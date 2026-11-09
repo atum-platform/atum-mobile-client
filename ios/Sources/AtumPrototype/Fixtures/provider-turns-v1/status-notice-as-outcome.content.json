@@ -1,0 +1,13 @@
+{
+  "msgtype": "m.notice",
+  "body": "Mình chưa đọc được tin nhắn bạn trả lời. Bạn gửi lại giúp mình nhé.",
+  "m.relates_to": {
+    "m.in_reply_to": {
+      "event_id": "$turnEventA"
+    }
+  },
+  "io.atum.result": {
+    "invocation": "2d3e4f50-6172-4839-94a5-b6c7d8e9f0a1",
+    "transaction": "atum-a-1b2c3d4e"
+  }
+}

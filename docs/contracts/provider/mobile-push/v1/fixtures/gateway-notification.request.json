@@ -1,0 +1,28 @@
+{
+  "notification": {
+    "event_id": "$encryptedEventA",
+    "room_id": "!assistantRoomA:atum.test",
+    "counts": {
+      "unread": 3
+    },
+    "prio": "high",
+    "devices": [
+      {
+        "app_id": "com.atum.mobile.ios.prod",
+        "pushkey": "0000000000000000000000000000000000000000000000000000000000000000",
+        "pushkey_ts": 1791190000,
+        "data": {
+          "format": "event_id_only",
+          "default_payload": {
+            "aps": {
+              "mutable-content": 1,
+              "alert": {
+                "loc-key": "ATUM_NEW_MESSAGE"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

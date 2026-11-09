@@ -1,0 +1,13 @@
+{
+  "msgtype": "m.text",
+  "body": "Đây là bản tóm tắt bạn cần.",
+  "m.relates_to": {
+    "m.in_reply_to": {
+      "event_id": "$turnEventA"
+    }
+  },
+  "io.atum.result": {
+    "invocation": "00000000-0000-4000-8000-6d662d43e15c",
+    "transaction": "atum-a-1b2c3d4e"
+  }
+}

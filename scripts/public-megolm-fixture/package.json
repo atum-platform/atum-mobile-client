@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "@matrix-org/olm": "^3.2.15"
+  },
+  "name": "atum-public-megolm-fixture",
+  "private": true,
+  "scripts": {
+    "test": "node verify.cjs",
+    "generate": "node generate.cjs"
+  }
+}

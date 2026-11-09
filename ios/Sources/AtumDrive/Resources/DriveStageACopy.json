@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "atum-platform/atum-app",
+    "revision": "2bc7ea5170510a53d2b6608d7304e61fadc539ca",
+    "prefix": "src.matrix.mobile-copy.mobilePhoneCopy.drive."
+  },
+  "locales": {
+    "en": {
+      "changed": "This file changed. Refresh the folder and try again.",
+      "connectBody": "Browse your personal files and keep the ones you need on this iPhone.",
+      "downloadFailed": "This file couldn’t be downloaded. Try again.",
+      "keepOffline": "Keep offline",
+      "keptOffline": "Kept offline",
+      "lowDisk": "There isn’t enough free space on this iPhone.",
+      "needsConnection": "Connect to the internet to download this file.",
+      "removeOffline": "Remove from offline files",
+      "storageUnavailable": "Drive files can’t be stored on this iPhone right now."
+    },
+    "ja": {
+      "changed": "このファイルは変更されています。フォルダを更新して、もう一度お試しください。",
+      "connectBody": "個人用ファイルを参照し、必要なものをこのiPhoneに保存できます。",
+      "downloadFailed": "このファイルをダウンロードできませんでした。もう一度お試しください。",
+      "keepOffline": "オフラインで保持",
+      "keptOffline": "オフラインで保持中",
+      "lowDisk": "このiPhoneの空き容量が不足しています。",
+      "needsConnection": "このファイルをダウンロードするにはインターネットに接続してください。",
+      "removeOffline": "オフラインファイルから削除",
+      "storageUnavailable": "現在、このiPhoneにDriveファイルを保存できません。"
+    },
+    "vi": {
+      "changed": "Tệp này đã thay đổi. Hãy làm mới thư mục rồi thử lại.",
+      "connectBody": "Duyệt tệp cá nhân và giữ những tệp bạn cần trên iPhone này.",
+      "downloadFailed": "Không tải được tệp này. Hãy thử lại.",
+      "keepOffline": "Giữ để dùng ngoại tuyến",
+      "keptOffline": "Đã giữ ngoại tuyến",
+      "lowDisk": "iPhone này không còn đủ dung lượng trống.",
+      "needsConnection": "Hãy kết nối Internet để tải tệp này.",
+      "removeOffline": "Xóa khỏi tệp ngoại tuyến",
+      "storageUnavailable": "Hiện chưa thể lưu tệp Drive trên iPhone này."
+    },
+    "zh": {
+      "changed": "此文件已更改。请刷新文件夹后重试。",
+      "connectBody": "浏览个人文件，并将需要的文件保留在这台 iPhone 上。",
+      "downloadFailed": "无法下载此文件。请重试。",
+      "keepOffline": "保留供离线使用",
+      "keptOffline": "已保留供离线使用",
+      "lowDisk": "这台 iPhone 的可用空间不足。",
+      "needsConnection": "请连接互联网以下载此文件。",
+      "removeOffline": "从离线文件中移除",
+      "storageUnavailable": "目前无法在这台 iPhone 上存储 Drive 文件。"
+    },
+    "zh-Hant": {
+      "changed": "此檔案已變更。請重新整理資料夾後再試一次。",
+      "connectBody": "瀏覽個人檔案，並將需要的檔案保留在這部 iPhone 上。",
+      "downloadFailed": "無法下載此檔案。請再試一次。",
+      "keepOffline": "保留供離線使用",
+      "keptOffline": "已保留供離線使用",
+      "lowDisk": "這部 iPhone 的可用空間不足。",
+      "needsConnection": "請連接網際網路以下載此檔案。",
+      "removeOffline": "從離線檔案中移除",
+      "storageUnavailable": "目前無法在這部 iPhone 上儲存 Drive 檔案。"
+    }
+  }
+}

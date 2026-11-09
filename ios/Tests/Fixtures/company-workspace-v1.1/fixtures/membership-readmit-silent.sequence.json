@@ -1,0 +1,19 @@
+{
+  "steps": [
+    {
+      "from": "active",
+      "to": "revoking",
+      "event": "remove"
+    },
+    {
+      "from": "revoking",
+      "to": "removed",
+      "event": "bans_witnessed"
+    },
+    {
+      "from": "removed",
+      "to": "active",
+      "event": "accept"
+    }
+  ]
+}

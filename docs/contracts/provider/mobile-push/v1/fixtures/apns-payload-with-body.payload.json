@@ -1,0 +1,12 @@
+{
+  "aps": {
+    "mutable-content": 1,
+    "alert": {
+      "loc-key": "ATUM_NEW_MESSAGE",
+      "body": "Hi"
+    }
+  },
+  "room_id": "!assistantRoomA:atum.test",
+  "event_id": "$encryptedEventA",
+  "unread_count": 3
+}

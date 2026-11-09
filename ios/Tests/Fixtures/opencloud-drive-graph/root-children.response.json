@@ -1,0 +1,35 @@
+{
+  "@odata.context": "https://drive.atum.test/graph/v1.0/$metadata#driveItem",
+  "value": [
+    {
+      "createdBy": {"user": {"displayName": "Fixture owner", "id": "fixture-owner-id"}},
+      "eTag": "\"etag-file-1\"",
+      "file": {"mimeType": "text/plain", "hashes": {"quickXorHash": "fixture"}},
+      "id": "storage-fixture$space-fixture!file-1",
+      "lastModifiedDateTime": "2026-10-25T08:12:13.455527853Z",
+      "name": "Notes.txt",
+      "parentReference": {
+        "driveId": "storage-fixture$space-fixture",
+        "driveType": "personal",
+        "id": "storage-fixture$space-fixture",
+        "path": "/drive/root:"
+      },
+      "size": 5,
+      "webDavUrl": "https://drive.atum.test/dav/spaces/storage-fixture$space-fixture/Notes.txt",
+      "webUrl": "https://drive.atum.test/f/storage-fixture$space-fixture/file-1"
+    },
+    {
+      "eTag": "\"etag-folder-1\"",
+      "folder": {"childCount": 2},
+      "id": "storage-fixture$space-fixture!folder-1",
+      "lastModifiedDateTime": "provider-sent-a-bad-date",
+      "name": "Projects",
+      "parentReference": {
+        "driveId": "storage-fixture$space-fixture",
+        "id": "storage-fixture$space-fixture"
+      },
+      "size": 0,
+      "webDavUrl": "https://drive.atum.test/dav/spaces/storage-fixture$space-fixture/Projects"
+    }
+  ]
+}

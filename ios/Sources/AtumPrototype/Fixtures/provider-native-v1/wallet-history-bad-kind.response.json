@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "id": "00000000-0000-4000-8000-637d0191b5af",
+      "at": "2026-10-05T09:12:44.101+00:00",
+      "kind": "withdrawal",
+      "status": "charged",
+      "amount": -1250000,
+      "reference": null,
+      "closedAt": "2026-10-05T09:12:47.900+00:00"
+    }
+  ],
+  "next": null
+}

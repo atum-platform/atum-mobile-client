@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "from": "active",
+      "to": "revoking",
+      "event": "leave"
+    },
+    {
+      "from": "revoking",
+      "to": "active",
+      "event": "accept"
+    }
+  ]
+}

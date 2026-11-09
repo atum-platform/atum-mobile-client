@@ -1,0 +1,29 @@
+{
+  "steps": [
+    {
+      "from": "signed_out",
+      "to": "authorizing",
+      "event": "start"
+    },
+    {
+      "from": "authorizing",
+      "to": "active",
+      "event": "granted_and_bound"
+    },
+    {
+      "from": "active",
+      "to": "refreshing",
+      "event": "expiring_or_401"
+    },
+    {
+      "from": "refreshing",
+      "to": "active",
+      "event": "refreshed"
+    },
+    {
+      "from": "active",
+      "to": "revoked",
+      "event": "sign_out"
+    }
+  ]
+}

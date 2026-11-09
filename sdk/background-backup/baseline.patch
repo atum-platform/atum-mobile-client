@@ -1,0 +1,231 @@
+--- a/crates/matrix-sdk/src/encryption/tasks.rs
++++ b/crates/matrix-sdk/src/encryption/tasks.rs
+@@ -600,15 +600,228 @@
+ 
+ #[cfg(all(test, not(target_family = "wasm")))]
+ mod test {
++    #[cfg(feature = "sqlite")]
++    use std::{path::Path, sync::Arc, time::Duration};
++
++    #[cfg(feature = "sqlite")]
++    use matrix_sdk_base::{
++        cross_process_lock::{CrossProcessLock, CrossProcessLockConfig},
++        crypto::{
++            OlmMachineBuilder,
++            store::types::BackupDecryptionKey,
++            store::{CRYPTO_STORE_LOCK_KEY, CryptoStore, LockableCryptoStore},
++        },
++        store::RoomLoadSettings,
++    };
++    #[cfg(feature = "sqlite")]
++    use matrix_sdk_sqlite::SqliteCryptoStore;
+     use matrix_sdk_test::async_test;
+     #[cfg(not(feature = "experimental-encrypted-state-events"))]
+     use ruma::events::room::encrypted::OriginalSyncRoomEncryptedEvent;
+     use ruma::{event_id, room_id};
+     use serde_json::json;
++    #[cfg(feature = "sqlite")]
++    use tokio::sync::Notify;
+     use wiremock::MockServer;
++    #[cfg(feature = "sqlite")]
++    use wiremock::{
++        Mock, Request, ResponseTemplate,
++        matchers::{method, path_regex},
++    };
+ 
+     use super::*;
+     use crate::test_utils::logged_in_client;
++    #[cfg(feature = "sqlite")]
++    use crate::{
++        Client, SessionMeta, SessionTokens,
++        authentication::oauth::{OAuthSession, UserSession},
++        config::RequestConfig,
++    };
++
++    #[cfg(feature = "sqlite")]
++    use oauth2::ClientId;
++    #[cfg(feature = "sqlite")]
++    use ruma::{api::MatrixVersion, device_id, user_id};
++    #[cfg(feature = "sqlite")]
++    use tempfile::TempDir;
++
++    #[cfg(feature = "sqlite")]
++    const BACKUP_BASELINE_PASSPHRASE: &str = "synthetic-backup-ownership-store";
++
++    #[cfg(feature = "sqlite")]
++    fn backup_baseline_session() -> OAuthSession {
++        OAuthSession {
++            client_id: ClientId::new("synthetic-backup-ownership-client".into()),
++            user: UserSession {
++                meta: SessionMeta {
++                    user_id: user_id!("@synthetic:atum.invalid").to_owned(),
++                    device_id: device_id!("BACKUP").to_owned(),
++                },
++                tokens: SessionTokens {
++                    access_token: "synthetic-not-an-access-token".into(),
++                    refresh_token: None,
++                },
++            },
++        }
++    }
++
++    #[cfg(feature = "sqlite")]
++    async fn seed_backup_baseline_store(path: &Path) -> (String, String) {
++        let store = SqliteCryptoStore::open(path, Some(BACKUP_BASELINE_PASSPHRASE)).await.unwrap();
++        let meta = backup_baseline_session().user.meta;
++        let machine = OlmMachineBuilder::new(&meta.user_id, &meta.device_id)
++            .with_crypto_store(store.clone())
++            .build()
++            .await
++            .unwrap();
++        let keys = machine.identity_keys();
++        let keys = (keys.curve25519.to_base64(), keys.ed25519.to_base64());
++        drop(machine);
++        store.close().await.unwrap();
++        keys
++    }
++
++    #[cfg(feature = "sqlite")]
++    async fn backup_baseline_client(
++        path: &Path,
++        server: &MockServer,
++        keys: (String, String),
++    ) -> Client {
++        let client = Client::builder()
++            .homeserver_url(server.uri())
++            .disable_well_known_lookup(true)
++            .server_versions([MatrixVersion::V1_12])
++            .request_config(RequestConfig::new().disable_retry())
++            .sqlite_store(path, Some(BACKUP_BASELINE_PASSPHRASE))
++            .cross_process_store_config(CrossProcessLockConfig::multi_process("background-A"))
++            .build()
++            .await
++            .unwrap();
++        client
++            .restore_session_existing(
++                backup_baseline_session(),
++                RoomLoadSettings::All,
++                keys.0,
++                keys.1,
++            )
++            .await
++            .unwrap();
++        client
++    }
++
++    #[cfg(feature = "sqlite")]
++    fn backup_baseline_room_key() -> matrix_sdk_base::crypto::olm::ExportedRoomKey {
++        serde_json::from_value(json!({
++            "algorithm": "m.megolm.v1.aes-sha2",
++            "room_id": "!backup:atum.invalid",
++            "sender_key": "Wk7UMER4dvdZe8YRAPQMOMqfIKjv96Yo7hN6ZNgDOT8",
++            "session_id": "hreT8VWwVdYYceap4iwyaBNUiS+Oy60DQOzWcnXKJag",
++            "session_key": "AQAAAAADf2U56LpE7HBQsA06+CxbtXPPdXHl8gTkA9g3KUNxTxoCCTynoUKF/RUkAHxPvsxpljJ3zg/Zo6Gs1XYAVjsAPpPHM7SutIhRi68Jcs4r/HRpApSXn1GPTZTRtSoaASQajP/seSbN4rKpRR7E+jCpv7WifinBCiw8xG3RNtk3aYa3k/FVsFXWGHHmqeIsMmgTVIkvjsutA0Ds1nJ1yiWo",
++            "sender_claimed_keys": {},
++            "forwarding_curve25519_key_chain": []
++        }))
++        .expect("synthetic backup room key must deserialize")
++    }
++
++    /// Characterizes the default upload listener under a real replacement
++    /// epoch. The background client prepared the pending key while it owned
++    /// generation A; a foreground holder then owns generation B before the
++    /// listener is notified. The listener still reaches the backup endpoint,
++    /// and its stale acknowledgement is rejected by the encrypted SQLite
++    /// fence. No production behavior is changed by this baseline.
++    #[cfg(feature = "sqlite")]
++    #[async_test]
++    async fn test_default_backup_upload_task_reaches_http_then_refuses_stale_ack() {
++        let directory = TempDir::new().unwrap();
++        let server = MockServer::start().await;
++        let keys = seed_backup_baseline_store(directory.path()).await;
++        let background = backup_baseline_client(directory.path(), &server, keys).await;
++
++        let owner = background.encryption().spin_lock_store(None).await.unwrap().unwrap();
++        let machine = background.olm_machine().await.as_ref().unwrap().clone();
++
++        let decryption_key = BackupDecryptionKey::new();
++        let backup_key = decryption_key.megolm_v1_public_key();
++        backup_key.set_version("1".to_owned());
++        machine
++            .backup_machine()
++            .save_decryption_key(Some(decryption_key), Some("1".to_owned()))
++            .await
++            .unwrap();
++        machine.backup_machine().enable_backup_v1(backup_key).await.unwrap();
++        machine
++            .store()
++            .import_exported_room_keys(vec![backup_baseline_room_key()], |_, _| {})
++            .await
++            .unwrap();
++
++        assert!(
++            background.inner.e2ee.tasks.lock().upload_room_keys.is_some(),
++            "Client construction must install the default BackupUploadingTask"
++        );
++
++        drop(owner);
++
++        let foreground_store =
++            SqliteCryptoStore::open(directory.path(), Some(BACKUP_BASELINE_PASSPHRASE))
++                .await
++                .unwrap();
++        let foreground_lock = CrossProcessLock::new(
++            LockableCryptoStore::new(foreground_store.clone()),
++            CRYPTO_STORE_LOCK_KEY.into(),
++            CrossProcessLockConfig::multi_process("foreground-B"),
++        );
++        let foreground =
++            tokio::time::timeout(Duration::from_secs(5), foreground_lock.spin_lock(Some(100)))
++                .await
++                .expect("background epoch must expire")
++                .unwrap()
++                .unwrap()
++                .into_guard();
++
++        let request_entered = Arc::new(Notify::new());
++        Mock::given(method("PUT"))
++            .and(path_regex(r"^/_matrix/client/(v3|r0)/room_keys/keys$"))
++            .respond_with({
++                let request_entered = request_entered.clone();
++                move |_: &Request| {
++                    request_entered.notify_one();
++                    ResponseTemplate::new(200)
++                        .set_body_json(json!({"count": 1, "etag": "synthetic"}))
++                        .set_delay(Duration::from_millis(100))
++                }
++            })
++            .expect(1)
++            .mount(&server)
++            .await;
++
++        background.encryption().backups().maybe_trigger_backup();
++        tokio::time::timeout(Duration::from_secs(2), request_entered.notified())
++            .await
++            .expect("stale default uploader unexpectedly reached the backup HTTP endpoint");
++
++        tokio::time::timeout(Duration::from_secs(2), async {
++            while machine.store().is_usable() {
++                tokio::time::sleep(Duration::from_millis(10)).await;
++            }
++        })
++        .await
++        .expect("stale backup acknowledgement must refuse and invalidate A's bound writer");
++
++        let counts = foreground_store.inbound_group_session_counts(Some("1")).await.unwrap();
++        assert_eq!(counts.total, 1, "the synthetic pending key remains durable");
++        assert_eq!(counts.backed_up, 0, "the stale acknowledgement must not persist");
++        assert!(
++            background.inner.e2ee.tasks.lock().upload_room_keys.is_some(),
++            "the stale listener remains installed after its acknowledgement refusal"
++        );
++        eprintln!(
++            "backup ownership baseline: default task made one HTTP request under foreground B; stale ack refused with {}/{} keys backed up",
++            counts.backed_up, counts.total
++        );
++        server.verify().await;
++        drop(foreground);
++    }
+ 
+     // Test that, if backups are not enabled, we don't incorrectly mark a room
+     // key as downloaded.

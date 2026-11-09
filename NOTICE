@@ -1,0 +1,55 @@
+Atum mixed ownership notice
+
+Atum-owned original contributions: see LICENSE (all rights reserved).
+Inherited Hermes Agent portions: MIT, copyright 2025 Nous Research; see
+LICENSES/Hermes-Agent-MIT.txt. Changes do not revoke inherited rights.
+Other dependencies and adapted files retain their own terms and notices.
+See THIRD-PARTY.json and existing per-component notices.
+
+Atum Mobile
+Copyright (c) 2026 Anka Ventures Vietnam Company Limited.
+
+The app is written from scratch against matrix-rust-sdk and its Apache-2.0
+bindings. No SDK binary or source has been vendored at setup.
+
+The native target resolves Atum's distribution of the Matrix Rust SDK bindings,
+atum-platform/atum-matrix-rust-components-swift 26.10.15-atum.2 at
+66c18d378d44d9ad61946f08b926514cccb14fb5. It is built from matrix-rust-sdk
+97a1589b70bd122c1d66e0d68ea008d8554076a5 plus Atum's modification patch
+(sha256 d7b68182ed249fbc27b0993eedd7390c389ad844a121172727d34284b9247694),
+which changes five files: Room List Service required state, read-only cached
+and authoritative global account-data accessors, and reverse-proxy HTTP 520-529
+retry classification. The upstream components release is 26.10.15
+(dbdf59e13d0eade7fd9cbd01cfd564693b85b761), and the XCFramework checksum is
+0367555a1b7a1f0e775037ba1db2b9d93320255eb4919bcf781b32d3a9ada9c2.
+The exact upstream Apache-2.0 license is included in the app's Resources/
+MatrixRustSDK-LICENSE.txt. Complete binary/transitive notice inventory remains
+part of release assembly before any public-v1 RC archive.
+
+Element X's last Apache-2.0 iOS revision, 0f3b33c5ae, is an approved parts bin.
+No parts have been copied at setup. Before adding a part, preserve its copyright,
+Apache-2.0 licence, original NOTICE (if present), file notices, immutable source
+revision and modification record in ios/Vendor/Notices/. The same applies to
+later Android parts from b802a196fc. Compound is excluded.
+
+Today's AGPL Element X source is never input to agents implementing this app.
+Later behaviour may be specified by a separate observer in plain words;
+implementers receive only those specs and the SDK's documentation.
+
+Generated Atum resources carry ATTRIBUTION.md and licences in
+ios/Vendor/AtumDesign/. This proprietary notice replaces no upstream notice.
+
+Crash reporting uses Sentry Cocoa 9.31.0 under the MIT License; its licence and
+bundled third-party notices are in
+ios/App/Resources/ThirdPartyNotices/Sentry-LICENSE.txt and
+Sentry-THIRD_PARTY_NOTICES.txt. Usage analytics uses no third-party SDK; the
+app posts directly to PostHog.
+
+Hermes-derived content throughout this tree, including modified files, remains
+subject to the preserved Nous Research MIT notice in LICENSES/Hermes-Agent-MIT.txt.
+An absent per-file provenance record does not assert Atum ownership.
+
+Atum-owned code is all rights reserved. No licence is granted beyond the
+viewing and forking rights required by GitHub's terms for public repositories.
+Inherited Hermes MIT and every other third-party licence remain in force,
+with their notices preserved.

@@ -1,0 +1,6 @@
+{
+  "confirmation": "delete_account",
+  "reauthIdToken": "PUBLIC_FIXTURE_ONLY.REAUTH_PROOF.NOT_A_SIGNATURE",
+  "idempotencyKey": "del-2026-10-05-d",
+  "principal": "00000000-0000-4000-8000-038d3d87b15e"
+}

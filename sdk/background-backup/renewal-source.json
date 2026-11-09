@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "status": "UNSELECTED_TEST_ONLY_RENEWAL_ACCEPTANCE",
+  "runtimeSelected": false,
+  "basePack": "sdk/background-backup/operation-source.json",
+  "basePackSHA256": "84009390fb6791c0174034bdd7511844dff00dae6c3e4c52e4654237060bc11b",
+  "sourcePath": "crates/matrix-sdk/src/encryption/tasks.rs",
+  "preimageSHA256": "02edc856cbe79ae15e70ea8d73c0bd87559f74aded1c9eff823f9c2135700b35",
+  "fixtureSHA256": "b1df0352313c60d84c0ef58c9ff656940b4816a1fd1e3ae11caa507487994769",
+  "patchSHA256": "a6d49a1c205e00379666e5fc9746b0e6bbe7a9bc5a6ca03008b7e08ec9299d82",
+  "requiredTest": "encryption::tasks::test::test_default_backup_operation_suspension_loses_lease_without_ack",
+  "patch": "sdk/background-backup/renewal.patch",
+  "publicAcceptanceReceipt": "sdk/background-backup/public-acceptance.json",
+  "publicAcceptanceReceiptSHA256": "7dd70d37a2d46acfc5779178ff6b1e9644239454fc34b17576e1b2b683023d90",
+  "publicationStatus": "Public source replay and 20 SQLite backup tests pass on regenerated v1 exported Megolm fixtures; historical private receipts are superseded",
+  "publicAcceptancePending": []
+}

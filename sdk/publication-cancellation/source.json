@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "status": "SOURCE_PUBLICATION_CANCELLATION_NOT_RUNTIME_SELECTED",
+  "runtimeSelected": false,
+  "upstreamRevision": "4f7f4d49f571e613eb1cb35956e4649dc056f0af",
+  "baseProtectedManifestSHA256": "148f7516ddfdf7aa613e8b32cdd0d2d961c184da27b2b1bbba09d13bc7aaf343",
+  "patch": "sdk/publication-cancellation/publication-cancellation.patch",
+  "patchSHA256": "db078a2a8d69aa7464dbc21b1237e429eaf3e150cba5718f5321e52837a67eb2",
+  "licenseSHA256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+  "fixtureSHA256": {
+    "baseline-test.rs": "5cede1b5505ed7b42c58660d10eddd9340d8f03b4cdb6dbb1da420620d9b6ea2",
+    "sqlite-baseline-test.rs": "d1ab2efc22627c67386a8b38533b84a8ee6a44b5b069a3b69e6160ceb107b732",
+    "wrapper-tests.rs": "1a8e8f2c6c01f478f57332f44a256fe78e86c177e25ee5941532d60254a1dcb3",
+    "sqlite-tests.rs": "13cc9cd7cb59952185b94c62eff96c9139395c698fe959b66d1bb1a28447169b",
+    "client-tests.rs": "c40ef82b1fc40a25d4f77b05a2a36be860cb651904a2542d0449acb93da75d98",
+    "publication-test-store.rs": "5d9db82abb883d10201ae4524178c6493265b469c8d186f0dff2fb8a2c80cb66"
+  },
+  "preimageSHA256": {
+    "crates/matrix-sdk/tests/atum_publication_cancellation.rs": null,
+    "crates/matrix-sdk-base/src/client.rs": "11927f3bda87ba7c7e912746c2392ea94e67d81d994b50b177afe53f40329346",
+    "crates/matrix-sdk-crypto/src/store/atum_publication_cancel_wrapper_tests.rs": null,
+    "crates/matrix-sdk-crypto/src/store/atum_publication_store.rs": "38584a4a0ff77ed61df609787787b0b8698496c2871901682358610a014ca330",
+    "crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs": "504175189b827747d1888ee9de81717f626b4f93f48a5964ea1a28c263632173",
+    "crates/matrix-sdk-crypto/src/store/error.rs": "3fb2291812368400c6cc42873d9f82904690fdfbcfc9d36e35907f7cdb9465b3",
+    "crates/matrix-sdk-crypto/src/store/mod.rs": "373703aba65bab57e7682bb08a8f49544261242c2e61c2261c1d078fe57c39b8",
+    "crates/matrix-sdk-crypto/src/store/traits.rs": "e22ff0128879261767224b76ba9e9d9f7bcb63709046cc1ba0127776e5fabff0",
+    "crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs": "71f5f431271c8b9dcb98864b6b2750ca81adbc87b64b0c262c433f306537bb8f",
+    "crates/matrix-sdk-sqlite/src/atum_publication_cancellation_tests.rs": null,
+    "crates/matrix-sdk-sqlite/src/crypto_store.rs": "40c56c79cd70064c0d0d4128d7739a906228b19a677579da006f69a0f840c63b",
+    "crates/matrix-sdk-sqlite/src/error.rs": "34af37dbeaa767186ed3d34463cbdc041d0b6a6bddf723e72fef4498daed2fd3"
+  },
+  "prototypeSHA256": {
+    "crates/matrix-sdk/tests/atum_publication_cancellation.rs": "c40ef82b1fc40a25d4f77b05a2a36be860cb651904a2542d0449acb93da75d98",
+    "crates/matrix-sdk-base/src/client.rs": "a88f204d63de6a293ff20be09e77ff334875c01e2d7ed67ab21606d1c4578d00",
+    "crates/matrix-sdk-crypto/src/store/atum_publication_cancel_wrapper_tests.rs": "1a8e8f2c6c01f478f57332f44a256fe78e86c177e25ee5941532d60254a1dcb3",
+    "crates/matrix-sdk-crypto/src/store/atum_publication_store.rs": "5d9db82abb883d10201ae4524178c6493265b469c8d186f0dff2fb8a2c80cb66",
+    "crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs": "d72f939fe585107f81b714d2e8d9d11d506e28576e46b788e47e5a8b36ded603",
+    "crates/matrix-sdk-crypto/src/store/error.rs": "46f95dd6feabbaf4d6e0d9eb6d8c81f874ce93367e82138452a2164aa721fd38",
+    "crates/matrix-sdk-crypto/src/store/mod.rs": "db73287e5d288f086ba308f04abf78fd13be74deee53d1066fcc8b0c37684667",
+    "crates/matrix-sdk-crypto/src/store/traits.rs": "27a63bd72c1999627b1c5223d7c844af62bdb2a29b4a76709a4c82dc152b2128",
+    "crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs": "621f4064ed6cf9de88f184c0273b6a7ad63295a5274ace8a002de480d121c61d",
+    "crates/matrix-sdk-sqlite/src/atum_publication_cancellation_tests.rs": "13cc9cd7cb59952185b94c62eff96c9139395c698fe959b66d1bb1a28447169b",
+    "crates/matrix-sdk-sqlite/src/crypto_store.rs": "e0ee1d4cef3100cccc77dcc75dd305305ecd870f695c2e5d26596800c980528e",
+    "crates/matrix-sdk-sqlite/src/error.rs": "564aa83b15b20bfa0c0fa36a888dfe40edcaec42f42b93853e171fdef9f37aaf"
+  },
+  "unchangedSourceSHA256": {
+    "crates/matrix-sdk-crypto/src/store/caches.rs": "e04ccd5d49dfe36873401d4a8c35d14e6f5f4248566542aaab2b164eee653bc6",
+    "crates/matrix-sdk-crypto/src/olm/account.rs": "cfd4101aa1f57de7cf670c7e04a18ce5a778c699fdd4559707e57b5231e0653c",
+    "crates/matrix-sdk-crypto/src/identities/device.rs": "feff3c7ea98d35309f7fc3a00c9f556a36ab49d98b6b7412fc1e774810c1dec0",
+    "crates/matrix-sdk-crypto/src/session_manager/sessions.rs": "8d8502c351887d303037d8c714bf327b727a215b4555d8cb7edc3f76b0743a1a",
+    "crates/matrix-sdk-crypto/src/olm/session.rs": "3709191e016a9337ff2091eb10491710bb10acb08e0d8397a98450bd3b006462",
+    "crates/matrix-sdk-common/src/cross_process_lock.rs": "8991fa31260a2f59b4d41d27e37821db633771264e400aac4dda06cb053446d6",
+    "crates/matrix-sdk/src/sliding_sync/cache.rs": "a73ad535971ec173e91611cadf02e5ab7c23454fee1b167284aac2d8ccf99b32",
+    "crates/matrix-sdk/src/sliding_sync/client.rs": "575a9266389254a6d065f68a6df96c4028417cffaf7916e8313b1cd748e8047f",
+    "crates/matrix-sdk/src/encryption/tasks.rs": "d5330a90d017448bc50d05760264b310f28b78568aae8b717886a3e4c54c3583",
+    "crates/matrix-sdk-base/src/sliding_sync.rs": "04135f18e070af08bb4621cccc926a005b69b67486064648ebf40ede4905fdc4",
+    "crates/matrix-sdk/src/encryption/mod.rs": "6825526446c1354f1e6563fede441efae04b26e2357a5392e607e59186a165b1",
+    "crates/matrix-sdk/src/sliding_sync/mod.rs": "8a686bcc021c11e2e5ba3756ce578778d44bfd4b09abd84ee2da941564c58d1c",
+    "crates/matrix-sdk/tests/atum_protected_tasks.rs": "a2838656973d28bab4e13cdd88f2bed1f71df7b017cc9ec0084a494a4d522c4d",
+    "crates/matrix-sdk/tests/atum_live_lease.rs": "18236d0db68aa8c0458ecdaefe7ca2d98f3bf3461eae9ea557ba598063f48293",
+    "crates/matrix-sdk-crypto/src/store/integration_tests.rs": "8857ec8352283f42b296ef4433fec8b70dd93d71ace26cd8130ce753747b1043",
+    "crates/matrix-sdk-sqlite/src/connection.rs": "8fe0b1c36871e661bff9c80e184e939287b5362789eeddf88861282d68d955ae"
+  },
+  "compiledFixtures": {
+    "wrapper-tests.rs": "crates/matrix-sdk-crypto/src/store/atum_publication_cancel_wrapper_tests.rs",
+    "sqlite-tests.rs": "crates/matrix-sdk-sqlite/src/atum_publication_cancellation_tests.rs",
+    "client-tests.rs": "crates/matrix-sdk/tests/atum_publication_cancellation.rs",
+    "publication-test-store.rs": "crates/matrix-sdk-crypto/src/store/atum_publication_store.rs"
+  },
+  "sqliteTestNames": [
+    "crypto_store::atum_publication_cancellation_tests::aborted_bound_transaction_rolls_back_and_fresh_raw_binding_stays_usable",
+    "crypto_store::atum_publication_cancellation_tests::writer_drain_waits_for_the_actual_blocked_sqlite_worker",
+    "crypto_store::atum_publication_cancellation_tests::explicit_invalidation_refuses_bound_clones_without_erasing_committed_data",
+    "crypto_store::atum_publication_cancellation_tests::unbound_handles_keep_upstream_behavior_after_invalidate"
+  ],
+  "protectedTestNames": [
+    "outgoing_upload_owns_lease_after_outer_guard_drop_and_commits_ack",
+    "outgoing_upload_cancellation_releases_guard_without_sync_ack",
+    "detached_response_retains_lease_and_position_after_caller_cancellation",
+    "room_only_detached_response_retains_crypto_position_lease_after_cancellation",
+    "same_epoch_binding_does_not_wait_for_existing_machine_reader"
+  ]
+}

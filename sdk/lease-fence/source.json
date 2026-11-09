@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "ISOLATED_BACKEND_PRIMITIVE_NOT_INTEGRATED",
+  "baseCustodyManifestSHA256": "1202e68f64040c2dba85784390f22c6474db3c14b93ce24821e9bcc32ad8c4cb",
+  "baseUpstreamRevision": "4f7f4d49f571e613eb1cb35956e4649dc056f0af",
+  "patch": "sdk/lease-fence/atomic-writer.patch",
+  "patchSHA256": "1a9bea967faf7a81fbf59fb2c14bf60c139e547944b76f023d8837df31fbaed2",
+  "baselineRegressionSHA256": "3953c8290ffcfa6da4679e1dc3214c9cec2d058ec0defb7d0c4116b8de1caf53",
+  "licenseSHA256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+  "preimageSHA256": {
+    "crates/matrix-sdk-common/src/cross_process_lock.rs": "d7af1ba8a92d5e11125d6d8252701a5ba413c6831f919198da0e35fb6436f375",
+    "crates/matrix-sdk-base/src/client.rs": "efd6a7e9d3c6ec5f7d4eed429787add17d306f20771d01710c8028607bffbdb1",
+    "crates/matrix-sdk-crypto/src/store/mod.rs": "417085c333b837aaf7f9af9795c370499c264aeb3193750cb77e0fbf829b011d",
+    "crates/matrix-sdk-sqlite/src/crypto_store.rs": "d1c6cbce11b0142b85a57cf139895b31c3226a8945544dc1705b00894fb9f80c",
+    "crates/matrix-sdk-sqlite/src/error.rs": "751dabf38eddaae1651ba35705c349d66279d3652b929eb65cb95a434a39ab52",
+    "crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs": null
+  },
+  "prototypeSHA256": {
+    "crates/matrix-sdk-common/src/cross_process_lock.rs": "375a9a5d1daeb6d7d598bf8b4d2c415d6947c96b74d8861f3051e3705b10fe09",
+    "crates/matrix-sdk-base/src/client.rs": "04c5768a25e6e5eca0d2b3d9b72a75e0d35125cf17877504f70a336e7f0a529e",
+    "crates/matrix-sdk-crypto/src/store/mod.rs": "fb41bb649e504e2e12a14b6138bb1fee0b64c05d906cd2bcc6586b2d1624c4dd",
+    "crates/matrix-sdk-sqlite/src/crypto_store.rs": "eda99bd5e01802a743b79aa2f2a37ef17ec6d576470afbd912e7a53099114cd3",
+    "crates/matrix-sdk-sqlite/src/error.rs": "34af37dbeaa767186ed3d34463cbdc041d0b6a6bddf723e72fef4498daed2fd3",
+    "crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs": "2eb4f2b9899c0f471371bed75cde329911e6762e5e081dbc30bd3ca879e134dd"
+  },
+  "runtimeSelected": false
+}

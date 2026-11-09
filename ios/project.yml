@@ -1,0 +1,176 @@
+name: AtumMobile
+options:
+  deploymentTarget:
+    iOS: '26.0'
+  developmentLanguage: vi
+  xcodeVersion: '27.0'
+packages:
+  AtumDesign:
+    path: .
+  MatrixRustSDK:
+    url: https://github.com/atum-platform/atum-matrix-rust-components-swift.git
+    revision: 66c18d378d44d9ad61946f08b926514cccb14fb5
+  Textual:
+    url: https://github.com/gonzalezreal/textual.git
+    revision: 01b51875a5406eefc95f52a058cb059e7bc94dc4
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa.git
+    exactVersion: 9.31.0
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    DEVELOPMENT_TEAM: 7D5FC62RXD
+    MARKETING_VERSION: 1.0.0
+    CURRENT_PROJECT_VERSION: 1
+targets:
+  AtumMobile:
+    type: application
+    platform: iOS
+    info:
+      path: App/Info.plist
+      properties:
+        AtumBuildLane: live-private-candidate
+        # Reporting build configuration. The values are supplied at build time
+        # in App/AtumTelemetry.xcconfig (or a git-ignored local override); the
+        # committed file is empty, and an empty value disables that channel.
+        AtumSentryDSN: $(ATUM_SENTRY_DSN)
+        AtumPostHogKey: $(ATUM_POSTHOG_KEY)
+        AtumPostHogHost: $(ATUM_POSTHOG_HOST)
+        AtumReportingEnvironment: $(ATUM_REPORTING_ENVIRONMENT)
+        NSPhotoLibraryAddUsageDescription: Atum lưu ảnh bạn chọn vào Thư viện ảnh.
+        # Composer dictation. Base-language (vi) text of the export's
+        # microphoneUsage / speechRecognitionUsage, like the photo-library
+        # string above; InfoPlist.xcstrings (generate-info-plist-localization.py)
+        # supplies every locale. The Info.plist key itself must exist.
+        NSMicrophoneUsageDescription: Atum dùng micrô để chuyển giọng nói của bạn thành chữ khi bạn bấm nút micrô.
+        NSSpeechRecognitionUsageDescription: Atum dùng nhận dạng giọng nói để chuyển lời bạn nói thành chữ trong khung soạn tin.
+        UILaunchScreen:
+          UIColorName: ground
+        # The app and its extension must report the same versions to App
+        # Store Connect; scripts/testflight.sh sets the build number.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+    sources:
+      - App
+      - path: App/Resources/NOTICE
+        buildPhase: resources
+    dependencies:
+      - target: AtumNotifications
+        embed: true
+      - package: AtumDesign
+      - package: AtumDesign
+        product: AtumNativeAPI
+      - package: AtumDesign
+        product: AtumDrive
+      - package: AtumDesign
+        product: AtumChat
+      - package: AtumDesign
+        product: AtumTelemetry
+      - package: Sentry
+        product: Sentry
+      - package: MatrixRustSDK
+        embed: true
+      - package: Textual
+    configFiles:
+      Debug: App/AtumTelemetry.xcconfig
+      Release: App/AtumTelemetry.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Development
+        CODE_SIGN_ENTITLEMENTS: App/AtumMobile.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: Atum Mobile Development
+        TARGETED_DEVICE_FAMILY: '1,2'
+        INFOPLIST_KEY_CFBundleDisplayName: Atum
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: 'UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
+  AtumNotifications:
+    type: app-extension
+    platform: iOS
+    info:
+      path: Notifications/Info.plist
+      properties:
+        CFBundleDisplayName: Atum
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    sources:
+      - path: Notifications
+        excludes: [Info.plist, AtumNotifications.entitlements]
+      - path: App/PushLocalizations
+        buildPhase: resources
+    dependencies:
+      - package: AtumDesign
+        product: AtumNativeAPI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.notifications
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Development
+        CODE_SIGN_ENTITLEMENTS: Notifications/AtumNotifications.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: Atum Mobile Notifications Development
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: '1,2'
+  # XCUITests for the chat revamp (plan §2.10). Simulator only: no device
+  # test runner profile (coordinator default C3). Built for testing only, so
+  # `xcodebuild build` and device-install.sh never build it.
+  AtumMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: AtumMobile
+      - package: AtumDesign
+        product: AtumChat
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AtumMobile
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: '1,2'
+  AtumMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AppTests
+    dependencies:
+      - target: AtumMobile
+      - package: AtumDesign
+        product: AtumChat
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/AtumMobile.app/AtumMobile
+        BUNDLE_LOADER: $(TEST_HOST)
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: '1,2'
+schemes:
+  AtumMobile:
+    build:
+      targets:
+        AtumMobile: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AtumMobileTests
+        - AtumMobileUITests
+  AtumMobileStateTests:
+    build:
+      targets:
+        AtumMobileTests: all
+    test:
+      config: Debug
+      targets:
+        - AtumMobileTests

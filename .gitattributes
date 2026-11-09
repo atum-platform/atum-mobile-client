@@ -1,0 +1,14 @@
+ios/Vendor/AtumDesign/** linguist-generated=true
+ios/Sources/AtumPrototype/Fixtures/native-catalog.json linguist-generated=true
+# Preserve the exact upstream license bytes and their recorded source hashes.
+ios/Vendor/AtumDesign/fonts/CormorantGaramond-native-OFL.txt whitespace=-trailing-space
+docs/research/licenses/matrix-rust-components-swift-26.10.02-LICENSE.txt whitespace=-blank-at-eof
+ios/App/Resources/MatrixRustSDK-LICENSE.txt whitespace=-blank-at-eof
+# Keep upstream rich-text legal notice bytes verbatim, including whitespace.
+ios/App/Resources/ThirdPartyNotices/*.txt -text -whitespace
+# Unified SDK patch context includes a required space on blank context lines.
+sdk/custody/*.patch whitespace=-trailing-space
+sdk/publication-cancellation/*.patch whitespace=-trailing-space
+sdk/phone-26.10.15/*.patch whitespace=-trailing-space
+sdk/phone-26.10.15-founder/*.patch whitespace=-trailing-space
+sdk/phone-26.10.15/LICENSE whitespace=-blank-at-eof

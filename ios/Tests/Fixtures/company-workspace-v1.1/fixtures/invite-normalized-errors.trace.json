@@ -1,0 +1,70 @@
+{
+  "directory": [
+    {
+      "handle": "lan_nguyen",
+      "person": "lan",
+      "kind": "human",
+      "inCompany": false
+    },
+    {
+      "handle": "moon_bot",
+      "person": "moon",
+      "kind": "agent",
+      "inCompany": false
+    },
+    {
+      "handle": "bao_tran",
+      "person": "bao",
+      "kind": "human",
+      "inCompany": true
+    }
+  ],
+  "steps": [
+    {
+      "do": "invite",
+      "request": "a1",
+      "admin": "minh",
+      "handle": "nobody_here",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "a2",
+      "admin": "minh",
+      "handle": "moon_bot",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "a3",
+      "admin": "minh",
+      "handle": "bao_tran",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "a4",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "invited",
+        "person": "lan"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "a5",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "unavailable"
+      }
+    }
+  ]
+}

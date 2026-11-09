@@ -1,0 +1,89 @@
+{
+  "state": "requested",
+  "disclosure": {
+    "deleted": [
+      "account_profile",
+      "identities",
+      "encrypted_chats_and_key_backup",
+      "synced_assistant_content",
+      "agents",
+      "app_links",
+      "drive_files",
+      "knowledge",
+      "storage_objects",
+      "cloud_enrollments",
+      "linked_usage_data",
+      "pushers_and_devices"
+    ],
+    "retained": [
+      {
+        "category": "proton_ledger_records",
+        "basis": "law",
+        "maxRetention": "P10Y"
+      },
+      {
+        "category": "ai_usage_records",
+        "basis": "privacy_policy",
+        "maxRetention": "P10Y"
+      },
+      {
+        "category": "app_message_records",
+        "basis": "privacy_policy",
+        "maxRetention": "P90D"
+      },
+      {
+        "category": "error_reports",
+        "basis": "privacy_policy",
+        "maxRetention": "P90D"
+      },
+      {
+        "category": "server_logs",
+        "basis": "privacy_policy",
+        "maxRetention": "P30D"
+      },
+      {
+        "category": "backups",
+        "basis": "privacy_policy",
+        "maxRetention": "P30D"
+      },
+      {
+        "category": "app_member_copies",
+        "basis": "privacy_policy",
+        "maxRetention": null
+      },
+      {
+        "category": "updates_channel_comments",
+        "basis": "privacy_policy",
+        "maxRetention": null
+      },
+      {
+        "category": "website_waitlist_and_contact",
+        "basis": "privacy_policy",
+        "maxRetention": null
+      },
+      {
+        "category": "deletion_receipts",
+        "basis": "proof_of_deletion",
+        "maxRetention": "P10Y"
+      },
+      {
+        "category": "abuse_reports",
+        "basis": "safety",
+        "maxRetention": null
+      }
+    ],
+    "timelineDays": 30,
+    "cannotRecall": "copies_others_received",
+    "localOnMac": [
+      "assistant_memory",
+      "google_credentials"
+    ],
+    "protons": {
+      "availableMicroProtons": 42000000000,
+      "refundEligible": true
+    }
+  },
+  "blockers": [],
+  "reauthNonce": "Qm9vdHN0cmFwTm9uY2VGb3JEZWxldGlvbjEyMzQ1Njc",
+  "reauthNonceExpiresAt": 1791200600000
+}

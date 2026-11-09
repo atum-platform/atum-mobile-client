@@ -1,0 +1,316 @@
+{
+  "agents": [
+    {
+      "id": "00000000-0000-4000-8000-576f18824476",
+      "identity_id": "00000000-0000-4000-8000-ea6d413dd339",
+      "display_name": "Raymond",
+      "slug": "raymond",
+      "avatar": "",
+      "avatar_url": "https://cdn.example.invalid/assistants/raymond.png",
+      "title": null,
+      "mark_shape": "circle",
+      "mark_color": "blue",
+      "is_default": true,
+      "lifecycle_revision": 7,
+      "identity_revision": 11,
+      "definition_revision": 9,
+      "status": "active",
+      "principal": "00000000-0000-4000-8000-4e393a4e3c10",
+      "matrixUser": "@agent-raymond:example.invalid",
+      "agentPrincipal": "00000000-0000-4000-8000-4e393a4e3c10",
+      "answering": "cloud",
+      "answeringChangedAt": 1793167200000,
+      "roomId": null,
+      "retired_agents": [],
+      "hire": null,
+      "cloud_signup": "placed"
+    },
+    {
+      "id": "00000000-0000-4000-8000-4b2f94c54b02",
+      "identity_id": "00000000-0000-4000-8000-0990f7358350",
+      "display_name": "Alfred",
+      "slug": "alfred",
+      "avatar": "",
+      "avatar_url": "https://cdn.example.invalid/assistants/alfred.png",
+      "title": "Research partner",
+      "mark_shape": "diamond",
+      "mark_color": "coral",
+      "is_default": false,
+      "lifecycle_revision": 4,
+      "identity_revision": 8,
+      "definition_revision": 6,
+      "status": "active",
+      "principal": "00000000-0000-4000-8000-602672421290",
+      "matrixUser": "@agent-alfred:example.invalid",
+      "agentPrincipal": "00000000-0000-4000-8000-602672421290",
+      "answering": "local",
+      "answeringChangedAt": null,
+      "roomId": "!alfred:example.invalid",
+      "hire": {
+        "state": "active",
+        "price_protons": 60000,
+        "period_end": "2026-11-27T00:00:00+00:00"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-471568220011",
+      "identity_id": null,
+      "display_name": "Founder",
+      "slug": null,
+      "avatar": "",
+      "avatar_url": "https://cdn.example.invalid/assistants/founder.png",
+      "title": null,
+      "mark_shape": "heart",
+      "mark_color": "amber",
+      "is_default": false,
+      "lifecycle_revision": 1,
+      "identity_revision": 3,
+      "definition_revision": 2,
+      "status": "active",
+      "principal": "00000000-0000-4000-8000-be4c90d5b61e",
+      "matrixUser": "@agent-founder:example.invalid",
+      "agentPrincipal": "00000000-0000-4000-8000-be4c90d5b61e",
+      "answering": "cloud",
+      "answeringChangedAt": 1793167200000,
+      "roomId": "!founder-agent:example.invalid",
+      "hire": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-6789912c6209",
+      "identity_id": null,
+      "display_name": "Luna",
+      "slug": null,
+      "avatar": "",
+      "avatar_url": "https://cdn.example.invalid/assistants/luna.png",
+      "title": null,
+      "mark_shape": "spark",
+      "mark_color": "violet",
+      "is_default": false,
+      "lifecycle_revision": 1,
+      "identity_revision": 3,
+      "definition_revision": 2,
+      "status": "active",
+      "principal": "00000000-0000-4000-8000-8efa2b792294",
+      "matrixUser": "@agent-luna:example.invalid",
+      "agentPrincipal": "00000000-0000-4000-8000-8efa2b792294",
+      "answering": "local",
+      "answeringChangedAt": null,
+      "roomId": "!luna:example.invalid",
+      "hire": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-cb3c7031a0b0",
+      "identity_id": null,
+      "display_name": "Wendy",
+      "slug": null,
+      "avatar": "",
+      "avatar_url": "https://cdn.example.invalid/assistants/wendy.png",
+      "title": null,
+      "mark_shape": "flower",
+      "mark_color": "mint",
+      "is_default": false,
+      "lifecycle_revision": 1,
+      "identity_revision": 3,
+      "definition_revision": 2,
+      "status": "active",
+      "principal": "00000000-0000-4000-8000-1fc5b056f90d",
+      "matrixUser": "@agent-wendy:example.invalid",
+      "agentPrincipal": "00000000-0000-4000-8000-1fc5b056f90d",
+      "answering": "cloud",
+      "answeringChangedAt": 1793167200000,
+      "roomId": "!wendy:example.invalid",
+      "hire": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-7f708f1061f5",
+      "identity_id": null,
+      "display_name": "Axe",
+      "slug": null,
+      "avatar": "",
+      "avatar_url": "https://cdn.example.invalid/assistants/axe.png",
+      "title": null,
+      "mark_shape": "hexagon",
+      "mark_color": "stone",
+      "is_default": false,
+      "lifecycle_revision": 1,
+      "identity_revision": 3,
+      "definition_revision": 2,
+      "status": "active",
+      "principal": "00000000-0000-4000-8000-ff339a2f703c",
+      "matrixUser": "@agent-axe:example.invalid",
+      "agentPrincipal": "00000000-0000-4000-8000-ff339a2f703c",
+      "answering": "cloud",
+      "answeringChangedAt": 1793167200000,
+      "roomId": "!axe:example.invalid",
+      "hire": null
+    }
+  ],
+  "petCompanion": {
+    "kind": "pet",
+    "id": "00000000-0000-4000-8000-833f75989eb2",
+    "identity_id": null,
+    "display_name": "Companion",
+    "slug": "companion",
+    "avatar": "",
+    "avatar_url": "https://cdn.example.invalid/pets/companion.png",
+    "title": "Synthetic companion",
+    "mark_shape": "future_pet_shape",
+    "mark_color": "future_pet_color",
+    "is_default": false,
+    "lifecycle_revision": 1,
+    "identity_revision": 1,
+    "definition_revision": 0,
+    "status": "companion",
+    "principal": "00000000-0000-4000-8000-23e0279ccd34",
+    "matrixUser": null,
+    "answering": "managed_companion",
+    "roomId": null
+  },
+  "futureRosterItem": {
+    "kind": "company_agent_v2",
+    "id": 7,
+    "presentation": {
+      "label": "Future row"
+    }
+  },
+  "placement": {
+    "meta": {
+      "requestId": "00000000-0000-4000-8000-f1d11edf5c5c",
+      "commandId": "00000000-0000-4000-8000-fbfe405ca65f",
+      "signer": "platform_controller",
+      "signerKeyId": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "sequence": 12,
+      "issuedAt": 1800000000000,
+      "expiresAt": 1800000015000,
+      "nonce": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "signature": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+    },
+    "profile": "atum.agent-home/2.5",
+    "ownerUserId": "@owner:example.invalid",
+    "agentPrincipal": "00000000-0000-4000-8000-4e393a4e3c10",
+    "placement": {
+      "ownerUserId": "@owner:example.invalid",
+      "agentPrincipal": "00000000-0000-4000-8000-4e393a4e3c10",
+      "homeId": "00000000-0000-4000-8000-e8d95748107a",
+      "location": {
+        "kind": "cloud"
+      },
+      "homeEpoch": 4,
+      "activeMove": null
+    },
+    "currentHomeReachability": {
+      "state": "reachable",
+      "lastSeenAtPlatform": 1800000000000
+    },
+    "eligibleDevices": [
+      {
+        "deviceServiceId": "00000000-0000-4000-8000-b454f82c5857",
+        "displayName": "Mac mini",
+        "eligibility": "ready"
+      }
+    ],
+    "moveCapability": {
+      "state": "available",
+      "profile": "atum.agent-home/2.5"
+    },
+    "observedAtPlatform": 1800000000000
+  },
+  "presentation": {
+    "profile": "atum.agent-presentation/1",
+    "assistant_id": "00000000-0000-4000-8000-576f18824476",
+    "assistant_principal": "00000000-0000-4000-8000-4e393a4e3c10",
+    "title": null,
+    "mark": {
+      "shape": "future_shape",
+      "color": "future_color"
+    },
+    "default_mark": {
+      "shape": "circle",
+      "color": "blue"
+    },
+    "avatar_url": "https://cdn.example.invalid/assistants/raymond.png",
+    "identity_revision": 11
+  },
+  "modelDestinations": [
+    {
+      "profile": "atum.model-choice/1.4",
+      "agentPrincipal": "00000000-0000-4000-8000-4e393a4e3c10",
+      "revision": 3,
+      "policyDigest": "489e82bcce6008fd0cae824623b3e323bf7a8820a18e34bf8bab815f7999d7a0",
+      "recommended": {
+        "source": "atum",
+        "model": "nguyet-thuc",
+        "effort": "medium"
+      },
+      "choices": [
+        {
+          "destination": "cloud",
+          "source": "opencode_go",
+          "model": "glm-5.2",
+          "effort": "high"
+        },
+        {
+          "destination": "mac:mini-b",
+          "source": "chatgpt_plan",
+          "model": "gpt-6-luna",
+          "effort": "medium"
+        }
+      ],
+      "dailyCap": {
+        "dailyProtons": 200000,
+        "timeZone": "Asia/Ho_Chi_Minh",
+        "warningPercent": 80,
+        "counts": "atum_billed_only"
+      },
+      "spend": {
+        "day": "2026-10-28",
+        "usedProtons": 42000,
+        "state": "normal",
+        "notice": "none"
+      }
+    },
+    {
+      "profile": "atum.model-choice/1.5",
+      "agentPrincipal": "00000000-0000-4000-8000-4e393a4e3c10",
+      "revision": 4,
+      "policyDigest": "489e82bcce6008fd0cae824623b3e323bf7a8820a18e34bf8bab815f7999d7a0",
+      "recommended": {
+        "source": "atum",
+        "model": "nguyet-thuc",
+        "effort": "medium"
+      },
+      "choices": [
+        {
+          "destination": "cloud",
+          "source": "chatgpt_plan",
+          "model": "gpt-5.6-luna",
+          "effort": "medium"
+        },
+        {
+          "destination": "mac:mini-b",
+          "source": "atum",
+          "model": "nhat-thuc",
+          "effort": "medium"
+        },
+        {
+          "destination": "mac:future",
+          "source": "future_subscription",
+          "model": "future/model",
+          "effort": "medium"
+        }
+      ],
+      "dailyCap": {
+        "dailyProtons": 200000,
+        "timeZone": "Asia/Ho_Chi_Minh",
+        "warningPercent": 80,
+        "counts": "atum_billed_only"
+      },
+      "spend": {
+        "day": "2026-10-28",
+        "usedProtons": 42000,
+        "state": "normal",
+        "notice": "none"
+      }
+    }
+  ]
+}

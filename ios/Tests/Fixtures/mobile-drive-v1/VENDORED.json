@@ -1,0 +1,8 @@
+{
+  "source": "atum-platform/spec/mobile-drive/v1",
+  "sourceRevision": "dbfa5ce7f2f1766658d92ac17c1af26aec26f5ec",
+  "contract": "atum.mobile-drive/1",
+  "digest": "1b7a3a2d4bc41efe361449327874c38c594393a7828861b2f2811e256a54139e",
+  "sha256": "1b7a3a2d4bc41efe361449327874c38c594393a7828861b2f2811e256a54139e",
+  "publicationStatus": "sanitised public pack; historical acceptance not applicable"
+}

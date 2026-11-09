@@ -1,0 +1,21 @@
+{
+  "matrixClientId": "01JPHNMXPQ7R8S9T0V2W3X4Y5Z",
+  "domainClientId": "01JPHNDXPQ7R8S9T0V2W3X4Y5Z",
+  "matrixIdToken": {
+    "iss": "https://auth.atumplatform.com/",
+    "sub": "01JZZZZZZZZZZZZZZZZZZZZZZA",
+    "aud": "01JPHNMXPQ7R8S9T0V2W3X4Y5Z",
+    "nonceMatches": true
+  },
+  "domainIdToken": {
+    "iss": "https://auth.atumplatform.com/",
+    "sub": "01JZZZZZZZZZZZZZZZZZZZZZZB",
+    "aud": "01JPHNDXPQ7R8S9T0V2W3X4Y5Z",
+    "nonceMatches": true
+  },
+  "me": {
+    "issuer": "https://auth.atumplatform.com/",
+    "subject": "01JZZZZZZZZZZZZZZZZZZZZZZB",
+    "principal": "00000000-0000-4000-8000-038d3d87b15e"
+  }
+}

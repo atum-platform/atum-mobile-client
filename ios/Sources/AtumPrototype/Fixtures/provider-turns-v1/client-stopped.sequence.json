@@ -1,0 +1,19 @@
+{
+  "steps": [
+    {
+      "from": "sent",
+      "to": "working",
+      "event": "turn_state_claimed_or_dispatched"
+    },
+    {
+      "from": "working",
+      "to": "stopping",
+      "event": "stop_sent"
+    },
+    {
+      "from": "stopping",
+      "to": "stopped",
+      "event": "stop_result_or_outcome_stopped"
+    }
+  ]
+}

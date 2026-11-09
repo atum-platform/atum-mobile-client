@@ -1,0 +1,8 @@
+{
+  "contract": "atum.agent-home/2.5",
+  "repository": "https://github.com/atum-platform/atum-platform.git",
+  "commit": "0058111dc6817f203e446edb15c7f9b9459ba4c0",
+  "path": "spec/agent-home/v2.5",
+  "sha256": "164b6c3068390756ece8535a7e5c2210ff680421665483f7f8d60fad6cb6bfc5",
+  "publicationStatus": "sanitised public pack; historical acceptance not applicable"
+}

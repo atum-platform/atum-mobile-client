@@ -1,0 +1,65 @@
+name: Public client checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-client-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  client:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Verify public Megolm test encoding
+        working-directory: scripts/public-megolm-fixture
+        run: |
+          npm ci --ignore-scripts
+          npm test
+      - name: Verify public design import and producer pin
+        run: |
+          python3 scripts/import-design-exports --verify
+          python3 -m unittest discover -s tests -p test_import_design_exports.py
+      - name: Verify public push fixtures
+        run: |
+          python3 scripts/generate-native-push-fixtures.py --check
+          python3 -m unittest discover -s tests -p test_native_push_projection.py
+      - name: Parse and resolve the client package
+        working-directory: ios
+        run: |
+          swift package dump-package > /tmp/atum-package.json
+          swift package resolve
+      - name: Parse native project
+        run: plutil -lint ios/AtumMobile.xcodeproj/project.pbxproj
+
+# Artifact allowlist is empty: no logs, captures, packages or release artifacts uploaded.
+# No shared caches or release/signing authority in public CI.
+
+  # Standard macos-26 currently ships Xcode 26.6. The native project requires Xcode 27
+  # (LastUpgradeCheck 2700); enable only when a standard hosted image includes it.
+  # https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md
+  simulator:
+    if: ${{ false }}
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Build simulator without signing
+        run: >-
+          xcodebuild -project ios/AtumMobile.xcodeproj -scheme AtumMobile
+          -sdk iphonesimulator -configuration Debug
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath /tmp/atum-public-derived
+          CODE_SIGNING_ALLOWED=NO build

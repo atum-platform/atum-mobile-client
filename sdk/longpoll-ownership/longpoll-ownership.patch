@@ -1,0 +1,1223 @@
+--- a/crates/matrix-sdk-base/src/client.rs
++++ b/crates/matrix-sdk-base/src/client.rs
+@@ -590,6 +590,20 @@
+         CrossProcessLock::new(
+             matrix_sdk_crypto::store::LockableCryptoStore::new(self.crypto_store.clone()),
+             "oidc_session_refresh_lock".to_owned(),
++            CrossProcessLockConfig::multi_process(holder),
++        )
++    }
++
++    /// Independent admission for the SDK's encryption sliding-sync session.
++    /// This owns control metadata only; it never binds a crypto machine.
++    #[cfg(feature = "e2e-encryption")]
++    pub fn create_encryption_sync_session_lock(
++        &self,
++        holder: String,
++    ) -> CrossProcessLock<matrix_sdk_crypto::store::LockableCryptoStore> {
++        CrossProcessLock::new(
++            matrix_sdk_crypto::store::LockableCryptoStore::new(self.crypto_store.clone()),
++            "sliding_sync_encryption_session_lock".to_owned(),
+             CrossProcessLockConfig::multi_process(holder),
+         )
+     }
+--- a/crates/matrix-sdk-ui/src/encryption_sync_service.rs
++++ b/crates/matrix-sdk-ui/src/encryption_sync_service.rs
+@@ -92,6 +92,12 @@
+             builder = builder.poll_timeout(poll_timeout).network_timeout(network_timeout);
+         }
+ 
++        if matches!(client.cross_process_lock_config(), CrossProcessLockConfig::MultiProcess { .. })
++        {
++            // The SDK now owns an independent lease across this session's
++            // request/response persistence, making shared position sequential.
++            builder = builder.share_pos();
++        }
+         let sliding_sync = builder.build().await.map_err(Error::SlidingSync)?;
+ 
+         if let CrossProcessLockConfig::MultiProcess { holder_name } =
+@@ -142,11 +148,23 @@
+             // the stream is alive.
+             let _permit = permit;
+ 
+-            let sync = self.sliding_sync.sync();
++            let sync = self.sliding_sync.sync_with_deadline(deadline);
+ 
+             pin_mut!(sync);
+ 
+             loop {
++                let update_summary = match sync.next().await {
++                    Some(Ok(summary)) => summary,
++                    Some(Err(err)) => {
++                        trace!("Encryption sync stopped because of an error: {err:#}");
++                        yield Err(Error::SlidingSync(err));
++                        break;
++                    }
++                    None => {
++                        trace!("Encryption sync properly terminated.");
++                        break;
++                    }
++                };
+                 let remaining = deadline.map_or(Some(Duration::from_secs(60)), |deadline| {
+                     deadline.checked_duration_since(Instant::now())
+                 });
+@@ -167,36 +185,27 @@
+                     None
+                 };
+ 
+-                match sync.next().await {
+-                    Some(Ok(update_summary)) => {
+-                        // This API is only concerned with the e2ee and
+-                        // to-device extensions. Warn if anything weird has been
+-                        // received from the homeserver.
+-                        if !update_summary.lists.is_empty() {
+-                            debug!(?update_summary.lists, "unexpected non-empty list of lists in encryption sync API");
+-                        }
+-                        if !update_summary.rooms.is_empty() {
+-                            debug!(?update_summary.rooms, "unexpected non-empty list of rooms in encryption sync API");
+-                        }
+-
+-                        // Cool cool, let's do it again.
+-                        trace!("Encryption sync received an update!");
+-                        // The guard remains alive across this yield, including
+-                        // the caller's decryption and resulting persistence.
+-                        yield Ok(());
+-                    }
+-
+-                    Some(Err(err)) => {
+-                        trace!("Encryption sync stopped because of an error: {err:#}");
+-                        yield Err(Error::SlidingSync(err));
+-                        break;
+-                    }
+-
+-                    None => {
+-                        trace!("Encryption sync properly terminated.");
+-                        break;
+-                    }
+-                }
++                if deadline.is_some_and(|d| Instant::now() >= d) {
++                    drop(guard);
++                    self.client
++                        .encryption()
++                        .release_store_if_unused()
++                        .await
++                        .map_err(Error::LockError)?;
++                    break;
++                }
++                // This API is only concerned with the e2ee and to-device
++                // extensions. Warn if the homeserver returned anything else.
++                if !update_summary.lists.is_empty() {
++                    debug!(?update_summary.lists, "unexpected non-empty list of lists in encryption sync API");
++                }
++                if !update_summary.rooms.is_empty() {
++                    debug!(?update_summary.rooms, "unexpected non-empty list of rooms in encryption sync API");
++                }
++                trace!("Encryption sync received an update!");
++                // The guard remains alive across this yield, including the
++                // caller's decryption and resulting persistence.
++                yield Ok(());
+                 drop(guard);
+                 if let Err(err) = self.client.encryption().release_store_if_unused().await {
+                     yield Err(Error::LockError(err));
+@@ -271,20 +280,10 @@
+         &self,
+         sync: &mut Pin<&mut impl Stream<Item = Item>>,
+     ) -> Result<Option<Item>, Error> {
+-        let _guard = if let CrossProcessLockConfig::MultiProcess { .. } =
+-            self.client.cross_process_lock_config()
+-        {
+-            self.client
+-                .encryption()
+-                .spin_lock_store_for(Duration::from_secs(60))
+-                .await
+-                .map_err(Error::LockError)?
+-        } else {
+-            None
+-        };
+-
++        // Request preparation, response persistence and outgoing ACK now own
++        // their individual crypto operations. Pure HTTP waits hold no crypto
++        // guard; encryption session admission is independent inside the SDK.
+         let result = sync.next().await;
+-        drop(_guard);
+         self.client.encryption().release_store_if_unused().await.map_err(Error::LockError)?;
+         if matches!(
+             self.client.cross_process_lock_config(),
+--- a/crates/matrix-sdk-ui/src/notification_client.rs
++++ b/crates/matrix-sdk-ui/src/notification_client.rs
+@@ -331,7 +331,23 @@
+         // Serialize calls to this function.
+         let _guard = self.encryption_sync_mutex.lock().await;
+ 
++        let deadline = Instant::now() + self.timeouts.decryption_deadline;
+         let push_ctx = room.push_context().await?;
++
++        if matches!(self.process_setup, NotificationProcessSetup::MultipleProcesses) {
++            // A cached original room key needs no competing encryption HTTP
++            // session. Admission/rebinding and decrypt use the real SDK/store.
++            match self
++                .terminal_decryption(deadline, try_decrypt(room, raw_event, push_ctx.as_ref()))
++                .await
++            {
++                Some(Ok(DecryptionAttempt::Decrypted(event))) => return Ok(Some(event)),
++                Some(Ok(DecryptionAttempt::MissingRoomKey)) => {}
++                Some(Ok(DecryptionAttempt::Unrecoverable)) | Some(Err(_)) | None => {
++                    return Ok(None);
++                }
++            }
++        }
+ 
+         let sync_permit_guard = match &self.process_setup {
+             NotificationProcessSetup::MultipleProcesses => {
+@@ -382,7 +398,6 @@
+             }
+         };
+ 
+-        let deadline = Instant::now() + self.timeouts.decryption_deadline;
+         let iterations = encryption_sync.run_iterations_until(sync_permit_guard, Some(deadline));
+         self.retry_decryption_loop(iterations, deadline, || {
+             try_decrypt(room, raw_event, push_ctx.as_ref())
+@@ -490,6 +505,7 @@
+         }
+         let result = operation.await;
+         drop(guard);
++        self.client.encryption().release_store_if_unused().await.ok()?;
+         Some(result)
+     }
+ 
+@@ -1388,6 +1404,36 @@
+         NotificationClient, NotificationItem, NotificationItemsRequest, NotificationProcessSetup,
+         NotificationStatus, RawNotificationEvent,
+     };
++
++    async fn multiprocess_test_parent(
++        server: &MatrixMockServer,
++        path: &std::path::Path,
++        holder: &str,
++    ) -> matrix_sdk::Client {
++        let client = server
++            .client_builder()
++            .on_builder(|builder| {
++                builder
++                    .sqlite_store(path, Some("atum-synthetic-notification-passphrase"))
++                    .cross_process_store_config(
++                    matrix_sdk_common::cross_process_lock::CrossProcessLockConfig::multi_process(
++                        holder,
++                    ),
++                )
++            })
++            .build()
++            .await;
++        client.encryption().enable_cross_process_store_lock(holder.to_owned()).await.unwrap();
++        let guard = client
++            .encryption()
++            .spin_lock_store_for(std::time::Duration::from_secs(1))
++            .await
++            .unwrap();
++        assert!(guard.is_some());
++        drop(guard);
++        client.encryption().release_store_if_unused().await.unwrap();
++        client
++    }
+ 
+     #[async_test]
+     async fn test_atum_notification_helpers_contend_for_same_sqlite_crypto_lease() {
+@@ -1518,7 +1564,9 @@
+     #[async_test]
+     async fn test_try_sliding_sync_ignores_invites_for_non_subscribed_rooms() {
+         let server = MatrixMockServer::new().await;
+-        let client = server.client_builder().build().await;
++        let directory = tempfile::tempdir().unwrap();
++        let client =
++            multiprocess_test_parent(&server, directory.path(), "atum-invite-parent").await;
+ 
+         let user_id = client.user_id().unwrap();
+         let room_id = room_id!("!a:b.c");
+@@ -1583,7 +1631,9 @@
+     #[async_test]
+     async fn test_redacted_event_returns_event_redacted_status() {
+         let server = MatrixMockServer::new().await;
+-        let client = server.client_builder().build().await;
++        let directory = tempfile::tempdir().unwrap();
++        let client =
++            multiprocess_test_parent(&server, directory.path(), "atum-redacted-parent").await;
+ 
+         let room_id = room_id!("!a:b.c");
+ 
+--- a/crates/matrix-sdk-ui/tests/integration/encryption_sync_service.rs
++++ b/crates/matrix-sdk-ui/tests/integration/encryption_sync_service.rs
+@@ -450,12 +450,25 @@
+     let dir = tempdir().unwrap();
+ 
+     let server = MatrixMockServer::new().await;
+-    let client =
+-        server.client_builder().on_builder(|b| b.sqlite_store(dir.path(), None)).build().await;
++    let client = server
++        .client_builder()
++        .on_builder(|builder| {
++            builder
++                .sqlite_store(dir.path(), Some("atum-synthetic-upload-passphrase"))
++                .cross_process_store_config(CrossProcessLockConfig::multi_process("tests-main"))
++        })
++        .build()
++        .await;
++    client.encryption().enable_cross_process_store_lock("tests-main".into()).await?;
++    let initialization =
++        client.encryption().spin_lock_store_for(std::time::Duration::from_secs(1)).await?;
++    assert!(initialization.is_some());
++    drop(initialization);
++    client.encryption().release_store_if_unused().await?;
+ 
+     info!("Creating the notification client");
+     let notification_client = client
+-        .notification_client(CrossProcessLockConfig::multi_process("tests"))
++        .notification_client(CrossProcessLockConfig::multi_process("tests-notification"))
+         .await
+         .expect("We should be able to build a notification client");
+ 
+--- a/crates/matrix-sdk/src/encryption/mod.rs
++++ b/crates/matrix-sdk/src/encryption/mod.rs
+@@ -2066,6 +2066,18 @@
+         }
+     }
+ 
++    /// Build one distinct controller for encryption-session admission.
++    /// The session lease serializes network/token progression, independently of
++    /// the crypto lease used for actual machine/store operations.
++    #[doc(hidden)]
++    pub fn create_sync_session_lock(&self) -> Option<CrossProcessLock<LockableCryptoStore>> {
++        let holder = self.client.cross_process_lock_config().holder_name()?;
++        Some(self.client.base_client().create_encryption_sync_session_lock(format!(
++            "{holder}::encryption-session::{}",
++            ruma::TransactionId::new()
++        )))
++    }
++
+     /// If a lock was created with [`Self::enable_cross_process_store_lock`],
+     /// spin-waits until the lock is available.
+     ///
+--- a/crates/matrix-sdk/src/sliding_sync/builder.rs
++++ b/crates/matrix-sdk/src/sliding_sync/builder.rs
+@@ -6,6 +6,8 @@
+ };
+ 
+ use cfg_if::cfg_if;
++#[cfg(feature = "e2e-encryption")]
++use matrix_sdk_common::cross_process_lock::CrossProcessLockConfig;
+ use matrix_sdk_common::timer;
+ use ruma::{OwnedRoomId, api::client::sync::sync_events::v5 as http};
+ use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock, broadcast::channel};
+@@ -300,10 +302,18 @@
+             cfg_if! {
+                 if #[cfg(feature = "e2e-encryption")] {
+                     if self.share_pos {
++                        // A different process may have advanced the epoch and
++                        // invalidated this client's cached machine. Restore
++                        // only after session and crypto admission in request
++                        // generation; constructor reads have neither lease.
++                        if matches!(client.cross_process_lock_config(), CrossProcessLockConfig::MultiProcess { .. }) {
++                            (true, None)
++                        } else {
+                         // If the sliding sync instance is configured to share
+                         // its current sync position, we will restore it from
+                         // the cache.
+                         (true, super::cache::restore_sliding_sync_state(&client, &self.storage_key).await?.and_then(|fields| fields.pos))
++                        }
+                     } else {
+                         (false, None)
+                     }
+@@ -314,6 +324,15 @@
+         };
+ 
+         let lists = AsyncRwLock::new(lists);
++        let extensions = self.extensions.unwrap_or_default();
++        #[cfg(feature = "e2e-encryption")]
++        let encryption_session_lock = if extensions.e2ee.enabled == Some(true)
++            || extensions.to_device.enabled == Some(true)
++        {
++            client.encryption().create_sync_session_lock().map(Arc::new)
++        } else {
++            None
++        };
+ 
+         Ok(SlidingSync::new(SlidingSyncInner {
+             id: self.id,
+@@ -331,7 +350,9 @@
+             })),
+ 
+             room_subscriptions: StdRwLock::new(self.room_subscriptions),
+-            extensions: self.extensions.unwrap_or_default(),
++            extensions,
++            #[cfg(feature = "e2e-encryption")]
++            encryption_session_lock,
+ 
+             internal_channel: internal_channel_sender,
+ 
+--- a/crates/matrix-sdk/src/sliding_sync/mod.rs
++++ b/crates/matrix-sdk/src/sliding_sync/mod.rs
+@@ -33,6 +33,11 @@
+ pub use client::{Version, VersionBuilder};
+ use futures_core::stream::Stream;
+ use matrix_sdk_base::RequestedRequiredStates;
++use matrix_sdk_common::cross_process_lock::CrossProcessLockGuard;
++#[cfg(feature = "e2e-encryption")]
++use matrix_sdk_common::cross_process_lock::{
++    CrossProcessLock, CrossProcessLockError, CrossProcessLockUnobtained,
++};
+ #[cfg(feature = "e2e-encryption")]
+ use matrix_sdk_common::executor::JoinHandleExt as _;
+ use matrix_sdk_common::{executor::spawn, timer};
+@@ -40,6 +45,7 @@
+     OwnedRoomId, RoomId,
+     api::{client::sync::sync_events::v5 as http, error::ErrorKind},
+     assign,
++    time::Instant,
+ };
+ use tokio::{
+     select,
+@@ -113,6 +119,12 @@
+     /// calls.
+     extensions: http::request::Extensions,
+ 
++    /// One encryption session at a time, including detached persistence.
++    /// Its metadata lease must never be used as crypto-store ownership.
++    #[cfg(feature = "e2e-encryption")]
++    encryption_session_lock:
++        Option<Arc<CrossProcessLock<matrix_sdk_base::crypto::store::LockableCryptoStore>>>,
++
+     /// Internal channel used to pass messages between Sliding Sync and other
+     /// types.
+     internal_channel: Sender<SlidingSyncInternalMessage>,
+@@ -125,6 +137,79 @@
+ 
+     async fn cache_to_storage(&self, position: &SlidingSyncPositionMarkers) -> Result<()> {
+         cache::store_sliding_sync_state(self, position).await
++    }
++
++    #[cfg(feature = "e2e-encryption")]
++    fn operation_budget(deadline: Option<Instant>, default: Duration) -> Result<Duration> {
++        let budget = deadline.map_or(Some(default), |d| d.checked_duration_since(Instant::now()));
++        budget.filter(|d| !d.is_zero()).ok_or_else(|| {
++            crate::Error::CrossProcessLockError(Box::new(
++                CrossProcessLockUnobtained::TimedOut.into(),
++            ))
++        })
++    }
++
++    async fn acquire_encryption_session(
++        &self,
++        _deadline: Option<Instant>,
++    ) -> Result<Option<CrossProcessLockGuard>> {
++        #[cfg(feature = "e2e-encryption")]
++        if let Some(lock) = &self.inner.encryption_session_lock {
++            let budget = Self::operation_budget(_deadline, Duration::from_secs(60))?;
++            let state = lock
++                .spin_lock_for(budget)
++                .await
++                .map_err(|e| {
++                    crate::Error::CrossProcessLockError(Box::new(CrossProcessLockError::TryLock(
++                        Arc::new(e),
++                    )))
++                })?
++                .map_err(|e| crate::Error::CrossProcessLockError(Box::new(e.into())))?;
++            return Ok(Some(state.into_guard()));
++        }
++        Ok(None)
++    }
++
++    async fn acquire_crypto_operation(
++        &self,
++        _deadline: Option<Instant>,
++        _default: Duration,
++    ) -> Result<Option<CrossProcessLockGuard>> {
++        #[cfg(feature = "e2e-encryption")]
++        {
++            let guard = self
++                .inner
++                .client
++                .encryption()
++                .spin_lock_store_for(Self::operation_budget(_deadline, _default)?)
++                .await?;
++            if _deadline.is_some_and(|d| Instant::now() >= d) {
++                drop(guard);
++                self.release_crypto_operation().await?;
++                return Err(crate::Error::CrossProcessLockError(Box::new(
++                    CrossProcessLockUnobtained::TimedOut.into(),
++                )));
++            }
++            return Ok(guard);
++        }
++        #[cfg(not(feature = "e2e-encryption"))]
++        Ok(None)
++    }
++
++    async fn release_crypto_operation(&self) -> Result<()> {
++        #[cfg(feature = "e2e-encryption")]
++        self.inner.client.encryption().release_store_if_unused().await?;
++        Ok(())
++    }
++
++    async fn release_encryption_session(&self) -> Result<()> {
++        #[cfg(feature = "e2e-encryption")]
++        if let Some(lock) = &self.inner.encryption_session_lock {
++            lock.release_if_unused()
++                .await
++                .map_err(|e| crate::Error::CrossProcessLockError(Box::new(e)))?;
++        }
++        Ok(())
+     }
+ 
+     /// Create a new [`SlidingSyncBuilder`].
+@@ -472,6 +557,20 @@
+ 
+     async fn generate_sync_request(
+         &self,
++        deadline: Option<Instant>,
++    ) -> Result<(http::Request, RequestConfig, OwnedMutexGuard<SlidingSyncPositionMarkers>)> {
++        // Lock order: session, local position, then a short crypto operation.
++        let position_guard = self.inner.position.clone().lock_owned().await;
++        let lease = self.acquire_crypto_operation(deadline, Duration::from_secs(60)).await?;
++        let result = self.generate_sync_request_under_lease(position_guard).await;
++        drop(lease);
++        self.release_crypto_operation().await?;
++        result
++    }
++
++    async fn generate_sync_request_under_lease(
++        &self,
++        mut position_guard: OwnedMutexGuard<SlidingSyncPositionMarkers>,
+     ) -> Result<(http::Request, RequestConfig, OwnedMutexGuard<SlidingSyncPositionMarkers>)> {
+         // Collect requests for lists.
+         let mut requests_lists = BTreeMap::new();
+@@ -498,14 +597,6 @@
+         // is updated, or the response handling has failed, in this case the
+         // `pos` hasn't been updated and the same `pos` will be used for this
+         // new request.
+-        let mut position_guard = {
+-            debug!("Waiting to acquire the `position` lock");
+-
+-            let _timer = timer!("acquiring the `position` lock");
+-
+-            self.inner.position.clone().lock_owned().await
+-        };
+-
+         debug!(pos = ?position_guard.pos, "Got a position");
+ 
+         let to_device_enabled = self.inner.extensions.to_device.enabled == Some(true);
+@@ -615,6 +706,8 @@
+         request: http::Request,
+         request_config: RequestConfig,
+         mut position_guard: OwnedMutexGuard<SlidingSyncPositionMarkers>,
++        session_lease: Option<CrossProcessLockGuard>,
++        deadline: Option<Instant>,
+     ) -> Result<UpdateSummary> {
+         debug!("Sending request");
+ 
+@@ -691,9 +784,8 @@
+         // Response handling is deliberately detached below. Its lease must
+         // outlive a cancelled caller through crypto and position persistence.
+         // Acquire after long-polling; the outer sync-service guard is unchanged.
+-        #[cfg(feature = "e2e-encryption")]
+         let response_lease =
+-            self.inner.client.encryption().spin_lock_store_for(Duration::from_secs(1)).await?;
++            self.acquire_crypto_operation(deadline, Duration::from_secs(1)).await?;
+ 
+         // At this point, the request has been sent, and a response has been
+         // received.
+@@ -710,28 +802,32 @@
+         // Spawn a new future to ensure that the code inside this future cannot
+         // be cancelled if this method is cancelled.
+         let future = async move {
+-            #[cfg(feature = "e2e-encryption")]
+-            let _response_lease = response_lease;
++            // Neither guard can disappear when the requesting caller cancels.
++            let response_lease = response_lease;
++            let session_lease = session_lease;
+             debug!("Start handling response");
+-
+-            // In case the task running this future is detached, we must ensure
+-            // responses are handled one at a time. At this point we still own
+-            // `position_guard`, so we're fine.
+-
+-            // Handle the response.
+-            let updates = this
+-                .handle_response(response, &mut position_guard, requested_required_states)
+-                .await?;
+-
+-            this.cache_to_storage(&position_guard).await?;
+-
+-            // Release the position guard lock. It means that other responses
+-            // can be generated and then handled later.
++            let result = async {
++                // In case the task running this future is detached, we must ensure
++                // responses are handled one at a time. At this point we still own
++                // `position_guard`, so we're fine.
++
++                // Handle the response.
++                let updates = this
++                    .handle_response(response, &mut position_guard, requested_required_states)
++                    .await?;
++
++                this.cache_to_storage(&position_guard).await?;
++
++                Ok(updates)
++            }
++            .await;
+             drop(position_guard);
+-
++            drop(response_lease);
++            this.release_crypto_operation().await?;
++            drop(session_lease);
++            this.release_encryption_session().await?;
+             debug!("Done handling response");
+-
+-            Ok(updates)
++            result
+         };
+ 
+         spawn(future.instrument(Span::current())).await.map_err(|error| Error::JoinError {
+@@ -777,10 +873,18 @@
+     #[doc(hidden)]
+     #[instrument(skip_all, fields(conn_id = self.inner.id, pos, timeout))]
+     pub async fn sync_once(&self) -> Result<UpdateSummary> {
+-        let (request, request_config, position_guard) = self.generate_sync_request().await?;
+-
+-        // Send the request.
+-        let summaries = self.send_sync_request(request, request_config, position_guard).await?;
++        self.sync_once_until(None).await
++    }
++
++    async fn sync_once_until(&self, deadline: Option<Instant>) -> Result<UpdateSummary> {
++        let session_lease = self.acquire_encryption_session(deadline).await?;
++        let (request, request_config, position_guard) =
++            self.generate_sync_request(deadline).await?;
++
++        // Session ownership spans HTTP and moves into detached persistence.
++        let summaries = self
++            .send_sync_request(request, request_config, position_guard, session_lease, deadline)
++            .await?;
+ 
+         // Notify a new sync was received.
+         self.inner.client.inner.sync_beat.notify(usize::MAX);
+@@ -799,6 +903,22 @@
+     #[allow(unknown_lints, clippy::let_with_type_underscore)] // triggered by instrument macro
+     #[instrument(name = "sync_stream", skip_all, fields(conn_id = self.inner.id, with_e2ee = self.is_e2ee_enabled()))]
+     pub fn sync(&self) -> impl Stream<Item = Result<UpdateSummary, crate::Error>> + '_ {
++        self.sync_until(None)
++    }
++
++    /// A notification retry keeps its original total admission deadline.
++    #[doc(hidden)]
++    pub fn sync_with_deadline(
++        &self,
++        deadline: Option<Instant>,
++    ) -> impl Stream<Item = Result<UpdateSummary, crate::Error>> + '_ {
++        self.sync_until(deadline)
++    }
++
++    fn sync_until(
++        &self,
++        deadline: Option<Instant>,
++    ) -> impl Stream<Item = Result<UpdateSummary, crate::Error>> + '_ {
+         debug!("Starting sync stream");
+ 
+         let mut internal_channel_receiver = self.inner.internal_channel.subscribe();
+@@ -826,7 +946,7 @@
+                         }
+                     }
+ 
+-                    update_summary = self.sync_once() => {
++                    update_summary = self.sync_once_until(deadline) => {
+                         match update_summary {
+                             Ok(updates) => {
+                                 yield Ok(updates);
+@@ -877,6 +997,47 @@
+     /// This method **MUST** be called when the sync loop is stopped.
+     #[doc(hidden)]
+     pub async fn expire_session(&self) {
++        // Snapshot the session that this caller intends to invalidate. A newer
++        // shared session must survive an old actor's delayed UnknownPos.
++        let expected_pos = self.inner.position.lock().await.pos.clone();
++        let this = self.clone();
++        let task = async move {
++            let session_lease = this.acquire_encryption_session(None).await?;
++            let mut position = this.inner.position.clone().lock_owned().await;
++            let crypto_lease = this.acquire_crypto_operation(None, Duration::from_secs(60)).await?;
++            let result: Result<()> = async {
++                if this.inner.share_pos {
++                    let current =
++                        restore_sliding_sync_state(&this.inner.client, &this.inner.storage_key)
++                            .await?
++                            .and_then(|fields| fields.pos);
++                    if current != expected_pos {
++                        position.pos = current;
++                        return Ok(());
++                    }
++                }
++                this.expire_session_under_lease(&mut position).await
++            }
++            .await;
++            drop(position);
++            drop(crypto_lease);
++            this.release_crypto_operation().await?;
++            drop(session_lease);
++            this.release_encryption_session().await?;
++            result
++        };
++        // Once admitted, lifecycle persistence cannot be cancelled by a caller.
++        match spawn(task).await {
++            Ok(Ok(())) => {}
++            Ok(Err(error)) => warn!(?error, "Failed to expire sliding sync session"),
++            Err(error) => warn!(?error, "Failed to finish session expiry task"),
++        }
++    }
++
++    async fn expire_session_under_lease(
++        &self,
++        position: &mut SlidingSyncPositionMarkers,
++    ) -> Result<()> {
+         info!("Session expired; resetting `pos`");
+ 
+         {
+@@ -890,8 +1051,6 @@
+ 
+         // Remove the cached sliding sync state as well.
+         {
+-            let mut position = self.inner.position.lock().await;
+-
+             // Invalidate in memory.
+             position.pos = None;
+ 
+@@ -904,9 +1063,7 @@
+ 
+             // Propagate to disk. Note: this propagates both the sliding sync
+             // state and the cached lists' state to disk.
+-            if let Err(err) = self.cache_to_storage(&position).await {
+-                warn!("Failed to invalidate cached sliding sync state: {err}");
+-            }
++            self.cache_to_storage(position).await?;
+         }
+ 
+         {
+@@ -914,6 +1071,7 @@
+             // subscriptions when the session will restart.
+             self.inner.room_subscriptions.write().unwrap().clear();
+         }
++        Ok(())
+     }
+ }
+ 
+@@ -1237,7 +1395,7 @@
+         let client = sliding_sync.inner.client.clone();
+ 
+         {
+-            let (request, _, _position_guard) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _position_guard) = sliding_sync.generate_sync_request(None).await?;
+ 
+             assert_eq!(request.set_presence, PresenceState::Online);
+         }
+@@ -1245,7 +1403,7 @@
+         client.set_presence(PresenceState::Unavailable, None, false).await?;
+ 
+         {
+-            let (request, _, _position_guard) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _position_guard) = sliding_sync.generate_sync_request(None).await?;
+ 
+             assert_eq!(request.set_presence, PresenceState::Unavailable);
+         }
+@@ -1253,7 +1411,7 @@
+         client.set_presence(PresenceState::Offline, None, false).await?;
+ 
+         {
+-            let (request, _, _position_guard) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _position_guard) = sliding_sync.generate_sync_request(None).await?;
+ 
+             assert_eq!(request.set_presence, PresenceState::Offline);
+         }
+@@ -1838,7 +1996,7 @@
+ 
+         // Test `Request::extensions`.
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await.unwrap();
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await.unwrap();
+ 
+             let to_device = &request.extensions.to_device;
+ 
+@@ -1866,7 +2024,7 @@
+ 
+         // Test `Request::extensions` again.
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await.unwrap();
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await.unwrap();
+ 
+             let to_device = &request.extensions.to_device;
+ 
+@@ -1928,7 +2086,7 @@
+ 
+         // No `since` to start with.
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert_eq!(request.extensions.sticky_events.enabled, Some(true));
+             assert!(request.extensions.sticky_events.since.is_none());
+         }
+@@ -1937,14 +2095,14 @@
+         sliding_sync.sync_once().await?;
+ 
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert_eq!(request.extensions.sticky_events.since.as_deref(), Some("sticky_1"));
+         }
+ 
+         sliding_sync.sync_once().await?;
+ 
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert_eq!(request.extensions.sticky_events.since.as_deref(), Some("sticky_2"));
+         }
+ 
+@@ -1952,7 +2110,7 @@
+         sliding_sync.sync_once().await?;
+ 
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert_eq!(request.extensions.sticky_events.since.as_deref(), Some("sticky_2"));
+         }
+ 
+@@ -1960,7 +2118,7 @@
+         sliding_sync.expire_session().await;
+ 
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert!(request.pos.is_none());
+             assert!(request.extensions.sticky_events.since.is_none());
+         }
+@@ -2056,7 +2214,7 @@
+             .await?;
+ 
+         // First request: no `pos`.
+-        let (_request, _, _) = sync.generate_sync_request().await?;
++        let (_request, _, _) = sync.generate_sync_request(None).await?;
+ 
+         // Now, tracked users must be dirty.
+         {
+@@ -2094,7 +2252,7 @@
+         // Second request: with a `pos` this time.
+         sync.set_pos("chocolat".to_owned()).await;
+ 
+-        let (_request, _, _) = sync.generate_sync_request().await?;
++        let (_request, _, _) = sync.generate_sync_request(None).await?;
+ 
+         // Tracked users are not marked as dirty.
+         {
+@@ -2148,7 +2306,7 @@
+         {
+             assert!(sliding_sync.inner.position.lock().await.pos.is_none());
+ 
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert!(request.pos.is_none());
+         }
+ 
+@@ -2185,7 +2343,7 @@
+         // It's still 0, not "yolo".
+         {
+             assert_eq!(sliding_sync.inner.position.lock().await.pos.as_deref(), Some("0"));
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert_eq!(request.pos.as_deref(), Some("0"));
+         }
+ 
+@@ -2235,7 +2393,7 @@
+ 
+         // `pos` is `None` to start with.
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+ 
+             assert!(request.pos.is_none());
+             assert!(sliding_sync.inner.position.lock().await.pos.is_none());
+@@ -2271,7 +2429,7 @@
+ 
+         // It's alright, the next request will load it from the database.
+         {
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert_eq!(request.pos.as_deref(), Some("42"));
+             assert_eq!(sliding_sync.inner.position.lock().await.pos.as_deref(), Some("42"));
+         }
+@@ -2281,7 +2439,7 @@
+             let sliding_sync = client.sliding_sync("elephant-sync")?.share_pos().build().await?;
+             assert_eq!(sliding_sync.inner.position.lock().await.pos.as_deref(), Some("42"));
+ 
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert_eq!(request.pos.as_deref(), Some("42"));
+         }
+ 
+@@ -2292,7 +2450,7 @@
+         {
+             assert!(sliding_sync.inner.position.lock().await.pos.is_none());
+ 
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert!(request.pos.is_none());
+         }
+ 
+@@ -2301,7 +2459,7 @@
+             let sliding_sync = client.sliding_sync("elephant-sync")?.share_pos().build().await?;
+             assert!(sliding_sync.inner.position.lock().await.pos.is_none());
+ 
+-            let (request, _, _) = sliding_sync.generate_sync_request().await?;
++            let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+             assert!(request.pos.is_none());
+         }
+ 
+@@ -2930,7 +3088,7 @@
+     async fn test_timeout_zero_list() -> Result<()> {
+         let (_server, sliding_sync) = new_sliding_sync(vec![]).await?;
+ 
+-        let (request, _, _) = sliding_sync.generate_sync_request().await?;
++        let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+ 
+         // Zero list means sliding sync is fully loaded, so there is a timeout
+         // to wait on new update to pop.
+@@ -2946,7 +3104,7 @@
+         ])
+         .await?;
+ 
+-        let (request, _, _) = sliding_sync.generate_sync_request().await?;
++        let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+ 
+         // The list does not require a timeout.
+         assert!(request.timeout.is_none());
+@@ -2974,7 +3132,7 @@
+             };
+         }
+ 
+-        let (request, _, _) = sliding_sync.generate_sync_request().await?;
++        let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+ 
+         // The list is now fully loaded, so it requires a timeout.
+         assert!(request.timeout.is_some());
+@@ -2992,7 +3150,7 @@
+         ])
+         .await?;
+ 
+-        let (request, _, _) = sliding_sync.generate_sync_request().await?;
++        let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+ 
+         // Two lists don't require a timeout.
+         assert!(request.timeout.is_none());
+@@ -3020,7 +3178,7 @@
+             };
+         }
+ 
+-        let (request, _, _) = sliding_sync.generate_sync_request().await?;
++        let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+ 
+         // One don't require a timeout.
+         assert!(request.timeout.is_none());
+@@ -3048,7 +3206,7 @@
+             };
+         }
+ 
+-        let (request, _, _) = sliding_sync.generate_sync_request().await?;
++        let (request, _, _) = sliding_sync.generate_sync_request(None).await?;
+ 
+         // All lists require a timeout.
+         assert!(request.timeout.is_some());
+--- a/crates/matrix-sdk/tests/atum_protected_tasks.rs
++++ b/crates/matrix-sdk/tests/atum_protected_tasks.rs
+@@ -321,3 +321,133 @@
+     drop(reader);
+     drop(guard);
+ }
++
++#[tokio::test(flavor = "multi_thread")]
++async fn encryption_long_poll_serializes_sessions_without_holding_crypto() {
++    let dir = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(dir.path()).await;
++    let client = client(dir.path(), &server, &keys).await;
++    upload_mock(&server, Arc::new(Notify::new()), Duration::ZERO).await;
++    let sync = client
++        .sliding_sync("encryption")
++        .unwrap()
++        .version(Version::Native)
++        .share_pos()
++        .with_all_extensions()
++        .build()
++        .await
++        .unwrap();
++    let warm = Mock::given(method("POST"))
++        .and(path_regex(r"^/_matrix/client/unstable/org.matrix.simplified_msc3575/sync$"))
++        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
++            "pos": "warm-pos", "lists": {},
++            "extensions": {"e2ee": {"device_one_time_keys_count": {"signed_curve25519": 50}},
++                "to_device": {"next_batch": "warm-token", "events": []}}
++        })))
++        .expect(1)
++        .mount_as_scoped(&server)
++        .await;
++    sync.sync_once().await.unwrap();
++    drop(warm);
++
++    let entered = Arc::new(Notify::new());
++    let notify = entered.clone();
++    Mock::given(method("POST"))
++        .and(path_regex(r"^/_matrix/client/unstable/org.matrix.simplified_msc3575/sync$"))
++        .respond_with(move |request: &Request| {
++            assert!(request.url.query_pairs().any(|(k, v)| k == "timeout" && v == "30000"));
++            assert!(request.url.query_pairs().any(|(k, v)| k == "pos" && v == "warm-pos"));
++            notify.notify_one();
++            ResponseTemplate::new(200)
++                .set_body_json(json!({"pos": "unused-cancelled-pos", "lists": {}}))
++                .set_delay(Duration::from_secs(10))
++        })
++        .expect(1)
++        .mount(&server)
++        .await;
++    let task = tokio::spawn(async move { sync.sync_once().await });
++    tokio::time::timeout(Duration::from_secs(5), entered.notified()).await.unwrap();
++    let session_contender = client.encryption().create_sync_session_lock().unwrap();
++    assert!(
++        session_contender.try_lock_once().await.unwrap().is_err(),
++        "the actual in-flight encryption request must exclude another session actor"
++    );
++    let (store_b, crypto_contender) = contender(dir.path()).await;
++    // The request starts concurrently with the separately protected outgoing
++    // operation. Allow its original one-second admission window to finish;
++    // the ten-second HTTP wait itself must not own the crypto store.
++    let crypto_guard =
++        crypto_contender.spin_lock_for(Duration::from_secs(1)).await.unwrap().unwrap().into_guard();
++    assert_eq!(store_b.next_batch_token().await.unwrap().as_deref(), Some("warm-token"));
++    drop(crypto_guard);
++    crypto_contender.release_if_unused().await.unwrap();
++    assert!(!task.is_finished(), "crypto access must occur while HTTP still waits");
++    task.abort();
++    assert!(task.await.unwrap_err().is_cancelled());
++    tokio::time::sleep(EXPIRE_WAIT).await;
++    let session_guard = session_contender.try_lock_once().await.unwrap().unwrap().into_guard();
++    drop(session_guard);
++    session_contender.release_if_unused().await.unwrap();
++    let position_key = "sliding_sync_store::encryption::@synthetic:atum.invalid::instance";
++    let stored = store_b.get_custom_value(position_key).await.unwrap().unwrap();
++    assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored).unwrap()["pos"], "warm-pos");
++    client.pause().await.unwrap();
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn stale_session_expiry_preserves_a_newer_shared_position() {
++    let dir = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(dir.path()).await;
++    let client = client(dir.path(), &server, &keys).await;
++    upload_mock(&server, Arc::new(Notify::new()), Duration::ZERO).await;
++    let first = client
++        .sliding_sync("encryption")
++        .unwrap()
++        .version(Version::Native)
++        .share_pos()
++        .with_all_extensions()
++        .build()
++        .await
++        .unwrap();
++    let warm = Mock::given(method("POST"))
++        .and(path_regex(r"^/_matrix/client/unstable/org.matrix.simplified_msc3575/sync$"))
++        .respond_with(ResponseTemplate::new(200).set_body_json(
++            json!({"pos": "old-pos", "lists": {},
++            "extensions": {"e2ee": {"device_one_time_keys_count": {"signed_curve25519": 50}},
++                "to_device": {"next_batch": "old-token", "events": []}}}),
++        ))
++        .expect(1)
++        .mount_as_scoped(&server)
++        .await;
++    first.sync_once().await.unwrap();
++    drop(warm);
++    let second = client
++        .sliding_sync("encryption")
++        .unwrap()
++        .version(Version::Native)
++        .share_pos()
++        .with_all_extensions()
++        .build()
++        .await
++        .unwrap();
++    Mock::given(method("POST"))
++        .and(path_regex(r"^/_matrix/client/unstable/org.matrix.simplified_msc3575/sync$"))
++        .respond_with(ResponseTemplate::new(200).set_body_json(
++            json!({"pos": "new-pos", "lists": {},
++            "extensions": {"e2ee": {"device_one_time_keys_count": {"signed_curve25519": 50}},
++                "to_device": {"next_batch": "new-token", "events": []}}}),
++        ))
++        .expect(1)
++        .mount(&server)
++        .await;
++    second.sync_once().await.unwrap();
++    first.expire_session().await;
++    let (store, _) = contender(dir.path()).await;
++    let position_key = "sliding_sync_store::encryption::@synthetic:atum.invalid::instance";
++    let stored = store.get_custom_value(position_key).await.unwrap().unwrap();
++    assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored).unwrap()["pos"], "new-pos");
++    assert_eq!(store.next_batch_token().await.unwrap().as_deref(), Some("new-token"));
++    client.pause().await.unwrap();
++}
+--- a/bindings/matrix-sdk-ffi/src/encryption.rs
++++ b/bindings/matrix-sdk-ffi/src/encryption.rs
+@@ -816,0 +817,19 @@
++
++    /// Recover with the server-current default key and return the exact
++    /// SDK-validated key id and canonical metadata that opened it. The default
++    /// is checked again after recovery so a rotation cannot be mislabeled as
++    /// the key that was transferred by a verified device.
++    pub async fn recover_with_details(
++        &self,
++        mut recovery_key: String,
++        expected_key_id: Option<String>,
++    ) -> Result<PreparedRecoveryKey> {
++        let result = async {
++            let before = checked_recovery_input(self, &recovery_key).await?;
++            if expected_key_id.as_deref().is_some_and(|expected| expected != before.0) {
++                return Err(RecoveryError::SecretStorage {
++                    error_message: "Recovery key id did not match the verified device".to_owned(),
++                });
++            }
++            self.inner.recovery().recover(&recovery_key).await?;
++            let after = checked_recovery_input(self, &recovery_key).await?;
+@@ -817,0 +837,18 @@
++            if before != after {
++                return Err(RecoveryError::SecretStorage {
++                    error_message: "Recovery key changed during recovery".to_owned(),
++                });
++            }
++
++            Ok(PreparedRecoveryKey {
++                recovery_key: recovery_key.clone(),
++                key_id: after.0,
++                metadata_json: after.1,
++            })
++        }
++        .await;
++
++        recovery_key.zeroize();
++        result
++    }
++
+@@ -1230,2 +1267,5 @@
+-    if input.key_id.len() != 32 || !input.key_id.bytes().all(|b| b.is_ascii_alphanumeric())
+-        || input.recovery_key.len() > 128 || input.metadata_json.len() > 1024
++    if input.key_id.is_empty()
++        || input.key_id.len() > 255
++        || !input.key_id.bytes().all(|b| b.is_ascii_graphic())
++        || input.recovery_key.len() > 128
++        || input.metadata_json.len() > 1024
+@@ -1239 +1279,2 @@
+-        || metadata.iv.as_bytes().len() != 16 || metadata.mac.as_bytes().len() != 32
++        || metadata.iv.as_bytes().len() != 16
++        || metadata.mac.as_bytes().len() != 32
+@@ -1246,3 +1287,4 @@
+-        SecretStorageEncryptionAlgorithm::V1AesHmacSha2(
+-            SecretStorageV1AesHmacSha2Properties::new(Some(metadata.iv), Some(metadata.mac)),
+-        ),
++        SecretStorageEncryptionAlgorithm::V1AesHmacSha2(SecretStorageV1AesHmacSha2Properties::new(
++            Some(metadata.iv),
++            Some(metadata.mac),
++        )),
+@@ -1251,3 +1293,5 @@
+-    if canonical != input.metadata_json { return Err(invalid()); }
+-    let key = SecretStorageKey::from_account_data(&input.recovery_key, content)
+-        .map_err(|_| invalid())?;
++    if canonical != input.metadata_json {
++        return Err(invalid());
++    }
++    let key =
++        SecretStorageKey::from_account_data(&input.recovery_key, content).map_err(|_| invalid())?;
+@@ -1259,0 +1304,38 @@
++async fn checked_recovery_input(
++    encryption: &Encryption,
++    recovery_key: &str,
++) -> Result<(String, String)> {
++    let default = encryption
++        .inner
++        .secret_storage()
++        .fetch_default_key_id()
++        .await
++        .map_err(|source| RecoveryError::Client { source: ClientError::from(source) })?
++        .ok_or_else(|| RecoveryError::SecretStorage {
++            error_message: "Recovery default key is missing".to_owned(),
++        })?
++        .deserialize()
++        .map_err(|error| RecoveryError::SecretStorage { error_message: error.to_string() })?;
++    let key_id = default.key_id;
++    let raw = encryption
++        ._client
++        .account_data(format!("m.secret_storage.key.{key_id}"))
++        .await
++        .map_err(|source| RecoveryError::Client { source })?
++        .ok_or_else(|| RecoveryError::SecretStorage {
++            error_message: "Recovery key metadata is missing".to_owned(),
++        })?;
++    let metadata_json = serde_json::from_str::<serde_json::Value>(&raw)
++        .map_err(|error| RecoveryError::SecretStorage { error_message: error.to_string() })?
++        .to_string();
++    let mut input =
++        PreparedRecoveryKey { recovery_key: recovery_key.to_owned(), key_id, metadata_json };
++    let validation =
++        validate_prepared_recovery_key_inner(&input).map_err(|_| RecoveryError::SecretStorage {
++            error_message: "Recovery key did not match the current default".to_owned(),
++        });
++    input.recovery_key.zeroize();
++    validation?;
++    Ok((input.key_id, input.metadata_json))
++}
++
+@@ -1281 +1363,2 @@
+-            let mut metadata: serde_json::Value = serde_json::from_str(&changed.metadata_json).unwrap();
++            let mut metadata: serde_json::Value =
++                serde_json::from_str(&changed.metadata_json).unwrap();
+@@ -1288 +1371,2 @@
+-            let mut metadata: serde_json::Value = serde_json::from_str(&changed.metadata_json).unwrap();
++            let mut metadata: serde_json::Value =
++                serde_json::from_str(&changed.metadata_json).unwrap();
+--- a/bindings/matrix-sdk-ffi/src/session_verification.rs
++++ b/bindings/matrix-sdk-ffi/src/session_verification.rs
+@@ -69,0 +70,10 @@
++}
++
++/// The exact peer and Matrix transaction bound to the active verification.
++/// This contains no display name or secret and remains available after the
++/// request transitions into SAS so a subsequent encrypted handoff can target
++/// only the device the person just compared.
++#[derive(uniffi::Record)]
++pub struct SessionVerificationFlowDetails {
++    flow_id: String,
++    device_id: String,
+@@ -259,0 +270,23 @@
++
++    pub fn flow_details(&self) -> Option<SessionVerificationFlowDetails> {
++        let request = self.verification_request.read().unwrap().clone()?;
++        let device_id = match request.state() {
++            VerificationRequestState::Requested { other_device_data, .. }
++            | VerificationRequestState::Ready { other_device_data, .. } => {
++                Some(other_device_data.device_id().to_string())
++            }
++            VerificationRequestState::Transitioned { verification } => {
++                verification.sas().map(|sas| sas.other_device().device_id().to_string())
++            }
++            _ => None,
++        }
++        .or_else(|| {
++            self.sas_verification
++                .read()
++                .unwrap()
++                .as_ref()
++                .map(|sas| sas.other_device().device_id().to_string())
++        })?;
++
++        Some(SessionVerificationFlowDetails { flow_id: request.flow_id().to_owned(), device_id })
++    }

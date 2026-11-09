@@ -1,0 +1,5 @@
+{
+  "confirmation": "yes",
+  "reauthIdToken": "PUBLIC_FIXTURE_ONLY.REAUTH_PROOF.NOT_A_SIGNATURE",
+  "idempotencyKey": "del-2026-10-05-c"
+}

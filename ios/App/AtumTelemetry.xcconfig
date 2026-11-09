@@ -1,0 +1,11 @@
+// Build-time reporting configuration. Keep the committed values empty.
+// Supply real values either on the xcodebuild command line
+// (ATUM_SENTRY_DSN=... etc.) or in the git-ignored local override file below.
+// An empty DSN disables crash reporting; an empty PostHog key disables usage
+// analytics. Neither empty value prevents the app from launching.
+ATUM_SENTRY_DSN =
+ATUM_POSTHOG_KEY =
+ATUM_POSTHOG_HOST =
+ATUM_REPORTING_ENVIRONMENT =
+
+#include? "AtumTelemetry.local.xcconfig"

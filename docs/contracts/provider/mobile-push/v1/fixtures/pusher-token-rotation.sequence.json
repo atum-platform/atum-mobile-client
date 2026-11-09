@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "from": "absent",
+      "to": "registered",
+      "event": "set"
+    },
+    {
+      "from": "registered",
+      "to": "removed",
+      "event": "replaced_by_new_token"
+    }
+  ]
+}

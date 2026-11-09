@@ -1,0 +1,438 @@
+diff --git a/bindings/matrix-sdk-ffi/src/room/mod.rs b/bindings/matrix-sdk-ffi/src/room/mod.rs
+index c018a38..cb92b51 100644
+--- a/bindings/matrix-sdk-ffi/src/room/mod.rs
++++ b/bindings/matrix-sdk-ffi/src/room/mod.rs
+@@ -38,7 +38,8 @@ use ruma::{
+     EventId, Int, OwnedDeviceId, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId, RoomAliasId,
+     ServerName, UserId, assign,
+     events::{
+-        AnyMessageLikeEventContent, AnySyncTimelineEvent, StateEventType,
++        AnyMessageLikeEventContent, AnySyncTimelineEvent, RoomAccountDataEventType,
++        StateEventType,
+         receipt::ReceiptThread as RumaReceiptThread,
+         relation::RelationType as RumaRelationType,
+         room::{
+@@ -530,6 +531,22 @@ impl Room {
+         Ok(to_state_events(events))
+     }
+ 
++    /// Read a custom room account-data event from the existing local store.
++    ///
++    /// This is a cached, read-only accessor. It performs no request and accepts
++    /// a string type so clients can validate vendor event JSON without growing
++    /// the generated enum for every custom event.
++    pub async fn account_data_raw(
++        &self,
++        event_type: String,
++    ) -> Result<Option<String>, ClientError> {
++        let event = self
++            .inner
++            .account_data(RoomAccountDataEventType::from(event_type))
++            .await?;
++        Ok(event.map(|raw| raw.json().get().to_owned()))
++    }
++
+     /// Subscribe to the room state events of the given type.
+     ///
+     /// The listener is called with the full current list of state events of
+@@ -2265,11 +2282,48 @@ impl TryFrom<SdkRoomSendQueueUpdate> for RoomSendQueueUpdate {
+ mod tests {
+     use std::time::Duration;
+ 
+-    use matrix_sdk::{ruma::room_id, test_utils::mocks::MatrixMockServer};
++    use matrix_sdk::{
++        ruma::{events::AnyRoomAccountDataEvent, room_id, serde::Raw},
++        test_utils::mocks::MatrixMockServer,
++    };
++    use matrix_sdk_test::JoinedRoomBuilder;
++    use serde_json::json;
+     use tempfile::tempdir;
+ 
+     use super::*;
+ 
++    #[tokio::test]
++    async fn custom_room_account_data_is_read_from_cache_as_raw_json() {
++        let server = MatrixMockServer::new().await;
++        let client = server.client_builder().build().await;
++        let room_id = room_id!("!test:example.com");
++        let event: Raw<AnyRoomAccountDataEvent> = Raw::new(&json!({
++            "content": { "v": 1, "hidden": true },
++            "type": "io.atum.app_bot.hidden",
++        }))
++        .unwrap()
++        .cast_unchecked();
++        let sdk_room = server
++            .sync_room(&client, JoinedRoomBuilder::new(room_id).add_account_data(event))
++            .await;
++        let room = Room::new(sdk_room, None);
++
++        let raw = room
++            .account_data_raw("io.atum.app_bot.hidden".to_owned())
++            .await
++            .unwrap()
++            .unwrap();
++        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
++        assert_eq!(value["type"], "io.atum.app_bot.hidden");
++        assert_eq!(value["content"], json!({ "v": 1, "hidden": true }));
++        assert_eq!(
++            room.account_data_raw("io.atum.app_bot.legacy_moved".to_owned())
++                .await
++                .unwrap(),
++            None
++        );
++    }
++
+     /// Dropping an FFI [`Room`] on a non-tokio thread must not panic.
+     ///
+     /// Regression test: when `Room.inner` was `SdkRoom` (not wrapped in
+diff --git a/crates/matrix-sdk-ui/src/room_list_service/mod.rs b/crates/matrix-sdk-ui/src/room_list_service/mod.rs
+index 6dd1c6f..f7b70f6 100644
+--- a/crates/matrix-sdk-ui/src/room_list_service/mod.rs
++++ b/crates/matrix-sdk-ui/src/room_list_service/mod.rs
+@@ -110,6 +110,21 @@ const DEFAULT_REQUIRED_STATE: &[(StateEventType, &str)] = &[
+ const DEFAULT_ROOM_SUBSCRIPTION_EXTRA_REQUIRED_STATE: &[(StateEventType, &str)] =
+     &[(StateEventType::RoomPinnedEvents, "")];
+ 
++/// Atum's two owner-authored room markers. Keep this list exact: these are
++/// cached read authorities for room classification, not a wildcard state
++/// subscription.
++const ATUM_REQUIRED_STATE: &[&str] = &["io.atum.conversation", "io.atum.app_bot.dm"];
++
++fn default_required_state() -> Vec<(StateEventType, String)> {
++    DEFAULT_REQUIRED_STATE
++        .iter()
++        .map(|(state_event, value)| (state_event.clone(), (*value).to_owned()))
++        .chain(ATUM_REQUIRED_STATE.iter().map(|event_type| {
++            (StateEventType::from((*event_type).to_owned()), String::new())
++        }))
++        .collect()
++}
++
+ /// The default Sliding Sync connection ID for the room list service.
+ pub(crate) const DEFAULT_CONNECTION_ID: &str = "room-list";
+ 
+@@ -233,12 +248,7 @@ impl RoomListService {
+                             .add_range(ALL_ROOMS_DEFAULT_SELECTIVE_RANGE),
+                     )
+                     .timeline_limit(timeline_limit)
+-                    .required_state(
+-                        DEFAULT_REQUIRED_STATE
+-                            .iter()
+-                            .map(|(state_event, value)| (state_event.clone(), (*value).to_owned()))
+-                            .collect(),
+-                    )
++                    .required_state(default_required_state())
+                     .filters(Some(assign!(http::request::ListFilters::default(), {
+                         // As defined in the [SlidingSync MSC] If unset, both
+                         // invited and joined rooms are returned. If false, no
+@@ -559,9 +569,7 @@ impl RoomListService {
+ 
+ fn room_subscription_settings() -> http::request::RoomSubscription {
+     assign!(http::request::RoomSubscription::default(), {
+-        required_state: DEFAULT_REQUIRED_STATE.iter().map(|(state_event, value)| {
+-            (state_event.clone(), (*value).to_owned())
+-        })
++        required_state: default_required_state().into_iter()
+         .chain(
+             DEFAULT_ROOM_SUBSCRIPTION_EXTRA_REQUIRED_STATE.iter().map(|(state_event, value)| {
+                 (state_event.clone(), (*value).to_owned())
+@@ -622,7 +630,39 @@ mod tests {
+     use matrix_sdk_test::{TestError, async_test};
+     use ruma::{api::client::sync::sync_events::v5, assign, uint};
+ 
+-    use super::{ALL_ROOMS_LIST_NAME, Error, RoomListService, State};
++    use super::{
++        ALL_ROOMS_LIST_NAME, Error, RoomListService, State, default_required_state,
++        room_subscription_settings,
++    };
++
++    #[test]
++    fn atum_required_state_is_exact_and_applies_to_subscriptions() {
++        let expected = ["io.atum.conversation", "io.atum.app_bot.dm"];
++        let list = default_required_state();
++        let subscription = room_subscription_settings().required_state;
++
++        for event_type in expected {
++            let event_type = ruma::events::StateEventType::from(event_type.to_owned());
++            assert_eq!(
++                list.iter()
++                    .filter(|value| **value == (event_type.clone(), String::new()))
++                    .count(),
++                1
++            );
++            assert_eq!(
++                subscription
++                    .iter()
++                    .filter(|value| **value == (event_type.clone(), String::new()))
++                    .count(),
++                1
++            );
++        }
++
++        assert!(!list.iter().any(|(event_type, state_key)| {
++            expected.contains(&event_type.to_string().as_str()) && state_key == "*"
++        }));
++        assert!(list.contains(&(ruma::events::StateEventType::RoomCreate, String::new())));
++    }
+ 
+     #[async_test]
+     async fn test_all_rooms_are_declared() -> Result<(), TestError> {
+diff --git a/crates/matrix-sdk-ui/tests/integration/room_list_service.rs b/crates/matrix-sdk-ui/tests/integration/room_list_service.rs
+index 1d5df53..a94b185 100644
+--- a/crates/matrix-sdk-ui/tests/integration/room_list_service.rs
++++ b/crates/matrix-sdk-ui/tests/integration/room_list_service.rs
+@@ -392,6 +392,8 @@ async fn test_sync_all_states() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                     ],
+                     "filters": {},
+                     "timeline_limit": 1,
+@@ -2346,6 +2348,8 @@ async fn test_room_subscription() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                         ["m.room.pinned_events", ""],
+                     ],
+                     "timeline_limit": 20,
+@@ -2390,6 +2394,8 @@ async fn test_room_subscription() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                     ],
+                     "filters": {},
+                     "timeline_limit": 1,
+@@ -2416,6 +2422,8 @@ async fn test_room_subscription() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                         ["m.room.pinned_events", ""],
+                     ],
+                     "timeline_limit": 20,
+@@ -2461,6 +2469,8 @@ async fn test_room_subscription() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                     ],
+                     "filters": {},
+                     "timeline_limit": 1,
+@@ -2487,6 +2497,8 @@ async fn test_room_subscription() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                         ["m.room.pinned_events", ""],
+                     ],
+                     "timeline_limit": 20,
+@@ -2511,6 +2523,8 @@ async fn test_room_subscription() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                         ["m.room.pinned_events", ""],
+                     ],
+                     "timeline_limit": 20,
+@@ -2616,6 +2630,8 @@ async fn test_remove_and_reset_room_subscriptions() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                     ],
+                     "filters": {},
+                     "timeline_limit": 1,
+@@ -2642,6 +2658,8 @@ async fn test_remove_and_reset_room_subscriptions() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                         ["m.room.pinned_events", ""],
+                     ],
+                     "timeline_limit": 20,
+@@ -2695,6 +2713,8 @@ async fn test_remove_and_reset_room_subscriptions() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                     ],
+                     "filters": {},
+                     "timeline_limit": 1,
+@@ -2721,6 +2741,8 @@ async fn test_remove_and_reset_room_subscriptions() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                         ["m.room.pinned_events", ""],
+                     ],
+                     "timeline_limit": 20,
+@@ -2745,6 +2767,8 @@ async fn test_remove_and_reset_room_subscriptions() -> Result<(), Error> {
+                         ["m.space.child", "*"],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                         ["m.room.pinned_events", ""],
+                     ],
+                     "timeline_limit": 20,
+@@ -3321,6 +3345,8 @@ async fn test_thread_subscriptions_extension_enabled_only_if_server_advertises_i
+                             [ "m.space.child", "*", ],
+                             ["org.matrix.msc3672.beacon_info", "*"],
+                             ["org.matrix.msc1763.retention", ""],
++                            ["io.atum.conversation", ""],
++                            ["io.atum.app_bot.dm", ""],
+                         ],
+                         "timeline_limit": 1,
+                     },
+@@ -3407,6 +3433,8 @@ async fn test_thread_subscriptions_extension_enabled_only_if_server_advertises_i
+                         [ "m.space.child", "*", ],
+                         ["org.matrix.msc3672.beacon_info", "*"],
+                         ["org.matrix.msc1763.retention", ""],
++                        ["io.atum.conversation", ""],
++                        ["io.atum.app_bot.dm", ""],
+                     ],
+                     "timeline_limit": 1,
+                 },
+diff --git a/crates/matrix-sdk/src/error.rs b/crates/matrix-sdk/src/error.rs
+index bcd742e..8e23aa6 100644
+--- a/crates/matrix-sdk/src/error.rs
++++ b/crates/matrix-sdk/src/error.rs
+@@ -187,8 +187,10 @@ impl From<FromHttpResponseError<RumaApiError>> for HttpError {
+     }
+ }
+ 
+-/// The HTTP status code that some reverse proxies return for server errors.
+-const STATUS_CODE_PROXY_UNKNOWN_SERVER_ERROR: u16 = 520;
++/// The non-standard HTTP status range that reverse proxies use for server and
++/// connection failures. Synapse is behind Cloudflare in Atum's deployment, so
++/// these failures are transient rather than request-authority refusals.
++const STATUS_CODE_PROXY_SERVER_ERROR_RANGE: std::ops::RangeInclusive<u16> = 520..=529;
+ 
+ /// How should we behave with respect to retry behavior after an [`HttpError`]
+ /// happened?
+@@ -260,8 +262,8 @@ impl RetryKind {
+     fn from_status_code(status_code: StatusCode) -> Option<Self> {
+         // The list of status code below should be considered retryable, since
+         // they reference an issue that should fix itself with time. Any
+-        // other status codes besides 520 (unknown server error emitted by
+-        // reverse proxies) should be considered permanent.
++        // other status codes besides the reverse-proxy 52x range should be
++        // considered permanent.
+         match status_code {
+             // The timeout should probably have been processed somewhere else as a different error
+             // type, but we can add it for completeness
+@@ -273,9 +275,8 @@ impl RetryKind {
+             | StatusCode::GATEWAY_TIMEOUT
+             | StatusCode::INSUFFICIENT_STORAGE => Some(RetryKind::Transient { retry_after: None }),
+             _ => {
+-                // Special case: unknown server error from a reverse proxy, the
+-                // server might recover
+-                if status_code.as_u16() == STATUS_CODE_PROXY_UNKNOWN_SERVER_ERROR {
++                // Reverse-proxy server/connection failures may recover.
++                if STATUS_CODE_PROXY_SERVER_ERROR_RANGE.contains(&status_code.as_u16()) {
+                     Some(RetryKind::Transient { retry_after: None })
+                 } else if status_code.is_client_error() || status_code.is_server_error() {
+                     Some(RetryKind::Permanent)
+@@ -809,7 +810,7 @@ mod tests {
+ 
+     use super::{
+         HttpError, RefreshTokenError, RetryKind, RumaApiError,
+-        STATUS_CODE_PROXY_UNKNOWN_SERVER_ERROR,
++        STATUS_CODE_PROXY_SERVER_ERROR_RANGE,
+     };
+     use crate::error::FromHttpResponseError;
+ 
+@@ -884,7 +885,7 @@ mod tests {
+ 
+     #[test]
+     fn test_retry_kind_of_http_status_codes() {
+-        let retry_status_code = [
++        let mut retry_status_code = vec![
+             StatusCode::REQUEST_TIMEOUT,
+             StatusCode::TOO_MANY_REQUESTS,
+             StatusCode::INTERNAL_SERVER_ERROR,
+@@ -892,8 +893,12 @@ mod tests {
+             StatusCode::SERVICE_UNAVAILABLE,
+             StatusCode::GATEWAY_TIMEOUT,
+             StatusCode::INSUFFICIENT_STORAGE,
+-            StatusCode::from_u16(STATUS_CODE_PROXY_UNKNOWN_SERVER_ERROR).unwrap(),
+         ];
++        retry_status_code.extend(
++            STATUS_CODE_PROXY_SERVER_ERROR_RANGE
++                .clone()
++                .map(|code| StatusCode::from_u16(code).unwrap()),
++        );
+ 
+         // Check retryable status codes
+         for code in retry_status_code.iter() {
+diff --git a/crates/matrix-sdk/tests/integration/send_queue.rs b/crates/matrix-sdk/tests/integration/send_queue.rs
+index 3c94a39..a14d468 100644
+--- a/crates/matrix-sdk/tests/integration/send_queue.rs
++++ b/crates/matrix-sdk/tests/integration/send_queue.rs
+@@ -3501,8 +3501,7 @@ async fn test_media_upload_retry() {
+     assert!(watch.is_empty());
+ }
+ 
+-#[async_test]
+-async fn test_media_upload_retry_with_520_http_status_code() {
++async fn assert_media_upload_retry_with_proxy_status(status_code: u16) {
+     let mock = MatrixMockServer::new().await;
+ 
+     // Mark the room as joined.
+@@ -3521,11 +3520,11 @@ async fn test_media_upload_retry_with_520_http_status_code() {
+ 
+     mock.mock_authenticated_media_config().ok_default().mount().await;
+ 
+-    // Fail with a 520 http status code, for the first three (in-request retry)
+-    // attempts.
++    // Fail with a reverse-proxy 52x status for the first three (in-request
++    // retry) attempts.
+     mock.mock_upload()
+         .expect_mime_type("image/jpeg")
+-        .respond_with_code_and_json(520, json!({}))
++        .respond_with_code_and_json(status_code, json!({}))
+         .up_to_n_times(3)
+         .expect(3)
+         .mount()
+@@ -3541,11 +3540,11 @@ async fn test_media_upload_retry_with_520_http_status_code() {
+     assert_let!(MessageType::Image(img_content) = content.msgtype);
+     assert_eq!(img_content.body, filename);
+ 
+-    // A 520 is a transient (recoverable) server error: let the upload stumble
++    // A 52x is a transient (recoverable) proxy error: let the upload stumble
+     // and the queue disable itself, keeping the request in the queue.
+     let error = assert_update!((global_watch, watch) => error { recoverable=true, txn=event_txn });
+     let error = error.as_client_api_error().unwrap();
+-    assert_eq!(error.status_code, 520);
++    assert_eq!(error.status_code.as_u16(), status_code);
+     assert!(q.is_enabled().not());
+ 
+     // Mount the mock for the upload and sending the event.
+@@ -3577,6 +3576,13 @@ async fn test_media_upload_retry_with_520_http_status_code() {
+     assert!(watch.is_empty());
+ }
+ 
++#[async_test]
++async fn test_media_upload_retry_with_proxy_52x_status_codes() {
++    for status_code in [520, 522, 529] {
++        assert_media_upload_retry_with_proxy_status(status_code).await;
++    }
++}
++
+ #[async_test]
+ async fn test_unwedging_media_upload() {
+     let mock = MatrixMockServer::new().await;

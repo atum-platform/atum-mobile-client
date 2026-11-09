@@ -1,0 +1,91 @@
+diff --git a/crates/matrix-sdk-base/src/client.rs b/crates/matrix-sdk-base/src/client.rs
+--- a/crates/matrix-sdk-base/src/client.rs
++++ b/crates/matrix-sdk-base/src/client.rs
+@@ -624,26 +624,37 @@
+     ) -> Result<bool> {
+         tracing::debug!("regenerating OlmMachine");
+         let session_meta = self.session_meta().ok_or(Error::OlmError(OlmError::MissingSession))?;
+-        let mut current = self.olm_machine.write().await;
+         let (store, epoch) = if let Some(guard) = guard {
+             let store = self.crypto_store.bind_lease(guard)?;
+             let epoch = guard
+                 .lease_identity()
+                 .map(|(key, holder, generation)| (key.to_owned(), holder.to_owned(), generation));
+-            if reuse_same_epoch
+-                && current.is_some()
+-                && *self.olm_machine_epoch.lock().unwrap() == epoch
+-            {
+-                return Ok(false);
+-            }
+             (store, epoch)
+         } else {
+-            if self.olm_machine_epoch.lock().unwrap().is_some() {
+-                return Err(Error::BadCryptoStoreState);
+-            }
+             (self.crypto_store.clone(), None)
+         };
+ 
++        // Existing HTTP paths can retain a machine reader until their crypto
++        // acknowledgement completes. Same-epoch acquisition only needs a read;
++        // requesting WRITE here would wait on an otherwise valid operation.
++        if reuse_same_epoch {
++            let current = self.olm_machine.read().await;
++            if current.is_some() && *self.olm_machine_epoch.lock().unwrap() == epoch {
++                return Ok(false);
++            }
++        }
++        let mut current = self.olm_machine.write().await;
++        if guard.is_none() && self.olm_machine_epoch.lock().unwrap().is_some() {
++            return Err(Error::BadCryptoStoreState);
++        }
++        // A concurrent acquirer may have installed this epoch while we waited.
++        if reuse_same_epoch
++            && current.is_some()
++            && *self.olm_machine_epoch.lock().unwrap() == epoch
++        {
++            return Ok(false);
++        }
++
+         // Recreate the `OlmMachine` and wipe the in-memory cache in the store
+         // because we suspect it has stale data.
+         let builder = OlmMachineBuilder::new(&session_meta.user_id, &session_meta.device_id)
+diff --git a/crates/matrix-sdk/src/encryption/mod.rs b/crates/matrix-sdk/src/encryption/mod.rs
+--- a/crates/matrix-sdk/src/encryption/mod.rs
++++ b/crates/matrix-sdk/src/encryption/mod.rs
+@@ -858,6 +858,11 @@
+     pub(crate) async fn send_outgoing_requests(&self) -> Result<()> {
+         const MAX_CONCURRENT_REQUESTS: usize = 20;
+ 
++        // The caller can be cancelled independently of this task. Own the
++        // acquired epoch through request creation, HTTP and acknowledgement.
++        // Store writes still validate the live lease transactionally.
++        let _operation_lease = self.encryption().spin_lock_store(None).await?;
++
+         // This is needed because sometimes we need to automatically claim some
+         // one-time keys to unwedge an existing Olm session.
+         if let Err(e) = self.claim_one_time_keys(iter::empty()).await {
+diff --git a/crates/matrix-sdk/src/sliding_sync/mod.rs b/crates/matrix-sdk/src/sliding_sync/mod.rs
+--- a/crates/matrix-sdk/src/sliding_sync/mod.rs
++++ b/crates/matrix-sdk/src/sliding_sync/mod.rs
+@@ -687,6 +687,12 @@
+         let response = request.await?;
+ 
+         debug!("Received response");
++
++        // Response handling is deliberately detached below. Its lease must
++        // outlive a cancelled caller through crypto and position persistence.
++        // Acquire after long-polling; the outer sync-service guard is unchanged.
++        #[cfg(feature = "e2e-encryption")]
++        let response_lease = self.inner.client.encryption().spin_lock_store(None).await?;
+ 
+         // At this point, the request has been sent, and a response has been
+         // received.
+@@ -703,6 +709,8 @@
+         // Spawn a new future to ensure that the code inside this future cannot
+         // be cancelled if this method is cancelled.
+         let future = async move {
++            #[cfg(feature = "e2e-encryption")]
++            let _response_lease = response_lease;
+             debug!("Start handling response");
+ 
+             // In case the task running this future is detached, we must ensure

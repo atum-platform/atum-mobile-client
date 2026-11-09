@@ -1,0 +1,19 @@
+{
+  "steps": [
+    {
+      "from": "sent",
+      "to": "status_shown",
+      "event": "status_notice_reply"
+    },
+    {
+      "from": "status_shown",
+      "to": "not_answered",
+      "event": "m1_bound_elapsed"
+    },
+    {
+      "from": "not_answered",
+      "to": "answered",
+      "event": "late_answer_reply"
+    }
+  ]
+}

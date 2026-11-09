@@ -1,0 +1,19 @@
+{
+  "steps": [
+    {
+      "from": "absent",
+      "to": "registered",
+      "event": "set"
+    },
+    {
+      "from": "registered",
+      "to": "registered",
+      "event": "set_again"
+    },
+    {
+      "from": "registered",
+      "to": "removed",
+      "event": "app_deleted_on_sign_out"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "steps": [
+    {
+      "from": "absent",
+      "to": "registered",
+      "event": "set"
+    },
+    {
+      "from": "registered",
+      "to": "removed",
+      "event": "apns_rejected"
+    },
+    {
+      "from": "removed",
+      "to": "registered",
+      "event": "set"
+    }
+  ]
+}

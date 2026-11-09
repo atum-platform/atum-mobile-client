@@ -1,0 +1,9 @@
+{
+  "msgtype": "m.text",
+  "body": "Đây là bản tóm tắt bạn cần.",
+  "m.relates_to": {
+    "m.in_reply_to": {
+      "event_id": "$turnEventA"
+    }
+  }
+}

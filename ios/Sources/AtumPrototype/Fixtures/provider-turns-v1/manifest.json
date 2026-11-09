@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.agent-turns",
+  "version": 1,
+  "providerCommit": "7759bc63161e6c5a056eb6fea942195037ee6a9a",
+  "packSHA256": "0bf49e6a73c5dc241633861a1e5b5d3c604f6739daf0858b3da2fbe62fae922e",
+  "fixtures": [
+    {
+      "file": "answer.content.json",
+      "message": "turn.answer_content",
+      "expect": "accept",
+      "sha256": "6d6147666ade7845fae51cb20e5d6a7d59101d283c5bce01d1decde700997ed6"
+    },
+    {
+      "file": "answer-local-turn.content.json",
+      "message": "turn.answer_content",
+      "expect": "accept",
+      "sha256": "63f8092ca92f1d70a49dd01f60f9217a4de52b22cdad62bb6df23c9254b477b3"
+    },
+    {
+      "file": "answer-with-proposed-status.content.json",
+      "message": "turn.answer_content",
+      "expect": "accept",
+      "sha256": "fbd90a224631fd8f40b862c366f938fb169b8b5d512c7b21c75d096aa110058a"
+    },
+    {
+      "file": "answer-in-thread.content.json",
+      "message": "turn.answer_content",
+      "expect": "reject",
+      "violation": "unknown_field",
+      "sha256": "5593658c8d6c93ae8eb351a55e30919c8b5e8a47546a0405407a8ff6ffbe25bc"
+    },
+    {
+      "file": "answer-without-result.content.json",
+      "message": "turn.answer_content",
+      "expect": "reject",
+      "violation": "missing",
+      "sha256": "36091c666400c4b4b641322ddb3f641cbb792b8ed3768d65a9243ec407a60a7f"
+    },
+    {
+      "file": "status-notice.content.json",
+      "message": "turn.status_notice_content",
+      "expect": "accept",
+      "sha256": "129c9a5cabf8d0f644f92f837410215058b0fa4ef89447440fb125b5adceeb2c"
+    },
+    {
+      "file": "status-notice-as-outcome.content.json",
+      "message": "turn.status_notice_content",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "bb9260e8e1f42d058303c62b45af9a1000e595bd041c2927f17590f6e02c738e"
+    },
+    {
+      "file": "readiness-ready-local.entry.json",
+      "message": "agents.readiness_entry",
+      "expect": "accept",
+      "sha256": "c0781275dcab47ff0774dd73e176725d3969c05addc85c8976108e3a51f182e9"
+    },
+    {
+      "file": "readiness-offline.entry.json",
+      "message": "agents.readiness_entry",
+      "expect": "accept",
+      "sha256": "b9db04a9a78e147652c0e7e2a745801df32b8a3b58fcbb16bfbb35404b84405a"
+    },
+    {
+      "file": "readiness-unknown-state.entry.json",
+      "message": "agents.readiness_entry",
+      "expect": "reject",
+      "violation": "enum",
+      "sha256": "309161fbbe61ad9379eb7797b185efafbb6db012dafc29e5d53964c0a529cf3f"
+    },
+    {
+      "file": "turn-state.request.json",
+      "message": "turn.state.request",
+      "expect": "accept",
+      "sha256": "651f519ee4828951506c6753bfc98951ae3bbf641224cee9e53a67bd97644210"
+    },
+    {
+      "file": "turn-state-names-owner.request.json",
+      "message": "turn.state.request",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "a86c7eba04623dfb7f7b6acc02e278d450f63d09d5dd766dbebd4fa386dacf0c"
+    },
+    {
+      "file": "turn-state-dispatched.response.json",
+      "message": "turn.state.response",
+      "expect": "accept",
+      "sha256": "9fbc7e5874cdc176e0a2aacda765d32a2624fc2342fe5bfc0f74f87e43b648a3"
+    },
+    {
+      "file": "turn-state-completed.response.json",
+      "message": "turn.state.response",
+      "expect": "accept",
+      "sha256": "dd22be5dc80587b3c5a691679758f6e184b4b01c740f3303545010b70fef3700"
+    },
+    {
+      "file": "turn-state-leaks-executor.response.json",
+      "message": "turn.state.response",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "99842351384648b2dfbb070d8d8ff22617891458db4d99c82ae50921959c518c"
+    },
+    {
+      "file": "client-answered.sequence.json",
+      "machine": "client_turn",
+      "expect": "accept",
+      "sha256": "49e43dff70054196604440abf92a125facc2241f696928111428f1e2ee43998e"
+    },
+    {
+      "file": "client-late-answer.sequence.json",
+      "machine": "client_turn",
+      "expect": "accept",
+      "sha256": "5769aab26d0c0dc4d908357b19c703a3eb903df353b67360a8bc36ed32ba425e"
+    },
+    {
+      "file": "client-stopped.sequence.json",
+      "machine": "client_turn",
+      "expect": "accept",
+      "sha256": "57750c8ae6cb3040f6e50cfbe8af1ae50a34b513eecb56dc37511bf17b731585"
+    },
+    {
+      "file": "client-notice-as-answer.sequence.json",
+      "machine": "client_turn",
+      "expect": "reject",
+      "violation": "transition",
+      "sha256": "5ae6905d50d6b909a1d1e96ef43b3b960eb5aecca54b0014f85826e15ed9c62c"
+    },
+    {
+      "file": "client-not-answered-is-failed.sequence.json",
+      "machine": "client_turn",
+      "expect": "reject",
+      "violation": "transition",
+      "sha256": "c7fe13ee9ec9a1c619f941823b8dd924d0ba9d9c1d695a4b90a663886119c90c"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.mobile-native-api",
+  "version": 1,
+  "providerCommit": "7759bc63161e6c5a056eb6fea942195037ee6a9a",
+  "packSHA256": "c651192fd0b9042628c47f370b23958437a04d847cf033ed6cd34956e7c32bfd",
+  "fixtures": [
+    {
+      "file": "agents.response.json",
+      "message": "agents.response",
+      "expect": "accept",
+      "sha256": "6d89085926430b54a5b95fe4caf1b702ccee8fc3400e61a8f044bbc76e5000d7"
+    },
+    {
+      "file": "agents-missing-principal.response.json",
+      "message": "agents.response",
+      "expect": "reject",
+      "violation": "missing",
+      "sha256": "7f78bce0a7c030eb87ff263df436202fd2ff4d249f6f4c974453472de6cd3416"
+    },
+    {
+      "file": "wallet.response.json",
+      "message": "wallet.response",
+      "expect": "accept",
+      "sha256": "a2bd29f4b9ba6445deea60728a3b83b6e8593531b2d8dd364378a86804770d06"
+    },
+    {
+      "file": "wallet-no-allowance.response.json",
+      "message": "wallet.response",
+      "expect": "accept",
+      "sha256": "e57e483d7105775f5279ee7bf1ed20d64c72cba810ffa9838f77c29e88da790d"
+    },
+    {
+      "file": "wallet-available-mismatch.response.json",
+      "message": "wallet.response",
+      "expect": "reject",
+      "violation": "invariant",
+      "sha256": "de061383df05d800f9cc029ea28cba95a71eb80d79e5154be28af7fc0625d44c"
+    },
+    {
+      "file": "wallet-names-principal.response.json",
+      "message": "wallet.response",
+      "expect": "reject",
+      "violation": "unknown_field",
+      "sha256": "995f468f1736d11fab8819f717667eedf1e38d1455f0aff3b34d1d2eeaea90bf"
+    },
+    {
+      "file": "wallet-history.response.json",
+      "message": "wallet.history.response",
+      "expect": "accept",
+      "sha256": "643ae06d03343d25216d15033730bf4b8b4d08be54664a8a0422f93904845906"
+    },
+    {
+      "file": "wallet-history-last-page.response.json",
+      "message": "wallet.history.response",
+      "expect": "accept",
+      "sha256": "00eca65fcd5645cc066ded9edd22166261ee4d062b11a05032df765d7ea16c0d"
+    },
+    {
+      "file": "wallet-history-bad-kind.response.json",
+      "message": "wallet.history.response",
+      "expect": "reject",
+      "violation": "enum",
+      "sha256": "4d78434a3415760bb53d10a59c8800f23c7cc784ecc59c0afb2043a2fc0f8f11"
+    },
+    {
+      "file": "alias-lookup-assigned.response.json",
+      "message": "alias.lookup.response",
+      "expect": "accept",
+      "sha256": "933ec60955a82765dda485d502ec87fb100480c30318f90df24b8f8a95b24ae2"
+    },
+    {
+      "file": "alias-lookup-available.response.json",
+      "message": "alias.lookup.response",
+      "expect": "accept",
+      "sha256": "9532774dccfd7f1f131d665c4b0c86c6d000d5aab497ac9e9d3d43ee275efe67"
+    },
+    {
+      "file": "alias-lookup-assigned-without-principal.response.json",
+      "message": "alias.lookup.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "afd19f99e769e1da4b357d6303acea76c352e6696b44d7f924c1561808d72700"
+    },
+    {
+      "file": "alias-current.response.json",
+      "message": "alias.current.response",
+      "expect": "accept",
+      "sha256": "4054cb5de7aa8c79dce6ad7079f6d4d6e1acede4f26eb37e26e4d95d1067535f"
+    },
+    {
+      "file": "alias-current-none.response.json",
+      "message": "alias.current.response",
+      "expect": "accept",
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "file": "alias-check.response.json",
+      "message": "alias.check.response",
+      "expect": "accept",
+      "sha256": "758c3e318d9d046d69d6457db91642e324509f37233296a962cb0ada5c4e1353"
+    },
+    {
+      "file": "alias-claim.request.json",
+      "message": "alias.claim.request",
+      "expect": "accept",
+      "sha256": "268d716d2dac91faf189277fa39326706d57c794c2e20a8117b0a497d2e52762"
+    },
+    {
+      "file": "alias-claim-names-principal.request.json",
+      "message": "alias.claim.request",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "eb0e03ef1a38dbab77318d50c517e3fb207d684862ec5056bd3064f3d7b0dfc3"
+    },
+    {
+      "file": "alias-claim-replayed.response.json",
+      "message": "alias.claim.response",
+      "expect": "accept",
+      "sha256": "c3b5fb4e560163ae20fac8e31e099089fb528f2261ad8458f65901e41529b707"
+    },
+    {
+      "file": "error-unauthenticated.response.json",
+      "message": "error.response",
+      "expect": "accept",
+      "sha256": "1e8b069db8d406c3404e77b3b52d4c83288c182f7628e86fe0e341cfccc577e4"
+    },
+    {
+      "file": "error-cloud-unavailable.response.json",
+      "message": "error.response",
+      "expect": "accept",
+      "sha256": "57b8a98524345304ee73187d1b70aaed49a1f6e5f25c5a59aaff94a85406b14e"
+    },
+    {
+      "file": "error-unknown-status.response.json",
+      "message": "error.response",
+      "expect": "reject",
+      "violation": "enum",
+      "sha256": "0481c03838e4759076d302f958c9b2e83c5ead0a73bd57e96785fb7ba219a9a2"
+    }
+  ]
+}

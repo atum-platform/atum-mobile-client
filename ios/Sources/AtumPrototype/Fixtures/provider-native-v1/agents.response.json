@@ -1,0 +1,33 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-53cc8fd729d5",
+    "identity_id": "00000000-0000-4000-8000-4c3c19d65287",
+    "display_name": "Atum",
+    "slug": "atum",
+    "avatar": "",
+    "avatar_url": null,
+    "is_default": true,
+    "lifecycle_revision": 1,
+    "status": "active",
+    "identity_revision": 1,
+    "definition_revision": 3,
+    "principal": "00000000-0000-4000-8000-cb479c1a915e",
+    "matrixUser": "@agent-0123456789abcdef0123:atum.test",
+    "retired_agents": []
+  },
+  {
+    "id": "00000000-0000-4000-8000-5cc805b93991",
+    "identity_id": "00000000-0000-4000-8000-4c3c19d65287",
+    "display_name": "Lịch",
+    "slug": null,
+    "avatar": "📅",
+    "avatar_url": null,
+    "is_default": false,
+    "lifecycle_revision": 1,
+    "status": "active",
+    "identity_revision": 1,
+    "definition_revision": 3,
+    "principal": "00000000-0000-4000-8000-aeba939e6cea",
+    "matrixUser": "@agent-fedcba9876543210fedc:atum.test"
+  }
+]

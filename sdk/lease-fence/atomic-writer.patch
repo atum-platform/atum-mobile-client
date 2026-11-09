@@ -1,0 +1,1219 @@
+diff --git a/crates/matrix-sdk-common/src/cross_process_lock.rs b/crates/matrix-sdk-common/src/cross_process_lock.rs
+--- a/crates/matrix-sdk-common/src/cross_process_lock.rs
++++ b/crates/matrix-sdk-common/src/cross_process_lock.rs
+@@ -144,13 +144,34 @@
+     /// - Every time [`CrossProcessLockGuard`] is dropped, `Weak` is dropped,
+     ///   and thus the number of holders of `CrossProcessLockInner` decreases.
+     inner: Weak<CrossProcessLockInner>,
++
++    /// Immutable identity of the acquired lease. This does not track later
++    /// acquisitions through the lock's mutable generation counter.
++    lease_identity: Option<(String, String, CrossProcessLockGeneration)>,
+ }
+ 
+ impl CrossProcessLockGuard {
+-    fn new(inner: &Arc<CrossProcessLockInner>) -> Self {
++    fn new(inner: &Arc<CrossProcessLockInner>, key: &str, config: &CrossProcessLockConfig) -> Self {
+         // Downgrading the strong pointer to a weak pointer to represent a new
+         // lock holder.
+-        Self { inner: Arc::downgrade(inner) }
++        let lease_identity = match config {
++            CrossProcessLockConfig::SingleProcess => None,
++            CrossProcessLockConfig::MultiProcess { holder_name } => {
++                Some((key.to_owned(), holder_name.clone(), inner.generation.load(Ordering::SeqCst)))
++            }
++        };
++        Self { inner: Arc::downgrade(inner), lease_identity }
++    }
++
++    /// Snapshot of the key, holder and generation acquired for this guard.
++    ///
++    /// A persistence backend must compare all three and the live expiration
++    /// inside the same write transaction. The snapshot alone does not prove
++    /// current ownership. Single-process guards have no lease identity.
++    pub fn lease_identity(&self) -> Option<(&str, &str, CrossProcessLockGeneration)> {
++        self.lease_identity
++            .as_ref()
++            .map(|(key, holder, generation)| (key.as_str(), holder.as_str(), *generation))
+     }
+ 
+     /// Determine whether the cross-process lock associated to this guard is
+@@ -376,7 +397,7 @@
+     pub async fn try_lock_once(&self) -> AcquireCrossProcessLockResult<L::LockError> {
+         // If it's not `MultiProcess`, this behaves as a no-op
+         let CrossProcessLockConfig::MultiProcess { holder_name } = &self.config else {
+-            let guard = CrossProcessLockGuard::new(&self.inner);
++            let guard = CrossProcessLockGuard::new(&self.inner, &self.lock_key, &self.config);
+             return Ok(Ok(CrossProcessLockState::Clean(guard)));
+         };
+ 
+@@ -397,7 +418,11 @@
+             // lock while the “count” might change.
+             trace!("We already had the lock, incrementing holder count");
+ 
+-            return Ok(Ok(CrossProcessLockState::Clean(CrossProcessLockGuard::new(&self.inner))));
++            return Ok(Ok(CrossProcessLockState::Clean(CrossProcessLockGuard::new(
++                &self.inner,
++                &self.lock_key,
++                &self.config,
++            ))));
+         }
+ 
+         if let Some(new_generation) =
+@@ -529,7 +554,7 @@
+             .abort_on_drop(),
+         );
+ 
+-        let guard = CrossProcessLockGuard::new(&self.inner);
++        let guard = CrossProcessLockGuard::new(&self.inner, &self.lock_key, &self.config);
+ 
+         Ok(Ok(if self.is_dirty() {
+             CrossProcessLockState::Dirty(guard)
+diff --git a/crates/matrix-sdk-base/src/client.rs b/crates/matrix-sdk-base/src/client.rs
+--- a/crates/matrix-sdk-base/src/client.rs
++++ b/crates/matrix-sdk-base/src/client.rs
+@@ -472,10 +472,10 @@
+         matrix_sdk_crypto::store::LockableCryptoStore,
+     > {
+         use matrix_sdk_common::cross_process_lock::CrossProcessLock;
+-        use matrix_sdk_crypto::store::LockableCryptoStore;
++        use matrix_sdk_crypto::store::{CRYPTO_STORE_LOCK_KEY, LockableCryptoStore};
+         CrossProcessLock::new(
+             LockableCryptoStore::new(self.crypto_store.clone()),
+-            "cross_process_lock".to_owned(),
++            CRYPTO_STORE_LOCK_KEY.to_owned(),
+             config,
+         )
+     }
+diff --git a/crates/matrix-sdk-crypto/src/store/mod.rs b/crates/matrix-sdk-crypto/src/store/mod.rs
+--- a/crates/matrix-sdk-crypto/src/store/mod.rs
++++ b/crates/matrix-sdk-crypto/src/store/mod.rs
+@@ -1951,6 +1951,9 @@
+     }
+ }
+ 
++/// Shared lease key used to serialize SDK crypto-store operations.
++pub const CRYPTO_STORE_LOCK_KEY: &str = "cross_process_lock";
++
+ /// A crypto store that implements primitives for cross-process locking.
+ #[derive(Clone, Debug)]
+ pub struct LockableCryptoStore(Arc<dyn CryptoStore<Error = CryptoStoreError>>);
+diff --git a/crates/matrix-sdk-sqlite/src/crypto_store.rs b/crates/matrix-sdk-sqlite/src/crypto_store.rs
+--- a/crates/matrix-sdk-sqlite/src/crypto_store.rs
++++ b/crates/matrix-sdk-sqlite/src/crypto_store.rs
+@@ -22,7 +22,9 @@
+ 
+ use async_trait::async_trait;
+ use deadpool::managed::PoolConfig;
+-use matrix_sdk_base::cross_process_lock::CrossProcessLockGeneration;
++use matrix_sdk_base::cross_process_lock::{
++    CrossProcessLockGeneration, CrossProcessLockGuard, FIRST_CROSS_PROCESS_LOCK_GENERATION,
++};
+ use matrix_sdk_crypto::{
+     Account, DeviceData, GossipRequest, GossippedSecret, SecretInfo, TrackedUser, UserIdentityData,
+     olm::{
+@@ -30,7 +32,7 @@
+         PrivateCrossSigningIdentity, SenderDataType, Session, StaticAccountData,
+     },
+     store::{
+-        CryptoStore,
++        CRYPTO_STORE_LOCK_KEY, CryptoStore,
+         types::{
+             BackupKeys, Changes, DehydratedDeviceKey, PendingChanges, RoomKeyCounts,
+             RoomKeyWithheldEntry, RoomPendingKeyBundleDetails, RoomSettings,
+@@ -43,7 +45,9 @@
+     DeviceId, MilliSecondsSinceUnixEpoch, OwnedDeviceId, RoomId, TransactionId, UserId,
+     events::secret::request::SecretName,
+ };
+-use rusqlite::{OptionalExtension, named_params, params_from_iter};
++use rusqlite::{
++    OptionalExtension, Transaction, TransactionBehavior, named_params, params_from_iter,
++};
+ use tokio::{
+     fs,
+     sync::{Mutex, OwnedMutexGuard},
+@@ -86,6 +90,10 @@
+     // DB values cached in memory
+     static_account: Arc<RwLock<Option<StaticAccountData>>>,
+     save_changes_lock: Arc<Mutex<()>>,
++
++    /// One immutable operation epoch. Cloning a writer retains this fence;
++    /// it never inherits a newer epoch from another store clone.
++    lease_fence: Option<(String, String, CrossProcessLockGeneration)>,
+ }
+ 
+ #[cfg(not(tarpaulin_include))]
+@@ -136,6 +144,7 @@
+             runtime_config,
+             static_account: Arc::new(RwLock::new(None)),
+             save_changes_lock: Default::default(),
++            lease_fence: None,
+         })
+     }
+ 
+@@ -244,6 +253,61 @@
+             conns.write_connection.clone()
+         };
+         Ok(write_connection.lock_owned().await)
++    }
++
++    /// Create an explicitly lease-bound crypto writer for this operation.
++    ///
++    /// The caller must obtain the guard through this store's SDK crypto lock
++    /// and retain it throughout the operation. This clone deliberately does
++    /// not extend the lease. On refusal, discard the owning Olm client and its
++    /// caches. Raw handles remain for bootstrap and lease acquisition only.
++    /// A bound clone cannot rebind or acquire/renew a lease.
++    pub fn with_lease(&self, guard: &CrossProcessLockGuard) -> Result<Self> {
++        if self.lease_fence.is_some() {
++            return Err(Error::InvalidCryptoStoreLeaseBinding);
++        }
++        let (key, holder, generation) = guard
++            .lease_identity()
++            .filter(|(key, _, generation)| {
++                *key == CRYPTO_STORE_LOCK_KEY && *generation >= FIRST_CROSS_PROCESS_LOCK_GENERATION
++            })
++            .ok_or(Error::InvalidCryptoStoreLeaseBinding)?;
++        let mut writer = self.clone();
++        writer.lease_fence = Some((key.to_owned(), holder.to_owned(), generation));
++        Ok(writer)
++    }
++
++    /// Reserve the SQLite writer before testing ownership. A competing lease
++    /// acquisition cannot interleave between this check and the mutation's
++    /// commit. Each check uses database-execution time, not time before await.
++    async fn with_crypto_write<T, F>(&self, f: F) -> Result<T>
++    where
++        T: Send + 'static,
++        F: FnOnce(&Transaction<'_>) -> Result<T> + Send + 'static,
++    {
++        let fence = self.lease_fence.clone();
++        self.write()
++            .await?
++            .interact(move |conn| {
++                let txn = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
++                if let Some((key, holder, generation)) = fence {
++                    let now: u64 = MilliSecondsSinceUnixEpoch::now().get().into();
++                    let current: bool = txn.query_row(
++                        "SELECT EXISTS(SELECT 1 FROM lease_locks WHERE key = ?1
++                         AND holder = ?2 AND generation = ?3 AND expiration > ?4)",
++                        (key, holder, generation, now),
++                        |row| row.get(0),
++                    )?;
++                    if !current {
++                        return Err(Error::StaleCryptoStoreLease);
++                    }
++                }
++                let result = f(&txn)?;
++                txn.commit()?;
++                Ok(result)
++            })
++            .await
++            .map_err(|_| Error::CryptoStoreInteractionFailed)?
+     }
+ }
+ 
+@@ -898,33 +962,6 @@
+             .await?)
+     }
+ 
+-    async fn mark_inbound_group_sessions_as_backed_up(&self, session_ids: Vec<Key>) -> Result<()> {
+-        if session_ids.is_empty() {
+-            // We are not expecting to be called with an empty list of sessions
+-            warn!("No sessions to mark as backed up!");
+-            return Ok(());
+-        }
+-
+-        self.chunk_large_query_over(session_ids, None, move |txn, session_ids| {
+-            // Safety: host parameters are not generated using any user input
+-            // except the number of session IDs, so it is safe from injection.
+-            let query = format!(
+-                "UPDATE inbound_group_session SET backed_up = TRUE where session_id IN ({})",
+-                session_ids.host_parameters()
+-            );
+-            txn.prepare(&query)?.execute(params_from_iter(session_ids))?;
+-            Ok(Vec::<()>::new())
+-        })
+-        .await?;
+-
+-        Ok(())
+-    }
+-
+-    async fn reset_inbound_group_session_backup_state(&self) -> Result<()> {
+-        self.execute("UPDATE inbound_group_session SET backed_up = FALSE", ()).await?;
+-        Ok(())
+-    }
+-
+     async fn get_outbound_group_session(&self, room_id: Key) -> Result<Option<Vec<u8>>> {
+         Ok(self
+             .query_one(
+@@ -976,23 +1013,6 @@
+             .prepare("SELECT data FROM tracked_user", |mut stmt| {
+                 stmt.query(())?.mapped(|row| row.get(0)).collect()
+             })
+-            .await?)
+-    }
+-
+-    async fn add_tracked_users(&self, users: Vec<(Key, Vec<u8>)>) -> Result<()> {
+-        Ok(self
+-            .prepare(
+-                "INSERT INTO tracked_user (user_id, data) \
+-                 VALUES (?1, ?2) \
+-                 ON CONFLICT (user_id) DO UPDATE SET data = ?2",
+-                |mut stmt| {
+-                    for (user_id, data) in users {
+-                        stmt.execute((user_id, data))?;
+-                    }
+-
+-                    Ok(())
+-                },
+-            )
+             .await?)
+     }
+ 
+@@ -1027,22 +1047,12 @@
+             .await?)
+     }
+ 
+-    async fn delete_key_request(&self, request_id: Key) -> Result<()> {
+-        self.execute("DELETE FROM key_requests WHERE request_id = ?", (request_id,)).await?;
+-        Ok(())
+-    }
+-
+     async fn get_secrets_from_inbox(&self, secret_name: Key) -> Result<Vec<Vec<u8>>> {
+         Ok(self
+             .prepare("SELECT secret FROM secrets_inbox WHERE secret_name = ?", |mut stmt| {
+                 stmt.query((secret_name,))?.mapped(|row| row.get(0)).collect()
+             })
+             .await?)
+-    }
+-
+-    async fn delete_secrets_from_inbox(&self, secret_name: Key) -> Result<()> {
+-        self.execute("DELETE FROM secrets_inbox WHERE secret_name = ?", (secret_name,)).await?;
+-        Ok(())
+     }
+ 
+     async fn get_direct_withheld_info(
+@@ -1159,25 +1169,22 @@
+         // TODO: #2000 should make this lock go away, or change its shape.
+         let _guard = self.save_changes_lock.lock().await;
+ 
+-        let pickled_account = if let Some(account) = changes.account {
+-            *self.static_account.write().unwrap() = Some(account.static_data().clone());
+-            Some(account.pickle())
+-        } else {
+-            None
+-        };
++        let account_data = changes.account.as_ref().map(|account| account.static_data().clone());
++        let pickled_account = changes.account.map(|account| account.pickle());
+ 
+         let this = self.clone();
+-        self.write()
+-            .await?
+-            .with_transaction(move |txn| {
+-                if let Some(pickled_account) = pickled_account {
+-                    let serialized_account = this.serialize_value(&pickled_account)?;
+-                    txn.set_kv("account", &serialized_account)?;
+-                }
+-
+-                Ok::<_, Error>(())
+-            })
+-            .await?;
++        self.with_crypto_write(move |txn| {
++            if let Some(pickled_account) = pickled_account {
++                let serialized_account = this.serialize_value(&pickled_account)?;
++                txn.set_kv("account", &serialized_account)?;
++            }
++
++            Ok::<_, Error>(())
++        })
++        .await?;
++        if let Some(account_data) = account_data {
++            *self.static_account.write().unwrap() = Some(account_data);
++        }
+ 
+         Ok(())
+     }
+@@ -1219,137 +1226,133 @@
+         }
+ 
+         let this = self.clone();
+-        self.write()
+-            .await?
+-            .with_transaction(move |txn| {
+-                if let Some(pickled_private_identity) = &pickled_private_identity {
+-                    let serialized_private_identity =
+-                        this.serialize_value(pickled_private_identity)?;
+-                    txn.set_kv("identity", &serialized_private_identity)?;
++        self.with_crypto_write(move |txn| {
++            if let Some(pickled_private_identity) = &pickled_private_identity {
++                let serialized_private_identity = this.serialize_value(pickled_private_identity)?;
++                txn.set_kv("identity", &serialized_private_identity)?;
++            }
++
++            if let Some(token) = &changes.next_batch_token {
++                let serialized_token = this.serialize_value(token)?;
++                txn.set_kv("next_batch_token", &serialized_token)?;
++            }
++
++            if let Some(decryption_key) = &changes.backup_decryption_key {
++                let serialized_decryption_key = this.serialize_value(decryption_key)?;
++                txn.set_kv("recovery_key_v1", &serialized_decryption_key)?;
++            }
++
++            if let Some(backup_version) = &changes.backup_version {
++                let serialized_backup_version = this.serialize_value(backup_version)?;
++                txn.set_kv("backup_version_v1", &serialized_backup_version)?;
++            }
++
++            if let Some(pickle_key) = &changes.dehydrated_device_pickle_key {
++                let serialized_pickle_key = this.serialize_value(pickle_key)?;
++                txn.set_kv(DEHYDRATED_DEVICE_PICKLE_KEY, &serialized_pickle_key)?;
++            }
++
++            for device in changes.devices.new.iter().chain(&changes.devices.changed) {
++                let user_id = this.encode_key("device", device.user_id().as_bytes());
++                let device_id = this.encode_key("device", device.device_id().as_bytes());
++                let data = this.serialize_value(&device)?;
++                txn.set_device(&user_id, &device_id, &data)?;
++            }
++
++            for device in &changes.devices.deleted {
++                let user_id = this.encode_key("device", device.user_id().as_bytes());
++                let device_id = this.encode_key("device", device.device_id().as_bytes());
++                txn.delete_device(&user_id, &device_id)?;
++            }
++
++            for identity in changes.identities.changed.iter().chain(&changes.identities.new) {
++                let user_id = this.encode_key("identity", identity.user_id().as_bytes());
++                let data = this.serialize_value(&identity)?;
++                txn.set_identity(&user_id, &data)?;
++            }
++
++            for (session_id, sender_key, pickle) in &session_changes {
++                let serialized_session = this.serialize_value(&pickle)?;
++                txn.set_session(session_id, sender_key, &serialized_session)?;
++            }
++
++            for (room_id, session_id, pickle, sender_key) in &inbound_session_changes {
++                let serialized_session = this.serialize_value(&pickle)?;
++                txn.set_inbound_group_session(
++                    room_id,
++                    session_id,
++                    &serialized_session,
++                    pickle.backed_up,
++                    Some(sender_key),
++                    Some(pickle.sender_data.to_type() as u8),
++                )?;
++            }
++
++            for (room_id, pickle) in &outbound_session_changes {
++                let serialized_session = this.serialize_json(&pickle)?;
++                txn.set_outbound_group_session(room_id, &serialized_session)?;
++            }
++
++            for hash in &changes.message_hashes {
++                let hash = rmp_serde::to_vec(hash)?;
++                txn.add_olm_hash(&hash)?;
++            }
++
++            for request in changes.key_requests {
++                let request_id = this.encode_key("key_requests", request.request_id.as_bytes());
++                let serialized_request = this.serialize_value(&request)?;
++                let serialized_info = this.encode_key("key_requests", request.info.as_key());
++                txn.set_key_request(
++                    &request_id,
++                    request.sent_out,
++                    &serialized_request,
++                    &serialized_info,
++                )?;
++            }
++
++            for (room_id, data) in changes.withheld_session_info {
++                for (session_id, event) in data {
++                    let session_id = this.encode_key("direct_withheld_info", session_id);
++                    let room_id = this.encode_key("direct_withheld_info", &room_id);
++                    let serialized_info = this.serialize_json(&event)?;
++                    txn.set_direct_withheld(&session_id, &room_id, &serialized_info)?;
+                 }
+-
+-                if let Some(token) = &changes.next_batch_token {
+-                    let serialized_token = this.serialize_value(token)?;
+-                    txn.set_kv("next_batch_token", &serialized_token)?;
+-                }
+-
+-                if let Some(decryption_key) = &changes.backup_decryption_key {
+-                    let serialized_decryption_key = this.serialize_value(decryption_key)?;
+-                    txn.set_kv("recovery_key_v1", &serialized_decryption_key)?;
+-                }
+-
+-                if let Some(backup_version) = &changes.backup_version {
+-                    let serialized_backup_version = this.serialize_value(backup_version)?;
+-                    txn.set_kv("backup_version_v1", &serialized_backup_version)?;
+-                }
+-
+-                if let Some(pickle_key) = &changes.dehydrated_device_pickle_key {
+-                    let serialized_pickle_key = this.serialize_value(pickle_key)?;
+-                    txn.set_kv(DEHYDRATED_DEVICE_PICKLE_KEY, &serialized_pickle_key)?;
+-                }
+-
+-                for device in changes.devices.new.iter().chain(&changes.devices.changed) {
+-                    let user_id = this.encode_key("device", device.user_id().as_bytes());
+-                    let device_id = this.encode_key("device", device.device_id().as_bytes());
+-                    let data = this.serialize_value(&device)?;
+-                    txn.set_device(&user_id, &device_id, &data)?;
+-                }
+-
+-                for device in &changes.devices.deleted {
+-                    let user_id = this.encode_key("device", device.user_id().as_bytes());
+-                    let device_id = this.encode_key("device", device.device_id().as_bytes());
+-                    txn.delete_device(&user_id, &device_id)?;
+-                }
+-
+-                for identity in changes.identities.changed.iter().chain(&changes.identities.new) {
+-                    let user_id = this.encode_key("identity", identity.user_id().as_bytes());
+-                    let data = this.serialize_value(&identity)?;
+-                    txn.set_identity(&user_id, &data)?;
+-                }
+-
+-                for (session_id, sender_key, pickle) in &session_changes {
+-                    let serialized_session = this.serialize_value(&pickle)?;
+-                    txn.set_session(session_id, sender_key, &serialized_session)?;
+-                }
+-
+-                for (room_id, session_id, pickle, sender_key) in &inbound_session_changes {
+-                    let serialized_session = this.serialize_value(&pickle)?;
+-                    txn.set_inbound_group_session(
+-                        room_id,
+-                        session_id,
+-                        &serialized_session,
+-                        pickle.backed_up,
+-                        Some(sender_key),
+-                        Some(pickle.sender_data.to_type() as u8),
+-                    )?;
+-                }
+-
+-                for (room_id, pickle) in &outbound_session_changes {
+-                    let serialized_session = this.serialize_json(&pickle)?;
+-                    txn.set_outbound_group_session(room_id, &serialized_session)?;
+-                }
+-
+-                for hash in &changes.message_hashes {
+-                    let hash = rmp_serde::to_vec(hash)?;
+-                    txn.add_olm_hash(&hash)?;
+-                }
+-
+-                for request in changes.key_requests {
+-                    let request_id = this.encode_key("key_requests", request.request_id.as_bytes());
+-                    let serialized_request = this.serialize_value(&request)?;
+-                    let serialized_info = this.encode_key("key_requests", request.info.as_key());
+-                    txn.set_key_request(
+-                        &request_id,
+-                        request.sent_out,
+-                        &serialized_request,
+-                        &serialized_info,
+-                    )?;
+-                }
+-
+-                for (room_id, data) in changes.withheld_session_info {
+-                    for (session_id, event) in data {
+-                        let session_id = this.encode_key("direct_withheld_info", session_id);
+-                        let room_id = this.encode_key("direct_withheld_info", &room_id);
+-                        let serialized_info = this.serialize_json(&event)?;
+-                        txn.set_direct_withheld(&session_id, &room_id, &serialized_info)?;
+-                    }
+-                }
+-
+-                for (room_id, settings) in changes.room_settings {
+-                    let room_id = this.encode_key("room_settings", room_id.as_bytes());
+-                    let value = this.serialize_value(&settings)?;
+-                    txn.set_room_settings(&room_id, &value)?;
+-                }
+-
+-                for secret in changes.secrets {
+-                    let secret_name =
+-                        this.encode_key("secrets_inbox", secret.secret_name.to_string());
+-                    let value = this.serialize_json(secret.secret.deref())?;
+-                    txn.set_secret(&secret_name, &value)?;
+-                }
+-
+-                for bundle in changes.received_room_key_bundles {
+-                    let room_id =
+-                        this.encode_key("received_room_key_bundle", &bundle.bundle_data.room_id);
+-                    let user_id = this.encode_key("received_room_key_bundle", &bundle.sender_user);
+-                    let value = this.serialize_value(&bundle)?;
+-                    txn.set_received_room_key_bundle(&room_id, &user_id, &value)?;
+-                }
+-
+-                for room in changes.room_key_backups_fully_downloaded {
+-                    let room_id = this.encode_key("room_key_backups_fully_downloaded", &room);
+-                    txn.set_has_downloaded_all_room_keys(&room_id)?;
+-                }
+-
+-                for (room, details) in changes.rooms_pending_key_bundle {
+-                    let room_id = this.encode_key("rooms_pending_key_bundle", &room);
+-                    let value = details.as_ref().map(|d| this.serialize_value(d)).transpose()?;
+-                    txn.set_room_pending_key_bundle(&room_id, value.as_deref())?;
+-                }
+-
+-                Ok::<_, Error>(())
+-            })
+-            .await?;
++            }
++
++            for (room_id, settings) in changes.room_settings {
++                let room_id = this.encode_key("room_settings", room_id.as_bytes());
++                let value = this.serialize_value(&settings)?;
++                txn.set_room_settings(&room_id, &value)?;
++            }
++
++            for secret in changes.secrets {
++                let secret_name = this.encode_key("secrets_inbox", secret.secret_name.to_string());
++                let value = this.serialize_json(secret.secret.deref())?;
++                txn.set_secret(&secret_name, &value)?;
++            }
++
++            for bundle in changes.received_room_key_bundles {
++                let room_id =
++                    this.encode_key("received_room_key_bundle", &bundle.bundle_data.room_id);
++                let user_id = this.encode_key("received_room_key_bundle", &bundle.sender_user);
++                let value = this.serialize_value(&bundle)?;
++                txn.set_received_room_key_bundle(&room_id, &user_id, &value)?;
++            }
++
++            for room in changes.room_key_backups_fully_downloaded {
++                let room_id = this.encode_key("room_key_backups_fully_downloaded", &room);
++                txn.set_has_downloaded_all_room_keys(&room_id)?;
++            }
++
++            for (room, details) in changes.rooms_pending_key_bundle {
++                let room_id = this.encode_key("rooms_pending_key_bundle", &room);
++                let value = details.as_ref().map(|d| this.serialize_value(d)).transpose()?;
++                txn.set_room_pending_key_bundle(&room_id, value.as_deref())?;
++            }
++
++            Ok::<_, Error>(())
++        })
++        .await?;
+ 
+         Ok(())
+     }
+@@ -1498,20 +1501,31 @@
+         _backup_version: &str,
+         session_ids: &[(&RoomId, &str)],
+     ) -> Result<()> {
+-        Ok(self
+-            .write()
+-            .await?
+-            .mark_inbound_group_sessions_as_backed_up(
+-                session_ids
+-                    .iter()
+-                    .map(|(_, s)| self.encode_key("inbound_group_session", s))
+-                    .collect(),
+-            )
+-            .await?)
++        let keys: Vec<Key> =
++            session_ids.iter().map(|(_, s)| self.encode_key("inbound_group_session", s)).collect();
++        self.with_crypto_write(move |txn| {
++            let limit = txn.limit(rusqlite::limits::Limit::SQLITE_LIMIT_VARIABLE_NUMBER)?;
++            let chunk_size = usize::try_from(limit)
++                .ok()
++                .filter(|limit| *limit > 0)
++                .ok_or(Error::SqliteMaximumVariableNumber(limit))?;
++            for keys in keys.chunks(chunk_size) {
++                let parameters = vec!["?"; keys.len()].join(",");
++                let query = format!(
++                    "UPDATE inbound_group_session SET backed_up = TRUE WHERE session_id IN ({parameters})"
++                );
++                txn.execute(&query, params_from_iter(keys))?;
++            }
++            Ok(())
++        }).await
+     }
+ 
+     async fn reset_backup_state(&self) -> Result<()> {
+-        Ok(self.write().await?.reset_inbound_group_session_backup_state().await?)
++        self.with_crypto_write(|txn| {
++            txn.execute("UPDATE inbound_group_session SET backed_up = FALSE", ())?;
++            Ok(())
++        })
++        .await
+     }
+ 
+     async fn load_backup_keys(&self) -> Result<BackupKeys> {
+@@ -1542,7 +1556,11 @@
+     }
+ 
+     async fn delete_dehydrated_device_pickle_key(&self) -> Result<(), Self::Error> {
+-        Ok(self.write().await?.clear_kv(DEHYDRATED_DEVICE_PICKLE_KEY).await?)
++        self.with_crypto_write(|txn| {
++            txn.clear_kv(DEHYDRATED_DEVICE_PICKLE_KEY)?;
++            Ok(())
++        })
++        .await
+     }
+     async fn get_outbound_group_session(
+         &self,
+@@ -1587,7 +1605,17 @@
+             })
+             .collect::<Result<_>>()?;
+ 
+-        Ok(self.write().await?.add_tracked_users(users).await?)
++        self.with_crypto_write(move |txn| {
++            let mut stmt = txn.prepare_cached(
++                "INSERT INTO tracked_user (user_id, data) VALUES (?1, ?2)
++                 ON CONFLICT (user_id) DO UPDATE SET data = ?2",
++            )?;
++            for (user_id, data) in users {
++                stmt.execute((user_id, data))?;
++            }
++            Ok(())
++        })
++        .await
+     }
+ 
+     async fn get_device(
+@@ -1694,7 +1722,11 @@
+ 
+     async fn delete_outgoing_secret_requests(&self, request_id: &TransactionId) -> Result<()> {
+         let request_id = self.encode_key("key_requests", request_id.as_bytes());
+-        Ok(self.write().await?.delete_key_request(request_id).await?)
++        self.with_crypto_write(move |txn| {
++            txn.execute("DELETE FROM key_requests WHERE request_id = ?", (request_id,))?;
++            Ok(())
++        })
++        .await
+     }
+ 
+     async fn get_secrets_from_inbox(
+@@ -1714,7 +1746,11 @@
+ 
+     async fn delete_secrets_from_inbox(&self, secret_name: &SecretName) -> Result<()> {
+         let secret_name = self.encode_key("secrets_inbox", secret_name.to_string());
+-        self.write().await?.delete_secrets_from_inbox(secret_name).await
++        self.with_crypto_write(move |txn| {
++            txn.execute("DELETE FROM secrets_inbox WHERE secret_name = ?", (secret_name,))?;
++            Ok(())
++        })
++        .await
+     }
+ 
+     async fn get_withheld_info(
+@@ -1826,18 +1862,21 @@
+             value
+         };
+ 
+-        self.write().await?.set_kv(key, serialized).await?;
+-        Ok(())
++        let key = key.to_owned();
++        self.with_crypto_write(move |txn| {
++            txn.set_kv(&key, &serialized)?;
++            Ok(())
++        })
++        .await
+     }
+ 
+     async fn remove_custom_value(&self, key: &str) -> Result<()> {
+         let key = key.to_owned();
+-        self.write()
+-            .await?
+-            .interact(move |conn| conn.execute("DELETE FROM kv WHERE key = ?1", (&key,)))
+-            .await
+-            .unwrap()?;
+-        Ok(())
++        self.with_crypto_write(move |txn| {
++            txn.clear_kv(&key)?;
++            Ok(())
++        })
++        .await
+     }
+ 
+     #[instrument(skip(self))]
+@@ -1847,19 +1886,23 @@
+         key: &str,
+         holder: &str,
+     ) -> Result<Option<CrossProcessLockGeneration>> {
++        if self.lease_fence.is_some() {
++            return Err(Error::InvalidCryptoStoreLeaseBinding);
++        }
+         let key = key.to_owned();
+         let holder = holder.to_owned();
+-
+-        let now: u64 = MilliSecondsSinceUnixEpoch::now().get().into();
+-        let expiration = now + lease_duration_ms as u64;
+ 
+         // Learn about the `excluded` keyword in https://sqlite.org/lang_upsert.html.
+         let generation = self
+             .write()
+             .await?
+-            .with_transaction(move |txn| {
+-                txn.query_one(
+-                    "INSERT INTO lease_locks (key, holder, expiration)
++            .interact(move |conn| {
++                let txn = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
++                let now: u64 = MilliSecondsSinceUnixEpoch::now().get().into();
++                let expiration = now + lease_duration_ms as u64;
++                let generation = txn
++                    .query_one(
++                        "INSERT INTO lease_locks (key, holder, expiration)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT (key)
+                     DO
+@@ -1876,12 +1919,15 @@
+                             OR expiration < ?4
+                     RETURNING generation
+                     ",
+-                    (key, holder, expiration, now),
+-                    |row| row.get(0),
+-                )
+-                .optional()
++                        (key, holder, expiration, now),
++                        |row| row.get(0),
++                    )
++                    .optional()?;
++                txn.commit()?;
++                Ok::<_, Error>(generation)
+             })
+-            .await?;
++            .await
++            .map_err(|_| Error::CryptoStoreInteractionFailed)??;
+ 
+         Ok(generation)
+     }
+@@ -2765,3 +2811,7 @@
+         assert!(guard.is_none(), "connections should be None after close");
+     }
+ }
++
++#[cfg(test)]
++#[path = "atum_lease_fence_tests.rs"]
++mod atum_lease_fence_tests;
+diff --git a/crates/matrix-sdk-sqlite/src/error.rs b/crates/matrix-sdk-sqlite/src/error.rs
+--- a/crates/matrix-sdk-sqlite/src/error.rs
++++ b/crates/matrix-sdk-sqlite/src/error.rs
+@@ -125,6 +125,15 @@
+ 
+     #[error("The store is closed")]
+     StoreClosed,
++
++    #[error("The crypto-store lease is no longer current")]
++    StaleCryptoStoreLease,
++
++    #[error("A crypto-store writer requires an unbound store and a multi-process guard")]
++    InvalidCryptoStoreLeaseBinding,
++
++    #[error("The crypto-store database worker was interrupted")]
++    CryptoStoreInteractionFailed,
+ }
+ 
+ macro_rules! impl_from {
+diff --git a/crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs b/crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs
+@@ -0,0 +1,405 @@
++// Atum SQLite lease-fence regression. Disposable synthetic stores only.
++// SPDX-License-Identifier: Apache-2.0
++
++use std::{
++    sync::{
++        Arc,
++        atomic::{AtomicBool, Ordering},
++    },
++    time::Duration,
++};
++
++use matrix_sdk_common::cross_process_lock::{
++    CrossProcessLock, CrossProcessLockConfig, CrossProcessLockGuard, TryLock,
++};
++use matrix_sdk_crypto::{
++    Account,
++    store::{
++        CryptoStore, LockableCryptoStore,
++        types::{Changes, PendingChanges},
++    },
++};
++use ruma::{device_id, user_id};
++use tempfile::TempDir;
++
++use super::{Error, SqliteCryptoStore, SqliteKeyValueStoreConnExt};
++
++const LOCK_KEY: &str = matrix_sdk_crypto::store::CRYPTO_STORE_LOCK_KEY;
++type Lock = CrossProcessLock<LockableCryptoStore>;
++
++fn lock(store: &SqliteCryptoStore, holder: &str) -> Lock {
++    CrossProcessLock::new(
++        LockableCryptoStore::new(store.clone()),
++        LOCK_KEY.to_owned(),
++        CrossProcessLockConfig::multi_process(holder),
++    )
++}
++
++fn writer(store: &SqliteCryptoStore, guard: &CrossProcessLockGuard) -> SqliteCryptoStore {
++    store.with_lease(guard).unwrap()
++}
++
++#[tokio::test]
++async fn stale_custom_write_preserves_successor_data_and_original_keys() {
++    let temp = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let account = Account::with_device_id(user_id!("@synthetic:atum.invalid"), device_id!("FENCE"));
++    let expected = account.identity_keys();
++    a.save_pending_changes(PendingChanges { account: Some(account) }).await.unwrap();
++    let b = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++
++    let lock_a = lock(&a, "synthetic-A");
++    let guard_a: CrossProcessLockGuard =
++        lock_a.try_lock_once().await.unwrap().unwrap().into_guard();
++    let stale = writer(&a, &guard_a);
++    stale.set_custom_value("owner-state", b"A".to_vec()).await.unwrap();
++    drop(guard_a);
++    let lock_b = lock(&b, "synthetic-B");
++    let guard_b: CrossProcessLockGuard =
++        lock_b.spin_lock(None).await.unwrap().unwrap().into_guard();
++    let current = writer(&b, &guard_b);
++    current.set_custom_value("owner-state", b"B".to_vec()).await.unwrap();
++
++    let result = stale.set_custom_value("owner-state", b"STALE".to_vec()).await;
++    assert!(
++        matches!(result, Err(Error::StaleCryptoStoreLease)),
++        "stale writer must be refused before mutating current-owner state"
++    );
++    assert_eq!(b.get_custom_value("owner-state").await.unwrap(), Some(b"B".to_vec()));
++    assert_eq!(b.load_account().await.unwrap().unwrap().identity_keys(), expected);
++}
++
++#[tokio::test]
++async fn every_mutation_refuses_a_stale_epoch_and_account_cache_stays_original() {
++    let temp = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let original =
++        Account::with_device_id(user_id!("@synthetic:atum.invalid"), device_id!("FENCE"));
++    let expected = original.identity_keys();
++    a.save_pending_changes(PendingChanges { account: Some(original) }).await.unwrap();
++    let b = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let lock_a = lock(&a, "synthetic-A");
++    let guard = lock_a.try_lock_once().await.unwrap().unwrap().into_guard();
++    let stale = writer(&a, &guard);
++    drop(guard);
++    let lock_b = lock(&b, "synthetic-B");
++    let guard_b = lock_b.spin_lock(None).await.unwrap().unwrap().into_guard();
++    let current = writer(&b, &guard_b);
++    current
++        .save_changes(Changes {
++            next_batch_token: Some("current-batch".into()),
++            ..Default::default()
++        })
++        .await
++        .unwrap();
++    current.save_tracked_users(&[(user_id!("@peer:atum.invalid"), false)]).await.unwrap();
++
++    macro_rules! stale {
++        ($future:expr) => {
++            assert!(matches!($future.await, Err(Error::StaleCryptoStoreLease)));
++        };
++    }
++    let replacement =
++        Account::with_device_id(user_id!("@synthetic:atum.invalid"), device_id!("REPLACEMENT"));
++    stale!(stale.save_pending_changes(PendingChanges { account: Some(replacement) }));
++    assert_eq!(*stale.get_static_account().unwrap().identity_keys, expected);
++    stale!(stale.save_pending_changes(PendingChanges { account: None }));
++    stale!(stale.save_changes(Changes {
++        next_batch_token: Some("stale-batch".into()),
++        ..Default::default()
++    }));
++    stale!(stale.save_inbound_group_sessions(Vec::new(), None));
++    stale!(stale.mark_inbound_group_sessions_as_backed_up("synthetic-version", &[]));
++    stale!(stale.reset_backup_state());
++    stale!(stale.delete_dehydrated_device_pickle_key());
++    stale!(stale.save_tracked_users(&[(user_id!("@peer:atum.invalid"), true)]));
++    stale!(stale.save_tracked_users(&[]));
++    let request_id = ruma::TransactionId::new();
++    stale!(stale.delete_outgoing_secret_requests(&request_id));
++    stale!(
++        stale.delete_secrets_from_inbox(&ruma::events::secret::request::SecretName::RecoveryKey)
++    );
++    stale!(stale.set_custom_value("synthetic-value", vec![1]));
++    stale!(stale.remove_custom_value("synthetic-value"));
++    assert!(matches!(
++        stale.try_take_leased_lock(500, LOCK_KEY, "synthetic-A").await,
++        Err(Error::InvalidCryptoStoreLeaseBinding)
++    ));
++    assert_eq!(b.next_batch_token().await.unwrap().as_deref(), Some("current-batch"));
++    assert!(!b.load_tracked_users().await.unwrap()[0].dirty);
++    assert_eq!(b.load_account().await.unwrap().unwrap().identity_keys(), expected);
++}
++
++#[tokio::test]
++async fn guard_clone_and_same_holder_renewal_keep_the_writer_valid() {
++    let temp = TempDir::new().unwrap();
++    let store = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let control = lock(&store, "synthetic-A");
++    let guard = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    let cloned = guard.clone();
++    let bound = writer(&store, &guard);
++    assert_eq!(guard.lease_identity(), cloned.lease_identity());
++    drop(guard);
++    // More than one normal SDK lease lifetime; real renewal must sustain it.
++    tokio::time::sleep(Duration::from_millis(650)).await;
++    bound.set_custom_value("renewed", vec![7]).await.unwrap();
++    let reentrant = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    assert_eq!(cloned.lease_identity(), reentrant.lease_identity());
++    assert_eq!(store.get_custom_value("renewed").await.unwrap(), Some(vec![7]));
++    assert!(matches!(bound.with_lease(&reentrant), Err(Error::InvalidCryptoStoreLeaseBinding)));
++}
++
++#[tokio::test]
++async fn expired_writer_refuses_without_a_successor() {
++    let temp = TempDir::new().unwrap();
++    let store = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let control = lock(&store, "synthetic-A");
++    let guard = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    let bound = writer(&store, &guard);
++    drop(guard);
++    tokio::time::sleep(Duration::from_millis(650)).await;
++    assert!(matches!(
++        bound.set_custom_value("expired", vec![1]).await,
++        Err(Error::StaleCryptoStoreLease)
++    ));
++    assert!(store.get_custom_value("expired").await.unwrap().is_none());
++}
++
++#[tokio::test]
++async fn single_process_and_unrelated_guards_cannot_bind_a_crypto_writer() {
++    let temp = TempDir::new().unwrap();
++    let store = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let single = CrossProcessLock::new(
++        LockableCryptoStore::new(store.clone()),
++        LOCK_KEY.into(),
++        CrossProcessLockConfig::SingleProcess,
++    );
++    let guard = single.try_lock_once().await.unwrap().unwrap().into_guard();
++    assert!(guard.lease_identity().is_none());
++    assert!(matches!(store.with_lease(&guard), Err(Error::InvalidCryptoStoreLeaseBinding)));
++    let unrelated = CrossProcessLock::new(
++        LockableCryptoStore::new(store.clone()),
++        "unrelated-lock".into(),
++        CrossProcessLockConfig::multi_process("synthetic-A"),
++    );
++    let guard = unrelated.try_lock_once().await.unwrap().unwrap().into_guard();
++    assert!(matches!(store.with_lease(&guard), Err(Error::InvalidCryptoStoreLeaseBinding)));
++}
++
++// Test instrumentation stops renewal, while acquisition/generations/mutations
++// still use the actual encrypted SQLite backend. No lease row is fabricated.
++#[derive(Clone)]
++struct StoppableRenewal {
++    store: SqliteCryptoStore,
++    renew: Arc<AtomicBool>,
++}
++
++impl TryLock for StoppableRenewal {
++    type LockError = Error;
++
++    async fn try_lock(&self, duration: u32, key: &str, holder: &str) -> Result<Option<u64>, Error> {
++        if !self.renew.load(Ordering::SeqCst) {
++            return Ok(None);
++        }
++        self.store.try_take_leased_lock(duration, key, holder).await
++    }
++}
++
++#[tokio::test]
++async fn retained_guard_and_writer_stay_stale_across_owner_a_b_a() {
++    let temp = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let b = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let renew = Arc::new(AtomicBool::new(true));
++    let old_control = CrossProcessLock::new(
++        StoppableRenewal { store: a.clone(), renew: renew.clone() },
++        LOCK_KEY.into(),
++        CrossProcessLockConfig::multi_process("synthetic-A"),
++    );
++    let old_guard = old_control.try_lock_once().await.unwrap().unwrap().into_guard();
++    let old_identity = old_guard.lease_identity().unwrap().2;
++    let stale = writer(&a, &old_guard);
++    renew.store(false, Ordering::SeqCst);
++    tokio::time::sleep(Duration::from_millis(650)).await;
++    let peer_control = lock(&b, "synthetic-B");
++    let peer_guard = peer_control.spin_lock(None).await.unwrap().unwrap().into_guard();
++    assert!(peer_guard.lease_identity().unwrap().2 > old_identity);
++    writer(&b, &peer_guard).set_custom_value("epoch", b"B".to_vec()).await.unwrap();
++    assert!(matches!(
++        stale.set_custom_value("epoch", vec![0]).await,
++        Err(Error::StaleCryptoStoreLease)
++    ));
++    drop(peer_guard);
++    let new_control = lock(&a, "synthetic-A");
++    let new_guard = new_control.spin_lock(None).await.unwrap().unwrap().into_guard();
++    assert!(new_guard.lease_identity().unwrap().2 > old_identity);
++    writer(&a, &new_guard).set_custom_value("epoch", b"NEW-A".to_vec()).await.unwrap();
++    assert_eq!(old_guard.lease_identity().unwrap().2, old_identity);
++    assert!(matches!(
++        stale.set_custom_value("epoch", vec![0]).await,
++        Err(Error::StaleCryptoStoreLease)
++    ));
++    // Existing local guard shortcut must not grant the old writer a new epoch.
++    let old_reentrant = old_control.try_lock_once().await.unwrap().unwrap().into_guard();
++    assert_eq!(old_reentrant.lease_identity().unwrap().2, old_identity);
++    assert!(matches!(
++        writer(&a, &old_reentrant).remove_custom_value("epoch").await,
++        Err(Error::StaleCryptoStoreLease)
++    ));
++    assert_eq!(a.get_custom_value("epoch").await.unwrap(), Some(b"NEW-A".to_vec()));
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn successor_cannot_take_an_expired_lease_between_fence_check_and_commit() {
++    let temp = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let b = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    b.write()
++        .await
++        .unwrap()
++        .interact(|conn| conn.busy_timeout(Duration::from_millis(25)))
++        .await
++        .unwrap()
++        .unwrap();
++    let control = lock(&a, "synthetic-A");
++    let guard = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    let bound = writer(&a, &guard);
++    let encrypted =
++        bound.store_cipher.as_ref().unwrap().encrypt_value_data(b"A-committed".to_vec()).unwrap();
++    let serialized = rmp_serde::to_vec_named(&encrypted).unwrap();
++    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
++    let (release_tx, release_rx) = std::sync::mpsc::channel();
++    let pending = tokio::spawn(async move {
++        bound
++            .with_crypto_write(move |txn| {
++                started_tx.send(()).unwrap();
++                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
++                txn.set_kv("atomic-result", &serialized)?;
++                Ok(())
++            })
++            .await
++    });
++    started_rx.await.unwrap();
++    drop(guard);
++    // The renewal task cannot update the lease because this transaction holds
++    // the real write connection. Let the existing lease expire without edits.
++    tokio::time::sleep(Duration::from_millis(650)).await;
++    let denied = b.try_take_leased_lock(500, LOCK_KEY, "synthetic-B").await;
++    // Always release the transaction before any assertion, including failures.
++    release_tx.send(()).unwrap();
++    pending.await.unwrap().unwrap();
++    assert!(matches!(denied, Err(Error::Sqlite(rusqlite::Error::SqliteFailure(e, _)))
++        if e.code == rusqlite::ErrorCode::DatabaseBusy));
++    let peer = lock(&b, "synthetic-B");
++    let peer_guard = peer.spin_lock(None).await.unwrap().unwrap().into_guard();
++    let current = writer(&b, &peer_guard);
++    assert_eq!(b.get_custom_value("atomic-result").await.unwrap(), Some(b"A-committed".to_vec()));
++    current.set_custom_value("atomic-result", b"B-after-commit".to_vec()).await.unwrap();
++    assert_eq!(
++        b.get_custom_value("atomic-result").await.unwrap(),
++        Some(b"B-after-commit".to_vec())
++    );
++}
++
++#[tokio::test]
++async fn non_empty_inbound_save_and_backup_refusals_preserve_successor_sessions() {
++    use matrix_sdk_crypto::olm::{InboundGroupSession, SenderData};
++    use matrix_sdk_crypto::types::EventEncryptionAlgorithm;
++    use ruma::room_id;
++    use vodozemac::megolm::{GroupSession, SessionConfig};
++
++    let temp = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let b = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let sender = Account::with_device_id(user_id!("@synthetic:atum.invalid"), device_id!("FENCE"));
++    let keys = sender.identity_keys();
++    a.save_pending_changes(PendingChanges { account: Some(sender) }).await.unwrap();
++    let room = room_id!("!synthetic:atum.invalid");
++    let make_session = || {
++        InboundGroupSession::new(
++            keys.curve25519,
++            keys.ed25519,
++            room,
++            &GroupSession::new(SessionConfig::default()).session_key(),
++            SenderData::UnknownDevice { legacy_session: false, owner_check_failed: false },
++            None,
++            EventEncryptionAlgorithm::MegolmV1AesSha2,
++            None,
++            false,
++        )
++        .unwrap()
++    };
++    let control_a = lock(&a, "synthetic-A");
++    let guard_a = control_a.try_lock_once().await.unwrap().unwrap().into_guard();
++    let stale = writer(&a, &guard_a);
++    drop(guard_a);
++    let control_b = lock(&b, "synthetic-B");
++    let guard_b = control_b.spin_lock(None).await.unwrap().unwrap().into_guard();
++    let current = writer(&b, &guard_b);
++    let kept = make_session();
++    current.save_inbound_group_sessions(vec![kept.clone()], None).await.unwrap();
++    let refused = make_session();
++    assert!(matches!(
++        stale.save_inbound_group_sessions(vec![refused.clone()], None).await,
++        Err(Error::StaleCryptoStoreLease)
++    ));
++    assert!(matches!(
++        stale
++            .mark_inbound_group_sessions_as_backed_up(
++                "synthetic-version",
++                &[(room, kept.session_id())]
++            )
++            .await,
++        Err(Error::StaleCryptoStoreLease)
++    ));
++    assert!(
++        !b.get_inbound_group_session(room, kept.session_id()).await.unwrap().unwrap().backed_up()
++    );
++    current
++        .mark_inbound_group_sessions_as_backed_up("synthetic-version", &[(room, kept.session_id())])
++        .await
++        .unwrap();
++    assert!(matches!(stale.reset_backup_state().await, Err(Error::StaleCryptoStoreLease)));
++    assert!(matches!(
++        stale
++            .save_changes(Changes {
++                inbound_group_sessions: vec![refused.clone()],
++                next_batch_token: Some("stale-batch".into()),
++                backup_version: Some("stale-backup".into()),
++                ..Default::default()
++            })
++            .await,
++        Err(Error::StaleCryptoStoreLease)
++    ));
++    assert!(b.get_inbound_group_session(room, refused.session_id()).await.unwrap().is_none());
++    assert!(
++        b.get_inbound_group_session(room, kept.session_id()).await.unwrap().unwrap().backed_up()
++    );
++    assert_eq!(b.get_inbound_group_sessions().await.unwrap().len(), 1);
++    assert!(b.next_batch_token().await.unwrap().is_none());
++    assert!(b.load_backup_keys().await.unwrap().backup_version.is_none());
++    assert_eq!(b.load_account().await.unwrap().unwrap().identity_keys(), keys);
++}
++
++#[tokio::test]
++async fn interrupted_database_worker_returns_error_and_rolls_back() {
++    let temp = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    let control = lock(&a, "synthetic-A");
++    let guard = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    let bound = writer(&a, &guard);
++    let encrypted = bound.store_cipher.as_ref().unwrap().encrypt_value_data(vec![1]).unwrap();
++    let serialized = rmp_serde::to_vec_named(&encrypted).unwrap();
++    let result: Result<(), Error> = bound
++        .with_crypto_write(move |txn| {
++            txn.set_kv("interrupted", &serialized)?;
++            panic!("synthetic database worker interruption");
++        })
++        .await;
++    assert!(matches!(result, Err(Error::CryptoStoreInteractionFailed)));
++    // Discard the failed store/client. An independently reopened real store
++    // proves that transaction unwind did not publish the interrupted write.
++    let reopened =
++        SqliteCryptoStore::open(temp.path(), Some("synthetic-fence-test")).await.unwrap();
++    assert!(reopened.get_custom_value("interrupted").await.unwrap().is_none());
++}

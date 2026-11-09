@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "upstream": "matrix-org/matrix-rust-sdk",
+  "license": "Apache-2.0",
+  "sdkRevision": "4f7f4d49f571e613eb1cb35956e4649dc056f0af",
+  "swiftBindingsRevision": "55650a2320cc6e3264c1d5508a5094f8dd7e51a5",
+  "status": "Historical upstream source reference; selected client producer is recorded in the project and package pins.",
+  "release": "26.10.02",
+  "packageURL": "https://github.com/matrix-org/matrix-rust-components-swift.git",
+  "binarySha256": "954420a70dee62f3c73a772d530b9668da17393da3bc71a219f0105006f93573",
+  "iosLinkEvidence": null,
+  "supersededBy": "atum-platform/atum-matrix-rust-components-swift 26.10.15-atum.2 at 66c18d378d44d9ad61946f08b926514cccb14fb5 (immutable release 421614778 published 2026-10-23)",
+  "publicProjection": "Historical private link/device acceptance evidence is not distributed and no runtime acceptance is inferred."
+}

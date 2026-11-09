@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "status": "SOURCE_LIVE_BASECLIENT_NOT_RUNTIME_SELECTED",
+  "baseLeaseBindingManifestSHA256": "7909aab8e3661c5142282557c966e37014b48a905360d6fe8f0993c174a296e8",
+  "patch": "sdk/live-lease/live-lease.patch",
+  "patchSHA256": "4e5d510cebe9a940455d7c70ba56c684aeb616ac2c5bdd9293888f735478d3e2",
+  "licenseSHA256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+  "preimageSHA256": {
+    "crates/matrix-sdk-base/src/client.rs": "04c5768a25e6e5eca0d2b3d9b72a75e0d35125cf17877504f70a336e7f0a529e",
+    "crates/matrix-sdk-base/src/error.rs": "7deb03735a9e7b658ba28c73e308710b9fc7ff4007b35b28063cb32afb642fa9",
+    "crates/matrix-sdk-base/src/store/mod.rs": "654b7f8f59a8010b72a4a82258266c62e58ac5dc4750499e8c11eb820d36d1ea",
+    "crates/matrix-sdk-crypto/src/store/atum_publication_store.rs": "26445d0998cbebba1a85407e3b4341f6121793a93fe9ff03648b806620655cf9",
+    "crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs": "edeef4a3947040a19f364b769d780f90b751289886f610c8b6448e7806f1451e",
+    "crates/matrix-sdk/src/encryption/mod.rs": "b697913cc075abb77ab12bc1af2af5d28e42ebfdd6901e79bcaa39e02dba8e4f",
+    "crates/matrix-sdk/src/error.rs": "d52e04f3578fd80f12d367020e9cd65d965d85f02c17235a737e9c1e5674e2ae",
+    "crates/matrix-sdk/tests/atum_existing_device.rs": "5b2c7d6f44d987e7910dec3d75772e1ff9325bc48578e12fc5f1b5a231da5f6d",
+    "crates/matrix-sdk/tests/atum_live_lease.rs": null,
+    "crates/matrix-sdk/src/authentication/oauth/mod.rs": "0ccea2f27746506ebeb0d4dd070662e31b783836f6ef8675649e98c616e4441e",
+    "crates/matrix-sdk/src/authentication/oauth/cross_process.rs": "6ec53a28cbd7d02fa4572ad3c3ffea00392e7d7c37649d548eb047ff3edc7c6c"
+  },
+  "prototypeSHA256": {
+    "crates/matrix-sdk-base/src/client.rs": "511755bc5c5b8ed7c4c581119ce8956b5334839fbf84ecd984074636613f4a65",
+    "crates/matrix-sdk-base/src/error.rs": "ed6bd11a6cce3ffaba0f625d20820bca7edcbaba8e0331ba9c45706ce26e9ae4",
+    "crates/matrix-sdk-base/src/store/mod.rs": "23ddadc7cc7b58feb485abb336761fbc97e0f15ee7673a268606c800cff1180c",
+    "crates/matrix-sdk-crypto/src/store/atum_publication_store.rs": "38584a4a0ff77ed61df609787787b0b8698496c2871901682358610a014ca330",
+    "crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs": "504175189b827747d1888ee9de81717f626b4f93f48a5964ea1a28c263632173",
+    "crates/matrix-sdk/src/encryption/mod.rs": "699eeb10ac620ce3d3f65f7981bbbd9061032786970e8ad7a1b8c4bb506db2d5",
+    "crates/matrix-sdk/src/error.rs": "952e73da2275bbe756d2dbd4bc20be5f7fc8bc644a38812bff7e39e606e7dec3",
+    "crates/matrix-sdk/tests/atum_existing_device.rs": "ed147fcc9cbd6171be5c27662ed4536d77a792bd4c67304781c514a1b5a76723",
+    "crates/matrix-sdk/tests/atum_live_lease.rs": "18236d0db68aa8c0458ecdaefe7ca2d98f3bf3461eae9ea557ba598063f48293",
+    "crates/matrix-sdk/src/authentication/oauth/mod.rs": "382611d75a90422f778a5c060e838492dc7c9ff848bb97e4a744c470d50272f2",
+    "crates/matrix-sdk/src/authentication/oauth/cross_process.rs": "1a9e8a96ec0c887be0628c28e0e087ee0f37d86e226f40ab46d05ecbf77a2d5f"
+  },
+  "runtimeSelected": false,
+  "liveBaselineSHA256": "48c76136314fe675ab79fb8d35d1be53da25b32946f0bd0e2ef3275d2e3db326",
+  "publicationBaselineSHA256": "ee1dce24808f705ae207dbed317ab1fcb00f0c8c22c1dd3f3dc8b03e2cd3a5e7",
+  "publicationStoreSHA256": "38584a4a0ff77ed61df609787787b0b8698496c2871901682358610a014ca330"
+}

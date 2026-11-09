@@ -1,0 +1,46 @@
+{
+  "state": "in_progress",
+  "completesBy": 1791286400000,
+  "steps": [
+    {
+      "system": "turns_and_cloud",
+      "state": "done"
+    },
+    {
+      "system": "apps_and_agents",
+      "state": "done"
+    },
+    {
+      "system": "drive",
+      "state": "done"
+    },
+    {
+      "system": "knowledge",
+      "state": "running"
+    },
+    {
+      "system": "storage",
+      "state": "pending"
+    },
+    {
+      "system": "commerce",
+      "state": "pending"
+    },
+    {
+      "system": "apple_and_google",
+      "state": "pending"
+    },
+    {
+      "system": "matrix",
+      "state": "pending"
+    },
+    {
+      "system": "telemetry",
+      "state": "pending"
+    },
+    {
+      "system": "principal",
+      "state": "pending"
+    }
+  ]
+}

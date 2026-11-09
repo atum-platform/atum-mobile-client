@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.mobile-native-api",
+  "version": 1,
+  "providerCommit": "7759bc63161e6c5a056eb6fea942195037ee6a9a",
+  "packSHA256": "c651192fd0b9042628c47f370b23958437a04d847cf033ed6cd34956e7c32bfd",
+  "fixtures": [
+    {
+      "file": "ios-matrix-client.registration.json",
+      "message": "ios.client_registration",
+      "expect": "accept",
+      "sha256": "eb6136d4b0c6ed064ea6baf79baa4bc876568b79c1e6700cd53b7b1239b9641f"
+    },
+    {
+      "file": "ios-domain-client.registration.json",
+      "message": "ios.client_registration",
+      "expect": "accept",
+      "sha256": "a33e8d0cf558562f3063b4453a8209385139f4419db35416a1549f3a052aeaa8"
+    },
+    {
+      "file": "ios-client-with-secret.registration.json",
+      "message": "ios.client_registration",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "0a4eaf246a06ac670c781e0636d2c177eab0d6353e7ceb250155fae0f5d4ec17"
+    },
+    {
+      "file": "ios-client-loopback-redirect.registration.json",
+      "message": "ios.client_registration",
+      "expect": "reject",
+      "violation": "const",
+      "sha256": "33d1067900b70c2a3622e7422df791ce7be6f2eb01cc40b64c54e6c590441e47"
+    },
+    {
+      "file": "ios-client-confidential.registration.json",
+      "message": "ios.client_registration",
+      "expect": "reject",
+      "violation": "const",
+      "sha256": "f7270b25bff022007c270679c0a7fe43cb4809394737856cdb4cc87e4ba0e514"
+    },
+    {
+      "file": "binding.facts.json",
+      "message": "binding.facts",
+      "expect": "accept",
+      "sha256": "8e629c72f5c4f37ef24b7d806a933b3ce7576d8aa27ff1f3831fb90746c76d01"
+    },
+    {
+      "file": "binding-subject-mismatch.facts.json",
+      "message": "binding.facts",
+      "expect": "reject",
+      "violation": "invariant",
+      "sha256": "eebfcc79fda6fac6ef47e96bba468b5ac19c30ff47cfae1dc8d7218ff2bca6b4"
+    },
+    {
+      "file": "binding-swapped-grants.facts.json",
+      "message": "binding.facts",
+      "expect": "reject",
+      "violation": "invariant",
+      "sha256": "f0712946dc3c2e7184d3aa033481b30bdf7e7459965ecb553b5c60d9a89a71bb"
+    },
+    {
+      "file": "domain-grant-lifecycle.sequence.json",
+      "machine": "domain_grant",
+      "expect": "accept",
+      "sha256": "c4f0db7966ad96861b74290470861d5bcdcb10be2a43d448020745b128af183f"
+    },
+    {
+      "file": "domain-grant-failure-keeps-retrying.sequence.json",
+      "machine": "domain_grant",
+      "expect": "accept",
+      "sha256": "be7363149459905cd7ad65d8f58155d73b02fce23c01f59d4d147ca7a0b677a7"
+    },
+    {
+      "file": "domain-grant-skips-binding.sequence.json",
+      "machine": "domain_grant",
+      "expect": "reject",
+      "violation": "transition",
+      "sha256": "a397fe2e4fe7a4f7598cf94817612eef2c7b0036670065f8750978eddbc9caba"
+    }
+  ]
+}

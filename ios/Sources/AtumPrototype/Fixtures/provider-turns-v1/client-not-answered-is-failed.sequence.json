@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "from": "sent",
+      "to": "not_answered",
+      "event": "m1_bound_elapsed"
+    },
+    {
+      "from": "not_answered",
+      "to": "failed",
+      "event": "outcome_failed"
+    }
+  ]
+}

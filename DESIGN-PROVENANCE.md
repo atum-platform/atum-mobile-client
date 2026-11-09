@@ -1,0 +1,9 @@
+# Public design snapshot and stage 2 repin
+
+The retained `ios/Vendor/AtumDesign` snapshot is a sanitised local projection. Its 44 member hashes and `atum-design.lock` manifest hash remain independently verifiable; they do not attest a new public producer revision.
+
+The generated `packages/mobile-design-exports/dist` artifact is intentionally absent from the frozen desktop tree. Do not add it to this source freeze or claim that the current desktop freeze provides a committed export. At stage 2, after desktop publication, the coordinator establishes a reviewed public desktop producer SHA with the expected committed export prefix and runs the DR-2 import/repin using `scripts/import-design-exports <full-public-producer-SHA> --source <public-desktop-checkout>`, followed by `scripts/import-design-exports --verify`. The importer deliberately refuses a SHA without that export; it never imports uncommitted working-tree output. The public export producer/tooling and any required export commit must be established at that gate before this command can succeed. No repin or generated desktop dist is performed in this round.
+
+All imports verify canonical repository origin, immutable full commit, exact manifest membership/hashes, five locales, regular-file archive entries and atomic replacement. Private source history/evidence is not imported.
+
+The importer now accepts only `atum-platform/atum-desktop` HTTPS/SSH origins. The retained historical snapshot lock has deliberately not been relabelled as a public commit. Until the coordinator performs the real public producer import, `--verify` rejects that historical repository field and the public workflow must not be dispatched. Unit tests exercise real disposable public-origin commits offline. The final public pin and a fresh mobile byte approval are required before publication.

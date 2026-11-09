@@ -1,0 +1,1084 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index f67af5d..284934b 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3600,6 +3600,7 @@ dependencies = [
+  "rand 0.10.2",
+  "reqwest",
+  "ruma",
++ "rusqlite",
+  "serde",
+  "serde_html_form",
+  "serde_json",
+diff --git a/bindings/matrix-sdk-ffi/src/client.rs b/bindings/matrix-sdk-ffi/src/client.rs
+index f0d2e76..e64afb9 100644
+--- a/bindings/matrix-sdk-ffi/src/client.rs
++++ b/bindings/matrix-sdk-ffi/src/client.rs
+@@ -825,6 +825,36 @@ impl Client {
+         Ok(())
+     }
+ 
++    /// Restore an existing OAuth identity, without encryption initialization.
++    /// Requires a fresh multi-process client, automatic refresh disabled, and
++    /// existing persistent store paths already checked by the application.
++    /// Missing accounts and mismatched keys are refused under the SDK's own
++    /// crypto-store lease before activation; no replacement account is created.
++    pub async fn restore_session_existing(
++        &self,
++        session: Session,
++        curve25519: String,
++        ed25519: String,
++    ) -> Result<(), ClientError> {
++        let sliding_sync_version = session.sliding_sync_version.clone();
++        let AuthSession::OAuth(session) = session.try_into()? else {
++            return Err(ClientError::from_str(
++                "Existing identity restoration requires OAuth",
++                None,
++            ));
++        };
++        self.inner
++            .restore_session_existing(
++                *session,
++                matrix_sdk::store::RoomLoadSettings::All,
++                curve25519,
++                ed25519,
++            )
++            .await?;
++        self.inner.set_sliding_sync_version(sliding_sync_version.try_into()?);
++        Ok(())
++    }
++
+     /// Enables or disables all the room send queues at once.
+     ///
+     /// When connectivity is lost on a device, it is recommended to disable the
+diff --git a/bindings/matrix-sdk-ffi/src/encryption.rs b/bindings/matrix-sdk-ffi/src/encryption.rs
+index 946afe5..649bbc5 100644
+--- a/bindings/matrix-sdk-ffi/src/encryption.rs
++++ b/bindings/matrix-sdk-ffi/src/encryption.rs
+@@ -1163,3 +1163,135 @@ impl From<&matrix_sdk::encryption::OAuthCrossSigningResetInfo> for OAuthCrossSig
+         Self { approval_url: value.approval_url.to_string() }
+     }
+ }
++
++/// Atum's offline first-use input. This record contains a private root key.
++/// Persist/read back in main-private device-only Keychain before remote writes.
++/// It supplies no authority to publish, replace a default, or create a backup.
++/// Do not log it; the caller owns all exported string copies.
++#[derive(Clone, uniffi::Record)]
++pub struct PreparedRecoveryKey {
++    pub recovery_key: String,
++    pub key_id: String,
++    pub metadata_json: String,
++}
++
++#[derive(Debug, Error, uniffi::Error)]
++pub enum PreparedRecoveryKeyError {
++    #[error("Invalid prepared recovery input")]
++    InvalidInput,
++}
++
++/// No client, store, runtime, lease or network is used by this function.
++#[uniffi::export]
++pub fn prepare_recovery_key() -> Result<PreparedRecoveryKey, PreparedRecoveryKeyError> {
++    use matrix_sdk_base::crypto::secret_storage::SecretStorageKey;
++    let key = SecretStorageKey::new();
++    let metadata_json = serde_json::to_value(key.event_content())
++        .map_err(|_| PreparedRecoveryKeyError::InvalidInput)?
++        .to_string();
++    Ok(PreparedRecoveryKey {
++        recovery_key: key.to_base58(),
++        key_id: key.key_id().to_owned(),
++        metadata_json,
++    })
++}
++
++/// Checks only a locally prepared triple. Does not inspect published state.
++#[uniffi::export]
++pub fn validate_prepared_recovery_key(
++    mut input: PreparedRecoveryKey,
++) -> Result<(), PreparedRecoveryKeyError> {
++    let result = validate_prepared_recovery_key_inner(&input);
++    input.recovery_key.zeroize();
++    result
++}
++
++fn validate_prepared_recovery_key_inner(
++    input: &PreparedRecoveryKey,
++) -> Result<(), PreparedRecoveryKeyError> {
++    use matrix_sdk_base::crypto::secret_storage::SecretStorageKey;
++    use ruma::{
++        events::secret_storage::key::{
++            SecretStorageEncryptionAlgorithm, SecretStorageKeyEventContent,
++            SecretStorageV1AesHmacSha2Properties,
++        },
++        serde::Base64,
++    };
++
++    #[derive(serde::Deserialize)]
++    #[serde(deny_unknown_fields)]
++    struct Metadata {
++        algorithm: String,
++        iv: Base64,
++        mac: Base64,
++    }
++
++    let invalid = || PreparedRecoveryKeyError::InvalidInput;
++    if input.key_id.len() != 32 || !input.key_id.bytes().all(|b| b.is_ascii_alphanumeric())
++        || input.recovery_key.len() > 128 || input.metadata_json.len() > 1024
++    {
++        return Err(invalid());
++    }
++    // Upstream accepts absent IV/MAC by design. Prepared first-use input must
++    // require both so from_account_data actually checks possession of this key.
++    let metadata: Metadata = serde_json::from_str(&input.metadata_json).map_err(|_| invalid())?;
++    if metadata.algorithm != "m.secret_storage.v1.aes-hmac-sha2"
++        || metadata.iv.as_bytes().len() != 16 || metadata.mac.as_bytes().len() != 32
++    {
++        return Err(invalid());
++    }
++    // Ruma omits key_id from content JSON: it belongs in the event-type suffix.
++    let content = SecretStorageKeyEventContent::new(
++        input.key_id.clone(),
++        SecretStorageEncryptionAlgorithm::V1AesHmacSha2(
++            SecretStorageV1AesHmacSha2Properties::new(Some(metadata.iv), Some(metadata.mac)),
++        ),
++    );
++    let canonical = serde_json::to_value(&content).map_err(|_| invalid())?.to_string();
++    if canonical != input.metadata_json { return Err(invalid()); }
++    let key = SecretStorageKey::from_account_data(&input.recovery_key, content)
++        .map_err(|_| invalid())?;
++    let mut encoded = key.to_base58();
++    let matches = encoded == input.recovery_key && key.key_id() == input.key_id;
++    encoded.zeroize();
++    if matches { Ok(()) } else { Err(invalid()) }
++}
++
++#[cfg(test)]
++mod atum_recovery_prepared_tests {
++    use super::{prepare_recovery_key, validate_prepared_recovery_key};
++
++    #[test]
++    fn exact_offline_input_roundtrips_and_foreign_keys_refuse() {
++        let original = prepare_recovery_key().unwrap();
++        assert!(validate_prepared_recovery_key(original.clone()).is_ok());
++        let mut foreign = original.clone();
++        foreign.recovery_key = prepare_recovery_key().unwrap().recovery_key;
++        assert!(validate_prepared_recovery_key(foreign).is_err());
++        let mut corrupt = original;
++        corrupt.recovery_key = "not-a-recovery-key".to_owned();
++        assert!(validate_prepared_recovery_key(corrupt).is_err());
++    }
++
++    #[test]
++    fn incomplete_or_altered_metadata_never_skips_the_mac_check() {
++        let original = prepare_recovery_key().unwrap();
++        for field in ["iv", "mac"] {
++            let mut changed = original.clone();
++            let mut metadata: serde_json::Value = serde_json::from_str(&changed.metadata_json).unwrap();
++            metadata.as_object_mut().unwrap().remove(field);
++            changed.metadata_json = metadata.to_string();
++            assert!(validate_prepared_recovery_key(changed).is_err());
++        }
++        for field in ["passphrase", "name", "key_id", "unexpected"] {
++            let mut changed = original.clone();
++            let mut metadata: serde_json::Value = serde_json::from_str(&changed.metadata_json).unwrap();
++            metadata[field] = serde_json::Value::String("unexpected".to_owned());
++            changed.metadata_json = metadata.to_string();
++            assert!(validate_prepared_recovery_key(changed).is_err());
++        }
++        let mut changed = original;
++        changed.key_id = "m.secret_storage.key.foreign".to_owned();
++        assert!(validate_prepared_recovery_key(changed).is_err());
++    }
++}
+diff --git a/crates/matrix-sdk-base/src/client.rs b/crates/matrix-sdk-base/src/client.rs
+index 22618b2..63fe024 100644
+--- a/crates/matrix-sdk-base/src/client.rs
++++ b/crates/matrix-sdk-base/src/client.rs
+@@ -13,10 +13,10 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ 
+-#[cfg(feature = "e2e-encryption")]
+-use std::sync::Arc;
+ #[cfg(all(feature = "e2e-encryption", feature = "unstable-msc4354"))]
+ use std::sync::Mutex as StdMutex;
++#[cfg(feature = "e2e-encryption")]
++use std::sync::{Arc, OnceLock};
+ use std::{
+     collections::{BTreeMap, BTreeSet, HashMap},
+     fmt,
+@@ -118,6 +118,10 @@ pub struct BaseClient {
+     #[cfg(feature = "e2e-encryption")]
+     crypto_store: Arc<DynCryptoStore>,
+ 
++    /// An existing-only identity constraint, retained across Olm regeneration.
++    #[cfg(feature = "e2e-encryption")]
++    required_identity_keys: Arc<OnceLock<(String, String)>>,
++
+     /// The olm-machine that is created once the
+     /// [`SessionMeta`][crate::session::SessionMeta] is set via
+     /// [`BaseClient::activate`]
+@@ -224,6 +228,8 @@ impl BaseClient {
+             #[cfg(feature = "e2e-encryption")]
+             crypto_store: config.crypto_store,
+             #[cfg(feature = "e2e-encryption")]
++            required_identity_keys: Default::default(),
++            #[cfg(feature = "e2e-encryption")]
+             olm_machine: Default::default(),
+             ignore_user_list_changes: Default::default(),
+             global_profile_updates_sender: broadcast::Sender::new(16),
+@@ -270,6 +276,7 @@ impl BaseClient {
+             //    introduced don't diverge, i.e. one-time keys that get generated by the Olm Account
+             //    or Olm sessions when they encrypt or decrypt messages.
+             crypto_store: self.crypto_store.clone(),
++            required_identity_keys: self.required_identity_keys.clone(),
+             olm_machine: self.olm_machine.clone(),
+             ignore_user_list_changes: Default::default(),
+             global_profile_updates_sender: broadcast::Sender::new(16),
+@@ -424,6 +431,55 @@ impl BaseClient {
+         Ok(())
+     }
+ 
++    /// Require an existing account before any session activation. The caller
++    /// must hold the SDK crypto-store lease through validation and activation.
++    #[cfg(feature = "e2e-encryption")]
++    pub async fn require_existing_identity(
++        &self,
++        meta: &SessionMeta,
++        curve25519: String,
++        ed25519: String,
++    ) -> Result<()> {
++        use matrix_sdk_crypto::CryptoStoreError;
++
++        let account =
++            self.crypto_store.load_account().await?.ok_or(CryptoStoreError::AccountUnset)?;
++        if account.user_id() != meta.user_id || account.device_id() != meta.device_id {
++            return Err(CryptoStoreError::MismatchedAccount {
++                expected: (meta.user_id.clone(), meta.device_id.clone()),
++                got: (account.user_id().to_owned(), account.device_id().to_owned()),
++            }
++            .into());
++        }
++        if account.identity_keys().curve25519.to_base64() != curve25519
++            || account.identity_keys().ed25519.to_base64() != ed25519
++        {
++            return Err(CryptoStoreError::StoredIdentityMismatch.into());
++        }
++        self.required_identity_keys
++            .set((curve25519, ed25519))
++            .map_err(|_| Error::BadCryptoStoreState)?;
++        Ok(())
++    }
++
++    /// Create the same crypto-store lease used after activation, allowing the
++    /// initial restoration to be checked under that lease too.
++    #[cfg(feature = "e2e-encryption")]
++    pub fn create_crypto_store_lock(
++        &self,
++        config: CrossProcessLockConfig,
++    ) -> matrix_sdk_common::cross_process_lock::CrossProcessLock<
++        matrix_sdk_crypto::store::LockableCryptoStore,
++    > {
++        use matrix_sdk_common::cross_process_lock::CrossProcessLock;
++        use matrix_sdk_crypto::store::LockableCryptoStore;
++        CrossProcessLock::new(
++            LockableCryptoStore::new(self.crypto_store.clone()),
++            "cross_process_lock".to_owned(),
++            config,
++        )
++    }
++
+     /// Recreate an `OlmMachine` from scratch.
+     ///
+     /// In particular, this will clear all its caches.
+@@ -439,7 +495,8 @@ impl BaseClient {
+         // because we suspect it has stale data.
+         let builder = OlmMachineBuilder::new(&session_meta.user_id, &session_meta.device_id)
+             .with_crypto_store(self.crypto_store.clone())
+-            .with_custom_account(custom_account);
++            .with_custom_account(custom_account)
++            .with_required_identity_keys(self.required_identity_keys.get().cloned());
+ 
+         #[cfg(feature = "experimental-x509-identity-verification")]
+         let builder = builder
+diff --git a/crates/matrix-sdk-crypto/src/machine/mod.rs b/crates/matrix-sdk-crypto/src/machine/mod.rs
+index 02f7899..b5309c2 100644
+--- a/crates/matrix-sdk-crypto/src/machine/mod.rs
++++ b/crates/matrix-sdk-crypto/src/machine/mod.rs
+@@ -145,6 +145,9 @@ pub struct OlmMachineBuilder {
+     /// OlmMachine.
+     custom_account: Option<vodozemac::olm::Account>,
+ 
++    /// When set, restoration must reuse these exact existing device keys.
++    required_identity_keys: Option<(String, String)>,
++
+     /// Optional X509 verifier to be used for verifying people's identities.
+     #[cfg(feature = "experimental-x509-identity-verification")]
+     x509_verifier: Option<X509Verifier>,
+@@ -163,6 +166,7 @@ impl OlmMachineBuilder {
+             device_id: device_id.to_owned(),
+             store: None,
+             custom_account: None,
++            required_identity_keys: None,
+             #[cfg(feature = "experimental-x509-identity-verification")]
+             x509_verifier: None,
+             #[cfg(feature = "experimental-x509-identity-verification")]
+@@ -196,6 +200,14 @@ impl OlmMachineBuilder {
+         self
+     }
+ 
++    /// Require an existing account with the given Curve25519 and Ed25519 keys.
++    /// No account is created if the store is empty or the keys differ.
++    /// The caller must hold the store's cross-process lock while building.
++    pub fn with_required_identity_keys(mut self, keys: Option<(String, String)>) -> Self {
++        self.required_identity_keys = keys;
++        self
++    }
++
+     /// Specify a [`RawX509Verifier`] which the `OlmMachine` should use to
+     /// verify people's identities.
+     #[cfg(feature = "experimental-x509-identity-verification")]
+@@ -412,6 +424,7 @@ impl OlmMachine {
+             device_id,
+             store,
+             custom_account,
++            required_identity_keys,
+             #[cfg(feature = "experimental-x509-identity-verification")]
+             x509_verifier,
+             #[cfg(feature = "experimental-x509-identity-verification")]
+@@ -436,6 +449,14 @@ impl OlmMachine {
+                     });
+                 }
+ 
++                if let Some((curve25519, ed25519)) = &required_identity_keys {
++                    if account.identity_keys().curve25519.to_base64() != *curve25519
++                        || account.identity_keys().ed25519.to_base64() != *ed25519
++                    {
++                        return Err(CryptoStoreError::StoredIdentityMismatch);
++                    }
++                }
++
+                 Span::current()
+                     .record("ed25519_key", display(account.identity_keys().ed25519))
+                     .record("curve25519_key", display(account.identity_keys().curve25519));
+@@ -445,6 +466,9 @@ impl OlmMachine {
+             }
+ 
+             None => {
++                if required_identity_keys.is_some() {
++                    return Err(CryptoStoreError::AccountUnset);
++                }
+                 let account = if let Some(account) = custom_account {
+                     Account::new_helper(account, &user_id, &device_id)
+                 } else {
+diff --git a/crates/matrix-sdk-crypto/src/store/error.rs b/crates/matrix-sdk-crypto/src/store/error.rs
+index f663c5c..a09dbe4 100644
+--- a/crates/matrix-sdk-crypto/src/store/error.rs
++++ b/crates/matrix-sdk-crypto/src/store/error.rs
+@@ -31,6 +31,10 @@ pub enum CryptoStoreError {
+     #[error("can't save/load sessions or group sessions in the store before an account is stored")]
+     AccountUnset,
+ 
++    /// The persisted device keys differ from the keys required for restoration.
++    #[error("the stored device identity does not match the required identity")]
++    StoredIdentityMismatch,
++
+     /// The store doesn't support multiple accounts and data from another device
+     /// was discovered.
+     #[error(
+diff --git a/crates/matrix-sdk-crypto/src/store/mod.rs b/crates/matrix-sdk-crypto/src/store/mod.rs
+index 860b169..812d059 100644
+--- a/crates/matrix-sdk-crypto/src/store/mod.rs
++++ b/crates/matrix-sdk-crypto/src/store/mod.rs
+@@ -1955,6 +1955,13 @@ impl Deref for Store {
+ #[derive(Clone, Debug)]
+ pub struct LockableCryptoStore(Arc<dyn CryptoStore<Error = CryptoStoreError>>);
+ 
++impl LockableCryptoStore {
++    /// Wrap a store for the SDK's existing cross-process lease mechanism.
++    pub fn new(store: impl IntoCryptoStore) -> Self {
++        Self(store.into_crypto_store())
++    }
++}
++
+ impl matrix_sdk_common::cross_process_lock::TryLock for LockableCryptoStore {
+     type LockError = CryptoStoreError;
+ 
+diff --git a/crates/matrix-sdk-ui/src/notification_client.rs b/crates/matrix-sdk-ui/src/notification_client.rs
+index f23208d..65c5d78 100644
+--- a/crates/matrix-sdk-ui/src/notification_client.rs
++++ b/crates/matrix-sdk-ui/src/notification_client.rs
+@@ -28,7 +28,7 @@ use matrix_sdk::{
+ use matrix_sdk_base::{RoomState, StoreError, deserialized_responses::TimelineEvent};
+ use matrix_sdk_common::{cross_process_lock::CrossProcessLockConfig, timeout::timeout};
+ use ruma::{
+-    EventId, OwnedEventId, OwnedRoomId, RoomId, UserId,
++    EventId, OwnedEventId, OwnedRoomId, RoomId, TransactionId, UserId,
+     api::client::sync::sync_events::v5 as http,
+     assign,
+     events::{
+@@ -188,7 +188,6 @@ pub struct NotificationClient {
+ 
+ impl NotificationClient {
+     const CONNECTION_ID: &'static str = "notifications";
+-    const LOCK_ID: &'static str = "notifications";
+ 
+     /// Minimum number of encryption sync iterations to run when an event in a
+     /// notification can't be decrypted, before
+@@ -204,12 +203,12 @@ impl NotificationClient {
+         parent_client: Client,
+         process_setup: NotificationProcessSetup,
+     ) -> Result<Self, Error> {
+-        // Only create the lock id if cross process lock is needed (multiple
+-        // processes)
++        // Each independent helper needs a distinct holder: a shared name would
++        // let SQLite renew another helper's live lease as if it were our own.
+         let cross_process_store_config = match process_setup {
+-            NotificationProcessSetup::MultipleProcesses => {
+-                CrossProcessLockConfig::multi_process(Self::LOCK_ID)
+-            }
++            NotificationProcessSetup::MultipleProcesses => CrossProcessLockConfig::multi_process(
++                format!("notifications-{}", TransactionId::new()),
++            ),
+             NotificationProcessSetup::SingleProcess { .. } => CrossProcessLockConfig::SingleProcess,
+         };
+         let client = parent_client.notification_client(cross_process_store_config).await?;
+@@ -1336,6 +1335,44 @@ mod tests {
+         NotificationStatus, RawNotificationEvent,
+     };
+ 
++    #[async_test]
++    async fn test_atum_notification_helpers_contend_for_same_sqlite_crypto_lease() {
++        let directory = tempfile::tempdir().unwrap();
++        let server = MatrixMockServer::new().await;
++        let parent = server
++            .client_builder()
++            .on_builder(|builder| builder.sqlite_store(directory.path(), None))
++            .build()
++            .await;
++        let first =
++            NotificationClient::new(parent.clone(), NotificationProcessSetup::MultipleProcesses)
++                .await
++                .unwrap();
++        let second = NotificationClient::new(parent, NotificationProcessSetup::MultipleProcesses)
++            .await
++            .unwrap();
++        let first_holder =
++            first.client.cross_process_lock_config().holder_name().unwrap().to_owned();
++        let second_holder =
++            second.client.cross_process_lock_config().holder_name().unwrap().to_owned();
++        assert!(!first_holder.is_empty() && !second_holder.is_empty());
++
++        let first_encryption = first.client.encryption();
++        first_encryption.enable_cross_process_store_lock(first_holder.clone()).await.unwrap();
++        let first_guard = first_encryption.try_lock_store_once().await.unwrap();
++        assert!(first_guard.is_some(), "first helper must hold the actual SDK crypto lease");
++
++        let second_encryption = second.client.encryption();
++        second_encryption.enable_cross_process_store_lock(second_holder.clone()).await.unwrap();
++        let second_guard = second_encryption.try_lock_store_once().await.unwrap();
++        assert!(
++            second_guard.is_none(),
++            "another notification helper must not acquire the held SQLite crypto lease",
++        );
++        assert_ne!(first_holder, second_holder, "independent helpers need independent holders");
++        drop(first_guard);
++    }
++
+     #[async_test]
+     async fn test_notification_item_returns_thread_id() {
+         let server = MatrixMockServer::new().await;
+diff --git a/crates/matrix-sdk/Cargo.toml b/crates/matrix-sdk/Cargo.toml
+index 8282d6c..79761f6 100644
+--- a/crates/matrix-sdk/Cargo.toml
++++ b/crates/matrix-sdk/Cargo.toml
+@@ -181,6 +181,7 @@ reqwest = { workspace = true, features = ["gzip", "http2", "rustls-no-provider"]
+ tokio = { workspace = true, features = ["macros"] }
+ 
+ [dev-dependencies]
++rusqlite = { version = "0.40.2", default-features = false }
+ anyhow.workspace = true
+ assert-json-diff.workspace = true
+ assert_matches.workspace = true
+diff --git a/crates/matrix-sdk/src/authentication/oauth/cross_process.rs b/crates/matrix-sdk/src/authentication/oauth/cross_process.rs
+index cca9b7e..3fdd203 100644
+--- a/crates/matrix-sdk/src/authentication/oauth/cross_process.rs
++++ b/crates/matrix-sdk/src/authentication/oauth/cross_process.rs
+@@ -244,6 +244,11 @@ pub enum CrossProcessRefreshLockError {
+     )]
+     MissingReloadSession,
+ 
++    /// Strict restore could not read the authoritative current session.
++    /// The callback's opaque error is deliberately not retained.
++    #[error("authoritative current session is unavailable")]
++    AuthoritativeSessionUnavailable,
++
+     /// The store has been created twice.
+     #[error(
+         "the cross-process lock has been set up twice with `enable_cross_process_refresh_lock`"
+diff --git a/crates/matrix-sdk/src/authentication/oauth/mod.rs b/crates/matrix-sdk/src/authentication/oauth/mod.rs
+index 84c5bc3..7cc10b2 100644
+--- a/crates/matrix-sdk/src/authentication/oauth/mod.rs
++++ b/crates/matrix-sdk/src/authentication/oauth/mod.rs
+@@ -746,6 +746,27 @@ impl OAuth {
+         &self,
+         session: OAuthSession,
+         room_load_settings: RoomLoadSettings,
++    ) -> Result<()> {
++        self.restore_session_impl(session, room_load_settings, true, false).await
++    }
++
++    /// Restore without scheduling encryption initialization. Used only by the
++    /// existing-account restoration guarded by the SDK crypto-store lease.
++    #[cfg(feature = "e2e-encryption")]
++    pub(crate) async fn restore_session_without_initialization(
++        &self,
++        session: OAuthSession,
++        room_load_settings: RoomLoadSettings,
++    ) -> Result<()> {
++        self.restore_session_impl(session, room_load_settings, false, true).await
++    }
++
++    async fn restore_session_impl(
++        &self,
++        session: OAuthSession,
++        room_load_settings: RoomLoadSettings,
++        _initialize_encryption: bool,
++        _refuse_unavailable_read: bool,
+     ) -> Result<()> {
+         let OAuthSession { client_id, user: UserSession { meta, tokens } } = session;
+ 
+@@ -792,9 +813,11 @@ impl OAuth {
+             // update the hash. Otherwise, we save our hash into the database.
+ 
+             if guard.hash_mismatch {
+-                Box::pin(self.handle_session_hash_mismatch(&mut guard))
+-                    .await
+-                    .map_err(|err| crate::Error::OAuth(Box::new(err.into())))?;
++                Box::pin(
++                    self.handle_session_hash_mismatch_with(&mut guard, _refuse_unavailable_read),
++                )
++                .await
++                .map_err(|err| crate::Error::OAuth(Box::new(err.into())))?;
+             } else {
+                 guard
+                     .save_in_memory_and_db(&tokens)
+@@ -807,7 +830,9 @@ impl OAuth {
+         }
+ 
+         #[cfg(feature = "e2e-encryption")]
+-        self.client.encryption().spawn_initialization_task(None).await;
++        if _initialize_encryption {
++            self.client.encryption().spawn_initialization_task(None).await;
++        }
+ 
+         Ok(())
+     }
+@@ -816,6 +841,15 @@ impl OAuth {
+     async fn handle_session_hash_mismatch(
+         &self,
+         guard: &mut CrossProcessRefreshLockGuard,
++    ) -> Result<(), CrossProcessRefreshLockError> {
++        self.handle_session_hash_mismatch_with(guard, false).await
++    }
++
++    #[cfg(feature = "e2e-encryption")]
++    async fn handle_session_hash_mismatch_with(
++        &self,
++        guard: &mut CrossProcessRefreshLockGuard,
++        refuse_unavailable_read: bool,
+     ) -> Result<(), CrossProcessRefreshLockError> {
+         trace!("Handling hash mismatch.");
+ 
+@@ -835,6 +869,12 @@ impl OAuth {
+                 // saving the data back into the app, as that would have no
+                 // effect.
+             }
++            Err(_) if refuse_unavailable_read => {
++                // Strict existing-device restore must not accept a stale input
++                // after its authoritative source failed. Do not log or retain
++                // the callback's opaque error, which may contain private data.
++                return Err(CrossProcessRefreshLockError::AuthoritativeSessionUnavailable);
++            }
+             Err(err) => {
+                 error!("when reloading OAuth 2.0 session tokens from callback: {err}");
+             }
+diff --git a/crates/matrix-sdk/src/client/mod.rs b/crates/matrix-sdk/src/client/mod.rs
+index 3e6f5d5..d3a0439 100644
+--- a/crates/matrix-sdk/src/client/mod.rs
++++ b/crates/matrix-sdk/src/client/mod.rs
+@@ -1715,6 +1715,50 @@ impl Client {
+         }
+     }
+ 
++    /// Restore an existing OAuth device under the SDK crypto-store lease.
++    /// Rejects absent/mismatched stored identities before session activation or
++    /// refresh-hash reconciliation. Requires a fresh multi-process client and
++    /// does not schedule encryption initialization. The identity constraint is
++    /// retained across later Olm regeneration. The caller must also disable
++    /// automatic token refresh and preflight persistent store paths.
++    #[cfg(feature = "e2e-encryption")]
++    #[instrument(skip_all)]
++    pub async fn restore_session_existing(
++        &self,
++        session: crate::authentication::oauth::OAuthSession,
++        room_load_settings: RoomLoadSettings,
++        curve25519: String,
++        ed25519: String,
++    ) -> Result<()> {
++        if self.auth_ctx().auth_data.get().is_some() || self.auth_ctx().handle_refresh_tokens {
++            return Err(Error::BadCryptoStoreState);
++        }
++        let CrossProcessLockConfig::MultiProcess { holder_name } = self.cross_process_lock_config()
++        else {
++            return Err(Error::BadCryptoStoreState);
++        };
++        self.encryption().enable_cross_process_store_lock(holder_name.clone()).await?;
++        let lock =
++            self.locks().cross_process_crypto_store_lock.get().ok_or(Error::BadCryptoStoreState)?;
++        let _guard = lock.try_lock_once().await.map_err(|error| {
++            Error::CrossProcessLockError(Box::new(
++                crate::cross_process_lock::CrossProcessLockError::TryLock(Arc::new(error)),
++            ))
++        })??;
++        self.base_client()
++            .require_existing_identity(&session.user.meta, curve25519, ed25519)
++            .await?;
++        Box::pin(self.oauth().restore_session_without_initialization(session, room_load_settings))
++            .await?;
++        self.olm_machine()
++            .await
++            .as_ref()
++            .ok_or(Error::NoOlmMachine)?
++            .initialize_crypto_store_generation(&self.locks().crypto_store_generation)
++            .await?;
++        Ok(())
++    }
++
+     /// Refresh the access token using the authentication API used to log into
+     /// this session.
+     ///
+diff --git a/crates/matrix-sdk/src/encryption/mod.rs b/crates/matrix-sdk/src/encryption/mod.rs
+index 92d9dec..f56167d 100644
+--- a/crates/matrix-sdk/src/encryption/mod.rs
++++ b/crates/matrix-sdk/src/encryption/mod.rs
+@@ -1983,12 +1983,10 @@ impl Encryption {
+         }
+ 
+         let olm_machine = self.client.base_client().olm_machine().await;
+-        let olm_machine = olm_machine.as_ref().ok_or(Error::NoOlmMachine)?;
+-
+-        let lock = olm_machine.store().create_store_lock(
+-            "cross_process_lock".to_owned(),
+-            CrossProcessLockConfig::multi_process(lock_value.to_owned()),
+-        );
++        let lock = self
++            .client
++            .base_client()
++            .create_crypto_store_lock(CrossProcessLockConfig::multi_process(lock_value.to_owned()));
+ 
+         // Gently try to initialize the crypto store generation counter.
+         //
+@@ -1998,7 +1996,9 @@ impl Encryption {
+         {
+             let lock_result = lock.try_lock_once().await?;
+ 
+-            if lock_result.is_ok() {
++            if lock_result.is_ok()
++                && let Some(olm_machine) = olm_machine.as_ref()
++            {
+                 olm_machine
+                     .initialize_crypto_store_generation(
+                         &self.client.locks().crypto_store_generation,
+diff --git a/crates/matrix-sdk/tests/atum_existing_device.rs b/crates/matrix-sdk/tests/atum_existing_device.rs
+new file mode 100644
+index 0000000..fd32708
+--- /dev/null
++++ b/crates/matrix-sdk/tests/atum_existing_device.rs
+@@ -0,0 +1,385 @@
++// Atum existing-device restoration regression tests. Synthetic data only.
++// SPDX-License-Identifier: Apache-2.0
++#![cfg(all(feature = "e2e-encryption", feature = "sqlite"))]
++
++use std::{
++    path::Path,
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++
++use matrix_sdk::{
++    Client, Error, SessionMeta, SessionTokens,
++    authentication::oauth::{OAuthError, OAuthSession, UserSession},
++    config::RequestConfig,
++    cross_process_lock::CrossProcessLockConfig,
++    encryption::CryptoStoreError,
++    store::RoomLoadSettings,
++};
++use matrix_sdk_base::{
++    BaseClient, DmRoomDefinition, ThreadingSupport,
++    crypto::{OlmMachineBuilder, store::CryptoStore},
++    store::StoreConfig,
++};
++use matrix_sdk_sqlite::SqliteCryptoStore;
++use oauth2::ClientId;
++use ruma::{api::MatrixVersion, device_id, user_id};
++use tempfile::TempDir;
++use wiremock::MockServer;
++
++const PASSPHRASE: &str = "atum-disposable-test-store-passphrase";
++
++fn session() -> OAuthSession {
++    OAuthSession {
++        client_id: ClientId::new("atum-disposable-test-client".into()),
++        user: UserSession {
++            meta: SessionMeta {
++                user_id: user_id!("@synthetic:atum.invalid").to_owned(),
++                device_id: device_id!("SYNTHETIC").to_owned(),
++            },
++            tokens: SessionTokens {
++                access_token: "not-an-access-token".into(),
++                refresh_token: Some("not-a-refresh-token".into()),
++            },
++        },
++    }
++}
++
++async fn seed(path: &Path) -> (String, String) {
++    let store = SqliteCryptoStore::open(path, Some(PASSPHRASE)).await.unwrap();
++    let meta = session().user.meta;
++    let machine = OlmMachineBuilder::new(&meta.user_id, &meta.device_id)
++        .with_crypto_store(store.clone())
++        .build()
++        .await
++        .unwrap();
++    let keys = machine.identity_keys();
++    let expected = (keys.curve25519.to_base64(), keys.ed25519.to_base64());
++    drop(machine);
++    store.close().await.unwrap();
++    expected
++}
++
++async fn client(path: &Path, server: &MockServer, holder: &str) -> Client {
++    Client::builder()
++        .homeserver_url(server.uri())
++        .disable_well_known_lookup(true)
++        .server_versions([MatrixVersion::V1_12])
++        .request_config(RequestConfig::new().disable_retry())
++        .sqlite_store(path, Some(PASSPHRASE))
++        .cross_process_store_config(CrossProcessLockConfig::multi_process(holder))
++        .build()
++        .await
++        .unwrap()
++}
++
++async fn surviving_keys(path: &Path) -> Option<(String, String)> {
++    let store = SqliteCryptoStore::open(path, Some(PASSPHRASE)).await.unwrap();
++    let account = store.load_account().await.unwrap();
++    let keys = account
++        .map(|a| (a.identity_keys().curve25519.to_base64(), a.identity_keys().ed25519.to_base64()));
++    store.close().await.unwrap();
++    keys
++}
++
++async fn restore(client: &Client, keys: &(String, String)) -> matrix_sdk::Result<()> {
++    client
++        .restore_session_existing(session(), RoomLoadSettings::All, keys.0.clone(), keys.1.clone())
++        .await
++}
++
++fn remove_synthetic_account(path: &Path) {
++    // Only the fresh TempDir owned by this test reaches here. Product code
++    // does not inspect SQL, remove rows, or repair a surviving database.
++    let database = path.join("matrix-sdk-crypto.sqlite3");
++    assert!(database.metadata().unwrap().len() > 0);
++    let connection = rusqlite::Connection::open(database).unwrap();
++    assert_eq!(connection.execute("DELETE FROM kv WHERE key = 'account'", []).unwrap(), 1);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn existing_identity_reopens_without_initialization_traffic() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    for holder in ["first", "relaunch"] {
++        let client = client(temp.path(), &server, holder).await;
++        restore(&client, &keys).await.unwrap();
++        assert!(client.user_id() == Some(&session().user.meta.user_id));
++        assert!(client.device_id() == Some(&session().user.meta.device_id));
++        assert!(client.session_tokens() == Some(session().user.tokens));
++        // Initialization schedules HTTP requests even with auto-* false on
++        // the original API. This deferred API must schedule none.
++        tokio::time::sleep(Duration::from_millis(200)).await;
++        assert_eq!(server.received_requests().await.unwrap().len(), 0);
++        client.pause().await.unwrap();
++        assert!(surviving_keys(temp.path()).await == Some(keys.clone()));
++        // The SDK lease expires naturally after its guard is released.
++        tokio::time::sleep(Duration::from_millis(750)).await;
++    }
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn missing_internal_account_is_refused_without_replacement() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    remove_synthetic_account(temp.path());
++    for holder in ["missing-first", "missing-retry"] {
++        let client = client(temp.path(), &server, holder).await;
++        assert!(matches!(restore(&client, &keys).await,
++            Err(Error::CryptoStoreError(e)) if matches!(*e, CryptoStoreError::AccountUnset)));
++        assert!(client.session_tokens().is_none());
++        assert!(client.user_id().is_none());
++        client.pause().await.unwrap();
++        assert!(surviving_keys(temp.path()).await.is_none());
++        assert!(temp.path().join("matrix-sdk-crypto.sqlite3").metadata().unwrap().len() > 0);
++        tokio::time::sleep(Duration::from_millis(750)).await;
++    }
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn wrong_keys_user_or_device_preserve_original_identity() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    for (index, wrong) in [0, 1, 2, 3].into_iter().enumerate() {
++        let client = client(temp.path(), &server, &format!("mismatch-{index}")).await;
++        let mut candidate = session();
++        let mut candidate_keys = keys.clone();
++        match wrong {
++            0 => candidate_keys.0 = "wrong-curve-key".into(),
++            1 => candidate_keys.1 = "wrong-ed-key".into(),
++            2 => candidate.user.meta.user_id = user_id!("@other:atum.invalid").to_owned(),
++            _ => candidate.user.meta.device_id = device_id!("OTHER").to_owned(),
++        }
++        let result = client
++            .restore_session_existing(
++                candidate,
++                RoomLoadSettings::All,
++                candidate_keys.0,
++                candidate_keys.1,
++            )
++            .await;
++        assert!(matches!(result, Err(Error::CryptoStoreError(e)) if matches!(*e,
++            CryptoStoreError::StoredIdentityMismatch | CryptoStoreError::MismatchedAccount { .. })));
++        assert!(client.session_tokens().is_none());
++        client.pause().await.unwrap();
++        assert!(surviving_keys(temp.path()).await == Some(keys.clone()));
++        tokio::time::sleep(Duration::from_millis(750)).await;
++    }
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn wrong_passphrase_refuses_open_and_preserves_identity() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    let result = Client::builder()
++        .homeserver_url(server.uri())
++        .sqlite_store(temp.path(), Some("wrong-synthetic-passphrase"))
++        .build()
++        .await;
++    assert!(result.is_err());
++    assert!(surviving_keys(temp.path()).await == Some(keys));
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn existing_restore_obeys_the_same_sdk_crypto_store_lease() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    let first = client(temp.path(), &server, "lease-holder").await;
++    // Construct the independent reader before holding the 500 ms SDK lease.
++    // Client construction is outside this test's assertion and can take more
++    // than one lease interval on a contended hosted runner.
++    let second = client(temp.path(), &server, "lease-contender").await;
++    first.encryption().enable_cross_process_store_lock("lease-holder".into()).await.unwrap();
++    let guard = first.encryption().try_lock_store_once().await.unwrap().unwrap();
++    assert!(matches!(restore(&second, &keys).await, Err(Error::CrossProcessLockError(_))));
++    assert!(second.session_tokens().is_none());
++    second.pause().await.unwrap();
++    assert!(surviving_keys(temp.path()).await == Some(keys.clone()));
++    drop(guard);
++    first.pause().await.unwrap();
++    tokio::time::sleep(Duration::from_millis(750)).await;
++    let fresh = client(temp.path(), &server, "after-release").await;
++    restore(&fresh, &keys).await.unwrap();
++    fresh.pause().await.unwrap();
++    assert!(surviving_keys(temp.path()).await == Some(keys));
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn later_regeneration_cannot_recreate_a_missing_identity() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    let store = SqliteCryptoStore::open(temp.path(), Some(PASSPHRASE)).await.unwrap();
++    let meta = session().user.meta;
++    let config = CrossProcessLockConfig::multi_process("regeneration-holder");
++    let base = BaseClient::new(
++        StoreConfig::new(config.clone()).crypto_store(store.clone()),
++        ThreadingSupport::Disabled,
++        DmRoomDefinition::default(),
++    );
++    let lock = base.create_crypto_store_lock(config);
++    let guard = lock.try_lock_once().await.unwrap().unwrap();
++    base.require_existing_identity(&meta, keys.0, keys.1).await.unwrap();
++    base.activate(meta, RoomLoadSettings::All, None).await.unwrap();
++    drop(guard);
++    base.close_stores().await.unwrap();
++    remove_synthetic_account(temp.path());
++    base.reopen_stores().await.unwrap();
++    let guard = lock.try_lock_once().await.unwrap().unwrap();
++    assert!(base.regenerate_olm(None).await.is_err());
++    assert!(store.load_account().await.unwrap().is_none());
++    drop(guard);
++    base.close_stores().await.unwrap();
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn corrupt_store_is_refused_without_repair() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    seed(temp.path()).await;
++    let database = temp.path().join("matrix-sdk-crypto.sqlite3");
++    let corrupted = b"synthetic-corrupt-store";
++    std::fs::write(&database, corrupted).unwrap();
++    let result = Client::builder()
++        .homeserver_url(server.uri())
++        .sqlite_store(temp.path(), Some(PASSPHRASE))
++        .build()
++        .await;
++    assert!(result.is_err());
++    assert_eq!(std::fs::read(database).unwrap(), corrupted);
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn automatic_refresh_and_authenticated_client_are_refused() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    let automatic = Client::builder()
++        .homeserver_url(server.uri())
++        .sqlite_store(temp.path(), Some(PASSPHRASE))
++        .handle_refresh_tokens()
++        .cross_process_store_config(CrossProcessLockConfig::multi_process("automatic"))
++        .build()
++        .await
++        .unwrap();
++    assert!(matches!(restore(&automatic, &keys).await, Err(Error::BadCryptoStoreState)));
++    assert!(automatic.session_tokens().is_none());
++    automatic.pause().await.unwrap();
++    let fresh = client(temp.path(), &server, "fresh").await;
++    restore(&fresh, &keys).await.unwrap();
++    assert!(matches!(restore(&fresh, &keys).await, Err(Error::BadCryptoStoreState)));
++    fresh.pause().await.unwrap();
++    assert!(surviving_keys(temp.path()).await == Some(keys));
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}
++
++async fn token_reader(
++    path: &Path,
++    server: &MockServer,
++    holder: &str,
++    current: SessionTokens,
++    unavailable: bool,
++) -> (Client, Arc<AtomicUsize>, Arc<AtomicUsize>) {
++    let client = client(path, server, holder).await;
++    client.oauth().enable_cross_process_refresh_lock(holder.to_owned()).await.unwrap();
++    let reads = Arc::new(AtomicUsize::new(0));
++    let saves = Arc::new(AtomicUsize::new(0));
++    let read_count = reads.clone();
++    let save_count = saves.clone();
++    client
++        .set_session_callbacks(
++            Box::new(move |_| {
++                read_count.fetch_add(1, Ordering::SeqCst);
++                if unavailable {
++                    Err(std::io::Error::other("synthetic-private-callback-error-detail").into())
++                } else {
++                    Ok(current.clone())
++                }
++            }),
++            Box::new(move |_| {
++                save_count.fetch_add(1, Ordering::SeqCst);
++                Ok(())
++            }),
++        )
++        .unwrap();
++    (client, reads, saves)
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn unavailable_authoritative_tokens_refuse_strict_restore_and_preserve_latest() {
++    let temp = TempDir::new().unwrap();
++    let server = MockServer::start().await;
++    let keys = seed(temp.path()).await;
++    let original = session();
++    let mut latest = original.clone();
++    latest.user.tokens.access_token = "not-a-new-access-token".into();
++    latest.user.tokens.refresh_token = Some("not-a-new-refresh-token".into());
++
++    let (first, reads, saves) =
++        token_reader(temp.path(), &server, "token-first", original.user.tokens.clone(), false)
++            .await;
++    restore(&first, &keys).await.unwrap();
++    assert_eq!(reads.load(Ordering::SeqCst), 0);
++    assert_eq!(saves.load(Ordering::SeqCst), 0);
++    first.pause().await.unwrap();
++    tokio::time::sleep(Duration::from_millis(750)).await;
++
++    let (replacement, reads, saves) =
++        token_reader(temp.path(), &server, "token-replacement", latest.user.tokens.clone(), false)
++            .await;
++    replacement
++        .restore_session_existing(
++            latest.clone(),
++            RoomLoadSettings::All,
++            keys.0.clone(),
++            keys.1.clone(),
++        )
++        .await
++        .unwrap();
++    assert!(replacement.session_tokens() == Some(latest.user.tokens.clone()));
++    assert_eq!(reads.load(Ordering::SeqCst), 1);
++    assert_eq!(saves.load(Ordering::SeqCst), 0);
++    replacement.pause().await.unwrap();
++    tokio::time::sleep(Duration::from_millis(750)).await;
++
++    let (unavailable, reads, saves) =
++        token_reader(temp.path(), &server, "token-unavailable", latest.user.tokens.clone(), true)
++            .await;
++    let error = restore(&unavailable, &keys)
++        .await
++        .expect_err("Unavailable authority must refuse strict restore");
++    assert!(!error.to_string().contains("synthetic-private-callback-error-detail"));
++    assert!(error.to_string().contains("authoritative current session is unavailable"));
++    assert!(matches!(error, Error::OAuth(error) if matches!(*error, OAuthError::LockError(_))));
++    assert_eq!(reads.load(Ordering::SeqCst), 1);
++    assert_eq!(saves.load(Ordering::SeqCst), 0);
++    unavailable.pause().await.unwrap();
++    assert!(surviving_keys(temp.path()).await == Some(keys.clone()));
++    tokio::time::sleep(Duration::from_millis(750)).await;
++
++    // A failed stale read must not clobber the stored latest-token hash: a new
++    // reader starting from the original input still reloads the latest tokens.
++    let (fresh, reads, saves) =
++        token_reader(temp.path(), &server, "token-fresh", latest.user.tokens.clone(), false).await;
++    restore(&fresh, &keys).await.unwrap();
++    assert!(fresh.session_tokens() == Some(latest.user.tokens));
++    assert_eq!(reads.load(Ordering::SeqCst), 1);
++    assert_eq!(saves.load(Ordering::SeqCst), 0);
++    fresh.pause().await.unwrap();
++    assert!(surviving_keys(temp.path()).await == Some(keys));
++    assert_eq!(server.received_requests().await.unwrap().len(), 0);
++}

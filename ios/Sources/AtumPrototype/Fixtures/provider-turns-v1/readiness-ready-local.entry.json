@@ -1,0 +1,10 @@
+{
+  "principal": "00000000-0000-4000-8000-cb479c1a915e",
+  "id": "00000000-0000-4000-8000-53cc8fd729d5",
+  "display_name": "Atum",
+  "readiness": {
+    "state": "ready",
+    "executorKind": "local",
+    "observedAt": 1791200000000
+  }
+}

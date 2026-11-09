@@ -1,0 +1,8 @@
+{
+  "principal": "00000000-0000-4000-8000-cb479c1a915e",
+  "readiness": {
+    "state": "offline",
+    "executorKind": null,
+    "observedAt": 1791200000000
+  }
+}

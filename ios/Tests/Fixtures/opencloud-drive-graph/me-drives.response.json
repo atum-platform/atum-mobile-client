@@ -1,0 +1,42 @@
+{
+  "@odata.context": "https://drive.atum.test/graph/v1.0/$metadata#drives",
+  "value": [
+    {
+      "driveAlias": "virtual/shares",
+      "driveType": "virtual",
+      "id": "storage-fixture$shares-fixture",
+      "name": "Shares",
+      "root": {
+        "eTag": "DECAFC00FEE",
+        "id": "storage-fixture$shares-fixture",
+        "webDavUrl": "https://drive.atum.test/dav/spaces/storage-fixture$shares-fixture"
+      },
+      "webUrl": "https://drive.atum.test/f/storage-fixture$shares-fixture"
+    },
+    {
+      "driveAlias": "personal/fixture-owner",
+      "driveType": "personal",
+      "id": "storage-fixture$space-fixture",
+      "lastModifiedDateTime": "2026-10-25T08:12:13.455527853Z",
+      "name": "Fixture owner",
+      "owner": {
+        "user": {
+          "displayName": "Fixture owner",
+          "id": "fixture-owner-id"
+        }
+      },
+      "quota": {
+        "remaining": 999853685,
+        "state": "normal",
+        "total": 1000000000,
+        "used": 146315
+      },
+      "root": {
+        "eTag": "\"910af0061161c42d8d1224df6c4a2527\"",
+        "id": "storage-fixture$space-fixture",
+        "webDavUrl": "https://drive.atum.test/dav/spaces/storage-fixture$space-fixture"
+      },
+      "webUrl": "https://drive.atum.test/f/storage-fixture$space-fixture"
+    }
+  ]
+}

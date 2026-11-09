@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "from": "invited",
+      "to": "revoking",
+      "event": "withdraw"
+    },
+    {
+      "from": "revoking",
+      "to": "removed",
+      "event": "bans_witnessed"
+    }
+  ]
+}

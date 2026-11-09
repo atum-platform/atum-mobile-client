@@ -1,0 +1,22 @@
+{
+  "kind": "http",
+  "app_id": "com.atum.mobile.ios.prod",
+  "pushkey": "0000000000000000000000000000000000000000000000000000000000000000",
+  "app_display_name": "Atum",
+  "device_display_name": "iPhone",
+  "lang": "vi",
+  "append": false,
+  "data": {
+    "url": "https://push.atumplatform.com/_matrix/push/v1/notify",
+    "format": "event_id_only",
+    "default_payload": {
+      "aps": {
+        "mutable-content": 1,
+        "alert": {
+          "loc-key": "ATUM_NEW_MESSAGE",
+          "body": "Hi"
+        }
+      }
+    }
+  }
+}

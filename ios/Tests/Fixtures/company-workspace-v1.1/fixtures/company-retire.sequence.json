@@ -1,0 +1,9 @@
+{
+  "steps": [
+    {
+      "from": "active",
+      "to": "retired",
+      "event": "last_active_member_left"
+    }
+  ]
+}

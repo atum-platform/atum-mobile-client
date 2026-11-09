@@ -1,0 +1,2 @@
+const Olm=require('@matrix-org/olm');
+Olm.init().then(()=>{let a=new Olm.Account(); a.create();let s=new Olm.OutboundGroupSession();s.create();let inbound=new Olm.InboundGroupSession();inbound.create(s.session_key());console.log(JSON.stringify({sender_key:JSON.parse(a.identity_keys()).curve25519,session_id:s.session_id(),session_key:inbound.export_session(0)}));inbound.free();s.free();a.free();});

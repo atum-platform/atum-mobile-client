@@ -1,0 +1,11 @@
+{
+  "client_id": "01M4SYXQ8KGGTZFVC9F484ZAA6",
+  "client_name": "Atum for iPhone (Drive)",
+  "client_auth_method": "none",
+  "redirect_uris": ["https://api.atumplatform.com/oauth/ios/callback"],
+  "scopes": ["openid"],
+  "pkce_method": "S256",
+  "state": true,
+  "nonce": true,
+  "dynamic_registration": false
+}

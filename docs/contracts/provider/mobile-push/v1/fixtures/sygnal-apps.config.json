@@ -1,0 +1,20 @@
+{
+  "com.atum.mobile.ios.prod": {
+    "type": "apns",
+    "keyfile": "/config/apns-key.p8",
+    "key_id": "TESTKEY000",
+    "team_id": "TESTTEAM00",
+    "topic": "com.atum.mobile",
+    "push_type": "alert",
+    "platform": "production"
+  },
+  "com.atum.mobile.ios.dev": {
+    "type": "apns",
+    "keyfile": "/config/apns-key.p8",
+    "key_id": "TESTKEY000",
+    "team_id": "TESTTEAM00",
+    "topic": "com.atum.mobile",
+    "push_type": "alert",
+    "platform": "sandbox"
+  }
+}

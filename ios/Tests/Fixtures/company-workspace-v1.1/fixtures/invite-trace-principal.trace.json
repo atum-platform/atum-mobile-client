@@ -1,0 +1,33 @@
+{
+  "directory": [
+    {
+      "handle": "lan_nguyen",
+      "person": "lan",
+      "kind": "human",
+      "inCompany": false,
+      "principal": "00000000-0000-4000-8000-3ce144c9fd70"
+    }
+  ],
+  "steps": [
+    {
+      "do": "invite",
+      "request": "r1",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "invited",
+        "person": "lan"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "r1",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "invited",
+        "person": "lan"
+      }
+    }
+  ]
+}

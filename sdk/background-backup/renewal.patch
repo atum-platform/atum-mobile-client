@@ -1,0 +1,156 @@
+--- a/crates/matrix-sdk/src/encryption/tasks.rs
++++ b/crates/matrix-sdk/src/encryption/tasks.rs
+@@ -601,7 +601,16 @@
+ #[cfg(all(test, not(target_family = "wasm")))]
+ mod test {
+     #[cfg(feature = "sqlite")]
+-    use std::{path::Path, sync::Arc, time::Duration};
++    use std::{
++        path::Path,
++        sync::{
++            Arc,
++            atomic::{AtomicBool, Ordering},
++            mpsc,
++        },
++        thread,
++        time::Duration,
++    };
+ 
+     #[cfg(feature = "sqlite")]
+     use matrix_sdk_base::{
+@@ -621,7 +630,7 @@
+     use ruma::{event_id, room_id};
+     use serde_json::json;
+     #[cfg(feature = "sqlite")]
+-    use tokio::sync::Notify;
++    use tokio::sync::{Notify, oneshot};
+     use wiremock::MockServer;
+     #[cfg(feature = "sqlite")]
+     use wiremock::{
+@@ -903,6 +912,126 @@
+         assert!(current.store().is_usable());
+     }
+ 
++    /// Suspending the runtime that renews A's lease lets B replace its sqlite
++    /// epoch. A must reject the delayed HTTP acknowledgement, preserving the
++    /// pending key for a fresh owner.
++    #[cfg(feature = "sqlite")]
++    #[async_test]
++    async fn test_default_backup_operation_suspension_loses_lease_without_ack() {
++        let (directory, server, background, keys) = pending_backup_fixture().await;
++        let path = directory.path().to_owned();
++
++        // Keep A's real epoch alive while the installed uploader acquires its
++        // re-entrant operation guard. This gives the replacement guard an
++        // exact epoch to supersede, without substituting the uploader itself.
++        let a_guard = background.encryption().spin_lock_store(None).await.unwrap().unwrap();
++        let a_epoch = a_guard.lease_identity().unwrap().2;
++        let machine_a = background.olm_machine().await.as_ref().unwrap().clone();
++
++        // B opens its own sqlite connection before A is suspended, so the
++        // suspension interval measures only the real lease hand-off.
++        let (b_ready_tx, b_ready_rx) = mpsc::sync_channel(1);
++        let (b_start_tx, b_start_rx) = mpsc::sync_channel(1);
++        let (b_claimed_tx, b_claimed_rx) = mpsc::sync_channel(1);
++        let (b_counts_tx, b_counts_rx) = mpsc::sync_channel(1);
++        let (ack_observed_tx, ack_observed_rx) = oneshot::channel();
++        let (b_release_tx, b_release_rx) = oneshot::channel();
++        let a_resumed = Arc::new(AtomicBool::new(false));
++        let b_resumed = a_resumed.clone();
++
++        let b_thread = thread::spawn(move || {
++            let runtime =
++                tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
++            runtime.block_on(async move {
++                let (store_b, lock_b) = backup_contender(&path).await;
++                b_ready_tx.send(()).unwrap();
++                b_start_rx.recv().unwrap();
++
++                let holder_b = backup_acquire(&lock_b).await;
++                let b_epoch = holder_b.lease_identity().unwrap().2;
++                b_claimed_tx.send((b_epoch, !b_resumed.load(Ordering::Acquire))).unwrap();
++
++                // This await leaves B's current-thread runtime free to run
++                // the guard's real lease-renewal task through A's response.
++                ack_observed_rx.await.unwrap();
++                let counts = store_b.inbound_group_session_counts(Some("1")).await.unwrap();
++                b_counts_tx.send((counts.total, counts.backed_up)).unwrap();
++
++                b_release_rx.await.unwrap();
++                drop(holder_b);
++                tokio::time::sleep(Duration::from_millis(100)).await;
++                drop(lock_b);
++                store_b.close().await.unwrap();
++            });
++        });
++
++        b_ready_rx.recv_timeout(Duration::from_secs(5)).expect("B must open before suspension");
++
++        let entered = Arc::new(Notify::new());
++        backup_response(&server, entered.clone(), Duration::from_millis(1400)).await;
++        background.encryption().backups().maybe_trigger_backup();
++        tokio::time::timeout(Duration::from_secs(3), entered.notified())
++            .await
++            .expect("installed uploader must own A's epoch through the delayed PUT");
++
++        b_start_tx.send(()).unwrap();
++
++        // `async_test` uses a current-thread runtime, so this freezes both A's
++        // uploader and its 500ms lease heartbeat in the same way as an app
++        // suspension would.
++        thread::sleep(Duration::from_millis(750));
++        a_resumed.store(true, Ordering::Release);
++
++        let (b_epoch, b_claimed_while_a_suspended) = b_claimed_rx
++            .try_recv()
++            .expect("B must synchronously claim the replacement epoch before A resumes");
++        assert!(b_claimed_while_a_suspended, "B claimed only after A resumed");
++        assert!(b_epoch > a_epoch, "B must replace A's actual lease epoch");
++
++        // The delayed response has now been consumed by A. A stale lease must
++        // reject its acknowledgement and retire the old machine rather than
++        // marking B's durable key as backed up.
++        tokio::time::timeout(Duration::from_secs(5), async {
++            while machine_a.store().is_usable() {
++                tokio::time::sleep(Duration::from_millis(10)).await;
++            }
++        })
++        .await
++        .expect("A must observe its stale acknowledgement before B releases");
++        assert!(!machine_a.store().is_usable(), "A's old machine must be retired");
++        ack_observed_tx.send(()).unwrap();
++
++        let b_counts = b_counts_rx
++            .recv_timeout(Duration::from_secs(5))
++            .expect("B must inspect the raw sqlite key while retaining the replacement guard");
++        assert_eq!(b_counts, (1, 0), "A's stale acknowledgement must not mark B's key backed up");
++        server.verify().await;
++
++        drop(a_guard);
++        b_release_tx.send(()).unwrap();
++        b_thread.join().expect("B's runtime must finish cleanly");
++
++        let fresh = backup_baseline_client(directory.path(), &server, keys.clone()).await;
++        let fresh_guard = fresh.encryption().spin_lock_store(None).await.unwrap().unwrap();
++        let fresh_machine = fresh.olm_machine().await.as_ref().unwrap().clone();
++        assert_eq!(
++            (
++                fresh_machine.identity_keys().curve25519.to_base64(),
++                fresh_machine.identity_keys().ed25519.to_base64()
++            ),
++            keys
++        );
++        assert!(fresh_machine.store().is_usable());
++        let fresh_counts =
++            fresh_machine.store().inbound_group_session_counts(Some("1")).await.unwrap();
++        assert_eq!(
++            (fresh_counts.total, fresh_counts.backed_up),
++            (1, 0),
++            "the fresh guarded client must retain A's pending key"
++        );
++        drop(fresh_guard);
++    }
++
+     // Test that, if backups are not enabled, we don't incorrectly mark a room
+     // key as downloaded.
+     #[async_test]

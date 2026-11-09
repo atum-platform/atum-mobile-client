@@ -1,0 +1,119 @@
+{
+  "comment": "Exported glyph alias (glyphs.json) -> Phosphor icon in atum-kit phosphor-icons.json. Weight is light unless 'fill'. Kit STYLE §8: Phosphor Light; Fill only for a selected state.",
+  "aliases": {
+    "AlertCircle": "warning-circle",
+    "AlertTriangle": "warning",
+    "ArrowBackUp": "arrow-bend-up-left",
+    "ArrowDown": "arrow-down",
+    "ArrowLeft": "arrow-left",
+    "ArrowUp": "arrow-up",
+    "ArrowUpRight": "arrow-up-right",
+    "Bell": "bell",
+    "BellOff": "bell-slash",
+    "Briefcase": "briefcase",
+    "BriefcaseFilled": {
+      "name": "briefcase",
+      "weight": "fill"
+    },
+    "Check": "check",
+    "CheckCircle2": "check-circle",
+    "ChevronDown": "caret-down",
+    "ChevronLeft": "caret-left",
+    "ChevronRight": "caret-right",
+    "ChevronUpDown": "caret-up-down",
+    "Circle": "circle",
+    "Clock": "clock",
+    "CloudOff": "cloud-slash",
+    "Compass": "compass",
+    "CompassFilled": {
+      "name": "compass",
+      "weight": "fill"
+    },
+    "ComposePencil": "note-pencil",
+    "Copy": "copy",
+    "DeviceMobile": "device-mobile",
+    "Eye": "eye",
+    "EyeOff": "eye-slash",
+    "File": "file",
+    "FileImage": "image",
+    "FileMusic": "file-audio",
+    "FileSpreadsheet": "file-xls",
+    "FileText": "file-text",
+    "FileTypePdf": "file-pdf",
+    "FileTypePpt": "file-ppt",
+    "FileZip": "file-zip",
+    "Folder": "folder-simple",
+    "FolderFilled": {
+      "name": "folder-simple",
+      "weight": "fill"
+    },
+    "Globe": "globe",
+    "Hash": "hash",
+    "HelpCircle": "question",
+    "History": "clock-counter-clockwise",
+    "Home": "house",
+    "HomeFilled": {
+      "name": "house",
+      "weight": "fill"
+    },
+    "Info": "info",
+    "KeyRound": "key",
+    "Link": "link",
+    "LogOut": "sign-out",
+    "Mail": "envelope-simple",
+    "MailOpened": "envelope-simple-open",
+    "MessageCircle": "chat-circle",
+    "MessageCircleFilled": {
+      "name": "chat-circle",
+      "weight": "fill"
+    },
+    "Mic": "microphone",
+    "MoreHorizontal": "dots-three",
+    "Movie": "film-strip",
+    "PawPrint": "paw-print",
+    "Pencil": "pencil-simple",
+    "Photo": "image",
+    "Pin": "push-pin",
+    "PinFilled": {
+      "name": "push-pin",
+      "weight": "fill"
+    },
+    "PinOff": "push-pin-slash",
+    "Plus": "plus",
+    "Refresh": "arrow-clockwise",
+    "RosetteCheck": "seal-check",
+    "RosetteCheckFilled": {
+      "name": "seal-check",
+      "weight": "fill"
+    },
+    "Search": "magnifying-glass",
+    "Settings": "gear",
+    "Share": "share-network",
+    "Shield": "shield",
+    "SlidersHorizontal": "sliders-horizontal",
+    "Smiley": "smiley",
+    "Sparkles": "sparkle",
+    "Star": "star",
+    "StarFilled": {
+      "name": "star",
+      "weight": "fill"
+    },
+    "StopFilled": {
+      "name": "stop",
+      "weight": "fill"
+    },
+    "Sun": "sun",
+    "TextCursor": "text-aa",
+    "ThumbsDown": "thumbs-down",
+    "ThumbsUp": "thumbs-up",
+    "Trash2": "trash",
+    "User": "user",
+    "UserCircle": "user-circle",
+    "UserCircleFilled": {
+      "name": "user-circle",
+      "weight": "fill"
+    },
+    "Users": "users",
+    "X": "x"
+  }
+}

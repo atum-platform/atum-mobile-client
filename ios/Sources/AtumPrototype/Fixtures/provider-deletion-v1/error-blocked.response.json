@@ -1,0 +1,9 @@
+{
+  "error": "matrix_409",
+  "details": {
+    "reason": "deletion_blocked",
+    "blockers": [
+      "seller_payout_pending"
+    ]
+  }
+}

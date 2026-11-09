@@ -1,0 +1,425 @@
+{
+  "contract_id": "atum.mobile-drive",
+  "version": 1,
+  "status": "frozen",
+  "pack_files": [
+    "README.md",
+    "contract.json",
+    "fixtures/account-active.response.json",
+    "fixtures/account-subject-leak.response.json",
+    "fixtures/admission-desktop.facts.json",
+    "fixtures/admission-domain.facts.json",
+    "fixtures/admission-ios-drive.facts.json",
+    "fixtures/client-registration-secret.json",
+    "fixtures/client-registration-wrong-id.json",
+    "fixtures/client-registration.json",
+    "fixtures/denial-provider-detail.json",
+    "fixtures/denial-provisioning.json",
+    "fixtures/download.json",
+    "fixtures/page-incomplete.json",
+    "fixtures/page.json"
+  ],
+  "dependencies": [
+    {
+      "contract": "atum.drive-identity/2",
+      "path": "../../drive-identity/v2",
+      "sha256": "3dac3c255832992b8ddf149c0c615e4059399c55cb03166b9e96b26750b85cd7"
+    },
+    {
+      "contract": "atum.mobile-native-api/1",
+      "path": "../../mobile-native-api/v1",
+      "sha256": "c651192fd0b9042628c47f370b23958437a04d847cf033ed6cd34956e7c32bfd"
+    }
+  ],
+  "types": {
+    "ulid": {
+      "type": "string",
+      "pattern": "[0-9A-HJKMNP-TV-Z]{26}"
+    },
+    "ios_drive_client_id": {
+      "const": "01M4SYXQ8KGGTZFVC9F484ZAA6"
+    },
+    "desktop_drive_client_id": {
+      "const": "01JDRVCMPNXQ7R8S9T0V2W3X4Y"
+    },
+    "drive_state": {
+      "enum": [
+        "provisioning",
+        "active",
+        "suspended",
+        "deleting",
+        "deleted"
+      ]
+    },
+    "drive_item": {
+      "type": "object",
+      "required": {
+        "id": {
+          "type": "string",
+          "min": 1,
+          "max": 1024
+        },
+        "name": {
+          "type": "string",
+          "min": 1,
+          "max": 255,
+          "pattern": "[^/\\\\\\u0000-\\u001f]+"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "folder"
+          ]
+        },
+        "etag": {
+          "type": "string",
+          "min": 1,
+          "max": 1024
+        },
+        "size": {
+          "type": "integer",
+          "min": 0,
+          "max": 9007199254740991
+        },
+        "webDavUrl": {
+          "type": "string",
+          "min": 30,
+          "max": 4096,
+          "pattern": "https://drive[.]atum[.]test/dav/spaces/[!-~]+"
+        }
+      }
+    },
+    "denial_reason": {
+      "enum": [
+        "missing_token",
+        "inactive",
+        "expired",
+        "wrong_client",
+        "wrong_scope",
+        "wrong_issuer",
+        "unsupported_credential",
+        "not_allowed",
+        "not_provisioned",
+        "not_human",
+        "suspended",
+        "not_owner",
+        "route_not_allowed",
+        "invalid_path",
+        "invalid_destination",
+        "depth_not_allowed",
+        "public_links_disabled",
+        "provisioning",
+        "provider_unavailable"
+      ]
+    }
+  },
+  "directions": {
+    "configuration_to_mobile": {
+      "forbidden_fields": [
+        "clientSecret",
+        "client_secret",
+        "accessToken",
+        "refreshToken",
+        "subject",
+        "principal",
+        "owner"
+      ]
+    },
+    "provider_to_mobile": {
+      "forbidden_fields": [
+        "clientSecret",
+        "client_secret",
+        "accessToken",
+        "refreshToken",
+        "subject",
+        "principal",
+        "owner",
+        "opencloudUserId",
+        "personalSpaceId",
+        "rawError",
+        "stderr"
+      ]
+    },
+    "mobile_to_provider": {
+      "forbidden_fields": [
+        "clientSecret",
+        "client_secret",
+        "owner",
+        "subject",
+        "principal",
+        "opencloudUserId"
+      ]
+    }
+  },
+  "messages": {
+    "ios.drive_client_registration": {
+      "direction": "configuration_to_mobile",
+      "schema": {
+        "type": "object",
+        "required": {
+          "client_id": {
+            "ref": "ios_drive_client_id"
+          },
+          "client_name": {
+            "const": "Atum for iPhone (Drive)"
+          },
+          "client_auth_method": {
+            "const": "none"
+          },
+          "redirect_uris": {
+            "type": "array",
+            "min": 1,
+            "max": 1,
+            "unique": true,
+            "items": {
+              "const": "https://api.atumplatform.com/oauth/ios/callback"
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "min": 1,
+            "max": 1,
+            "unique": true,
+            "items": {
+              "const": "openid"
+            }
+          },
+          "pkce_method": {
+            "const": "S256"
+          },
+          "state": {
+            "const": true
+          },
+          "nonce": {
+            "const": true
+          },
+          "dynamic_registration": {
+            "const": false
+          }
+        }
+      }
+    },
+    "ios.drive_account": {
+      "direction": "provider_to_mobile",
+      "schema": {
+        "type": "object",
+        "required": {
+          "state": {
+            "ref": "drive_state"
+          },
+          "serverUrl": {
+            "const": "https://drive.atum.test"
+          }
+        }
+      }
+    },
+    "ios.drive_admission": {
+      "direction": "provider_to_mobile",
+      "schema": {
+        "type": "object",
+        "required": {
+          "active": {
+            "const": true
+          },
+          "tokenType": {
+            "const": "access_token"
+          },
+          "clientId": {
+            "anyOf": [
+              {
+                "ref": "desktop_drive_client_id"
+              },
+              {
+                "ref": "ios_drive_client_id"
+              }
+            ]
+          },
+          "scope": {
+            "const": "openid"
+          }
+        }
+      }
+    },
+    "ios.drive_page": {
+      "direction": "provider_to_mobile",
+      "schema": {
+        "type": "object",
+        "required": {
+          "driveId": {
+            "type": "string",
+            "min": 3,
+            "max": 512,
+            "pattern": "[!-#%-~]+[$][!-#%-~]+"
+          },
+          "parentId": {
+            "type": "string",
+            "min": 1,
+            "max": 1024
+          },
+          "complete": {
+            "const": true
+          },
+          "items": {
+            "type": "array",
+            "min": 0,
+            "max": 5000,
+            "items": {
+              "ref": "drive_item"
+            }
+          }
+        },
+        "optional": {
+          "nextCursor": {
+            "type": "string",
+            "min": 1,
+            "max": 4096
+          }
+        }
+      }
+    },
+    "ios.drive_download": {
+      "direction": "provider_to_mobile",
+      "schema": {
+        "type": "object",
+        "required": {
+          "itemId": {
+            "type": "string",
+            "min": 1,
+            "max": 1024
+          },
+          "etag": {
+            "type": "string",
+            "min": 1,
+            "max": 1024
+          },
+          "size": {
+            "type": "integer",
+            "min": 0,
+            "max": 9007199254740991
+          },
+          "webDavUrl": {
+            "type": "string",
+            "min": 30,
+            "max": 4096,
+            "pattern": "https://drive[.]atum[.]test/dav/spaces/[!-~]+"
+          },
+          "atomic": {
+            "const": true
+          }
+        }
+      }
+    },
+    "ios.drive_denial": {
+      "direction": "provider_to_mobile",
+      "schema": {
+        "type": "object",
+        "required": {
+          "status": {
+            "anyOf": [
+              {
+                "const": 400
+              },
+              {
+                "const": 401
+              },
+              {
+                "const": 403
+              },
+              {
+                "const": 404
+              },
+              {
+                "const": 503
+              }
+            ]
+          },
+          "reason": {
+            "ref": "denial_reason"
+          }
+        },
+        "optional": {
+          "retryAfter": {
+            "type": "integer",
+            "min": 1,
+            "max": 300
+          }
+        }
+      }
+    }
+  },
+  "invariants": [],
+  "state_machines": {},
+  "fixtures": [
+    {
+      "file": "fixtures/account-active.response.json",
+      "message": "ios.drive_account",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/account-subject-leak.response.json",
+      "message": "ios.drive_account",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/admission-desktop.facts.json",
+      "message": "ios.drive_admission",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/admission-domain.facts.json",
+      "message": "ios.drive_admission",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/admission-ios-drive.facts.json",
+      "message": "ios.drive_admission",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/client-registration-secret.json",
+      "message": "ios.drive_client_registration",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/client-registration-wrong-id.json",
+      "message": "ios.drive_client_registration",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/client-registration.json",
+      "message": "ios.drive_client_registration",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/denial-provider-detail.json",
+      "message": "ios.drive_denial",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/denial-provisioning.json",
+      "message": "ios.drive_denial",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/download.json",
+      "message": "ios.drive_download",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/page-incomplete.json",
+      "message": "ios.drive_page",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/page.json",
+      "message": "ios.drive_page",
+      "expect": "accept"
+    }
+  ]
+}

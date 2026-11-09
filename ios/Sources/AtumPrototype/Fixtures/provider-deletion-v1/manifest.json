@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.account-deletion",
+  "version": 1,
+  "providerCommit": "7759bc63161e6c5a056eb6fea942195037ee6a9a",
+  "packSHA256": "c0bce141072921c3416af0fb57ab1e48d81889c7f8d4ef0321f08ad6d3465467",
+  "fixtures": [
+    {
+      "file": "status-none.response.json",
+      "message": "deletion.status.response",
+      "expect": "accept",
+      "sha256": "51d9767a2643b7e300132f19503cc18a2b6932de38b028ddf3ba3600e504327b"
+    },
+    {
+      "file": "status-blocked.response.json",
+      "message": "deletion.status.response",
+      "expect": "accept",
+      "sha256": "fb7164d46196ec57aedd93457e65597667f90f4d34a2d5fa41e8abc312a15f75"
+    },
+    {
+      "file": "status-with-apple-link.response.json",
+      "message": "deletion.status.response",
+      "expect": "accept",
+      "sha256": "3a5bf3aa413f1b08e3246f46a425c4dc2c73f9cee43eeea3e180eec777c13eaf"
+    },
+    {
+      "file": "status-old-requested-state.response.json",
+      "message": "deletion.status.response",
+      "expect": "reject",
+      "violation": "enum",
+      "sha256": "016df14f7b6f06ffc787a145847e8c8ef8a0dc906d2716af26ee8994077b8236"
+    },
+    {
+      "file": "status-without-protons.response.json",
+      "message": "deletion.status.response",
+      "expect": "reject",
+      "violation": "missing",
+      "sha256": "c8b94230b87a1a9937d7bdbc8216db0028ad2eff65d30b5dbedd195da1157e22"
+    },
+    {
+      "file": "request.json",
+      "message": "deletion.request",
+      "expect": "accept",
+      "sha256": "5992aa7ae1a7483d1090e5289843e49d22cb6b28a584672d0d5bd4525d18629f"
+    },
+    {
+      "file": "request-with-apple-code.json",
+      "message": "deletion.request",
+      "expect": "accept",
+      "sha256": "29c3f7e9de2b71c7337b2e387ed43ffecd6f16c1104dd5b42f39675861d0db3f"
+    },
+    {
+      "file": "request-wrong-confirmation.json",
+      "message": "deletion.request",
+      "expect": "reject",
+      "violation": "const",
+      "sha256": "35896b4019116f26bbb2606428a676c9d5c87fe2dbb741343daffa676bc60ead"
+    },
+    {
+      "file": "request-names-principal.json",
+      "message": "deletion.request",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "fc82d8fa538c77dd0218ffbda4b7ccf75a0e65bb9b64537a3b338e1131a996a8"
+    },
+    {
+      "file": "accepted.response.json",
+      "message": "deletion.accepted.response",
+      "expect": "accept",
+      "sha256": "cfe7d6ebfdc4ff032458e35fe7819434091f9889383df7f1d874d3427911a5c2"
+    },
+    {
+      "file": "progress-in-progress.response.json",
+      "message": "deletion.progress.response",
+      "expect": "accept",
+      "sha256": "d5797e74c041289b114abec7edb045df4960558fd2bfc453d582e6c1d784e3a1"
+    },
+    {
+      "file": "progress-completed.response.json",
+      "message": "deletion.progress.response",
+      "expect": "accept",
+      "sha256": "361573cc21a65b2c94e3b8f974302e35cf849c5fb57db3433bf032a4815e2be1"
+    },
+    {
+      "file": "progress-names-principal.response.json",
+      "message": "deletion.progress.response",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "0116e8b5dbad6dfbf096d060d37993f5f1c798cc26f3929a1a050a305cfcad0e"
+    },
+    {
+      "file": "error-blocked.response.json",
+      "message": "deletion.error.response",
+      "expect": "accept",
+      "sha256": "ac394815a7e42122ea58fb30446cb1f6cc0a808dbaad94296b8582508194b4d6"
+    },
+    {
+      "file": "error-already-requested.response.json",
+      "message": "deletion.error.response",
+      "expect": "accept",
+      "sha256": "87608979798a7ca58878a9cff4250daa4102b81164fbe48f68a3e4955b7ce673"
+    },
+    {
+      "file": "error-request-conflict.response.json",
+      "message": "deletion.error.response",
+      "expect": "accept",
+      "sha256": "17939d15e325f8bf6a4a33da41618eae0162f0896192cc291ed5776168476b6a"
+    },
+    {
+      "file": "error-deactivation-called-deletion.response.json",
+      "message": "deletion.error.response",
+      "expect": "reject",
+      "violation": "enum",
+      "sha256": "c84a6321fe7a3cba9af23132498d4ad1367bb1cafd91288acf6c7a1fd881fe67"
+    }
+  ]
+}

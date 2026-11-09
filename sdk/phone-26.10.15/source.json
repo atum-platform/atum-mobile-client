@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "runtimeSelected": false,
+  "status": "SOURCE_PATCH_CANDIDATE_NOT_DISTRIBUTED",
+  "upstreamURL": "https://github.com/matrix-org/matrix-rust-sdk.git",
+  "upstreamRevision": "97a1589b70bd122c1d66e0d68ea008d8554076a5",
+  "swiftDistribution": {
+    "url": "https://github.com/element-hq/matrix-rust-components-swift.git",
+    "revision": "dbdf59e13d0eade7fd9cbd01cfd564693b85b761",
+    "release": "26.10.15",
+    "officialBinarySHA256": "38a5321ebaeea65bc162b838330c70812f967e1a5fd878c649ce9ff3d6dbc853"
+  },
+  "license": "Apache-2.0",
+  "licenseSHA256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+  "rustToolchain": "1.96.0",
+  "patch": "sdk/phone-26.10.15/atum-phone.patch",
+  "patchSHA256": "95f59c307870207e4f518a95dfc4786d935c5ef62599047d5997ae4aac23d708",
+  "preimageSHA256": {
+    "bindings/matrix-sdk-ffi/src/room/mod.rs": "51e051f7e96237fda4116757643e0684f37f56f3f620293827bd34816df20d7d",
+    "crates/matrix-sdk-ui/src/room_list_service/mod.rs": "a640b115a2c66e330ef86a79d23a1ec4531d2eff1fe3be1632208f0269ea9f2c",
+    "crates/matrix-sdk-ui/tests/integration/room_list_service.rs": "4e41efbd13c8c0cb48af7db978a9e780029907da6b7614c52a182a51671f4523",
+    "crates/matrix-sdk/src/error.rs": "3e926d4b5141ceabddb6a4591e2e07a387fde8972c67b2817f6222e257948796",
+    "crates/matrix-sdk/tests/integration/send_queue.rs": "2fac4ad67353bc7fb53c4c3c562f83561c666e6db44bd6c8f1be1350e9a4422b"
+  },
+  "patchedSHA256": {
+    "bindings/matrix-sdk-ffi/src/room/mod.rs": "a99e0b968ed8f4b248f5653b2e6f1f448a3f9595c1fcc1ff18db505d4c6d84ba",
+    "crates/matrix-sdk-ui/src/room_list_service/mod.rs": "608fb530bdfd46714398b697c304c4a3a7831943088063f4446ee3e515e015c0",
+    "crates/matrix-sdk-ui/tests/integration/room_list_service.rs": "1c4770bf419cd77a8de29a2d3abfbf6a79836452f787accbb5636cc5c29882d7",
+    "crates/matrix-sdk/src/error.rs": "dcf374e1939916374a6cd197940b258d61f0b2137bb531d6d3e207dfac84ace3",
+    "crates/matrix-sdk/tests/integration/send_queue.rs": "142c159f7bf2b2f3c86814cf67af4837445d837971c620ced1ac2b0faaa7d396"
+  }
+}

@@ -1,0 +1,893 @@
+diff --git a/crates/matrix-sdk-common/src/cross_process_lock.rs b/crates/matrix-sdk-common/src/cross_process_lock.rs
+--- a/crates/matrix-sdk-common/src/cross_process_lock.rs
++++ b/crates/matrix-sdk-common/src/cross_process_lock.rs
+@@ -39,6 +39,7 @@
+ 
+ use std::{
+     error::Error,
++    fmt,
+     future::Future,
+     sync::{
+         Arc, Weak,
+@@ -61,6 +62,26 @@
+ ///
+ /// This is used to know if a lock has been dirtied.
+ pub type CrossProcessLockGeneration = u64;
++
++/// Opaque identity of one opened store and its clones.
++///
++/// A separately opened store receives a distinct identity even when its path
++/// is the same. This identity contains no path or persisted credential.
++#[derive(Clone, Default)]
++pub struct CrossProcessLockScope(Arc<()>);
++
++impl CrossProcessLockScope {
++    /// Whether both identities belong to the same opened store.
++    pub fn is_same(&self, other: &Self) -> bool {
++        Arc::ptr_eq(&self.0, &other.0)
++    }
++}
++
++impl fmt::Debug for CrossProcessLockScope {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str("CrossProcessLockScope")
++    }
++}
+ 
+ /// A trait that represents any function which can be used to acquire the
+ /// underlying lock of a [`CrossProcessLock`].
+@@ -94,6 +115,11 @@
+ 
+     #[cfg(target_family = "wasm")]
+     type LockError: Error;
++
++    /// Optional issuing-store identity for explicit lease-bound handles.
++    fn lease_scope(&self) -> Option<CrossProcessLockScope> {
++        None
++    }
+ 
+     /// Try to take a leased lock.
+     ///
+@@ -148,10 +174,16 @@
+     /// Immutable identity of the acquired lease. This does not track later
+     /// acquisitions through the lock's mutable generation counter.
+     lease_identity: Option<(String, String, CrossProcessLockGeneration)>,
++    lease_scope: Option<CrossProcessLockScope>,
+ }
+ 
+ impl CrossProcessLockGuard {
+-    fn new(inner: &Arc<CrossProcessLockInner>, key: &str, config: &CrossProcessLockConfig) -> Self {
++    fn new(
++        inner: &Arc<CrossProcessLockInner>,
++        key: &str,
++        config: &CrossProcessLockConfig,
++        lease_scope: Option<CrossProcessLockScope>,
++    ) -> Self {
+         // Downgrading the strong pointer to a weak pointer to represent a new
+         // lock holder.
+         let lease_identity = match config {
+@@ -160,7 +192,12 @@
+                 Some((key.to_owned(), holder_name.clone(), inner.generation.load(Ordering::SeqCst)))
+             }
+         };
+-        Self { inner: Arc::downgrade(inner), lease_identity }
++        Self { inner: Arc::downgrade(inner), lease_identity, lease_scope }
++    }
++
++    /// Whether this guard was issued through this exact opened store.
++    pub fn is_from_scope(&self, scope: &CrossProcessLockScope) -> bool {
++        self.lease_scope.as_ref().is_some_and(|issued| issued.is_same(scope))
+     }
+ 
+     /// Snapshot of the key, holder and generation acquired for this guard.
+@@ -397,7 +434,12 @@
+     pub async fn try_lock_once(&self) -> AcquireCrossProcessLockResult<L::LockError> {
+         // If it's not `MultiProcess`, this behaves as a no-op
+         let CrossProcessLockConfig::MultiProcess { holder_name } = &self.config else {
+-            let guard = CrossProcessLockGuard::new(&self.inner, &self.lock_key, &self.config);
++            let guard = CrossProcessLockGuard::new(
++                &self.inner,
++                &self.lock_key,
++                &self.config,
++                self.locker.lease_scope(),
++            );
+             return Ok(Ok(CrossProcessLockState::Clean(guard)));
+         };
+ 
+@@ -422,6 +464,7 @@
+                 &self.inner,
+                 &self.lock_key,
+                 &self.config,
++                self.locker.lease_scope(),
+             ))));
+         }
+ 
+@@ -554,7 +597,12 @@
+             .abort_on_drop(),
+         );
+ 
+-        let guard = CrossProcessLockGuard::new(&self.inner, &self.lock_key, &self.config);
++        let guard = CrossProcessLockGuard::new(
++            &self.inner,
++            &self.lock_key,
++            &self.config,
++            self.locker.lease_scope(),
++        );
+ 
+         Ok(Ok(if self.is_dirty() {
+             CrossProcessLockState::Dirty(guard)
+diff --git a/crates/matrix-sdk-crypto/src/store/mod.rs b/crates/matrix-sdk-crypto/src/store/mod.rs
+--- a/crates/matrix-sdk-crypto/src/store/mod.rs
++++ b/crates/matrix-sdk-crypto/src/store/mod.rs
+@@ -1968,6 +1968,10 @@
+ impl matrix_sdk_common::cross_process_lock::TryLock for LockableCryptoStore {
+     type LockError = CryptoStoreError;
+ 
++    fn lease_scope(&self) -> Option<matrix_sdk_common::cross_process_lock::CrossProcessLockScope> {
++        self.0.lease_scope()
++    }
++
+     async fn try_lock(
+         &self,
+         lease_duration_ms: u32,
+diff --git a/crates/matrix-sdk-crypto/src/store/error.rs b/crates/matrix-sdk-crypto/src/store/error.rs
+--- a/crates/matrix-sdk-crypto/src/store/error.rs
++++ b/crates/matrix-sdk-crypto/src/store/error.rs
+@@ -26,6 +26,10 @@
+ /// The crypto store's error type.
+ #[derive(Debug, Error)]
+ pub enum CryptoStoreError {
++    /// Explicit immutable lease binding is not supported by this backend.
++    #[error("this crypto store does not support immutable lease binding")]
++    LeaseBindingUnsupported,
++
+     /// The account that owns the sessions, group sessions, and devices wasn't
+     /// found.
+     #[error("can't save/load sessions or group sessions in the store before an account is stored")]
+diff --git a/crates/matrix-sdk-crypto/src/store/traits.rs b/crates/matrix-sdk-crypto/src/store/traits.rs
+--- a/crates/matrix-sdk-crypto/src/store/traits.rs
++++ b/crates/matrix-sdk-crypto/src/store/traits.rs
+@@ -15,7 +15,12 @@
+ use std::{collections::HashMap, fmt, sync::Arc};
+ 
+ use async_trait::async_trait;
+-use matrix_sdk_common::{AsyncTraitDeps, cross_process_lock::CrossProcessLockGeneration};
++use matrix_sdk_common::{
++    AsyncTraitDeps,
++    cross_process_lock::{
++        CrossProcessLockGeneration, CrossProcessLockGuard, CrossProcessLockScope,
++    },
++};
+ use ruma::{
+     DeviceId, OwnedDeviceId, RoomId, TransactionId, UserId, events::secret::request::SecretName,
+ };
+@@ -48,6 +53,20 @@
+     /// The error type used by this crypto store.
+     type Error: fmt::Debug + Into<CryptoStoreError>;
+ 
++    /// Opaque identity shared by clones of this opened store, if supported.
++    fn lease_scope(&self) -> Option<CrossProcessLockScope> {
++        None
++    }
++
++    /// Explicitly bind a new handle to one immutable lease epoch.
++    ///
++    /// Unsupported backends refuse this opt-in operation. The caller retains
++    /// the guard; a bound handle never takes a newer epoch or extends its lease.
++    /// On persistence refusal, discard the owning Olm machine and its caches.
++    fn bind_lease(&self, _guard: &CrossProcessLockGuard) -> Result<Arc<DynCryptoStore>> {
++        Err(CryptoStoreError::LeaseBindingUnsupported)
++    }
++
+     /// Load an account that was previously stored.
+     async fn load_account(&self) -> Result<Option<Account>, Self::Error>;
+ 
+@@ -448,6 +467,14 @@
+ #[cfg_attr(not(target_family = "wasm"), async_trait)]
+ impl<T: CryptoStore> CryptoStore for EraseCryptoStoreError<T> {
+     type Error = CryptoStoreError;
++
++    fn lease_scope(&self) -> Option<CrossProcessLockScope> {
++        self.0.lease_scope()
++    }
++
++    fn bind_lease(&self, guard: &CrossProcessLockGuard) -> Result<Arc<DynCryptoStore>> {
++        self.0.bind_lease(guard)
++    }
+ 
+     async fn load_account(&self) -> Result<Option<Account>> {
+         self.0.load_account().await.map_err(Into::into)
+@@ -754,3 +781,7 @@
+         self
+     }
+ }
++
++#[cfg(test)]
++#[path = "atum_publication_store.rs"]
++pub(crate) mod atum_publication_store;
+diff --git a/crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs b/crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs
+--- a/crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs
++++ b/crates/matrix-sdk-crypto/src/store/crypto_store_wrapper.rs
+@@ -122,22 +122,25 @@
+         let room_key_bundle_updates: Vec<_> =
+             changes.received_room_key_bundles.iter().map(RoomKeyBundleInfo::from).collect();
+ 
+-        if devices
++        let clear_sessions = devices
+             .changed
+             .iter()
+-            .any(|d| d.user_id() == self.user_id && d.device_id() == self.device_id)
+-        {
++            .any(|d| d.user_id() == self.user_id && d.device_id() == self.device_id);
++        let sessions = changes.sessions.clone();
++
++        // Refused persistence must not publish additions or clear a valid cache.
++        self.store.save_changes(changes).await?;
++
++        if clear_sessions {
+             // If our own device key changes, we need to clear the session cache
+             // because the sessions contain a copy of our device key.
+             self.sessions.clear().await;
+         } else {
+             // Otherwise add the sessions to the cache.
+-            for session in &changes.sessions {
+-                self.sessions.add(session.clone()).await;
++            for session in sessions {
++                self.sessions.add(session).await;
+             }
+         }
+-
+-        self.store.save_changes(changes).await?;
+ 
+         // If we updated our own public identity, log it for debugging purposes
+         if tracing::level_enabled!(tracing::Level::DEBUG) {
+@@ -421,6 +424,86 @@
+     use crate::machine::test_helpers::get_machine_pair_with_setup_sessions_test_helper;
+ 
+     #[async_test]
++    async fn test_refused_save_neither_adds_nor_clears_session_cache() {
++        use super::super::traits::atum_publication_store::RefusingChangesStore;
++        use crate::{Account, DeviceData, store::types::PendingChanges};
++        use ruma::device_id;
++        use vodozemac::olm::SessionConfig;
++
++        let account =
++            Account::with_device_id(user_id!("@synthetic:atum.invalid"), device_id!("CACHE"));
++        let mut peer = Account::with_device_id(user_id!("@peer:atum.invalid"), device_id!("PEER"));
++        peer.generate_one_time_keys(2);
++        let keys: Vec<_> = peer.one_time_keys().values().copied().collect();
++        let make_session = |key| {
++            account
++                .create_outbound_session_helper(
++                    SessionConfig::version_1(),
++                    peer.identity_keys().curve25519,
++                    key,
++                    false,
++                    account.device_keys(),
++                )
++                .unwrap()
++        };
++        let first = make_session(keys[0]);
++        let next = make_session(keys[1]);
++        let sender = peer.identity_keys().curve25519.to_base64();
++        let own = DeviceData::from_account(&account);
++        let backend = RefusingChangesStore::new();
++        let wrapper =
++            CryptoStoreWrapper::new(account.user_id(), account.device_id(), backend.clone());
++        wrapper.save_pending_changes(PendingChanges { account: Some(account) }).await.unwrap();
++        wrapper
++            .save_changes(Changes {
++                sessions: vec![first.clone()],
++                devices: DeviceChanges { new: vec![own.clone()], ..Default::default() },
++                ..Default::default()
++            })
++            .await
++            .unwrap();
++        let cached = wrapper.sessions.get(&sender).await.unwrap();
++        assert_eq!(cached.lock().await.len(), 1);
++        backend.refuse(true);
++
++        assert!(
++            wrapper
++                .save_changes(Changes { sessions: vec![next.clone()], ..Default::default() })
++                .await
++                .is_err()
++        );
++        assert_eq!(cached.lock().await.len(), 1, "refused session must not publish into the cache");
++        assert_eq!(wrapper.store.get_sessions(&sender).await.unwrap().unwrap().len(), 1);
++
++        assert!(
++            wrapper
++                .save_changes(Changes {
++                    devices: DeviceChanges { changed: vec![own.clone()], ..Default::default() },
++                    ..Default::default()
++                })
++                .await
++                .is_err()
++        );
++        assert!(
++            Arc::ptr_eq(&cached, &wrapper.sessions.get(&sender).await.unwrap()),
++            "refused device update must not clear the original cache"
++        );
++
++        backend.refuse(false);
++        wrapper.save_changes(Changes { sessions: vec![next], ..Default::default() }).await.unwrap();
++        assert_eq!(cached.lock().await.len(), 2);
++        assert_eq!(wrapper.store.get_sessions(&sender).await.unwrap().unwrap().len(), 2);
++        wrapper
++            .save_changes(Changes {
++                devices: DeviceChanges { changed: vec![own], ..Default::default() },
++                ..Default::default()
++            })
++            .await
++            .unwrap();
++        assert!(wrapper.sessions.get(&sender).await.is_none());
++    }
++
++    #[async_test]
+     async fn test_cache_cleared_after_device_update() {
+         let user_id = user_id!("@alice:example.com");
+         let (first, second) =
+diff --git a/crates/matrix-sdk-crypto/src/store/atum_publication_store.rs b/crates/matrix-sdk-crypto/src/store/atum_publication_store.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/matrix-sdk-crypto/src/store/atum_publication_store.rs
+@@ -0,0 +1,305 @@
++// Explicit persistence-refusal fixture for cache publication invariants.
++// Actual MemoryStore and actual Olm sessions; no network or server account.
++// SPDX-License-Identifier: Apache-2.0
++use super::*;
++use crate::store::MemoryStore;
++use std::sync::atomic::{AtomicBool, Ordering};
++
++#[derive(Clone, Debug)]
++pub(crate) struct RefusingChangesStore {
++    inner: Arc<MemoryStore>,
++    refuse: Arc<AtomicBool>,
++}
++impl RefusingChangesStore {
++    pub(crate) fn new() -> Self {
++        Self { inner: Arc::new(MemoryStore::new()), refuse: Arc::new(AtomicBool::new(false)) }
++    }
++    pub(crate) fn refuse(&self, value: bool) {
++        self.refuse.store(value, Ordering::SeqCst);
++    }
++}
++
++#[cfg_attr(target_family = "wasm", async_trait(?Send))]
++#[cfg_attr(not(target_family = "wasm"), async_trait)]
++impl CryptoStore for RefusingChangesStore {
++    type Error = CryptoStoreError;
++
++    fn lease_scope(&self) -> Option<CrossProcessLockScope> {
++        self.inner.lease_scope()
++    }
++
++    fn bind_lease(&self, guard: &CrossProcessLockGuard) -> Result<Arc<DynCryptoStore>> {
++        self.inner.bind_lease(guard)
++    }
++
++    async fn load_account(&self) -> Result<Option<Account>> {
++        self.inner.load_account().await.map_err(Into::into)
++    }
++
++    async fn load_identity(&self) -> Result<Option<PrivateCrossSigningIdentity>> {
++        self.inner.load_identity().await.map_err(Into::into)
++    }
++
++    async fn save_changes(&self, changes: Changes) -> Result<()> {
++        if self.refuse.load(Ordering::SeqCst) {
++            return Err(CryptoStoreError::LeaseBindingUnsupported);
++        }
++        self.inner.save_changes(changes).await.map_err(Into::into)
++    }
++
++    async fn save_pending_changes(&self, changes: PendingChanges) -> Result<()> {
++        self.inner.save_pending_changes(changes).await.map_err(Into::into)
++    }
++
++    async fn save_inbound_group_sessions(
++        &self,
++        sessions: Vec<InboundGroupSession>,
++        backed_up_to_version: Option<&str>,
++    ) -> Result<()> {
++        self.inner
++            .save_inbound_group_sessions(sessions, backed_up_to_version)
++            .await
++            .map_err(Into::into)
++    }
++
++    async fn get_sessions(&self, sender_key: &str) -> Result<Option<Vec<Session>>> {
++        self.inner.get_sessions(sender_key).await.map_err(Into::into)
++    }
++
++    async fn get_inbound_group_session(
++        &self,
++        room_id: &RoomId,
++        session_id: &str,
++    ) -> Result<Option<InboundGroupSession>> {
++        self.inner.get_inbound_group_session(room_id, session_id).await.map_err(Into::into)
++    }
++
++    async fn get_inbound_group_sessions(&self) -> Result<Vec<InboundGroupSession>> {
++        self.inner.get_inbound_group_sessions().await.map_err(Into::into)
++    }
++
++    async fn get_inbound_group_sessions_by_room_id(
++        &self,
++        room_id: &RoomId,
++    ) -> Result<Vec<InboundGroupSession>> {
++        self.inner.get_inbound_group_sessions_by_room_id(room_id).await.map_err(Into::into)
++    }
++
++    async fn get_inbound_group_sessions_for_device_batch(
++        &self,
++        curve_key: Curve25519PublicKey,
++        sender_data_type: SenderDataType,
++        after_session_id: Option<String>,
++        limit: usize,
++    ) -> Result<Vec<InboundGroupSession>> {
++        self.inner
++            .get_inbound_group_sessions_for_device_batch(
++                curve_key,
++                sender_data_type,
++                after_session_id,
++                limit,
++            )
++            .await
++            .map_err(Into::into)
++    }
++
++    async fn inbound_group_session_counts(
++        &self,
++        backup_version: Option<&str>,
++    ) -> Result<RoomKeyCounts> {
++        self.inner.inbound_group_session_counts(backup_version).await.map_err(Into::into)
++    }
++    async fn inbound_group_sessions_for_backup(
++        &self,
++        backup_version: &str,
++        limit: usize,
++    ) -> Result<Vec<InboundGroupSession>> {
++        self.inner
++            .inbound_group_sessions_for_backup(backup_version, limit)
++            .await
++            .map_err(Into::into)
++    }
++
++    async fn mark_inbound_group_sessions_as_backed_up(
++        &self,
++        backup_version: &str,
++        room_and_session_ids: &[(&RoomId, &str)],
++    ) -> Result<()> {
++        self.inner
++            .mark_inbound_group_sessions_as_backed_up(backup_version, room_and_session_ids)
++            .await
++            .map_err(Into::into)
++    }
++
++    async fn reset_backup_state(&self) -> Result<()> {
++        self.inner.reset_backup_state().await.map_err(Into::into)
++    }
++
++    async fn load_backup_keys(&self) -> Result<BackupKeys> {
++        self.inner.load_backup_keys().await.map_err(Into::into)
++    }
++
++    async fn load_dehydrated_device_pickle_key(&self) -> Result<Option<DehydratedDeviceKey>> {
++        self.inner.load_dehydrated_device_pickle_key().await.map_err(Into::into)
++    }
++
++    async fn delete_dehydrated_device_pickle_key(&self) -> Result<(), Self::Error> {
++        self.inner.delete_dehydrated_device_pickle_key().await.map_err(Into::into)
++    }
++
++    async fn get_outbound_group_session(
++        &self,
++        room_id: &RoomId,
++    ) -> Result<Option<OutboundGroupSession>> {
++        self.inner.get_outbound_group_session(room_id).await.map_err(Into::into)
++    }
++
++    async fn load_tracked_users(&self) -> Result<Vec<TrackedUser>> {
++        self.inner.load_tracked_users().await.map_err(Into::into)
++    }
++
++    async fn save_tracked_users(&self, users: &[(&UserId, bool)]) -> Result<()> {
++        self.inner.save_tracked_users(users).await.map_err(Into::into)
++    }
++
++    async fn get_device(
++        &self,
++        user_id: &UserId,
++        device_id: &DeviceId,
++    ) -> Result<Option<DeviceData>> {
++        self.inner.get_device(user_id, device_id).await.map_err(Into::into)
++    }
++
++    async fn get_user_devices(
++        &self,
++        user_id: &UserId,
++    ) -> Result<HashMap<OwnedDeviceId, DeviceData>> {
++        self.inner.get_user_devices(user_id).await.map_err(Into::into)
++    }
++
++    async fn get_own_device(&self) -> Result<DeviceData> {
++        self.inner.get_own_device().await.map_err(Into::into)
++    }
++
++    async fn get_user_identity(&self, user_id: &UserId) -> Result<Option<UserIdentityData>> {
++        self.inner.get_user_identity(user_id).await.map_err(Into::into)
++    }
++
++    async fn is_message_known(&self, message_hash: &OlmMessageHash) -> Result<bool> {
++        self.inner.is_message_known(message_hash).await.map_err(Into::into)
++    }
++
++    async fn get_outgoing_secret_requests(
++        &self,
++        request_id: &TransactionId,
++    ) -> Result<Option<GossipRequest>> {
++        self.inner.get_outgoing_secret_requests(request_id).await.map_err(Into::into)
++    }
++
++    async fn get_secret_request_by_info(
++        &self,
++        secret_info: &SecretInfo,
++    ) -> Result<Option<GossipRequest>> {
++        self.inner.get_secret_request_by_info(secret_info).await.map_err(Into::into)
++    }
++
++    async fn get_unsent_secret_requests(&self) -> Result<Vec<GossipRequest>> {
++        self.inner.get_unsent_secret_requests().await.map_err(Into::into)
++    }
++
++    async fn delete_outgoing_secret_requests(&self, request_id: &TransactionId) -> Result<()> {
++        self.inner.delete_outgoing_secret_requests(request_id).await.map_err(Into::into)
++    }
++
++    async fn get_secrets_from_inbox(
++        &self,
++        secret_name: &SecretName,
++    ) -> Result<Vec<Zeroizing<String>>> {
++        self.inner.get_secrets_from_inbox(secret_name).await.map_err(Into::into)
++    }
++
++    async fn delete_secrets_from_inbox(&self, secret_name: &SecretName) -> Result<()> {
++        self.inner.delete_secrets_from_inbox(secret_name).await.map_err(Into::into)
++    }
++
++    async fn get_withheld_info(
++        &self,
++        room_id: &RoomId,
++        session_id: &str,
++    ) -> Result<Option<RoomKeyWithheldEntry>, Self::Error> {
++        self.inner.get_withheld_info(room_id, session_id).await.map_err(Into::into)
++    }
++
++    async fn get_withheld_sessions_by_room_id(
++        &self,
++        room_id: &RoomId,
++    ) -> Result<Vec<RoomKeyWithheldEntry>, Self::Error> {
++        self.inner.get_withheld_sessions_by_room_id(room_id).await.map_err(Into::into)
++    }
++
++    async fn get_room_settings(&self, room_id: &RoomId) -> Result<Option<RoomSettings>> {
++        self.inner.get_room_settings(room_id).await.map_err(Into::into)
++    }
++
++    async fn get_received_room_key_bundle_data(
++        &self,
++        room_id: &RoomId,
++        user_id: &UserId,
++    ) -> Result<Option<StoredRoomKeyBundleData>> {
++        self.inner.get_received_room_key_bundle_data(room_id, user_id).await.map_err(Into::into)
++    }
++
++    async fn has_downloaded_all_room_keys(&self, room_id: &RoomId) -> Result<bool, Self::Error> {
++        self.inner.has_downloaded_all_room_keys(room_id).await.map_err(Into::into)
++    }
++
++    async fn get_pending_key_bundle_details_for_room(
++        &self,
++        room_id: &RoomId,
++    ) -> Result<Option<RoomPendingKeyBundleDetails>, Self::Error> {
++        self.inner.get_pending_key_bundle_details_for_room(room_id).await.map_err(Into::into)
++    }
++
++    async fn get_all_rooms_pending_key_bundles(
++        &self,
++    ) -> Result<Vec<RoomPendingKeyBundleDetails>, Self::Error> {
++        self.inner.get_all_rooms_pending_key_bundles().await.map_err(Into::into)
++    }
++
++    async fn get_custom_value(&self, key: &str) -> Result<Option<Vec<u8>>, Self::Error> {
++        self.inner.get_custom_value(key).await.map_err(Into::into)
++    }
++
++    async fn set_custom_value(&self, key: &str, value: Vec<u8>) -> Result<(), Self::Error> {
++        self.inner.set_custom_value(key, value).await.map_err(Into::into)
++    }
++
++    async fn remove_custom_value(&self, key: &str) -> Result<(), Self::Error> {
++        self.inner.remove_custom_value(key).await.map_err(Into::into)
++    }
++
++    async fn try_take_leased_lock(
++        &self,
++        lease_duration_ms: u32,
++        key: &str,
++        holder: &str,
++    ) -> Result<Option<CrossProcessLockGeneration>, Self::Error> {
++        self.inner.try_take_leased_lock(lease_duration_ms, key, holder).await.map_err(Into::into)
++    }
++
++    async fn next_batch_token(&self) -> Result<Option<String>, Self::Error> {
++        self.inner.next_batch_token().await.map_err(Into::into)
++    }
++
++    async fn close(&self) -> Result<(), Self::Error> {
++        self.inner.close().await.map_err(Into::into)
++    }
++
++    async fn reopen(&self) -> Result<(), Self::Error> {
++        self.inner.reopen().await.map_err(Into::into)
++    }
++
++    async fn get_size(&self) -> Result<Option<usize>, Self::Error> {
++        self.inner.get_size().await.map_err(Into::into)
++    }
++}
+diff --git a/crates/matrix-sdk-sqlite/src/crypto_store.rs b/crates/matrix-sdk-sqlite/src/crypto_store.rs
+--- a/crates/matrix-sdk-sqlite/src/crypto_store.rs
++++ b/crates/matrix-sdk-sqlite/src/crypto_store.rs
+@@ -23,7 +23,8 @@
+ use async_trait::async_trait;
+ use deadpool::managed::PoolConfig;
+ use matrix_sdk_base::cross_process_lock::{
+-    CrossProcessLockGeneration, CrossProcessLockGuard, FIRST_CROSS_PROCESS_LOCK_GENERATION,
++    CrossProcessLockGeneration, CrossProcessLockGuard, CrossProcessLockScope,
++    FIRST_CROSS_PROCESS_LOCK_GENERATION,
+ };
+ use matrix_sdk_crypto::{
+     Account, DeviceData, GossipRequest, GossippedSecret, SecretInfo, TrackedUser, UserIdentityData,
+@@ -32,7 +33,7 @@
+         PrivateCrossSigningIdentity, SenderDataType, Session, StaticAccountData,
+     },
+     store::{
+-        CRYPTO_STORE_LOCK_KEY, CryptoStore,
++        CRYPTO_STORE_LOCK_KEY, CryptoStore, CryptoStoreError, DynCryptoStore, IntoCryptoStore,
+         types::{
+             BackupKeys, Changes, DehydratedDeviceKey, PendingChanges, RoomKeyCounts,
+             RoomKeyWithheldEntry, RoomPendingKeyBundleDetails, RoomSettings,
+@@ -94,6 +95,9 @@
+     /// One immutable operation epoch. Cloning a writer retains this fence;
+     /// it never inherits a newer epoch from another store clone.
+     lease_fence: Option<(String, String, CrossProcessLockGeneration)>,
++
++    /// Identity of this opened store. Clones share it; independent opens do not.
++    lease_scope: CrossProcessLockScope,
+ }
+ 
+ #[cfg(not(tarpaulin_include))]
+@@ -145,6 +149,7 @@
+             static_account: Arc::new(RwLock::new(None)),
+             save_changes_lock: Default::default(),
+             lease_fence: None,
++            lease_scope: Default::default(),
+         })
+     }
+ 
+@@ -263,7 +268,7 @@
+     /// caches. Raw handles remain for bootstrap and lease acquisition only.
+     /// A bound clone cannot rebind or acquire/renew a lease.
+     pub fn with_lease(&self, guard: &CrossProcessLockGuard) -> Result<Self> {
+-        if self.lease_fence.is_some() {
++        if self.lease_fence.is_some() || !guard.is_from_scope(&self.lease_scope) {
+             return Err(Error::InvalidCryptoStoreLeaseBinding);
+         }
+         let (key, holder, generation) = guard
+@@ -1136,6 +1141,17 @@
+ #[async_trait]
+ impl CryptoStore for SqliteCryptoStore {
+     type Error = Error;
++
++    fn lease_scope(&self) -> Option<CrossProcessLockScope> {
++        Some(self.lease_scope.clone())
++    }
++
++    fn bind_lease(
++        &self,
++        guard: &CrossProcessLockGuard,
++    ) -> Result<Arc<DynCryptoStore>, CryptoStoreError> {
++        Ok(self.with_lease(guard)?.into_crypto_store())
++    }
+ 
+     async fn load_account(&self) -> Result<Option<Account>> {
+         let conn = self.read().await?;
+@@ -2815,3 +2831,7 @@
+ #[cfg(test)]
+ #[path = "atum_lease_fence_tests.rs"]
+ mod atum_lease_fence_tests;
++
++#[cfg(test)]
++#[path = "atum_lease_binding_tests.rs"]
++mod atum_lease_binding_tests;
+diff --git a/crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs b/crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs
+--- a/crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs
++++ b/crates/matrix-sdk-sqlite/src/atum_lease_fence_tests.rs
+@@ -196,6 +196,10 @@
+ 
+ impl TryLock for StoppableRenewal {
+     type LockError = Error;
++
++    fn lease_scope(&self) -> Option<matrix_sdk_common::cross_process_lock::CrossProcessLockScope> {
++        CryptoStore::lease_scope(&self.store)
++    }
+ 
+     async fn try_lock(&self, duration: u32, key: &str, holder: &str) -> Result<Option<u64>, Error> {
+         if !self.renew.load(Ordering::SeqCst) {
+diff --git a/crates/matrix-sdk-sqlite/src/atum_lease_binding_tests.rs b/crates/matrix-sdk-sqlite/src/atum_lease_binding_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/matrix-sdk-sqlite/src/atum_lease_binding_tests.rs
+@@ -0,0 +1,159 @@
++// Atum immutable store binding regressions. Disposable synthetic stores only.
++// SPDX-License-Identifier: Apache-2.0
++
++use matrix_sdk_common::cross_process_lock::{CrossProcessLock, CrossProcessLockConfig};
++use matrix_sdk_crypto::{
++    Account, DecryptionSettings, EncryptionSyncChanges, OlmMachine, OlmMachineBuilder,
++    store::{
++        CRYPTO_STORE_LOCK_KEY, CryptoStore, CryptoStoreError, IntoCryptoStore, LockableCryptoStore,
++        MemoryStore, types::PendingChanges,
++    },
++};
++use ruma::{device_id, user_id};
++use tempfile::TempDir;
++
++use super::{Error, SqliteCryptoStore};
++
++fn lock(store: &SqliteCryptoStore, holder: &str) -> CrossProcessLock<LockableCryptoStore> {
++    CrossProcessLock::new(
++        LockableCryptoStore::new(store.clone()),
++        CRYPTO_STORE_LOCK_KEY.into(),
++        CrossProcessLockConfig::multi_process(holder),
++    )
++}
++
++#[tokio::test]
++async fn foreign_guard_with_identical_lease_tuple_is_refused() {
++    let a_dir = TempDir::new().unwrap();
++    let b_dir = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(a_dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let b = SqliteCryptoStore::open(b_dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let control_a = lock(&a, "same-holder");
++    let control_b = lock(&b, "same-holder");
++    let guard_a = control_a.try_lock_once().await.unwrap().unwrap().into_guard();
++    let guard_b = control_b.try_lock_once().await.unwrap().unwrap().into_guard();
++    assert_eq!(guard_a.lease_identity(), guard_b.lease_identity());
++    let result = b.with_lease(&guard_a);
++    assert!(
++        result.is_err(),
++        "guard from another opened store must not bind despite an identical lease tuple"
++    );
++    b.with_lease(&guard_b).unwrap().set_custom_value("owner", b"B".to_vec()).await.unwrap();
++    assert!(a.get_custom_value("owner").await.unwrap().is_none());
++}
++
++#[tokio::test]
++async fn independently_reopened_same_database_requires_its_own_guard() {
++    let dir = TempDir::new().unwrap();
++    let a = SqliteCryptoStore::open(dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let reopened =
++        SqliteCryptoStore::open(dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let control = lock(&a, "A");
++    let guard = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    assert!(matches!(reopened.with_lease(&guard), Err(Error::InvalidCryptoStoreLeaseBinding)));
++    a.clone().with_lease(&guard).unwrap().set_custom_value("clone", vec![1]).await.unwrap();
++    assert_eq!(reopened.get_custom_value("clone").await.unwrap(), Some(vec![1]));
++}
++
++#[tokio::test]
++async fn both_error_erasure_paths_preserve_scope_and_immutable_epoch() {
++    let dir = TempDir::new().unwrap();
++    let raw = SqliteCryptoStore::open(dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let erased = raw.clone().into_crypto_store();
++    // Concrete value and Arc<T> use the two existing error-erasure adapters.
++    let arc_erased = std::sync::Arc::new(raw.clone()).into_crypto_store();
++    let control = CrossProcessLock::new(
++        LockableCryptoStore::new(erased.clone()),
++        CRYPTO_STORE_LOCK_KEY.into(),
++        CrossProcessLockConfig::multi_process("A"),
++    );
++    let guard = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    let bound = arc_erased.bind_lease(&guard).unwrap();
++    bound.set_custom_value("erased", vec![2]).await.unwrap();
++    assert!(bound.bind_lease(&guard).is_err());
++    assert!(bound.try_take_leased_lock(500, CRYPTO_STORE_LOCK_KEY, "A").await.is_err());
++    assert_eq!(raw.get_custom_value("erased").await.unwrap(), Some(vec![2]));
++}
++
++#[tokio::test]
++async fn unsupported_memory_backend_refuses_explicit_binding() {
++    let dir = TempDir::new().unwrap();
++    let raw = SqliteCryptoStore::open(dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let control = lock(&raw, "A");
++    let guard = control.try_lock_once().await.unwrap().unwrap().into_guard();
++    assert!(matches!(
++        MemoryStore::new().into_crypto_store().bind_lease(&guard),
++        Err(CryptoStoreError::LeaseBindingUnsupported)
++    ));
++}
++
++async fn sync(machine: &OlmMachine, batch: &str) -> Result<(), matrix_sdk_crypto::OlmError> {
++    machine
++        .receive_sync_changes(
++            EncryptionSyncChanges {
++                to_device_events: vec![],
++                changed_devices: &Default::default(),
++                one_time_keys_counts: &Default::default(),
++                unused_fallback_keys: None,
++                next_batch_token: Some(batch.into()),
++            },
++            &DecryptionSettings {
++                sender_device_trust_requirement: matrix_sdk_crypto::TrustRequirement::Untrusted,
++            },
++        )
++        .await
++        .map(|_| ())
++}
++
++#[tokio::test]
++async fn old_olm_and_deref_remain_fenced_across_a_b_a() {
++    let dir = TempDir::new().unwrap();
++    let raw_a = SqliteCryptoStore::open(dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let account =
++        Account::with_device_id(user_id!("@synthetic:atum.invalid"), device_id!("BINDING"));
++    let original = account.identity_keys();
++    let required = (original.curve25519.to_base64(), original.ed25519.to_base64());
++    raw_a.save_pending_changes(PendingChanges { account: Some(account) }).await.unwrap();
++    let raw_b = SqliteCryptoStore::open(dir.path(), Some("synthetic-binding-test")).await.unwrap();
++    let control_a = lock(&raw_a, "A");
++    let guard_a = control_a.try_lock_once().await.unwrap().unwrap().into_guard();
++    let old = OlmMachineBuilder::new(user_id!("@synthetic:atum.invalid"), device_id!("BINDING"))
++        .with_crypto_store(raw_a.bind_lease(&guard_a).unwrap())
++        .with_required_identity_keys(Some(required.clone()))
++        .build()
++        .await
++        .unwrap();
++    let old_clone = old.clone();
++    sync(&old, "A").await.unwrap();
++    old.store().set_custom_value("owner", b"A".to_vec()).await.unwrap();
++    drop(guard_a);
++    let control_b = lock(&raw_b, "B");
++    let guard_b = control_b.spin_lock(None).await.unwrap().unwrap().into_guard();
++    let current_b =
++        OlmMachineBuilder::new(user_id!("@synthetic:atum.invalid"), device_id!("BINDING"))
++            .with_crypto_store(raw_b.bind_lease(&guard_b).unwrap())
++            .with_required_identity_keys(Some(required.clone()))
++            .build()
++            .await
++            .unwrap();
++    sync(&current_b, "B").await.unwrap();
++    current_b.store().set_custom_value("owner", b"B".to_vec()).await.unwrap();
++    assert!(sync(&old, "STALE-A").await.is_err());
++    assert!(old_clone.store().set_custom_value("owner", b"STALE".to_vec()).await.is_err());
++    assert_eq!(raw_b.next_batch_token().await.unwrap().as_deref(), Some("B"));
++    assert_eq!(raw_b.get_custom_value("owner").await.unwrap(), Some(b"B".to_vec()));
++    drop(guard_b);
++    let new_guard_a = control_a.spin_lock(None).await.unwrap().unwrap().into_guard();
++    let new_a = OlmMachineBuilder::new(user_id!("@synthetic:atum.invalid"), device_id!("BINDING"))
++        .with_crypto_store(raw_a.bind_lease(&new_guard_a).unwrap())
++        .with_required_identity_keys(Some(required))
++        .build()
++        .await
++        .unwrap();
++    sync(&new_a, "A2").await.unwrap();
++    assert!(old.store().bind_lease(&new_guard_a).is_err());
++    assert!(sync(&old_clone, "STALE-A2").await.is_err());
++    assert_eq!(raw_a.next_batch_token().await.unwrap().as_deref(), Some("A2"));
++    assert_eq!(raw_a.load_account().await.unwrap().unwrap().identity_keys(), original);
++    assert_eq!(new_a.identity_keys(), original);
++}

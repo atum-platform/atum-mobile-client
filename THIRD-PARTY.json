@@ -1,0 +1,95 @@
+{
+  "schema": "atum.source.third-party/1",
+  "status": "Source candidate; see private stage1c audit for outstanding release/publication gates",
+  "hermesNotice": "LICENSES/Hermes-Agent-MIT.txt (notice retained; no blanket assertion of Hermes-derived Swift code)",
+  "notices": [
+    "LICENSE",
+    "NOTICE",
+    "ios/App/AppBots/AppBotNoticeProjection.swift",
+    "ios/App/Chat/Views/NoticeRow.swift",
+    "ios/App/Resources/MatrixRustSDK-LICENSE.txt",
+    "ios/App/Resources/NOTICE",
+    "ios/App/Resources/ThirdPartyNotices/ConcurrencyExtras-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/MathFonts-EmbeddedNotices.txt",
+    "ios/App/Resources/ThirdPartyNotices/MathFonts-GUST-FONT-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/MathFonts-MIT-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/Prism-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/Sentry-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/Sentry-THIRD_PARTY_NOTICES.txt",
+    "ios/App/Resources/ThirdPartyNotices/SwiftUIMath-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/Textual-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/rich-text-notices.json",
+    "ios/Sources/AtumChat/AppBotNoticeButtons.swift",
+    "ios/Sources/AtumChat/TypingNoticePolicy.swift",
+    "ios/Sources/AtumPrototype/Fixtures/provider-turns-v1/client-notice-as-answer.sequence.json",
+    "ios/Sources/AtumPrototype/Fixtures/provider-turns-v1/status-notice-as-outcome.content.json",
+    "ios/Sources/AtumPrototype/Fixtures/provider-turns-v1/status-notice.content.json",
+    "ios/Tests/Fixtures/agent-home-v2.5/fixtures/matrix.unledgered-publication.group_notice.enqueue.json",
+    "ios/Tests/Fixtures/agent-home-v2.5/fixtures/matrix.unledgered-publication.notice.enqueue.json",
+    "ios/Vendor/AtumDesign/ATTRIBUTION.md",
+    "sdk/background-backup/LICENSE",
+    "sdk/custody/LICENSE",
+    "sdk/lease-binding/LICENSE",
+    "sdk/lease-fence/LICENSE",
+    "sdk/live-lease/LICENSE",
+    "sdk/longpoll-ownership/LICENSE",
+    "sdk/operation-handoff/LICENSE",
+    "sdk/phone-26.10.15/LICENSE",
+    "sdk/phone-26.10.15-founder/LICENSE",
+    "sdk/protected-tasks/LICENSE",
+    "sdk/publication-cancellation/LICENSE"
+  ],
+  "swiftPackages": [
+    {
+      "originHash": "a9231c8721c639f59677d51684d2d85becc33a6964f107384fe84f239a6574ad",
+      "pins": [
+        {
+          "identity": "atum-matrix-rust-components-swift",
+          "kind": "remoteSourceControl",
+          "location": "https://github.com/atum-platform/atum-matrix-rust-components-swift.git",
+          "state": {
+            "revision": "66c18d378d44d9ad61946f08b926514cccb14fb5"
+          }
+        },
+        {
+          "identity": "sentry-cocoa",
+          "kind": "remoteSourceControl",
+          "location": "https://github.com/getsentry/sentry-cocoa.git",
+          "state": {
+            "revision": "2f64c77f77514acd01780d1aac86ae75b7fccd04",
+            "version": "9.31.0"
+          }
+        },
+        {
+          "identity": "swift-concurrency-extras",
+          "kind": "remoteSourceControl",
+          "location": "https://github.com/pointfreeco/swift-concurrency-extras",
+          "state": {
+            "revision": "5fa253428866f2360c3754e88537f700ed2656b5",
+            "version": "1.4.1"
+          }
+        },
+        {
+          "identity": "swiftui-math",
+          "kind": "remoteSourceControl",
+          "location": "https://github.com/gonzalezreal/swiftui-math",
+          "state": {
+            "revision": "0b5c2cfaaec8d6193db206f675048eeb5ce95f71",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "identity": "textual",
+          "kind": "remoteSourceControl",
+          "location": "https://github.com/gonzalezreal/textual.git",
+          "state": {
+            "revision": "01b51875a5406eefc95f52a058cb059e7bc94dc4"
+          }
+        }
+      ],
+      "version": 3
+    }
+  ],
+  "modifications": "Matrix SDK patch and Apache-era Element X provenance documented in NOTICE; vendored design attribution in ios/Vendor/AtumDesign/ATTRIBUTION.md",
+  "hermesBlanketNotice": "NOTICE and LICENSES/Hermes-Agent-MIT.txt apply to all inherited Hermes content; no absent-path ownership assumption"
+}

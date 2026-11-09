@@ -1,0 +1,42 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "ATUM_NEW_MESSAGE": {
+      "comment": "Generated from pinned desktop copy: src.matrix.mobile-copy.mobilePhoneCopy.genericNotification",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You have a new message"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bạn có tin nhắn mới"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しいメッセージがあります"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你有新消息"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你有新訊息"
+          }
+        }
+      }
+    }
+  }
+}

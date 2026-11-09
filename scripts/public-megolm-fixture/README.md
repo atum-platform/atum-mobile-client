@@ -1,0 +1,3 @@
+Public test vectors only. Run `npm ci --ignore-scripts` then `node generate.cjs` here. libolm creates a fresh Account and OutboundGroupSession from OS randomness. Replace sender_key/session_id/session_key together in the backup test helpers. Never use the generated session for real messages. The stage1d vectors were generated with this script and @matrix-org/olm 3.2.15; historical vectors are private-only. Rust SDK acceptance must be rerun after replacement.
+
+The published room key uses the v1 export format: create an inbound session from the outbound v2 key, then export index zero. Verification imports the exported key; `create()` accepts the different outbound wire format.

@@ -1,0 +1,21 @@
+{
+  "directory": [
+    {
+      "handle": "lan_nguyen",
+      "person": "lan",
+      "kind": "human",
+      "inCompany": false
+    }
+  ],
+  "steps": [
+    {
+      "do": "invite",
+      "request": "r1",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "not_found"
+      }
+    }
+  ]
+}

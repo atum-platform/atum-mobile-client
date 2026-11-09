@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.mobile-push",
+  "version": 1,
+  "providerCommit": "sanitised-public-pack-v1",
+  "packSHA256": "3a482fd92ea9d4248df8c4321d2037339615d9315a1a945e749c5b957a056f34",
+  "fixtures": [
+    {
+      "file": "pusher-set-prod.request.json",
+      "message": "pusher.set.request",
+      "expect": "accept",
+      "sha256": "c3c8830ec0ff685cfe9a7d102204afbef0965e8e7ec14f323ca953522b7cc537"
+    },
+    {
+      "file": "pusher-set-dev.request.json",
+      "message": "pusher.set.request",
+      "expect": "accept",
+      "sha256": "41389616000a620e0b4ef7cfcc1eb9a33b5518eed00fd154466977670da33e9c"
+    },
+    {
+      "file": "pusher-set-full-format.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "const",
+      "sha256": "878ad0c4d746c33a5644b4d2f03d5592e4afde4de608299f1fba3bde3cc7e7a3"
+    },
+    {
+      "file": "pusher-set-third-party-gateway.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "const",
+      "sha256": "8ee8299e5f1c178b04cd2331c0e44d0a4c98ed9566d925de3b441cb677f5dadf"
+    },
+    {
+      "file": "pusher-set-chosen-device-name.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "enum",
+      "sha256": "729ee6b7994f2dc00fe2ee1c68d2293e3a20cb9b1ebabe4280ec0c821f0683f4"
+    },
+    {
+      "file": "pusher-set-alert-with-text.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "unknown_field",
+      "sha256": "2e51d989f351e9d751d8c0d1ac6e1a35c9f4996eb1b18f62588e831f6a262147"
+    },
+    {
+      "file": "pusher-delete.request.json",
+      "message": "pusher.delete.request",
+      "expect": "accept",
+      "sha256": "fabfa5fa8ec02c089240908e1dc6dce460b2fef5f29fa0afc200391ef3f187de"
+    },
+    {
+      "file": "apns.payload.json",
+      "message": "apns.payload",
+      "expect": "accept",
+      "sha256": "d8e7f569885e2c3a9122ad8e8d7c3b27ccb68bd21bfafa786d50d171fcc14cfd"
+    },
+    {
+      "file": "apns-payload-with-body.payload.json",
+      "message": "apns.payload",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "c30c1734b3f3ad57a258a8cc5eb11e5d5bb05e419cf6ec8611db7ccd6e3c206e"
+    },
+    {
+      "file": "apns-payload-with-sender.payload.json",
+      "message": "apns.payload",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "d9319e51245870e9afef8ebeb0694ab022783baac4aade9d208e52f812f09cb9"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "@odata.context": "https://drive.atum.test/graph/v1.0/$metadata#driveItem",
+  "value": [
+    {
+      "eTag": "\"etag-pdf-1\"",
+      "file": {"mimeType": "application/pdf"},
+      "id": "storage-fixture$space-fixture!pdf-1",
+      "lastModifiedBy": {"user": {"displayName": "Fixture owner", "id": "fixture-owner-id"}},
+      "lastModifiedDateTime": "2026-10-25T15:30:01.123456789+07:00",
+      "name": "Plan.pdf",
+      "parentReference": {
+        "driveId": "storage-fixture$space-fixture",
+        "id": "storage-fixture$space-fixture!folder-1",
+        "name": "Projects",
+        "path": "/drive/root:/Projects"
+      },
+      "size": 12,
+      "webDavUrl": "https://drive.atum.test/dav/spaces/storage-fixture$space-fixture/Projects/Plan.pdf"
+    }
+  ]
+}

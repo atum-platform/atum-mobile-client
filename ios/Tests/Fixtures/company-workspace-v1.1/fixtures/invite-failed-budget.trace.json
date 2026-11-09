@@ -1,0 +1,121 @@
+{
+  "directory": [
+    {
+      "handle": "lan_nguyen",
+      "person": "lan",
+      "kind": "human",
+      "inCompany": false
+    }
+  ],
+  "steps": [
+    {
+      "do": "invite",
+      "request": "f1",
+      "admin": "minh",
+      "handle": "nobody_1x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f2",
+      "admin": "minh",
+      "handle": "nobody_2x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f3",
+      "admin": "minh",
+      "handle": "nobody_3x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f4",
+      "admin": "minh",
+      "handle": "nobody_4x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f5",
+      "admin": "minh",
+      "handle": "nobody_5x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f6",
+      "admin": "minh",
+      "handle": "nobody_6x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f7",
+      "admin": "minh",
+      "handle": "nobody_7x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f8",
+      "admin": "minh",
+      "handle": "nobody_8x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f9",
+      "admin": "minh",
+      "handle": "nobody_9x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "f10",
+      "admin": "minh",
+      "handle": "nobody_10x",
+      "expect": {
+        "result": "unavailable"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "ok1",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "limited"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "ok2",
+      "admin": "tuan",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "invited",
+        "person": "lan"
+      }
+    }
+  ]
+}

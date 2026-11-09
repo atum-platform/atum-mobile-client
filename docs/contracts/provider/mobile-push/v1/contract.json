@@ -1,0 +1,550 @@
+{
+  "contract_id": "atum.mobile-push",
+  "version": 1,
+  "status": "frozen",
+  "pack_files": [
+    "README.md",
+    "contract.json",
+    "fixtures/apns-payload-with-body.payload.json",
+    "fixtures/apns-payload-with-sender.payload.json",
+    "fixtures/apns.payload.json",
+    "fixtures/gateway-notification-with-content.request.json",
+    "fixtures/gateway-notification.request.json",
+    "fixtures/pusher-delete.request.json",
+    "fixtures/pusher-lifecycle.sequence.json",
+    "fixtures/pusher-revived-after-removal.sequence.json",
+    "fixtures/pusher-set-alert-with-text.request.json",
+    "fixtures/pusher-set-chosen-device-name.request.json",
+    "fixtures/pusher-set-dev.request.json",
+    "fixtures/pusher-set-full-format.request.json",
+    "fixtures/pusher-set-prod.request.json",
+    "fixtures/pusher-set-third-party-gateway.request.json",
+    "fixtures/pusher-token-rotation.sequence.json",
+    "fixtures/sygnal-apps-inline-key.config.json",
+    "fixtures/sygnal-apps-wrong-team.config.json",
+    "fixtures/sygnal-apps.config.json"
+  ],
+  "providers": [
+    "HO",
+    "DA"
+  ],
+  "consumers": [
+    "iOS",
+    "iOS notification service extension"
+  ],
+  "routes": {
+    "pusher": "POST https://chat.atumplatform.com/_matrix/client/v3/pushers/set",
+    "gateway": "POST https://push.atumplatform.com/_matrix/push/v1/notify"
+  },
+  "types": {
+    "app_id": {
+      "enum": [
+        "com.atum.mobile.ios.prod",
+        "com.atum.mobile.ios.dev"
+      ]
+    },
+    "pushkey": {
+      "type": "string",
+      "min": 64,
+      "max": 200,
+      "pattern": "[0-9a-f]+"
+    },
+    "room_id": {
+      "type": "string",
+      "min": 2,
+      "max": 1024,
+      "pattern": "![!-~]+"
+    },
+    "event_id": {
+      "type": "string",
+      "min": 2,
+      "max": 1024,
+      "pattern": "[$][!-~]+"
+    },
+    "loc_key": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Z][A-Z0-9_]*"
+    },
+    "apns_app": {
+      "type": "object",
+      "required": {
+        "type": {
+          "const": "apns"
+        },
+        "keyfile": {
+          "type": "string",
+          "min": 2,
+          "max": 255,
+          "pattern": "/[!-~]+"
+        },
+        "key_id": {
+          "type": "string",
+          "min": 10,
+          "max": 10,
+          "pattern": "[A-Z0-9]{10}"
+        },
+        "team_id": {
+          "const": "TESTTEAM00"
+        },
+        "topic": {
+          "const": "com.atum.mobile"
+        }
+      },
+      "optional": {
+        "push_type": {
+          "const": "alert"
+        },
+        "platform": {
+          "enum": [
+            "production",
+            "sandbox"
+          ]
+        }
+      }
+    }
+  },
+  "directions": {
+    "device_to_homeserver": {
+      "description": "The app registers or deletes its pusher with the Matrix grant.",
+      "forbidden_fields": [
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    },
+    "homeserver_to_gateway": {
+      "description": "Synapse's event_id_only notification to the gateway. It never carries content or identity.",
+      "forbidden_fields": [
+        "content",
+        "sender",
+        "sender_display_name",
+        "room_name",
+        "room_alias",
+        "user_is_target",
+        "type",
+        "membership",
+        "body"
+      ]
+    },
+    "gateway_to_apns": {
+      "description": "What the gateway sends APNs for the device.",
+      "forbidden_fields": [
+        "content",
+        "sender",
+        "sender_display_name",
+        "room_name",
+        "room_alias",
+        "body",
+        "title",
+        "subtitle",
+        "avatar_url",
+        "msgtype",
+        "user_id"
+      ]
+    },
+    "configuration": {
+      "description": "The gateway's app configuration, as HO deploys it.",
+      "forbidden_fields": [
+        "certfile",
+        "private_key",
+        "key",
+        "password",
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    }
+  },
+  "messages": {
+    "pusher.set.request": {
+      "direction": "device_to_homeserver",
+      "schema": {
+        "type": "object",
+        "required": {
+          "kind": {
+            "const": "http"
+          },
+          "app_id": {
+            "ref": "app_id"
+          },
+          "pushkey": {
+            "ref": "pushkey"
+          },
+          "app_display_name": {
+            "const": "Atum"
+          },
+          "device_display_name": {
+            "enum": [
+              "iPhone",
+              "iPad"
+            ]
+          },
+          "lang": {
+            "enum": [
+              "vi",
+              "en",
+              "zh",
+              "zh-hant",
+              "ja"
+            ]
+          },
+          "append": {
+            "const": false
+          },
+          "data": {
+            "type": "object",
+            "required": {
+              "url": {
+                "const": "https://push.atumplatform.com/_matrix/push/v1/notify"
+              },
+              "format": {
+                "const": "event_id_only"
+              },
+              "default_payload": {
+                "type": "object",
+                "required": {
+                  "aps": {
+                    "type": "object",
+                    "required": {
+                      "mutable-content": {
+                        "const": 1
+                      },
+                      "alert": {
+                        "type": "object",
+                        "required": {
+                          "loc-key": {
+                            "ref": "loc_key"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "pusher.delete.request": {
+      "direction": "device_to_homeserver",
+      "schema": {
+        "type": "object",
+        "required": {
+          "kind": {
+            "type": "null"
+          },
+          "app_id": {
+            "ref": "app_id"
+          },
+          "pushkey": {
+            "ref": "pushkey"
+          }
+        }
+      }
+    },
+    "gateway.notification": {
+      "direction": "homeserver_to_gateway",
+      "schema": {
+        "type": "object",
+        "required": {
+          "notification": {
+            "type": "object",
+            "required": {
+              "event_id": {
+                "ref": "event_id"
+              },
+              "room_id": {
+                "ref": "room_id"
+              },
+              "counts": {
+                "type": "object",
+                "required": {
+                  "unread": {
+                    "type": "integer",
+                    "min": 0,
+                    "max": 9007199254740991
+                  }
+                },
+                "optional": {
+                  "missed_calls": {
+                    "type": "integer",
+                    "min": 0,
+                    "max": 9007199254740991
+                  }
+                }
+              },
+              "prio": {
+                "enum": [
+                  "high",
+                  "low"
+                ]
+              },
+              "devices": {
+                "type": "array",
+                "min": 1,
+                "max": 20,
+                "items": {
+                  "type": "object",
+                  "required": {
+                    "app_id": {
+                      "ref": "app_id"
+                    },
+                    "pushkey": {
+                      "ref": "pushkey"
+                    }
+                  },
+                  "optional": {
+                    "pushkey_ts": {
+                      "type": "integer",
+                      "min": 0,
+                      "max": 9007199254740991
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": {},
+                      "additional": true
+                    },
+                    "tweaks": {
+                      "type": "object",
+                      "required": {},
+                      "additional": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apns.payload": {
+      "direction": "gateway_to_apns",
+      "schema": {
+        "type": "object",
+        "required": {
+          "aps": {
+            "type": "object",
+            "required": {
+              "mutable-content": {
+                "const": 1
+              },
+              "alert": {
+                "type": "object",
+                "required": {
+                  "loc-key": {
+                    "ref": "loc_key"
+                  }
+                }
+              }
+            },
+            "optional": {
+              "badge": {
+                "type": "integer",
+                "min": 0,
+                "max": 9007199254740991
+              }
+            }
+          },
+          "room_id": {
+            "ref": "room_id"
+          },
+          "event_id": {
+            "ref": "event_id"
+          }
+        },
+        "optional": {
+          "unread_count": {
+            "type": "integer",
+            "min": 0,
+            "max": 9007199254740991
+          },
+          "missed_calls": {
+            "type": "integer",
+            "min": 0,
+            "max": 9007199254740991
+          }
+        }
+      }
+    },
+    "sygnal.apps": {
+      "direction": "configuration",
+      "schema": {
+        "type": "object",
+        "required": {
+          "com.atum.mobile.ios.prod": {
+            "ref": "apns_app"
+          },
+          "com.atum.mobile.ios.dev": {
+            "ref": "apns_app"
+          }
+        }
+      }
+    }
+  },
+  "invariants": [],
+  "state_machines": {
+    "pusher": {
+      "states": [
+        "absent",
+        "registered",
+        "removed"
+      ],
+      "initial": [
+        "absent"
+      ],
+      "terminal": [
+        "removed"
+      ],
+      "transitions": [
+        [
+          "absent",
+          "registered",
+          "set"
+        ],
+        [
+          "registered",
+          "registered",
+          "set_again"
+        ],
+        [
+          "registered",
+          "removed",
+          "replaced_by_new_token"
+        ],
+        [
+          "registered",
+          "removed",
+          "app_deleted_on_sign_out"
+        ],
+        [
+          "registered",
+          "removed",
+          "server_removed_on_revocation"
+        ],
+        [
+          "registered",
+          "removed",
+          "apns_rejected"
+        ],
+        [
+          "registered",
+          "removed",
+          "account_deleted"
+        ]
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "file": "fixtures/pusher-set-prod.request.json",
+      "message": "pusher.set.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/pusher-set-dev.request.json",
+      "message": "pusher.set.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/pusher-set-full-format.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/pusher-set-third-party-gateway.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/pusher-set-chosen-device-name.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/pusher-set-alert-with-text.request.json",
+      "message": "pusher.set.request",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/pusher-delete.request.json",
+      "message": "pusher.delete.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/gateway-notification.request.json",
+      "message": "gateway.notification",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/gateway-notification-with-content.request.json",
+      "message": "gateway.notification",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/apns.payload.json",
+      "message": "apns.payload",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/apns-payload-with-body.payload.json",
+      "message": "apns.payload",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/apns-payload-with-sender.payload.json",
+      "message": "apns.payload",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/sygnal-apps.config.json",
+      "message": "sygnal.apps",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/sygnal-apps-inline-key.config.json",
+      "message": "sygnal.apps",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/sygnal-apps-wrong-team.config.json",
+      "message": "sygnal.apps",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/pusher-lifecycle.sequence.json",
+      "machine": "pusher",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/pusher-token-rotation.sequence.json",
+      "machine": "pusher",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/pusher-revived-after-removal.sequence.json",
+      "machine": "pusher",
+      "expect": "reject",
+      "violation": "transition"
+    }
+  ]
+}

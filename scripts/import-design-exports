@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Import a committed desktop export, verifying before replacing any resources."""
+import argparse
+import hashlib
+import io
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
+
+REPOSITORY = "atum-platform/atum-desktop"
+ORIGIN = "https://github.com/atum-platform/atum-desktop.git"
+PREFIX = "packages/mobile-design-exports/dist/"
+ROOT = Path(__file__).resolve().parents[1]
+LOCALES = {"en", "vi", "ja", "zh", "zh-Hant"}
+REQUIRED = {"atum-kit-tokens.json", "Localizable.xcstrings", "copy-contract.json", "copy-inventory.json", "colors.json", "tokens.json", "glyphs.json", "ATTRIBUTION.md", "fixtures/playground.json", "fixtures/phone.json", "marks/eclipse.json", "marks/atom.json", "marks/proton.json"}
+
+
+class ImportFailure(Exception):
+    pass
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def json_bytes(value):
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
+
+
+def parse_json(data):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ImportFailure("Duplicate JSON key")
+            result[key] = value
+        return result
+    try:
+        return json.loads(data, object_pairs_hook=unique)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise ImportFailure("Invalid JSON resource") from error
+
+
+def safe_path(path):
+    if not isinstance(path, str) or not path or "\\" in path:
+        raise ImportFailure("Invalid resource path")
+    parts = path.split("/")
+    if any(not part or part.startswith(".") for part in parts) or PurePosixPath(path).is_absolute():
+        raise ImportFailure("Unsafe resource path")
+    return path
+
+
+def validate(files):
+    if "manifest.json" not in files:
+        raise ImportFailure("Missing manifest.json; regenerate desktop exports")
+    manifest = parse_json(files["manifest.json"])
+    if not isinstance(manifest, dict) or type(manifest.get("schemaVersion")) is not int or manifest.get("schemaVersion") != 1:
+        raise ImportFailure("Unsupported design-export schema; consumer supports version 1")
+    locales = manifest.get("locales")
+    if manifest.get("developmentLanguage") != "vi" or not isinstance(locales, list) or any(not isinstance(locale, str) for locale in locales) or len(locales) != len(LOCALES) or set(locales) != LOCALES:
+        raise ImportFailure("Expected Vietnamese development language and all five locales")
+    hashes = manifest.get("files")
+    if not isinstance(hashes, dict) or not REQUIRED <= hashes.keys():
+        raise ImportFailure("Incomplete design-export manifest")
+    if not any(path.startswith("fixtures/") for path in hashes) or not any(path.startswith("marks/") for path in hashes):
+        raise ImportFailure("Missing fixture or mark resources")
+    for path, expected in hashes.items():
+        safe_path(path)
+        if path == "manifest.json" or not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected):
+            raise ImportFailure("Invalid manifest hash entry")
+        if path not in files or digest(files[path]) != expected:
+            raise ImportFailure(f"Hash mismatch or missing resource: {path}")
+    if set(files) != set(hashes) | {"manifest.json"}:
+        raise ImportFailure("Unlisted resource in export; refusing incomplete manifest")
+    catalog = parse_json(files["Localizable.xcstrings"])
+    if not isinstance(catalog, dict) or catalog.get("sourceLanguage") != "vi" or not isinstance(catalog.get("strings"), dict) or not catalog["strings"]:
+        raise ImportFailure("Invalid Vietnamese String Catalog")
+    for key, entry in catalog["strings"].items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("localizations"), dict) or set(entry["localizations"]) != LOCALES:
+            raise ImportFailure(f"String must have all five locales: {key}")
+    return manifest
+
+
+def git(repo, *args):
+    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True)
+    if result.returncode:
+        raise ImportFailure(f"Git {args[0]} failed (exit {result.returncode}); check access and revision")
+    return result.stdout
+
+
+def read_export(repo, revision):
+    if not re.fullmatch(r"[a-f0-9]{40}", revision):
+        raise ImportFailure("Use the immutable full 40-character atum-desktop commit SHA")
+    origin = git(repo, "remote", "get-url", "origin").decode().strip()
+    if origin not in {ORIGIN, "https://github.com/atum-platform/atum-desktop", "git@github.com:atum-platform/atum-desktop.git"}:
+        raise ImportFailure("Source origin must be the canonical atum-platform/atum-desktop repository")
+    resolved = git(repo, "rev-parse", "--verify", revision + "^{commit}").decode().strip()
+    if resolved != revision:
+        raise ImportFailure("Revision did not resolve to the requested commit")
+    archive = git(repo, "archive", revision, PREFIX.rstrip("/"))
+    files = {}
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        for member in tar:
+            if member.isdir():
+                continue
+            if not member.isfile() or not member.name.startswith(PREFIX):
+                raise ImportFailure("Export contains an unsupported archive entry")
+            path = safe_path(member.name[len(PREFIX):])
+            if path in files or member.size > 20 * 1024 * 1024:
+                raise ImportFailure("Duplicate or oversized export resource")
+            files[path] = tar.extractfile(member).read()
+    validate(files)
+    return files
+
+
+def install(root, files, revision):
+    validate(files)
+    vendor = root / "ios/Vendor/AtumDesign"
+    lock = root / "atum-design.lock"
+    lock_data = json_bytes({"schemaVersion": 1, "repository": REPOSITORY,
+                            "revision": revision, "manifestSha256": digest(files["manifest.json"])})
+    vendor.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".import-", dir=root) as temporary:
+        staging = Path(temporary)
+        new_vendor = staging / "new"
+        new_vendor.mkdir()
+        for path, data in files.items():
+            target = new_vendor / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        new_lock = staging / "lock"
+        new_lock.write_bytes(lock_data)
+        old_vendor = staging / "old"
+        old_lock = lock.read_bytes() if lock.exists() else None
+        had_vendor = vendor.exists()
+        if had_vendor:
+            os.replace(vendor, old_vendor)
+        try:
+            os.replace(new_vendor, vendor)
+            os.replace(new_lock, lock)
+        except OSError:
+            if vendor.exists():
+                shutil.rmtree(vendor)
+            if had_vendor:
+                os.replace(old_vendor, vendor)
+            if old_lock is None:
+                lock.unlink(missing_ok=True)
+            else:
+                lock.write_bytes(old_lock)
+            raise
+
+
+def verify(root):
+    lock_path = root / "atum-design.lock"
+    if not lock_path.is_file():
+        raise ImportFailure("Missing atum-design.lock; import a committed desktop export first")
+    lock = parse_json(lock_path.read_bytes())
+    if not isinstance(lock, dict) or type(lock.get("schemaVersion")) is not int or lock.get("schemaVersion") != 1 or lock.get("repository") != REPOSITORY or not isinstance(lock.get("revision"), str) or not re.fullmatch(r"[a-f0-9]{40}", lock["revision"]):
+        raise ImportFailure("Invalid design pin")
+    vendor = root / "ios/Vendor/AtumDesign"
+    files = {}
+    if vendor.is_symlink():
+        raise ImportFailure("Vendor resources must be regular files")
+    for path in vendor.rglob("*"):
+        if path.is_symlink():
+            raise ImportFailure("Vendor resources must be regular files")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ImportFailure("Vendor resources must be regular files")
+        files[safe_path(path.relative_to(vendor).as_posix())] = path.read_bytes()
+    validate(files)
+    if digest(files["manifest.json"]) != lock.get("manifestSha256"):
+        raise ImportFailure("Manifest does not match atum-design.lock")
+    return lock
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("revision", nargs="?")
+    parser.add_argument("--source", type=Path, help="Local canonical atum-desktop checkout")
+    parser.add_argument("--verify", action="store_true", help="Check committed pin without network")
+    args = parser.parse_args()
+    if args.verify:
+        if args.revision or args.source:
+            parser.error("--verify does not accept a revision or source")
+        pin = verify(ROOT)
+    else:
+        if not args.revision or not re.fullmatch(r"[a-f0-9]{40}", args.revision):
+            parser.error("Supply a full immutable commit SHA")
+        if args.source:
+            files = read_export(args.source, args.revision)
+        else:
+            with tempfile.TemporaryDirectory(prefix="atum-export-fetch-") as temporary:
+                repo = Path(temporary)
+                git(repo, "init", "--bare", "--quiet")
+                git(repo, "remote", "add", "origin", ORIGIN)
+                git(repo, "fetch", "--depth=1", "origin", args.revision)
+                files = read_export(repo, args.revision)
+        install(ROOT, files, args.revision)
+        pin = verify(ROOT)
+    print(f"Verified {REPOSITORY}@{pin['revision']} ({pin['manifestSha256']})")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ImportFailure, OSError, tarfile.TarError) as error:
+        raise SystemExit(f"Design import failed: {error}")

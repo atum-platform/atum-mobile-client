@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "status": "UNSELECTED_TEST_ONLY_BASELINE",
+  "upstream": {
+    "url": "https://github.com/matrix-org/matrix-rust-sdk.git",
+    "revision": "4f7f4d49f571e613eb1cb35956e4649dc056f0af",
+    "license": "Apache-2.0"
+  },
+  "basePack": "../publication-cancellation/source.json",
+  "basePackSHA256": "b50d1dcabbfa7aeec2816bf283fb166a5b5fe4f6eb6a59fa3a775756aaa9206e",
+  "sourcePath": "crates/matrix-sdk/src/encryption/tasks.rs",
+  "preimageSHA256": "d5330a90d017448bc50d05760264b310f28b78568aae8b717886a3e4c54c3583",
+  "fixtureSHA256": "711712ac14e8bd16f3578811808d37c077182e994556bbb15759fbc1051ac8c5",
+  "patchSHA256": "75a925a47a16a1b91c49ee450f2691431d99cf75b00a2772ee753726efe1a160",
+  "selectedInApp": false,
+  "publicationStatus": "Public source replay and 20 SQLite backup tests pass on regenerated v1 exported Megolm fixtures; historical private receipts are superseded",
+  "publicAcceptancePending": [],
+  "patch": "sdk/background-backup/baseline.patch",
+  "publicAcceptanceReceipt": "sdk/background-backup/public-acceptance.json",
+  "publicAcceptanceReceiptSHA256": "7dd70d37a2d46acfc5779178ff6b1e9644239454fc34b17576e1b2b683023d90"
+}

@@ -1,0 +1,2355 @@
+{
+  "contract_id": "atum.company-workspace",
+  "version": "1.1",
+  "status": "frozen",
+  "pack_files": [
+    "README.md",
+    "contract.json",
+    "fixtures/channel-default.snapshot.json",
+    "fixtures/channel-directory-empty.response.json",
+    "fixtures/channel-directory.response.json",
+    "fixtures/channel-principals.snapshot.json",
+    "fixtures/channel-ready.snapshot.json",
+    "fixtures/channel-system-key.snapshot.json",
+    "fixtures/channel-v1-shape.snapshot.json",
+    "fixtures/company-reactivate.sequence.json",
+    "fixtures/company-retire.sequence.json",
+    "fixtures/error-creation-closed.response.json",
+    "fixtures/error-denied.response.json",
+    "fixtures/error-invite-agent.response.json",
+    "fixtures/error-invite-already-member.response.json",
+    "fixtures/error-invite-handle.response.json",
+    "fixtures/error-invite-limited.response.json",
+    "fixtures/error-invite-not-found.response.json",
+    "fixtures/error-invite-unavailable.response.json",
+    "fixtures/error-last-admin.response.json",
+    "fixtures/error-reason-status.response.json",
+    "fixtures/invite-admin.request.json",
+    "fixtures/invite-both.request.json",
+    "fixtures/invite-failed-budget.trace.json",
+    "fixtures/invite-hyphen.request.json",
+    "fixtures/invite-normalized-errors.trace.json",
+    "fixtures/invite-principal.request.json",
+    "fixtures/invite-replay-after-rename.trace.json",
+    "fixtures/invite-role.request.json",
+    "fixtures/invite-short.request.json",
+    "fixtures/invite-trace-bad-result.trace.json",
+    "fixtures/invite-trace-principal.trace.json",
+    "fixtures/invite.request.json",
+    "fixtures/leave-active.response.json",
+    "fixtures/leave-actor.request.json",
+    "fixtures/leave-no-retired.response.json",
+    "fixtures/leave-removed.response.json",
+    "fixtures/leave-retired.response.json",
+    "fixtures/leave-target.request.json",
+    "fixtures/leave.request.json",
+    "fixtures/leave.response.json",
+    "fixtures/list-closed.response.json",
+    "fixtures/list-inviter-gone.response.json",
+    "fixtures/list-inviter-principal.response.json",
+    "fixtures/list-inviter-ref.response.json",
+    "fixtures/list-v1-shape.response.json",
+    "fixtures/list.response.json",
+    "fixtures/membership-account-deletion.sequence.json",
+    "fixtures/membership-leave-readmit.sequence.json",
+    "fixtures/membership-readmit-silent.sequence.json",
+    "fixtures/membership-revoking-active.sequence.json",
+    "fixtures/membership-skip-witness.sequence.json",
+    "fixtures/membership-withdraw.sequence.json",
+    "fixtures/project-member-principal.request.json",
+    "fixtures/project-member.request.json",
+    "fixtures/removal-principal.response.json",
+    "fixtures/removal-replayed.response.json",
+    "fixtures/removal.response.json",
+    "fixtures/remove-member-principal.request.json",
+    "fixtures/remove-member-short-ref.request.json",
+    "fixtures/remove-member.request.json",
+    "fixtures/revoke-active.result.json",
+    "fixtures/revoke-blocked-admin.result.json",
+    "fixtures/revoke-blocked-deletion.result.json",
+    "fixtures/revoke-blocked-other.result.json",
+    "fixtures/revoke-deletion.input.json",
+    "fixtures/revoke-leave-admin.input.json",
+    "fixtures/revoke-leave.input.json",
+    "fixtures/revoke-no-retired.result.json",
+    "fixtures/revoke-noop.result.json",
+    "fixtures/revoke-remove-no-admin.input.json",
+    "fixtures/revoke-remove.input.json",
+    "fixtures/revoke-removed-retired.result.json",
+    "fixtures/revoke-revoking.result.json",
+    "fixtures/revoke-unknown-entry.input.json",
+    "fixtures/selector-absent.headers.json",
+    "fixtures/selector-other-version.headers.json",
+    "fixtures/selector-patch-version.headers.json",
+    "fixtures/selector.headers.json",
+    "fixtures/snapshot-admin.response.json",
+    "fixtures/snapshot-avatar-url.response.json",
+    "fixtures/snapshot-bad-ref.response.json",
+    "fixtures/snapshot-create.response.json",
+    "fixtures/snapshot-email.response.json",
+    "fixtures/snapshot-legacy.response.json",
+    "fixtures/snapshot-matrix-id.response.json",
+    "fixtures/snapshot-member.response.json",
+    "fixtures/snapshot-principal.response.json",
+    "fixtures/snapshot-project-principals.response.json",
+    "fixtures/snapshot-removed-identity.response.json",
+    "fixtures/snapshot-v1-shape.response.json",
+    "fixtures/v1.accept.request.json",
+    "fixtures/v1.create.request.json",
+    "fixtures/v1.invite-handle.request.json",
+    "fixtures/v1.invite.request.json",
+    "fixtures/v1.list-extra-can-create.response.json",
+    "fixtures/v1.list-inviter.response.json",
+    "fixtures/v1.list.response.json",
+    "fixtures/v1.removal-removed.response.json",
+    "fixtures/v1.removal.response.json",
+    "fixtures/v1.remove-member-ref.request.json",
+    "fixtures/v1.remove-member.request.json",
+    "fixtures/v1.snapshot-default-channel.response.json",
+    "fixtures/v1.snapshot-member-handle.response.json",
+    "fixtures/v1.snapshot-schema-2.response.json",
+    "fixtures/v1.snapshot.response.json"
+  ],
+  "row": "B19 S1: humans-only Team Space contract (handle invite, leave and removal, member projection, default channel, pilot admission)",
+  "providers": [
+    "Atum platform company authority and Shell native routes"
+  ],
+  "consumers": [
+    "Atum desktop Team Space",
+    "Atum phone (read, send, accept, leave)",
+    "Atum account-deletion lane (service entry)"
+  ],
+  "base": {
+    "contract": "atum.company-workspace/1",
+    "path": "spec/company-workspace/v1",
+    "kind": "readme_only",
+    "sha256": "74aa75d45541f24a9f587e32fb582e476677e53738f1499791411334d146e4e3",
+    "rule": "v1 has no contract.json. Its wire is restated in this pack as v1.* types and messages, answered byte for byte as before whenever Atum-Company-Wire is absent"
+  },
+  "dependencies": [
+    {
+      "contract": "atum.team-space/1",
+      "path": "spec/team-space/v1",
+      "sha256": "df5601d930e66dc943ad579670722bb52ef0bbe8acdd37db1472424c0d692555"
+    },
+    {
+      "contract": "atum.company-channels/1",
+      "path": "spec/company-channels/v1",
+      "sha256": "eb3e55c7a6a90b15176b9d935fa40154e8cb5fcfaf53e28c80129b545d5a0ab5"
+    },
+    {
+      "contract": "atum.company-channel-rooms/1",
+      "path": "spec/company-channel-rooms/v1",
+      "sha256": "45f785f4db22f330f9d58c88e5af06a655581528f73fa947382e82b37e9fc60e"
+    },
+    {
+      "contract": "atum.account-deletion/1",
+      "path": "spec/account-deletion/v1",
+      "sha256": "c0bce141072921c3416af0fb57ab1e48d81889c7f8d4ef0321f08ad6d3465467"
+    }
+  ],
+  "selection": {
+    "header": "Atum-Company-Wire",
+    "value": "1.1",
+    "absent": "company-workspace/1, byte for byte",
+    "unknown_value": "400 matrix_400, no effect",
+    "response_marker": {
+      "field": "schemaVersion",
+      "v1": 1,
+      "v1_1": 2
+    },
+    "applies_to": [
+      "list",
+      "read",
+      "create",
+      "invite",
+      "accept",
+      "remove-member",
+      "leave",
+      "create-project",
+      "project-member",
+      "list-channels",
+      "read-channel",
+      "create-channel",
+      "archive-channel",
+      "restore-channel"
+    ],
+    "not_versioned_here": [
+      "reserve-file",
+      "status-file",
+      "publish-file",
+      "download-file",
+      "project-sources",
+      "project-reader",
+      "project-brief",
+      "project-brief-correction",
+      "wallet",
+      "funding"
+    ],
+    "v1_1_only_actions": [
+      "leave"
+    ],
+    "probe": "GET /api/matrix/v1/companies with the header: schemaVersion 2 means the server speaks 1.1, schemaVersion 1 means it does not",
+    "vary": "Atum-Company-Wire"
+  },
+  "routes": {
+    "GET /api/matrix/v1/companies": {
+      "action": "list",
+      "request": "selector.headers",
+      "response": {
+        "1": "v1.list.response",
+        "1.1": "list.response"
+      }
+    },
+    "POST /api/matrix/v1/companies": {
+      "action": "create",
+      "request": {
+        "1": "v1.create.request",
+        "1.1": "v1.create.request"
+      },
+      "response": {
+        "1": "v1.snapshot.response",
+        "1.1": "snapshot.response"
+      }
+    },
+    "GET /api/matrix/v1/companies/{companyId}": {
+      "action": "read",
+      "response": {
+        "1": "v1.snapshot.response",
+        "1.1": "snapshot.response"
+      }
+    },
+    "POST /api/matrix/v1/companies/{companyId}/invite": {
+      "action": "invite",
+      "request": {
+        "1": "v1.invite.request",
+        "1.1": "invite.request"
+      },
+      "response": {
+        "1": "v1.snapshot.response",
+        "1.1": "snapshot.response"
+      }
+    },
+    "POST /api/matrix/v1/companies/{companyId}/accept": {
+      "action": "accept",
+      "request": {
+        "1": "v1.accept.request",
+        "1.1": "v1.accept.request"
+      },
+      "response": {
+        "1": "v1.snapshot.response",
+        "1.1": "snapshot.response"
+      }
+    },
+    "POST /api/matrix/v1/companies/{companyId}/remove-member": {
+      "action": "remove-member",
+      "request": {
+        "1": "v1.remove-member.request",
+        "1.1": "remove-member.request"
+      },
+      "response": {
+        "1": "v1.removal.response",
+        "1.1": "removal.response"
+      }
+    },
+    "POST /api/matrix/v1/companies/{companyId}/leave": {
+      "action": "leave",
+      "request": {
+        "1.1": "leave.request"
+      },
+      "response": {
+        "1.1": "leave.response"
+      },
+      "v1": "404 before authentication, as for any unknown action"
+    },
+    "POST /api/matrix/v1/companies/{companyId}/create-project": {
+      "action": "create-project",
+      "request": {
+        "1": "v1.create.request",
+        "1.1": "v1.create.request"
+      },
+      "response": {
+        "1": "v1.snapshot.response",
+        "1.1": "snapshot.response"
+      }
+    },
+    "POST /api/matrix/v1/companies/{companyId}/project-member": {
+      "action": "project-member",
+      "request": {
+        "1.1": "project-member.request"
+      },
+      "response": {
+        "1.1": "snapshot.response"
+      },
+      "v1": "unchanged: memberPrincipal, v1.snapshot.response"
+    },
+    "GET /api/matrix/v1/companies/{companyId}/channels": {
+      "action": "list-channels",
+      "response": {
+        "1.1": "channel-directory.response"
+      },
+      "v1": "unchanged: atum.company-channels/1"
+    },
+    "GET /api/matrix/v1/companies/{companyId}/channels/{channelId}": {
+      "action": "read-channel",
+      "response": {
+        "1.1": "channel.snapshot"
+      },
+      "v1": "unchanged: atum.company-channels/1"
+    },
+    "POST /api/matrix/v1/companies/{companyId}/channels": {
+      "action": "create-channel",
+      "request": "unchanged: atum.company-channels/1 channel_create_request",
+      "response": {
+        "1.1": "channel.snapshot"
+      },
+      "v1": "unchanged: atum.company-channels/1"
+    },
+    "POST /api/matrix/v1/companies/{companyId}/channels/{channelId}/{archive|restore}": {
+      "action": "archive-channel|restore-channel",
+      "request": "unchanged: {requestId}",
+      "response": {
+        "1.1": "channel.snapshot"
+      },
+      "v1": "unchanged: atum.company-channels/1"
+    }
+  },
+  "limits": {
+    "json_bytes": 4096,
+    "members_per_company": 100,
+    "companies_per_person": 100,
+    "companies_created_per_person": 10,
+    "snapshot_rows": 100,
+    "failed_handle_resolutions_per_admin": [
+      {
+        "window_seconds": 600,
+        "max": 10
+      },
+      {
+        "window_seconds": 86400,
+        "max": 50
+      }
+    ]
+  },
+  "errors": {
+    "statuses": {
+      "400": "invalid",
+      "401": "authentication",
+      "403": "denied",
+      "404": "not_found",
+      "409": "conflict",
+      "429": "limit",
+      "503": "unavailable"
+    },
+    "invite_target_unavailable": "one status, body and header set for: handle not assigned, handle belongs to a non-person or an ineligible person, person already invited/active/revoking, person at their membership cap",
+    "invite_lookup_limited": "Retry-After seconds; answered for every handle once the admin's failure budget is spent",
+    "company_creation_closed": "create by a person the pilot admission does not allow",
+    "last_admin": "leave or remove would leave members without an active admin"
+  },
+  "identity_projection": {
+    "member_ref": "32 random bytes, base64url (43 characters), stored per (company, principal) in a private table at first invitation and reused on readmission; stable across readmission, unlinkable to the principal, the Matrix ID or another company without database access, with no key to manage or rotate",
+    "principal_on_1_1_wire": "never, in any request or response of this pack",
+    "principal_on_1_wire": "unchanged: members[].principal, channel memberPrincipals and project memberPrincipals, to the audiences that receive them today",
+    "principal_elsewhere": "public-handles lookup answers the holder's principal for an assigned handle; a Matrix ID is visible to every member of a shared room. This pack claims neither is secret",
+    "audiences": {
+      "active_member": "active rows only; handle, displayName, avatarUri, role, self",
+      "admin": "invited, active and revoking rows with the same fields; removed rows keep memberRef, role and state only; at most 100 member rows, live rows first, then the newest removed rows, so the row cap never hides a live person",
+      "invitee": "the invitation and the inviter's handle and displayName while the inviter is an active member; nothing about other members",
+      "other": "nothing"
+    },
+    "fields": {
+      "handle": "the current alias, or null; changes when the person renames",
+      "displayName": "the person's Matrix profile name, or null; text only",
+      "avatarUri": "the person's Matrix profile avatar mxc URI, present only when one is set"
+    }
+  },
+  "invite": {
+    "order": [
+      "authenticate the caller",
+      "caller is an active admin of the company, else 403 as in v1",
+      "replay lookup by actor and requestId",
+      "failure budget, else 429 invite_lookup_limited",
+      "handle grammar, else 400",
+      "resolve the current assignment of the handle",
+      "eligibility",
+      "bind the request to the resolved person and insert the invitation"
+    ],
+    "eligibility": "an active human on the company's issuer who is not invited, active or revoking in this company and is under their own membership cap; a removed person is eligible (readmission)",
+    "refusal": "every failure after grammar is one 404 invite_target_unavailable and counts against the admin's failure budget; successes do not",
+    "binding": "a successful request stores operation, company, role, the normalized handle and the first resolved person",
+    "replay": "same requestId, same normalized handle and role: answered from the stored person, never re-resolved; a different handle or role: 409; a request that failed resolution stores nothing",
+    "normalization": "a leading @ is dropped and letters fold to lower case"
+  },
+  "admission": {
+    "decided_by": "server",
+    "modes": [
+      "allow_list",
+      "public"
+    ],
+    "current": "allow_list",
+    "public_requires": "the account-deletion service entry of the revocation core is live (S7)",
+    "refusal": {
+      "status": 403,
+      "error": "matrix_403",
+      "reason": "company_creation_closed"
+    },
+    "hint": "list.canCreate, advisory only",
+    "replay": "a replayed create that already succeeded is answered; admission is not re-evaluated"
+  },
+  "default_channel": {
+    "systemKey": "default",
+    "displayName": "general",
+    "localized_by": "clients, for systemKey default only",
+    "seeded_by": "create, in its transaction, for both wires",
+    "idempotency": "a replayed create returns the same company and the same defaultChannelId; at most one default channel per company",
+    "archive": "an ordinary channel; archive and restore apply with no special refusal"
+  },
+  "revocation": {
+    "entries": [
+      "leave",
+      "remove-member",
+      "account-deletion"
+    ],
+    "states": "active|invited -> revoking -> removed",
+    "authority_ends": "in the transaction that records revoking",
+    "removed_after": "the room manager has witnessed the ban in every registered channel room (atum.company-channel-rooms/1 bannedHumanPrincipals); a person in no room is removed in the same operation",
+    "blockers": {
+      "leave": "last_admin",
+      "remove-member": "last_admin",
+      "account-deletion": "company_owner_with_members"
+    },
+    "retire": "the last active member leaving retires the company: invitations withdrawn, channels archived, caps released, never reactivated",
+    "replay": "a leave replay is answered from the stored request of the same actor and requestId even after the actor has stopped being a member; every other replay re-authorizes the actor first",
+    "self_removal": "remove-member naming the caller's own memberRef is 400; leave is the only self path",
+    "readmission": "a fresh invitation to a removed person, same membership row and memberRef, same channel rooms, no project grant restored"
+  },
+  "invariants": [],
+  "types": {
+    "uuid": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+    },
+    "generation": {
+      "type": "integer",
+      "min": 1,
+      "max": 9007199254740991
+    },
+    "member_count": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "company_name": {
+      "type": "string",
+      "min": 1,
+      "max": 120
+    },
+    "channel_name": {
+      "type": "string",
+      "min": 1,
+      "max": 80
+    },
+    "profile_name": {
+      "type": "string",
+      "min": 1,
+      "max": 120
+    },
+    "handle": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9_]{2,31}"
+    },
+    "handle_input": {
+      "type": "string",
+      "min": 3,
+      "max": 33,
+      "pattern": "@?[A-Za-z][A-Za-z0-9_]{2,31}"
+    },
+    "member_ref": {
+      "type": "string",
+      "min": 43,
+      "max": 43,
+      "pattern": "[A-Za-z0-9_-]{43}"
+    },
+    "avatar_uri": {
+      "type": "string",
+      "min": 10,
+      "max": 512,
+      "pattern": "mxc://[A-Za-z0-9._-]{1,255}/[A-Za-z0-9_-]{1,255}"
+    },
+    "room_id": {
+      "type": "string",
+      "min": 4,
+      "max": 512,
+      "pattern": "![!-9;-~]{1,255}:[!-~]{1,255}"
+    },
+    "label": {
+      "type": "string",
+      "min": 1,
+      "max": 16,
+      "pattern": "[a-z][a-z0-9]{0,15}"
+    },
+    "role": {
+      "enum": [
+        "admin",
+        "member"
+      ]
+    },
+    "member_state": {
+      "enum": [
+        "invited",
+        "active",
+        "revoking",
+        "removed"
+      ]
+    },
+    "revocation_state": {
+      "enum": [
+        "revoking",
+        "removed"
+      ]
+    },
+    "v1_company": {
+      "type": "object",
+      "required": {
+        "id": {
+          "ref": "uuid"
+        },
+        "displayName": {
+          "ref": "company_name"
+        },
+        "role": {
+          "ref": "role"
+        },
+        "authorityGeneration": {
+          "ref": "generation"
+        }
+      }
+    },
+    "v1_invitation": {
+      "type": "object",
+      "required": {
+        "id": {
+          "ref": "uuid"
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "displayName": {
+          "ref": "company_name"
+        },
+        "role": {
+          "ref": "role"
+        }
+      }
+    },
+    "v1_member": {
+      "type": "object",
+      "required": {
+        "principal": {
+          "ref": "uuid"
+        },
+        "role": {
+          "ref": "role"
+        },
+        "state": {
+          "ref": "member_state"
+        }
+      }
+    },
+    "v1_project": {
+      "type": "object",
+      "required": {
+        "id": {
+          "ref": "uuid"
+        },
+        "displayName": {
+          "ref": "company_name"
+        },
+        "memberPrincipals": {
+          "type": "array",
+          "items": {
+            "ref": "uuid"
+          },
+          "max": 100,
+          "unique": true
+        },
+        "collaboration": {
+          "const": "not_provisioned"
+        }
+      }
+    },
+    "v1_list_response": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "companies": {
+          "type": "array",
+          "items": {
+            "ref": "v1_company"
+          },
+          "max": 100,
+          "unique": true
+        },
+        "invitations": {
+          "type": "array",
+          "items": {
+            "ref": "v1_invitation"
+          },
+          "max": 100,
+          "unique": true
+        }
+      }
+    },
+    "v1_snapshot_response": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "company": {
+          "ref": "v1_company"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "ref": "v1_member"
+          },
+          "min": 1,
+          "max": 100,
+          "unique": true
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "ref": "v1_project"
+          },
+          "max": 100,
+          "unique": true
+        }
+      }
+    },
+    "v1_removal_response": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "memberPrincipal": {
+          "ref": "uuid"
+        },
+        "state": {
+          "const": "revoking"
+        },
+        "authorityGeneration": {
+          "ref": "generation"
+        }
+      }
+    },
+    "v1_create_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        },
+        "displayName": {
+          "ref": "company_name"
+        }
+      }
+    },
+    "v1_invite_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        },
+        "memberPrincipal": {
+          "ref": "uuid"
+        },
+        "role": {
+          "ref": "role"
+        }
+      }
+    },
+    "v1_accept_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        },
+        "invitationId": {
+          "ref": "uuid"
+        }
+      }
+    },
+    "v1_remove_member_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        },
+        "memberPrincipal": {
+          "ref": "uuid"
+        }
+      }
+    },
+    "selector_headers": {
+      "type": "object",
+      "required": {
+        "Atum-Company-Wire": {
+          "const": "1.1"
+        }
+      },
+      "optional": {
+        "Accept": {
+          "const": "application/json"
+        },
+        "Content-Type": {
+          "const": "application/json"
+        }
+      },
+      "additional": false
+    },
+    "member_visible": {
+      "type": "object",
+      "required": {
+        "memberRef": {
+          "ref": "member_ref"
+        },
+        "role": {
+          "ref": "role"
+        },
+        "state": {
+          "enum": [
+            "invited",
+            "active",
+            "revoking"
+          ]
+        },
+        "self": {
+          "type": "boolean"
+        },
+        "handle": {
+          "anyOf": [
+            {
+              "ref": "handle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "ref": "profile_name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "optional": {
+        "avatarUri": {
+          "ref": "avatar_uri"
+        }
+      }
+    },
+    "member_withheld": {
+      "type": "object",
+      "required": {
+        "memberRef": {
+          "ref": "member_ref"
+        },
+        "role": {
+          "ref": "role"
+        },
+        "state": {
+          "const": "removed"
+        },
+        "self": {
+          "const": false
+        },
+        "handle": {
+          "const": null
+        },
+        "displayName": {
+          "const": null
+        }
+      }
+    },
+    "member": {
+      "anyOf": [
+        {
+          "ref": "member_visible"
+        },
+        {
+          "ref": "member_withheld"
+        }
+      ]
+    },
+    "inviter": {
+      "type": "object",
+      "required": {
+        "handle": {
+          "anyOf": [
+            {
+              "ref": "handle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "displayName": {
+          "anyOf": [
+            {
+              "ref": "profile_name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "invitation": {
+      "type": "object",
+      "required": {
+        "id": {
+          "ref": "uuid"
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "displayName": {
+          "ref": "company_name"
+        },
+        "role": {
+          "ref": "role"
+        },
+        "inviter": {
+          "ref": "inviter"
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": {
+        "id": {
+          "ref": "uuid"
+        },
+        "displayName": {
+          "ref": "company_name"
+        },
+        "memberRefs": {
+          "type": "array",
+          "items": {
+            "ref": "member_ref"
+          },
+          "max": 100,
+          "unique": true
+        },
+        "collaboration": {
+          "const": "not_provisioned"
+        }
+      }
+    },
+    "list_response": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "companies": {
+          "type": "array",
+          "items": {
+            "ref": "v1_company"
+          },
+          "max": 100,
+          "unique": true
+        },
+        "invitations": {
+          "type": "array",
+          "items": {
+            "ref": "invitation"
+          },
+          "max": 100,
+          "unique": true
+        },
+        "canCreate": {
+          "type": "boolean"
+        }
+      }
+    },
+    "snapshot_response": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "company": {
+          "ref": "v1_company"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "ref": "member"
+          },
+          "min": 1,
+          "max": 100,
+          "unique": true
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "ref": "project"
+          },
+          "max": 100,
+          "unique": true
+        },
+        "defaultChannelId": {
+          "anyOf": [
+            {
+              "ref": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "removal_response": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "memberRef": {
+          "ref": "member_ref"
+        },
+        "state": {
+          "ref": "revocation_state"
+        },
+        "authorityGeneration": {
+          "ref": "generation"
+        }
+      }
+    },
+    "leave_response": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "state": {
+          "ref": "revocation_state"
+        },
+        "retired": {
+          "type": "boolean"
+        },
+        "authorityGeneration": {
+          "ref": "generation"
+        }
+      }
+    },
+    "channel": {
+      "type": "object",
+      "required": {
+        "id": {
+          "ref": "uuid"
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "displayName": {
+          "ref": "channel_name"
+        },
+        "visibility": {
+          "const": "company"
+        },
+        "state": {
+          "enum": [
+            "provisioning",
+            "active",
+            "archived"
+          ]
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "ref": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorityGeneration": {
+          "ref": "generation"
+        },
+        "channelGeneration": {
+          "ref": "generation"
+        }
+      },
+      "optional": {
+        "systemKey": {
+          "const": "default"
+        }
+      }
+    },
+    "room_pending": {
+      "type": "object",
+      "required": {
+        "state": {
+          "enum": [
+            "not_provisioned",
+            "provisioning",
+            "reconciling",
+            "failed"
+          ]
+        },
+        "roomId": {
+          "const": null
+        }
+      }
+    },
+    "room_ready": {
+      "type": "object",
+      "required": {
+        "state": {
+          "const": "ready"
+        },
+        "roomId": {
+          "ref": "room_id"
+        }
+      }
+    },
+    "channel_snapshot": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "channel": {
+          "ref": "channel"
+        },
+        "memberCount": {
+          "ref": "member_count"
+        },
+        "room": {
+          "anyOf": [
+            {
+              "ref": "room_pending"
+            },
+            {
+              "ref": "room_ready"
+            }
+          ]
+        }
+      }
+    },
+    "channel_directory": {
+      "type": "object",
+      "required": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "ref": "channel_snapshot"
+          },
+          "max": 100,
+          "unique": true
+        }
+      }
+    },
+    "invite_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        },
+        "memberHandle": {
+          "ref": "handle_input"
+        },
+        "role": {
+          "ref": "role"
+        }
+      }
+    },
+    "remove_member_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        },
+        "memberRef": {
+          "ref": "member_ref"
+        }
+      }
+    },
+    "leave_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        }
+      }
+    },
+    "project_member_request": {
+      "type": "object",
+      "required": {
+        "requestId": {
+          "ref": "uuid"
+        },
+        "projectId": {
+          "ref": "uuid"
+        },
+        "memberRef": {
+          "ref": "member_ref"
+        },
+        "included": {
+          "type": "boolean"
+        }
+      }
+    },
+    "error_plain": {
+      "type": "object",
+      "required": {
+        "error": {
+          "enum": [
+            "matrix_400",
+            "matrix_401",
+            "matrix_403",
+            "matrix_404",
+            "matrix_409",
+            "matrix_429",
+            "matrix_503"
+          ]
+        }
+      }
+    },
+    "error_invite_unavailable": {
+      "type": "object",
+      "required": {
+        "error": {
+          "const": "matrix_404"
+        },
+        "details": {
+          "type": "object",
+          "required": {
+            "reason": {
+              "const": "invite_target_unavailable"
+            }
+          }
+        }
+      }
+    },
+    "error_invite_limited": {
+      "type": "object",
+      "required": {
+        "error": {
+          "const": "matrix_429"
+        },
+        "details": {
+          "type": "object",
+          "required": {
+            "reason": {
+              "const": "invite_lookup_limited"
+            }
+          }
+        }
+      }
+    },
+    "error_creation_closed": {
+      "type": "object",
+      "required": {
+        "error": {
+          "const": "matrix_403"
+        },
+        "details": {
+          "type": "object",
+          "required": {
+            "reason": {
+              "const": "company_creation_closed"
+            }
+          }
+        }
+      }
+    },
+    "error_last_admin": {
+      "type": "object",
+      "required": {
+        "error": {
+          "const": "matrix_409"
+        },
+        "details": {
+          "type": "object",
+          "required": {
+            "reason": {
+              "const": "last_admin"
+            }
+          }
+        }
+      }
+    },
+    "error_response": {
+      "anyOf": [
+        {
+          "ref": "error_plain"
+        },
+        {
+          "ref": "error_invite_unavailable"
+        },
+        {
+          "ref": "error_invite_limited"
+        },
+        {
+          "ref": "error_creation_closed"
+        },
+        {
+          "ref": "error_last_admin"
+        }
+      ]
+    },
+    "revoke_leave": {
+      "type": "object",
+      "required": {
+        "entry": {
+          "const": "leave"
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "memberPrincipal": {
+          "ref": "uuid"
+        },
+        "requestId": {
+          "ref": "uuid"
+        }
+      }
+    },
+    "revoke_remove": {
+      "type": "object",
+      "required": {
+        "entry": {
+          "const": "remove-member"
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "memberPrincipal": {
+          "ref": "uuid"
+        },
+        "requestId": {
+          "ref": "uuid"
+        },
+        "adminPrincipal": {
+          "ref": "uuid"
+        }
+      }
+    },
+    "revoke_deletion": {
+      "type": "object",
+      "required": {
+        "entry": {
+          "const": "account-deletion"
+        },
+        "companyId": {
+          "ref": "uuid"
+        },
+        "memberPrincipal": {
+          "ref": "uuid"
+        },
+        "requestId": {
+          "ref": "uuid"
+        }
+      }
+    },
+    "revoke_input": {
+      "anyOf": [
+        {
+          "ref": "revoke_leave"
+        },
+        {
+          "ref": "revoke_remove"
+        },
+        {
+          "ref": "revoke_deletion"
+        }
+      ]
+    },
+    "revoke_progress": {
+      "type": "object",
+      "required": {
+        "outcome": {
+          "ref": "revocation_state"
+        },
+        "retired": {
+          "type": "boolean"
+        },
+        "authorityGeneration": {
+          "ref": "generation"
+        }
+      }
+    },
+    "revoke_blocked_admin": {
+      "type": "object",
+      "required": {
+        "outcome": {
+          "const": "blocked"
+        },
+        "blocker": {
+          "const": "last_admin"
+        }
+      }
+    },
+    "revoke_blocked_deletion": {
+      "type": "object",
+      "required": {
+        "outcome": {
+          "const": "blocked"
+        },
+        "blocker": {
+          "const": "company_owner_with_members"
+        }
+      }
+    },
+    "revoke_noop": {
+      "type": "object",
+      "required": {
+        "outcome": {
+          "const": "noop"
+        }
+      }
+    },
+    "revoke_result": {
+      "anyOf": [
+        {
+          "ref": "revoke_progress"
+        },
+        {
+          "ref": "revoke_blocked_admin"
+        },
+        {
+          "ref": "revoke_blocked_deletion"
+        },
+        {
+          "ref": "revoke_noop"
+        }
+      ]
+    },
+    "trace_entry": {
+      "type": "object",
+      "required": {
+        "handle": {
+          "ref": "handle"
+        },
+        "person": {
+          "ref": "label"
+        },
+        "kind": {
+          "enum": [
+            "human",
+            "agent"
+          ]
+        },
+        "inCompany": {
+          "type": "boolean"
+        }
+      }
+    },
+    "trace_expect_bound": {
+      "type": "object",
+      "required": {
+        "result": {
+          "enum": [
+            "invited",
+            "replayed"
+          ]
+        },
+        "person": {
+          "ref": "label"
+        }
+      }
+    },
+    "trace_expect_refused": {
+      "type": "object",
+      "required": {
+        "result": {
+          "enum": [
+            "unavailable",
+            "conflict",
+            "limited"
+          ]
+        }
+      }
+    },
+    "trace_invite": {
+      "type": "object",
+      "required": {
+        "do": {
+          "const": "invite"
+        },
+        "request": {
+          "ref": "label"
+        },
+        "admin": {
+          "ref": "label"
+        },
+        "handle": {
+          "ref": "handle_input"
+        },
+        "expect": {
+          "anyOf": [
+            {
+              "ref": "trace_expect_bound"
+            },
+            {
+              "ref": "trace_expect_refused"
+            }
+          ]
+        }
+      }
+    },
+    "trace_rename": {
+      "type": "object",
+      "required": {
+        "do": {
+          "const": "rename"
+        },
+        "person": {
+          "ref": "label"
+        },
+        "to": {
+          "ref": "handle"
+        }
+      }
+    },
+    "trace_reassign": {
+      "type": "object",
+      "required": {
+        "do": {
+          "const": "reassign"
+        },
+        "handle": {
+          "ref": "handle"
+        },
+        "to": {
+          "ref": "label"
+        }
+      }
+    },
+    "invite_trace": {
+      "type": "object",
+      "required": {
+        "directory": {
+          "type": "array",
+          "items": {
+            "ref": "trace_entry"
+          },
+          "min": 1,
+          "max": 16
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "ref": "trace_invite"
+              },
+              {
+                "ref": "trace_rename"
+              },
+              {
+                "ref": "trace_reassign"
+              }
+            ]
+          },
+          "min": 1,
+          "max": 32
+        }
+      }
+    }
+  },
+  "directions": {
+    "native_to_platform_v1": {
+      "from": "authenticated native client",
+      "to": "Atum platform (no Atum-Company-Wire header)",
+      "forbidden_fields": [
+        "actor",
+        "actorId",
+        "owner",
+        "payer",
+        "roomId",
+        "*Generation",
+        "agent*",
+        "controller",
+        "manager*"
+      ]
+    },
+    "platform_to_native_v1": {
+      "from": "Atum platform",
+      "to": "authenticated native client (no Atum-Company-Wire header)",
+      "forbidden_fields": [
+        "*token*",
+        "*email*",
+        "credential",
+        "controller",
+        "managerMasUser",
+        "userId",
+        "mxid"
+      ]
+    },
+    "native_to_platform_v1_1": {
+      "from": "authenticated native client",
+      "to": "Atum platform (Atum-Company-Wire: 1.1)",
+      "forbidden_fields": [
+        "actor*",
+        "owner*",
+        "payer*",
+        "*principal*",
+        "*Generation",
+        "roomId",
+        "manager*",
+        "agent*",
+        "controller",
+        "userId",
+        "mxid"
+      ]
+    },
+    "platform_to_native_v1_1": {
+      "from": "Atum platform",
+      "to": "authenticated native client (Atum-Company-Wire: 1.1)",
+      "forbidden_fields": [
+        "*principal*",
+        "*token*",
+        "*email*",
+        "credential",
+        "controller",
+        "managerMasUser",
+        "manager*",
+        "payer",
+        "userId",
+        "mxid",
+        "matrixId"
+      ]
+    },
+    "platform_internal": {
+      "from": "company authority entry point or account-deletion service",
+      "to": "the revocation core (a database function; no route)",
+      "forbidden_fields": [
+        "*token*",
+        "credential"
+      ]
+    },
+    "test_trace": {
+      "from": "conformance trace",
+      "to": "reference interpreter and provider tests",
+      "forbidden_fields": [
+        "*principal*",
+        "*token*"
+      ]
+    }
+  },
+  "messages": {
+    "v1.create.request": {
+      "direction": "native_to_platform_v1",
+      "schema": {
+        "ref": "v1_create_request"
+      }
+    },
+    "v1.invite.request": {
+      "direction": "native_to_platform_v1",
+      "schema": {
+        "ref": "v1_invite_request"
+      }
+    },
+    "v1.accept.request": {
+      "direction": "native_to_platform_v1",
+      "schema": {
+        "ref": "v1_accept_request"
+      }
+    },
+    "v1.remove-member.request": {
+      "direction": "native_to_platform_v1",
+      "schema": {
+        "ref": "v1_remove_member_request"
+      }
+    },
+    "v1.list.response": {
+      "direction": "platform_to_native_v1",
+      "schema": {
+        "ref": "v1_list_response"
+      }
+    },
+    "v1.snapshot.response": {
+      "direction": "platform_to_native_v1",
+      "schema": {
+        "ref": "v1_snapshot_response"
+      }
+    },
+    "v1.removal.response": {
+      "direction": "platform_to_native_v1",
+      "schema": {
+        "ref": "v1_removal_response"
+      }
+    },
+    "selector.headers": {
+      "direction": "native_to_platform_v1_1",
+      "schema": {
+        "ref": "selector_headers"
+      }
+    },
+    "invite.request": {
+      "direction": "native_to_platform_v1_1",
+      "schema": {
+        "ref": "invite_request"
+      }
+    },
+    "remove-member.request": {
+      "direction": "native_to_platform_v1_1",
+      "schema": {
+        "ref": "remove_member_request"
+      }
+    },
+    "leave.request": {
+      "direction": "native_to_platform_v1_1",
+      "schema": {
+        "ref": "leave_request"
+      }
+    },
+    "project-member.request": {
+      "direction": "native_to_platform_v1_1",
+      "schema": {
+        "ref": "project_member_request"
+      }
+    },
+    "list.response": {
+      "direction": "platform_to_native_v1_1",
+      "schema": {
+        "ref": "list_response"
+      }
+    },
+    "snapshot.response": {
+      "direction": "platform_to_native_v1_1",
+      "schema": {
+        "ref": "snapshot_response"
+      }
+    },
+    "removal.response": {
+      "direction": "platform_to_native_v1_1",
+      "schema": {
+        "ref": "removal_response"
+      }
+    },
+    "leave.response": {
+      "direction": "platform_to_native_v1_1",
+      "schema": {
+        "ref": "leave_response"
+      }
+    },
+    "channel.snapshot": {
+      "direction": "platform_to_native_v1_1",
+      "schema": {
+        "ref": "channel_snapshot"
+      }
+    },
+    "channel-directory.response": {
+      "direction": "platform_to_native_v1_1",
+      "schema": {
+        "ref": "channel_directory"
+      }
+    },
+    "error.response": {
+      "direction": "platform_to_native_v1_1",
+      "schema": {
+        "ref": "error_response"
+      }
+    },
+    "revoke.input": {
+      "direction": "platform_internal",
+      "schema": {
+        "ref": "revoke_input"
+      }
+    },
+    "revoke.result": {
+      "direction": "platform_internal",
+      "schema": {
+        "ref": "revoke_result"
+      }
+    },
+    "invite.trace": {
+      "direction": "test_trace",
+      "schema": {
+        "ref": "invite_trace"
+      }
+    }
+  },
+  "state_machines": {
+    "membership": {
+      "states": [
+        "invited",
+        "active",
+        "revoking",
+        "removed"
+      ],
+      "initial": [
+        "invited",
+        "active"
+      ],
+      "terminal": [],
+      "transitions": [
+        [
+          "invited",
+          "active",
+          "accept"
+        ],
+        [
+          "invited",
+          "revoking",
+          "withdraw"
+        ],
+        [
+          "active",
+          "revoking",
+          "leave"
+        ],
+        [
+          "active",
+          "revoking",
+          "remove"
+        ],
+        [
+          "active",
+          "revoking",
+          "account_deletion"
+        ],
+        [
+          "revoking",
+          "removed",
+          "bans_witnessed"
+        ],
+        [
+          "removed",
+          "invited",
+          "fresh_invitation"
+        ]
+      ]
+    },
+    "company": {
+      "states": [
+        "active",
+        "retired"
+      ],
+      "initial": [
+        "active"
+      ],
+      "terminal": [
+        "retired"
+      ],
+      "transitions": [
+        [
+          "active",
+          "retired",
+          "last_active_member_left"
+        ]
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "file": "fixtures/channel-default.snapshot.json",
+      "message": "channel.snapshot",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/channel-directory-empty.response.json",
+      "message": "channel-directory.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/channel-directory.response.json",
+      "message": "channel-directory.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/channel-principals.snapshot.json",
+      "message": "channel.snapshot",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/channel-ready.snapshot.json",
+      "message": "channel.snapshot",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/channel-system-key.snapshot.json",
+      "message": "channel.snapshot",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/channel-v1-shape.snapshot.json",
+      "message": "channel.snapshot",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/company-reactivate.sequence.json",
+      "machine": "company",
+      "expect": "reject",
+      "violation": "transition"
+    },
+    {
+      "file": "fixtures/company-retire.sequence.json",
+      "machine": "company",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-creation-closed.response.json",
+      "message": "error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-denied.response.json",
+      "message": "error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-invite-agent.response.json",
+      "message": "error.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/error-invite-already-member.response.json",
+      "message": "error.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/error-invite-handle.response.json",
+      "message": "error.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/error-invite-limited.response.json",
+      "message": "error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-invite-not-found.response.json",
+      "message": "error.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/error-invite-unavailable.response.json",
+      "message": "error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-last-admin.response.json",
+      "message": "error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-reason-status.response.json",
+      "message": "error.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/invite-admin.request.json",
+      "message": "invite.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/invite-both.request.json",
+      "message": "invite.request",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/invite-failed-budget.trace.json",
+      "message": "invite.trace",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/invite-hyphen.request.json",
+      "message": "invite.request",
+      "expect": "reject",
+      "violation": "pattern"
+    },
+    {
+      "file": "fixtures/invite-normalized-errors.trace.json",
+      "message": "invite.trace",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/invite-principal.request.json",
+      "message": "invite.request",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/invite-replay-after-rename.trace.json",
+      "message": "invite.trace",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/invite-role.request.json",
+      "message": "invite.request",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/invite-short.request.json",
+      "message": "invite.request",
+      "expect": "reject",
+      "violation": "bound"
+    },
+    {
+      "file": "fixtures/invite-trace-bad-result.trace.json",
+      "message": "invite.trace",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/invite-trace-principal.trace.json",
+      "message": "invite.trace",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/invite.request.json",
+      "message": "invite.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/leave-active.response.json",
+      "message": "leave.response",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/leave-actor.request.json",
+      "message": "leave.request",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/leave-no-retired.response.json",
+      "message": "leave.response",
+      "expect": "reject",
+      "violation": "missing"
+    },
+    {
+      "file": "fixtures/leave-removed.response.json",
+      "message": "leave.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/leave-retired.response.json",
+      "message": "leave.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/leave-target.request.json",
+      "message": "leave.request",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/leave.request.json",
+      "message": "leave.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/leave.response.json",
+      "message": "leave.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/list-closed.response.json",
+      "message": "list.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/list-inviter-gone.response.json",
+      "message": "list.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/list-inviter-principal.response.json",
+      "message": "list.response",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/list-inviter-ref.response.json",
+      "message": "list.response",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/list-v1-shape.response.json",
+      "message": "list.response",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/list.response.json",
+      "message": "list.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/membership-account-deletion.sequence.json",
+      "machine": "membership",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/membership-leave-readmit.sequence.json",
+      "machine": "membership",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/membership-readmit-silent.sequence.json",
+      "machine": "membership",
+      "expect": "reject",
+      "violation": "transition"
+    },
+    {
+      "file": "fixtures/membership-revoking-active.sequence.json",
+      "machine": "membership",
+      "expect": "reject",
+      "violation": "transition"
+    },
+    {
+      "file": "fixtures/membership-skip-witness.sequence.json",
+      "machine": "membership",
+      "expect": "reject",
+      "violation": "transition"
+    },
+    {
+      "file": "fixtures/membership-withdraw.sequence.json",
+      "machine": "membership",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/project-member-principal.request.json",
+      "message": "project-member.request",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/project-member.request.json",
+      "message": "project-member.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/removal-principal.response.json",
+      "message": "removal.response",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/removal-replayed.response.json",
+      "message": "removal.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/removal.response.json",
+      "message": "removal.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/remove-member-principal.request.json",
+      "message": "remove-member.request",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/remove-member-short-ref.request.json",
+      "message": "remove-member.request",
+      "expect": "reject",
+      "violation": "bound"
+    },
+    {
+      "file": "fixtures/remove-member.request.json",
+      "message": "remove-member.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-active.result.json",
+      "message": "revoke.result",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/revoke-blocked-admin.result.json",
+      "message": "revoke.result",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-blocked-deletion.result.json",
+      "message": "revoke.result",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-blocked-other.result.json",
+      "message": "revoke.result",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/revoke-deletion.input.json",
+      "message": "revoke.input",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-leave-admin.input.json",
+      "message": "revoke.input",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/revoke-leave.input.json",
+      "message": "revoke.input",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-no-retired.result.json",
+      "message": "revoke.result",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/revoke-noop.result.json",
+      "message": "revoke.result",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-remove-no-admin.input.json",
+      "message": "revoke.input",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/revoke-remove.input.json",
+      "message": "revoke.input",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-removed-retired.result.json",
+      "message": "revoke.result",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-revoking.result.json",
+      "message": "revoke.result",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/revoke-unknown-entry.input.json",
+      "message": "revoke.input",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/selector-absent.headers.json",
+      "message": "selector.headers",
+      "expect": "reject",
+      "violation": "missing"
+    },
+    {
+      "file": "fixtures/selector-other-version.headers.json",
+      "message": "selector.headers",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/selector-patch-version.headers.json",
+      "message": "selector.headers",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/selector.headers.json",
+      "message": "selector.headers",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/snapshot-admin.response.json",
+      "message": "snapshot.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/snapshot-avatar-url.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/snapshot-bad-ref.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/snapshot-create.response.json",
+      "message": "snapshot.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/snapshot-email.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/snapshot-legacy.response.json",
+      "message": "snapshot.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/snapshot-matrix-id.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/snapshot-member.response.json",
+      "message": "snapshot.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/snapshot-principal.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/snapshot-project-principals.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/snapshot-removed-identity.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/snapshot-v1-shape.response.json",
+      "message": "snapshot.response",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/v1.accept.request.json",
+      "message": "v1.accept.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/v1.create.request.json",
+      "message": "v1.create.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/v1.invite-handle.request.json",
+      "message": "v1.invite.request",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/v1.invite.request.json",
+      "message": "v1.invite.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/v1.list-extra-can-create.response.json",
+      "message": "v1.list.response",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/v1.list-inviter.response.json",
+      "message": "v1.list.response",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/v1.list.response.json",
+      "message": "v1.list.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/v1.removal-removed.response.json",
+      "message": "v1.removal.response",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/v1.removal.response.json",
+      "message": "v1.removal.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/v1.remove-member-ref.request.json",
+      "message": "v1.remove-member.request",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/v1.remove-member.request.json",
+      "message": "v1.remove-member.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/v1.snapshot-default-channel.response.json",
+      "message": "v1.snapshot.response",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/v1.snapshot-member-handle.response.json",
+      "message": "v1.snapshot.response",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/v1.snapshot-schema-2.response.json",
+      "message": "v1.snapshot.response",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/v1.snapshot.response.json",
+      "message": "v1.snapshot.response",
+      "expect": "accept"
+    }
+  ]
+}

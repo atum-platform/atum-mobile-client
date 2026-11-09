@@ -1,0 +1,6 @@
+{
+  "confirmation": "delete_account",
+  "reauthIdToken": "PUBLIC_FIXTURE_ONLY.REAUTH_PROOF.NOT_A_SIGNATURE",
+  "idempotencyKey": "del-2026-10-05-b",
+  "appleAuthorizationCode": "c0a1b2c3d4e5f.0.abcd.EFGH1234ijkl5678"
+}

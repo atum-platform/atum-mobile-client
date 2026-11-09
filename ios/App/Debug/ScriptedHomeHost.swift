@@ -1,0 +1,521 @@
+#if DEBUG
+import AtumChat
+import AtumDesign
+import AtumNativeAPI
+import Foundation
+import SwiftUI
+
+/// Debug only (plan §2.10): `-AtumScripted <roster scenario>`
+/// (`bot.moon-no-room`, `home.roster`) shows today's Home on a
+/// `ScriptedRoster` instead of signing in. The rows come from the same pure
+/// composition the live model uses (`LiveRosterRows`, with
+/// `MobileAgentRoomPolicy`, `MobileAppBotRoomPolicy.chooseChat` and
+/// `MobileAppRosterPolicy.entries`), so a UI test proves that "a bot
+/// with no plain room that the phone cannot start has no row and nothing opens
+/// the Store" (§4.2 item 1; a startable bot with no room now lists a row that
+/// starts its flow, `AppStartRosterTests`), not a hard-coded list. Nothing opens from here: the rows' taps and the
+/// tabs do nothing. Release builds compile none of this.
+///
+/// What the host adds to the scripted data, because the live contracts
+/// require it: the account's default agent Atum (`/agents` always has one),
+/// the catalog descriptors for the scripted apps (`/apps`), and the catalog
+/// bots' Matrix IDs on the server name the bot contract requires
+/// (`@app-<name>:atumplatform.com`). A bot's ID is mapped wherever it
+/// appears (members, senders, inviters), so the policies see the same
+/// relations as in the scenario; every other ID stays on `.test`.
+struct ScriptedHomeHost: View {
+    let roster: ScriptedRoster
+
+    @State private var router = Router()
+    @State private var rows: [LiveProductRoom]
+    @State private var scriptedCompany = "anka"
+    @State private var scriptedMuted = [String: Bool]()
+    @State private var scriptedLater = Set<String>()
+    @Environment(\.colorScheme) private var scheme
+    private let design: LiveDesign
+
+    init(roster: ScriptedRoster) {
+        self.roster = roster
+        design = try! LiveDesign()
+        let productRows = Self.rows(roster, locale: Self.locale)
+        // Screenshot-only focus for reviewing avatar rows: keep the
+        // assistants and the catalog app bots (Moon, Andy) without scrolling
+        // the full home.roster fixture. Release compiles none of this host.
+        if ProcessInfo.processInfo.arguments.contains("-AtumDebugAvatars") {
+            _rows = State(initialValue: productRows.filter {
+                $0.assistant != nil || $0.isAppBotRoom || $0.id.hasPrefix("app:")
+            })
+        } else {
+            _rows = State(initialValue: productRows)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            design.color("ground", scheme: scheme).ignoresSafeArea()
+            RootTabs(router: router, design: design,
+                     availability: PhoneTabAvailability(teamSpace: true),
+                     badges: PhoneTabBadges(teamSpace: scriptedTabBadge)) {
+                HomeScreen(
+                    design: design,
+                    router: router,
+                    accountName: Self.accountName,
+                    presentation: HomePresentation(state: rows.isEmpty ? .empty : .ready,
+                                                   rows: Self.testHomeRows(roster, productRows: rows)),
+                    actions: HomeActions(
+                        openRoom: { router.open(roomId: $0) },
+                        joinInvitation: { roomID in
+                            try? await Task.sleep(for: .seconds(1))
+                            router.open(roomId: roomID)
+                            return true
+                        },
+                        refresh: {},
+                        setUnread: { roomID, value in
+                            update(roomID) { $0.withRosterState(unreadOverride: value) }
+                            UITestProbe.append("unread \(roomID) \(value)", to: "home-actions.txt")
+                        },
+                        setPinned: { roomID, value in
+                            update(roomID) { $0.withRosterState(pinnedOverride: value) }
+                            rows.sort { left, right in
+                                left.isPinned != right.isPinned ? left.isPinned : false
+                            }
+                            UITestProbe.append("pinned \(roomID) \(value)", to: "home-actions.txt")
+                        },
+                        setMuted: { roomID, value in
+                            update(roomID) { $0.withRosterState(mutedOverride: value) }
+                            UITestProbe.append("muted \(roomID) \(value)", to: "home-actions.txt")
+                        },
+                        deleteAppRoom: { roomID in
+                            deleteAppRoom(roomID)
+                            UITestProbe.append("hidden \(roomID)", to: "home-actions.txt")
+                        },
+                        declineInvitation: { roomID in
+                            rows.removeAll { $0.id == roomID }
+                            UITestProbe.append("declined \(roomID)", to: "home-actions.txt")
+                        },
+                        addFriend: { handle in
+                            UITestProbe.append("addFriend \(handle)", to: "home-actions.txt")
+                            return .notFound(handle)
+                        },
+                        newGroup: HomeGroupActions(
+                            candidates: [
+                                HomeGroupCandidate(id: "@lan:atum.test", name: "Lan", kind: .person),
+                                // The phone has no shared-agent group consent/capability
+                                // contract. The real group UI must keep this ineligible.
+                                HomeGroupCandidate(id: "@alfred:atum.test", name: "Alfred", kind: .assistant),
+                            ],
+                            lookup: { handle in
+                                .candidate(HomeGroupCandidate(id: "@\(handle):atum.test",
+                                                              name: "@\(handle)", kind: .person))
+                            },
+                            create: { name, members in
+                                UITestProbe.append("newGroup \(name) \(members.count)",
+                                                   to: "home-actions.txt")
+                                return .openRoom("!gia-dinh:atum.test")
+                            }
+                        ),
+                        newAssistant: HomeAssistantActions(pending: false, create: { name in
+                            UITestProbe.append("newAssistant \(name)", to: "home-actions.txt")
+                            return .starting
+                        }),
+                        exitRoom: { roomID, action in
+                            rows.removeAll { $0.id == roomID }
+                            UITestProbe.append("\(action.rawValue) \(roomID)", to: "home-actions.txt")
+                        }
+                    )
+                )
+                .navigationDestination(for: String.self) { roomID in
+                    ZStack {
+                        design.color("ground", scheme: scheme).ignoresSafeArea()
+                        Text(verbatim: rows.first(where: { $0.id == roomID })?.title ?? "")
+                            .font(.headline)
+                    }
+                    .accessibilityIdentifier("home.scripted.destination")
+                    .toolbar(.hidden, for: .tabBar)
+                }
+            } drive: {
+                PhoneComingSoonView(design: design, tab: .drive)
+            } store: {
+                StoreScreen(design: design, store: scriptedStore,
+                            onRefresh: {}, onOpenRoom: { router.open(roomId: $0) })
+            } teamSpace: {
+                TeamSpaceScreen(
+                    design: design,
+                    presentation: scriptedTeamSpace,
+                    actions: TeamSpaceActions(
+                        refresh: {},
+                        selectCompany: { scriptedCompany = $0 },
+                        openRoom: { router.openTeamSpace(roomId: $0) },
+                        acceptInvitation: { _ in false },
+                        declineInvitation: { scriptedLater.insert($0) },
+                        leave: { _ in },
+                        setMuted: { roomID, muted in
+                            UITestProbe.append("mute \(roomID) \(muted)", to: "team-actions.txt")
+                            scriptedMuted[String(roomID.dropFirst().prefix { $0 != ":" })] = muted
+                        },
+                        createCompany: { name in
+                            UITestProbe.append("create \(name)", to: "team-actions.txt")
+                            // A name that spells the refusal shows the platform's closed answer.
+                            if name == "closed" { return .closed }
+                            scriptedCompany = "studio"
+                            return nil
+                        },
+                        loadMatrixThumbnail: { uri, _ in
+                            uri == Self.scriptedLogoURI
+                                ? try? AtumDesign.data(for: "app-icon/atum-app-icon-1024.png") : nil
+                        }
+                    )
+                )
+                .navigationDestination(for: String.self) { roomID in
+                    ZStack {
+                        design.color("ground", scheme: scheme).ignoresSafeArea()
+                        Text(verbatim: roomID).font(.headline)
+                    }
+                    .accessibilityIdentifier("teamSpace.scripted.destination")
+                }
+            } account: {
+                AccountScreen(
+                    design: design,
+                    presentation: AccountPresentation(
+                        matrixUserID: ScriptedCast.me,
+                        displayName: nil,
+                        offersHistoryRecovery: false,
+                        holdsRecoveryKey: false,
+                        recoveryKeySavedOnThisPhone: false,
+                        signOutInProgress: false,
+                        signOutFailureToken: 0,
+                        version: ""
+                    ),
+                    actions: AccountActions(
+                        readNotificationState: { .off },
+                        requestNotifications: { .off },
+                        openNotificationSettings: {},
+                        openAppSettings: {},
+                        loadRecoveryKey: { .unavailable },
+                        markRecoveryKeySaved: {},
+                        restoreMessages: { _ in .failed },
+                        signOut: { _ in false },
+                        openWebPage: { _ in }
+                    ),
+                    store: scriptedStore,
+                    openStoreRoom: { roomID in
+                        router.dismissAccount()
+                        router.open(roomId: roomID)
+                    }
+                )
+            }
+        }
+        .foregroundStyle(design.color("ink", scheme: scheme))
+        .tint(design.color("ink", scheme: scheme))
+        .focusEffectDisabled()
+        .task { applyDebugSurface() }
+    }
+
+    /// Screenshot-only preselection for the scripted host. It never ships in
+    /// Release and only chooses a destination the same Router actions reach.
+    private func applyDebugSurface() {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-AtumDebugAccount") {
+            router.presentAccount()
+        } else if arguments.contains("-AtumDebugDrive") {
+            router.select(tab: .drive)
+        } else if arguments.contains("-AtumDebugStore") {
+            router.select(tab: .store)
+        } else if arguments.contains("-AtumDebugTeamSpace") {
+            router.select(tab: .teamSpace)
+        }
+    }
+
+    private static let accountName = "Bạn"
+
+    private struct ScriptedChannel {
+        let id: String
+        let title: String
+        let isDefault: Bool
+        let input: Badge.Input
+    }
+
+    private static let scriptedChannels: [String: [ScriptedChannel]] = [
+        "anka": [
+            ScriptedChannel(id: "general", title: "general", isDefault: true,
+                            input: Badge.Input(highlights: 2, notifications: 4, hasUnreadActivity: true)),
+            ScriptedChannel(id: "random", title: "random", isDefault: false,
+                            input: Badge.Input(notifications: 3, hasUnreadActivity: true)),
+            ScriptedChannel(id: "ops", title: "ops", isDefault: false,
+                            input: Badge.Input(notifications: 5, hasUnreadActivity: true, isMuted: true)),
+            ScriptedChannel(id: "design", title: "design", isDefault: false, input: Badge.Input()),
+        ],
+        "studio": [
+            ScriptedChannel(id: "studio-general", title: "general", isDefault: true,
+                            input: Badge.Input(notifications: 1, hasUnreadActivity: true)),
+        ],
+    ]
+
+    private func scriptedInput(_ channel: ScriptedChannel) -> Badge.Input {
+        var input = channel.input
+        input.isMuted = scriptedMuted[channel.id] ?? channel.input.isMuted
+        return input
+    }
+
+    private var scriptedTabBadge: Badge {
+        return TeamSpaceBadges.tab(
+            companies: Self.scriptedChannels.keys.sorted().map { company in
+                TeamSpaceBadges.company(channels: (Self.scriptedChannels[company] ?? []).map(scriptedInput))
+            },
+            pendingInvitations: scriptedLater.contains("invite-labs") ? 0 : 1)
+    }
+
+    private var scriptedTeamSpace: TeamSpacePresentation {
+        let channels = (Self.scriptedChannels[scriptedCompany] ?? []).map { channel -> CompanyChannelRow in
+            let input = scriptedInput(channel)
+            return CompanyChannelRow(id: channel.id, title: channel.title, state: "Ready",
+                                     roomID: "!" + channel.id + ":atum.test", memberCount: 3,
+                                     canOpen: true, badge: Badge.mark(for: input), isMuted: input.isMuted)
+        }
+        let entries = ["anka": "Anka", "studio": "Studio"].sorted { $0.key < $1.key }.map { key, title in
+            CompanySwitcherEntry(
+                id: key, title: title,
+                badge: TeamSpaceBadges.company(channels: (Self.scriptedChannels[key] ?? []).map(scriptedInput)),
+                isActive: key == scriptedCompany)
+        }
+        return TeamSpacePresentation(
+            isLoading: false,
+            isUnavailable: false,
+            invitations: scriptedLater.contains("invite-labs") ? [] : [
+                CompanyHomeRow(id: "invitation:labs", companyID: "labs", invitationID: "invite-labs",
+                               title: "Labs", subtitle: nil),
+            ],
+            workspace: CompanyWorkspacePresentation(
+                id: scriptedCompany, title: scriptedCompany == "anka" ? "Anka" : "Studio",
+                channels: channels, members: [], channelsLoading: false, membersLoading: false,
+                leavePending: false, notice: nil, error: nil),
+            switcher: entries,
+            canCreate: true,
+            // Studio has a logo (served by the scripted media below); Anka has
+            // none and shows the Kit monogram.
+            logos: ["studio": Self.scriptedLogoURI])
+    }
+
+    static let scriptedLogoURI = "mxc://atum.test/studio-logo"
+
+    private var scriptedStore: LiveProductStoreRead {
+        LiveProductStoreRead(
+            availability: .ready,
+            walletValue: "12.400",
+            items: [LiveProductStoreItem(
+                id: "featured", kind: .skill,
+                title: design.text("desktop.atum.discover.featuredSection"),
+                summary: design.text("src.matrix.mobile-device-copy.mobileDeviceCopy.welcomeBody"),
+                glyph: "◉", featured: true, price: "24"
+            )]
+        )
+    }
+
+    private func update(_ roomID: String, transform: (LiveProductRoom) -> LiveProductRoom) {
+        guard let index = rows.firstIndex(where: { $0.id == roomID }) else { return }
+        rows[index] = transform(rows[index])
+    }
+
+    private func deleteAppRoom(_ roomID: String) {
+        guard let index = rows.firstIndex(where: { $0.id == roomID }),
+              rows[index].isAppBotRoom,
+              let app = roster.apps.first(where: { $0.name == rows[index].title }) else { return }
+        let removed = rows.remove(at: index)
+        rows.append(LiveProductRoom(
+            id: "app:" + app.appID, kind: .agent, title: app.name,
+            detail: nil, avatar: .monogram(LiveRosterRows.monogram(for: app.name)),
+            appAccent: removed.appAccent, appVerification: removed.appVerification,
+            canOpen: true, isAppBotRoom: true
+        ))
+    }
+
+    static func homeRows(_: ScriptedRoster, productRows: [LiveProductRoom]) -> [HomeRow] {
+        return productRows.map { HomeRow(product: $0, locale: Locale(identifier: locale)) }
+    }
+
+    /// A bounded synthetic tail lets the shell UI test measure the actual last
+    /// List row against the existing tab button frames at compact and large
+    /// text sizes. This never changes release data or live roster ownership.
+    static func testHomeRows(_ roster: ScriptedRoster, productRows: [LiveProductRoom]) -> [HomeRow] {
+        let rows = homeRows(roster, productRows: productRows)
+        guard ProcessInfo.processInfo.arguments.contains("-AtumDebugLongRoster") else {
+            return rows
+        }
+        let tail = (0..<20).map { index in
+            HomeRow(id: "test.roster.tail.\(index)", kind: .person,
+                    name: index == 19 ? "Roster final row" : "Roster row \(index + 1)",
+                    canOpen: false)
+        }
+        return rows + tail
+    }
+
+    private static func scriptedName(_ userID: String) -> String? {
+        userID == ScriptedCast.me ? nil : ScriptedCast.names[userID]
+    }
+
+    /// `LiveAppModel.currentLocale`: catalog names in the device's language.
+    private static var locale: String {
+        let identifier = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
+        return identifier.split(separator: "-", maxSplits: 1).first.map(String.init) ?? identifier
+    }
+
+    static func rows(_ roster: ScriptedRoster, locale: String) -> [LiveProductRoom] {
+        let bots = Set(roster.apps.map(\.botUserID))
+        let serverID = { (id: String) in bots.contains(id) ? botID(id) : id }
+        var rooms = [LiveMatrixRoomRow]()
+        var invites = [LiveMatrixInvite]()
+        for room in roster.rooms {
+            switch room.membership {
+            case .joined:
+                let members = room.members.map(serverID)
+                let sender = room.latestSenderID.map(serverID)
+                rooms.append(LiveMatrixRoomRow(
+                    roomID: room.roomID,
+                    displayName: room.name,
+                    avatarURL: nil,
+                    latestText: room.latestBody.isEmpty ? nil : room.latestBody,
+                    latestPreviewContent: room.latestPreviewContent
+                        ?? (room.latestBody.isEmpty ? .none : .text(room.latestBody)),
+                    latestSenderID: sender,
+                    latestSenderName: room.latestSenderID.flatMap(scriptedName),
+                    latestIsOwn: sender == ScriptedCast.me,
+                    latestIsNotice: isAppNotice(room.latestPreviewContent),
+                    latestSendState: room.latestSendState,
+                    latestTimestamp: room.latestTimestamp.map { UInt64(max(0, $0.timeIntervalSince1970 * 1000)) },
+                    unreadCount: UInt64(max(0, room.unreadCount)),
+                    notificationCount: UInt64(max(0, room.unreadCount)),
+                    highlightCount: UInt64(max(0, room.mentionCount)),
+                    isMarkedUnread: room.isMarkedUnread,
+                    isFavourite: room.isFavourite,
+                    isMuted: room.isMuted,
+                    isDirect: room.isDirect,
+                    memberUserIDs: members,
+                    memberCount: UInt64(members.count + 1),
+                    roomType: nil,
+                    isEncrypted: room.encrypted
+                ))
+            case let .invited(by: inviter):
+                invites.append(LiveMatrixInvite(roomID: room.roomID, inviterID: serverID(inviter),
+                                                displayName: room.name,
+                                                inviterDisplayName: scriptedName(inviter),
+                                                latestTimestamp: room.latestTimestamp.map {
+                                                    UInt64(max(0, $0.timeIntervalSince1970 * 1_000))
+                                                },
+                                                isEncrypted: room.encrypted,
+                                                roomType: nil))
+            }
+        }
+        var hiddenRooms = MobileHiddenRoomLedger()
+        let hiddenAt = roster.hiddenAt.map { UInt64(max(0, $0.timeIntervalSince1970 * 1_000)) }
+        for roomID in roster.hiddenRoomIDs {
+            let latest = rooms.first { $0.roomID == roomID }?.latestTimestamp
+            hiddenRooms.hide(roomID: roomID, latestTimestamp: latest, nowMillis: hiddenAt ?? latest ?? 0)
+        }
+        let copy = try? AtumCopy()
+        let waitingDetail = copy.flatMap { catalog in
+            try? catalog.text(LiveRosterRows.waitingCopyKey,
+                              locale: catalog.locales.contains(locale) ? locale : "en")
+        }
+        let apps = catalog(roster.apps)
+        let input = LiveRosterRows.Input(agents: defaultAgents(), apps: apps, rooms: rooms,
+                                         invites: invites, pointers: roster.pointers,
+                                         hiddenRooms: hiddenRooms,
+                                         // Scripted fixtures have no account data; this is
+                                         // the successful no-event state, not a guess.
+                                         appShortcuts: Dictionary(uniqueKeysWithValues: apps.map {
+                                             ($0.appID, MobileAppShortcutState.absent)
+                                         }),
+                                         locale: locale,
+                                         waitingDetail: waitingDetail)
+        return LiveRosterRows.rows(input).rows
+    }
+
+    /// A scripted catalog bot's ID on the server name the bot contract
+    /// requires.
+    static func botID(_ id: String) -> String {
+        id.hasSuffix(":atum.test") ? String(id.dropLast(":atum.test".count)) + ":atumplatform.com" : id
+    }
+
+    private static func isAppNotice(_ content: RowPreview.Content?) -> Bool {
+        if case .appNotice? = content { return true }
+        return false
+    }
+
+    /// The account's default agent: Atum, on `ScriptedCast.atum`.
+    private static func defaultAgents() -> [AgentsResponse.Agent] {
+        let definitions = [
+            ("00000000-0000-4000-8000-89c0dd5b3309", "Atum", ScriptedCast.atum, true),
+            ("00000000-0000-4000-8000-b71039fe0b83", "Luna", ScriptedCast.luna, false),
+            ("00000000-0000-4000-8000-19ef26fcbb3a", "Nhà phân tích", ScriptedCast.analyst, false),
+        ]
+        let agents: [[String: Any]] = definitions.map { id, name, matrixUser, isDefault in
+            [
+                "id": id, "identity_id": NSNull(), "display_name": name,
+                "slug": NSNull(), "avatar": "", "avatar_url": NSNull(),
+                "is_default": isDefault, "lifecycle_revision": 1,
+                "identity_revision": 0, "definition_revision": 0,
+                "status": "active", "principal": id, "matrixUser": matrixUser,
+            ]
+        }
+        return decode(AgentsResponse.self, agents).agents
+    }
+
+    /// `/apps` descriptors for the scripted catalog: active bots with a
+    /// device, shown by default, icons on a host that never resolves.
+    private static func catalog(_ apps: [ScriptedRosterApp]) -> [AppDescriptor] {
+        let entries: [[String: Any]] = apps.enumerated().map { index, app in
+            let slug = app.name.lowercased()
+            let icon: [String: Any] = ["url": "https://scripted.atum.test/\(slug).png",
+                                       "sha256": String(repeating: "a", count: 64)]
+            return [
+                "app": slug,
+                "app_id": app.appID,
+                "app_version_id": "00000000-0000-4000-8000-00000000b00\(index)",
+                "name": ["vi": app.name, "en": app.name],
+                "subtitle": NSNull(),
+                "description": NSNull(),
+                "icon": icon,
+                "accent": app.appID == ScriptedCast.moonAppID ? "#2c8078" : "#b4690e",
+                "affiliation": "first_party",
+                "verified": true,
+                "verification": "official",
+                "availability": "available",
+                "roster_default": true,
+                "roster_order": index,
+                "supported_modes": ["direct"],
+                "matrix_room_context": "addressed_only",
+                "has_surface": true,
+                "link": ["mode": "none", "state": "never_linked"],
+                "bot": [
+                    "v": 1,
+                    "user_id": botID(app.botUserID),
+                    "handle": "\(slug)_bot",
+                    "display_name": app.name,
+                    "avatar": icon,
+                    "device_generation": 1,
+                    "device": ["device_id": "\(app.name.uppercased()).1",
+                               "ed25519": String(repeating: "A", count: 43),
+                               "curve25519": String(repeating: "B", count: 43)],
+                    "state": "active",
+                    "groups": true,
+                    "consent": "accepted",
+                    "disclosure_version": 1,
+                    "open_route_id": "open",
+                    "open_shared_memory": false,
+                    "purchase_route_id": "purchase",
+                ] as [String: Any],
+            ]
+        }
+        return decode(AppCatalogResponse.self, ["profile": AppCatalogResponse.profile, "apps": entries]).apps
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, _ object: Any) -> T {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: object)
+            return try NativeAPI.decode(type, from: data)
+        } catch {
+            preconditionFailure("scripted roster: \(T.self) does not decode: \(error)")
+        }
+    }
+}
+#endif

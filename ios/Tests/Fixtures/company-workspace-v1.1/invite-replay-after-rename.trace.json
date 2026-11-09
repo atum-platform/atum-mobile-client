@@ -1,0 +1,61 @@
+{
+  "directory": [
+    {
+      "handle": "lan_nguyen",
+      "person": "lan",
+      "kind": "human",
+      "inCompany": false
+    }
+  ],
+  "steps": [
+    {
+      "do": "invite",
+      "request": "r1",
+      "admin": "minh",
+      "handle": "@Lan_Nguyen",
+      "expect": {
+        "result": "invited",
+        "person": "lan"
+      }
+    },
+    {
+      "do": "rename",
+      "person": "lan",
+      "to": "lan_new"
+    },
+    {
+      "do": "reassign",
+      "handle": "lan_nguyen",
+      "to": "other"
+    },
+    {
+      "do": "invite",
+      "request": "r1",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "replayed",
+        "person": "lan"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "r1",
+      "admin": "minh",
+      "handle": "lan_new",
+      "expect": {
+        "result": "conflict"
+      }
+    },
+    {
+      "do": "invite",
+      "request": "r2",
+      "admin": "minh",
+      "handle": "lan_nguyen",
+      "expect": {
+        "result": "invited",
+        "person": "other"
+      }
+    }
+  ]
+}

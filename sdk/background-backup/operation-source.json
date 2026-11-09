@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "SOURCE_BACKUP_OPERATION_NOT_RUNTIME_SELECTED",
+  "runtimeSelected": false,
+  "upstreamRevision": "4f7f4d49f571e613eb1cb35956e4649dc056f0af",
+  "basePublicationManifestSHA256": "b50d1dcabbfa7aeec2816bf283fb166a5b5fe4f6eb6a59fa3a775756aaa9206e",
+  "patch": "sdk/background-backup/operation.patch",
+  "patchSHA256": "aaf9d154f5f4354d84b3d018c164160c993b4f05615569629e1bd444b5b437e7",
+  "licenseSHA256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+  "preimageSHA256": {
+    "crates/matrix-sdk/src/encryption/backups/mod.rs": "2bf4c342f23f69a5e2216d170e8e32fb0391e09f4cd1c8c99cd8859f2c99a190",
+    "crates/matrix-sdk/src/encryption/tasks.rs": "d5330a90d017448bc50d05760264b310f28b78568aae8b717886a3e4c54c3583"
+  },
+  "prototypeSHA256": {
+    "crates/matrix-sdk/src/encryption/backups/mod.rs": "49669b7942a1d9bd4e93581e624834890424732bc6b6e27465a84de33e3bddcc",
+    "crates/matrix-sdk/src/encryption/tasks.rs": "02edc856cbe79ae15e70ea8d73c0bd87559f74aded1c9eff823f9c2135700b35"
+  },
+  "requiredTestNames": [
+    "encryption::tasks::test::test_default_backup_operation_waits_then_owns_http_and_ack",
+    "encryption::tasks::test::test_default_backup_operation_cancelled_waiter_never_sends",
+    "encryption::tasks::test::test_default_backup_operation_cancellation_releases_without_ack"
+  ],
+  "publicationStatus": "Public source replay and 20 SQLite backup tests pass on regenerated v1 exported Megolm fixtures; historical private receipts are superseded",
+  "publicAcceptancePending": [],
+  "publicAcceptanceReceipt": "sdk/background-backup/public-acceptance.json",
+  "publicAcceptanceReceiptSHA256": "7dd70d37a2d46acfc5779178ff6b1e9644239454fc34b17576e1b2b683023d90"
+}

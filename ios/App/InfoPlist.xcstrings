@@ -1,0 +1,108 @@
+{
+  "sourceLanguage": "vi",
+  "strings": {
+    "NSMicrophoneUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum uses the microphone to turn your speech into text when you tap the mic."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum は、マイクボタンをタップしたときに、音声をテキストに変換するためにマイクを使用します。"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum dùng micrô để chuyển giọng nói của bạn thành chữ khi bạn bấm nút micrô."
+          }
+        },
+        "zh": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当你点按麦克风按钮时，Atum 会使用麦克风将你的语音转换为文字。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當你點按麥克風按鈕時，Atum 會使用麥克風將你的語音轉換為文字。"
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryAddUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum saves the photos you choose to your library."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum は選択した写真を写真ライブラリに保存します。"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum lưu ảnh bạn chọn vào Thư viện ảnh."
+          }
+        },
+        "zh": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum 会将你选择的照片保存到照片图库。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum 會將你選擇的照片儲存到照片圖庫。"
+          }
+        }
+      }
+    },
+    "NSSpeechRecognitionUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum uses speech recognition to turn what you say into text in the message box."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum は、話した内容をメッセージ欄のテキストに変換するために音声認識を使用します。"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum dùng nhận dạng giọng nói để chuyển lời bạn nói thành chữ trong khung soạn tin."
+          }
+        },
+        "zh": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum 会使用语音识别将你说的话转换为消息框中的文字。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum 會使用語音辨識將你說的話轉換為訊息框中的文字。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

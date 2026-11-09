@@ -1,0 +1,9 @@
+{
+  "steps": [
+    {
+      "from": "signed_out",
+      "to": "active",
+      "event": "granted_and_bound"
+    }
+  ]
+}

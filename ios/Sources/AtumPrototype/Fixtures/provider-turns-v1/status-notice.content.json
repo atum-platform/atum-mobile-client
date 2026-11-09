@@ -1,0 +1,9 @@
+{
+  "msgtype": "m.notice",
+  "body": "Mình chưa đọc được tin nhắn bạn trả lời. Bạn gửi lại giúp mình nhé.",
+  "m.relates_to": {
+    "m.in_reply_to": {
+      "event_id": "$turnEventA"
+    }
+  }
+}
