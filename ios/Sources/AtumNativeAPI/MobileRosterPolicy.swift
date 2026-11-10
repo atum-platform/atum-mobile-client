@@ -1,3 +1,4 @@
+import AtumChat
 import Foundation
 
 /// One joined room with a given agent or app bot, as this phone sees it.
@@ -161,10 +162,12 @@ public enum MobileSenderLabelPolicy {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty, trimmed != senderID,
               !looksLikeMatrixID(trimmed),
-              !trimmed.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+              !trimmed.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              // The SDK's " (@id)" suffix goes, and an opaque localpart is no name.
+              let named = MatrixPersonName.name(trimmed, userID: senderID) else {
             return nil
         }
-        return trimmed
+        return named
     }
 
     /// NFKC folds full-width and compatibility forms; whitespace runs collapse.

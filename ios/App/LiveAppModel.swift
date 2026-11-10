@@ -1261,7 +1261,7 @@ final class LiveAppModel {
             let profile = await session.personProfile(userID: matrixUser.rawValue)
             guard liveMatrix === session, !Task.isCancelled else { return .failed }
             var candidate = known ?? profile ?? HomeGroupCandidate(
-                id: matrixUser.rawValue, name: matrixUser.rawValue, kind: .person)
+                id: matrixUser.rawValue, name: "@" + assignment.handle.rawValue, kind: .person)
             candidate.handle = assignment.handle.rawValue
             return .candidate(candidate)
         } catch let failure as NativeDomainClientFailure {

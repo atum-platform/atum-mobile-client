@@ -128,6 +128,7 @@
 		A238FAF6582B06674992DEC5 /* MessageBubbleRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0114D09D4628D3AD5D494B17 /* MessageBubbleRow.swift */; };
 		A251BDEDFCF1FD320573FAA1 /* MediaRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D532825556EA6FFB98E8E56 /* MediaRows.swift */; };
 		A26794091054BB4F9CFFA780 /* IgnoredPeopleList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9759FFBC6760628756EECA /* IgnoredPeopleList.swift */; };
+		D1A7E0C0AC2A4DE1A0C0FFEE /* DeleteAccountRequestSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A7E0C1AC2A4DE1A0C0FFEE /* DeleteAccountRequestSheet.swift */; };
 		A3DF398F7FFDBDF7FD846FAC /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = FE09EC837F5D02840D34BB11 /* Localizable.xcstrings */; };
 		A4D363820259C15FD5D9D830 /* ChatFaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75D6ED1A84266C6C7E977FF1 /* ChatFaces.swift */; };
 		A68E46DA94BF1D1A6084E556 /* KitBoardCaptureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC4718E463BCD1234DA42AD /* KitBoardCaptureUITests.swift */; };
@@ -338,6 +339,7 @@
 		647EAA4C4F8860728B7FE09B /* CompanyWorkspaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyWorkspaceViews.swift; sourceTree = "<group>"; };
 		65E57A0A4A6E16379B0A7464 /* AccountSettingsState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsState.swift; sourceTree = "<group>"; };
 		6A9759FFBC6760628756EECA /* IgnoredPeopleList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IgnoredPeopleList.swift; sourceTree = "<group>"; };
+		D1A7E0C1AC2A4DE1A0C0FFEE /* DeleteAccountRequestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountRequestSheet.swift; sourceTree = "<group>"; };
 		6B3AC8DEB4164959EC4915FB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		6CD3B5C0364CFA8466F00FDC /* Wave2MediaBotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wave2MediaBotUITests.swift; sourceTree = "<group>"; };
 		6DAFA4735DF8852374AC6028 /* ChatMediaComposerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMediaComposerState.swift; sourceTree = "<group>"; };
@@ -647,6 +649,7 @@
 				10F74306DAF0BF9208C8BB82 /* AccountScreen.swift */,
 				28089C269E87FADA810C5ABF /* AccountSettingsDetail.swift */,
 				65E57A0A4A6E16379B0A7464 /* AccountSettingsState.swift */,
+				D1A7E0C1AC2A4DE1A0C0FFEE /* DeleteAccountRequestSheet.swift */,
 				6A9759FFBC6760628756EECA /* IgnoredPeopleList.swift */,
 				F22FACE799EB35A301605EFC /* LegalScreens.swift */,
 			);
@@ -1258,6 +1261,7 @@
 				9D4767EA28C5D6CDA2F9C93E /* FounderRavenAvatar.swift in Sources */,
 				BFF601B1CC716B683506A094 /* HomeScreen.swift in Sources */,
 				A26794091054BB4F9CFFA780 /* IgnoredPeopleList.swift in Sources */,
+				D1A7E0C0AC2A4DE1A0C0FFEE /* DeleteAccountRequestSheet.swift in Sources */,
 				B849D6BD88A8D5B9913898FB /* ItemMapper.swift in Sources */,
 				4E3E15D349E4549E03B547FD /* JumpPillButton.swift in Sources */,
 				D3D4F996335F5324643CEC0A /* LegalScreens.swift in Sources */,

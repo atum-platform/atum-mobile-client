@@ -142,7 +142,8 @@ struct S6ScriptedHost: View {
             matrixUserID: "@an:atum.invalid", displayName: "An",
             offersHistoryRecovery: restore, holdsRecoveryKey: key,
             recoveryKeySavedOnThisPhone: false, signOutInProgress: false,
-            signOutFailureToken: 0, version: "1.0.0 (202610130001)"
+            signOutFailureToken: 0, version: "1.0.0 (202610130001)",
+            directoryHandle: "an"
         )
     }
 

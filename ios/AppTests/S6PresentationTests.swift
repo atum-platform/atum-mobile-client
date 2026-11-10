@@ -40,15 +40,55 @@ final class S6PresentationTests: XCTestCase {
         XCTAssertFalse(hidden.contains("1"))
     }
 
-    func testAccountHandleNeverExposesTheServerPart() {
-        let value = AccountPresentation(
-            matrixUserID: "@an:atum.invalid", displayName: "An",
+    private func account(_ userID: String, name: String?, handle: String? = nil) -> AccountPresentation {
+        AccountPresentation(
+            matrixUserID: userID, displayName: name,
             offersHistoryRecovery: false, holdsRecoveryKey: false,
             recoveryKeySavedOnThisPhone: false, signOutInProgress: false,
-            signOutFailureToken: 0, version: "1.0"
+            signOutFailureToken: 0, version: "1.0", directoryHandle: handle
         )
-        XCTAssertEqual(value.localHandle, "@an")
-        XCTAssertFalse(value.localHandle.contains(":"))
+    }
+
+    /// AC-1: a real directory handle shows as the @handle line under the name.
+    func testAccountShowsTheDirectoryHandleUnderTheName() {
+        let value = account("@user-0123456789abcdef0123456789abcdef:atum.invalid", name: "Minh", handle: "minh")
+        XCTAssertEqual(value.name(unnamed: "Atum user"), "Minh")
+        XCTAssertEqual(value.publicHandle, "@minh")
+        XCTAssertEqual(value.handleLine(unnamed: "Atum user"), "@minh")
+    }
+
+    /// AC-1: no directory handle (or one that is not a handle) means no handle
+    /// line and no Public handle row; the Matrix ID's localpart never stands in.
+    func testAccountNeverShowsTheMatrixIDAsAHandle() {
+        let opaque = "@user-0123456789abcdef0123456789abcdef:atum.invalid"
+        for handle in [nil, "", "user-0123456789abcdef0123456789abcdef", "@minh", "Minh", "mi"] as [String?] {
+            let value = account(opaque, name: "Minh", handle: handle)
+            XCTAssertNil(value.publicHandle, String(describing: handle))
+            XCTAssertNil(value.handleLine(unnamed: "Atum user"), String(describing: handle))
+        }
+        // A readable early ID is not a handle either: the directory may give it to someone else.
+        XCTAssertNil(account("@an:atum.invalid", name: "An").publicHandle)
+    }
+
+    /// AC-1: with no name, the handle is the name (and is not repeated under
+    /// it); with neither, the desktop's word for someone unnamed. Never an ID.
+    func testAccountWithNoNameFallsBackToTheHandleThenTheUnnamedWord() {
+        let opaque = "@user-0123456789abcdef0123456789abcdef:atum.invalid"
+        let named = account(opaque, name: nil, handle: "minh")
+        XCTAssertEqual(named.name(unnamed: "Atum user"), "@minh")
+        XCTAssertNil(named.handleLine(unnamed: "Atum user"))
+
+        for name in [nil, "", "  ", opaque, "user-0123456789abcdef0123456789abcdef",
+                     "\(opaque), \(opaque)"] as [String?] {
+            let value = account(opaque, name: name)
+            XCTAssertEqual(value.name(unnamed: "Atum user"), "Atum user", String(describing: name))
+            XCTAssertNil(value.profileName, String(describing: name))
+            XCTAssertNil(value.handleLine(unnamed: "Atum user"))
+        }
+        // An early readable ID still reads as a name, without the server or an "@".
+        XCTAssertEqual(account("@an:atum.invalid", name: nil).name(unnamed: "Atum user"), "an")
+        // The SDK's " (@id)" disambiguation suffix is not part of the name.
+        XCTAssertEqual(account(opaque, name: "Minh (\(opaque))").name(unnamed: "Atum user"), "Minh")
     }
 
     func testContextlessStatusEscapeCannotOrphanAnUnsavedRecoveryKey() {

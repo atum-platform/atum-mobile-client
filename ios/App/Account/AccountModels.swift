@@ -1,4 +1,6 @@
+import AtumChat
 import Foundation
+import Synchronization
 
 enum AccountNotificationState: Equatable, Sendable {
     case unknown
@@ -89,6 +91,10 @@ struct AccountPresentation: Equatable {
     var founderContactTitle: String
     /// The phone's own connection, for the This iPhone rows.
     var connection: AccountConnectionState
+    /// The person's own handle as the alias directory reports it. Nil until
+    /// the phone reads `GET /aliases/current` (plan SV-4): the handle is then
+    /// left out, never guessed from the Matrix ID.
+    var directoryHandle: String?
 
     init(matrixUserID: String,
          displayName: String?,
@@ -103,7 +109,8 @@ struct AccountPresentation: Equatable {
          founderContactAvailable: Bool = false,
          founderContactTitle: String = "Contact us",
          avatarURL: String? = nil,
-         connection: AccountConnectionState = .ready) {
+         connection: AccountConnectionState = .ready,
+         directoryHandle: String? = nil) {
         self.matrixUserID = matrixUserID
         self.displayName = displayName
         self.avatarURL = avatarURL
@@ -118,19 +125,60 @@ struct AccountPresentation: Equatable {
         self.founderContactAvailable = founderContactAvailable
         self.founderContactTitle = founderContactTitle
         self.connection = connection
+        self.directoryHandle = directoryHandle
     }
 
-    var localHandle: String {
-        let first = matrixUserID.split(separator: ":", maxSplits: 1).first.map(String.init) ?? matrixUserID
-        return first.hasPrefix("@") ? first : "@" + first
+    /// The name the person set, or nil: never their Matrix ID or its opaque
+    /// localpart (desktop `matrixPersonName`).
+    var profileName: String? { MatrixPersonName.name(displayName, userID: matrixUserID) }
+
+    /// Their public @handle, only when the alias directory said it is theirs
+    /// (`GET /aliases/current`). Never derived from the Matrix ID: a new
+    /// account's ID is `@user-<32 hex>`, and even a readable early ID's
+    /// localpart may belong to someone else in the directory.
+    var publicHandle: String? { MatrixPersonName.validHandle(directoryHandle).map { "@" + $0 } }
+
+    /// What Settings calls the person (desktop `useOwnName`): the name they
+    /// set, else their @handle, else a readable early localpart, else the
+    /// word for someone unnamed. Never a Matrix ID.
+    func name(unnamed: String) -> String {
+        MatrixPersonName.label(name: displayName, handle: directoryHandle,
+                               userID: matrixUserID, unnamed: unnamed).name
     }
 
-    var name: String {
-        let value = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return value.isEmpty ? localHandle : value
+    /// The @handle line under the name, only when it says something the
+    /// name does not (desktop `ownHandleLine`).
+    func handleLine(unnamed: String) -> String? {
+        guard let publicHandle, publicHandle != name(unnamed: unnamed) else { return nil }
+        return publicHandle
+    }
+}
+
+/// The exported words for someone with no name ("Atum user") and a chat with
+/// no name ("Untitled chat"), for code that names people and rooms off the
+/// main actor (the Matrix session's member, search and room reads), which has
+/// no design to ask. `LiveDesign` sets them from the export when it loads.
+enum PeopleNameWords {
+    private static let words = Mutex<(unnamed: String, untitledChat: String)>(("", ""))
+
+    static func configure(unnamed: String, untitledChat: String) {
+        words.withLock { $0 = (unnamed, untitledChat) }
     }
 
-    var showsHandle: Bool { name != localHandle }
+    static var unnamed: String { words.withLock { $0.unnamed } }
+    static var untitledChat: String { words.withLock { $0.untitledChat } }
+
+    /// What a list calls a person: the name they set, else a readable early
+    /// localpart, else the unnamed word. Never a Matrix ID.
+    static func person(_ raw: String?, userID: String) -> String {
+        MatrixPersonName.shown(raw, userID: userID, unnamed: unnamed)
+    }
+
+    /// What a list calls a room: its readable name, else the unnamed word for
+    /// a one-to-one chat, else "Untitled chat". Never a Matrix or room ID.
+    static func room(_ raw: String?, isDirect: Bool) -> String {
+        MatrixPersonName.readableRoomName(raw) ?? (isDirect ? unnamed : untitledChat)
+    }
 }
 
 struct AccountActions {
