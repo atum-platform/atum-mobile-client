@@ -230,7 +230,7 @@ struct MediaFileContent: View {
     }
 
     private var mediaKind: MediaKind {
-        MediaKind(mimetype: row.item.media?.mimetype, filename: row.item.media?.filename ?? row.item.fileName)
+        row.item.media?.presentationKind(fallbackFilename: row.item.fileName) ?? MediaKind(mimetype: nil, filename: row.item.fileName)
     }
 
     var body: some View {

@@ -21,16 +21,26 @@ public struct ChatMedia: Equatable, Hashable, Sendable {
     public var filename: String?
     public var isAnimated: Bool
     public var byteSize: UInt64?
+    /// Native message type survives missing or misleading MIME/filename data.
+    public var nativeKind: MediaKind?
+    public var isVoice: Bool
+
+    public func presentationKind(fallbackFilename: String? = nil) -> MediaKind {
+        nativeKind ?? MediaKind(mimetype: mimetype, filename: filename ?? fallbackFilename)
+    }
 
     public init(sourceHandle: String, thumbnailSourceHandle: String? = nil,
                 mimetype: String? = nil, filename: String? = nil,
-                isAnimated: Bool = false, byteSize: UInt64? = nil) {
+                isAnimated: Bool = false, byteSize: UInt64? = nil,
+                nativeKind: MediaKind? = nil, isVoice: Bool = false) {
         self.sourceHandle = sourceHandle
         self.thumbnailSourceHandle = thumbnailSourceHandle
         self.mimetype = mimetype
         self.filename = filename
         self.isAnimated = isAnimated
         self.byteSize = byteSize
+        self.nativeKind = nativeKind
+        self.isVoice = isVoice
     }
 }
 

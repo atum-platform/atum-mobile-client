@@ -401,7 +401,7 @@ private struct MessageMenuPreview: View {
             Label(ChatCopy.text(design, ChatCopy.Key.photo), image: design.symbol("Photo"))
         case let .file(name):
             if let media = row.item.media {
-                let kind = MediaKind(mimetype: media.mimetype, filename: media.filename ?? name)
+                let kind = media.presentationKind(fallbackFilename: name)
                 HStack(spacing: 12) {
                     Image(design.symbol(kind.glyphAlias)).font(.title3)
                     VStack(alignment: .leading, spacing: 2) {

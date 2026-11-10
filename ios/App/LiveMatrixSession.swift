@@ -33,9 +33,10 @@ struct LiveMatrixRoomRow: Equatable, Identifiable, Sendable {
     let isFavourite: Bool
     let isMuted: Bool
     let isDirect: Bool
+    /// Other joined/invited members from SDK state; excludes this account to
+    /// preserve existing agent/app identity classification contracts.
     let memberUserIDs: [String]
-    /// Joined plus invited members, from the SDK's room info. Unlike the
-    /// heroes above, this is set for rooms that have a name.
+    /// Joined plus invited count from SDK room info, including named rooms.
     let memberCount: UInt64
     /// The custom room type from cached `m.room.create` state, when present.
     /// The SDK room-list service already requests that state event.
@@ -50,6 +51,8 @@ struct LiveMatrixRoomRow: Equatable, Identifiable, Sendable {
     /// The desktop's "moved" note on a retired official bot chat
     /// (`io.atum.app_bot.legacy_moved`); such a room is never that bot's chat.
     var legacyAppBotMove: MobileLegacyAppBotMove? = nil
+    /// SDK profile records for people lists; room titles never rename members.
+    var memberProfiles: [LiveMatrixMemberRow] = []
 
     var id: String { roomID }
 }
@@ -68,10 +71,13 @@ struct LiveMatrixInvite: Equatable, Sendable {
     var isEncrypted: Bool? = nil
     /// The custom room type from stripped `m.room.create` state, when present.
     var roomType: String? = nil
+    var avatarURL: String? = nil
+    var isDirect: Bool = false
 
     init(roomID: String, inviterID: String?, displayName: String? = nil,
          inviterDisplayName: String? = nil, latestTimestamp: UInt64? = nil,
-         isEncrypted: Bool? = nil, roomType: String? = nil) {
+         isEncrypted: Bool? = nil, roomType: String? = nil,
+         avatarURL: String? = nil, isDirect: Bool = false) {
         self.roomID = roomID
         self.inviterID = inviterID
         self.displayName = displayName
@@ -79,6 +85,8 @@ struct LiveMatrixInvite: Equatable, Sendable {
         self.latestTimestamp = latestTimestamp
         self.isEncrypted = isEncrypted
         self.roomType = roomType
+        self.avatarURL = avatarURL
+        self.isDirect = isDirect
     }
 }
 
@@ -173,6 +181,7 @@ final class LiveMatrixSession {
     private var sessionEpoch: UInt64 = 0
     private var latestRoomPublication: UInt64 = 0
     private var requestedRoomPages = 1
+    private var directCreations: [String: Task<String?, Never>] = [:]
     private var maximumMediaUploadSizeTask: Task<UInt64?, Never>?
 
     init(runtime: MatrixLiveRuntime,
@@ -200,14 +209,87 @@ final class LiveMatrixSession {
         return room
     }
 
+    func personProfile(userID: String) async -> HomeGroupCandidate? {
+        do {
+            try runtime.requireCurrent()
+            let profile = try await runtime.client.getProfile(userId: userID)
+            try runtime.requireCurrent()
+            return HomeGroupCandidate(id: userID, name: profile.displayName ?? userID,
+                                      kind: .person, avatarURL: profile.avatarUrl)
+        } catch { return nil }
+    }
+
+    /// Native directory search; SDK owns authentication and transport. No
+    /// alias-service response may insert a person the directory did not return.
+    func searchPeople(_ query: String) async -> [HomeGroupCandidate]? {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty, term.count <= 200 else { return [] }
+        do {
+            try runtime.requireCurrent()
+            let result = try await runtime.client.searchUsers(searchTerm: term, limit: 30)
+            try runtime.requireCurrent()
+            return result.results.filter { $0.userId != runtime.ticket.session.userID }.map {
+                HomeGroupCandidate(id: $0.userId, name: $0.displayName ?? $0.userId,
+                                   kind: .person, avatarURL: $0.avatarUrl)
+            }
+        } catch { return nil }
+    }
+
     /// Creates one ordinary, unencrypted direct conversation with shared
     /// history, matching desktop 0.20. The SDK performs the authoritative
     /// Matrix create/invite; Home still waits for the room-list echo before it
     /// opens anything. `m.direct` is presentation metadata only, written best
     /// effort after creation and never used as membership authority.
     func createDirectRoom(inviting target: NativeMatrixUser) async -> String? {
+        if let pending = directCreations[target.rawValue] { return await pending.value }
+        let task = Task { await self.reuseOrCreateDirectRoom(inviting: target) }
+        directCreations[target.rawValue] = task
+        // Retain the outcome for this session: an ambiguous create failure must
+        // never become a second create when a picker is tapped again.
+        return await task.value
+    }
+
+    private func reuseOrCreateDirectRoom(inviting target: NativeMatrixUser) async -> String? {
         do {
             try runtime.requireCurrent()
+            // Read m.direct through the SDK before creating, including rooms not
+            // yet published by the paged room-list adapter. Only joined ordinary
+            // one-to-one rooms qualify; account data is never membership authority.
+            let raw: String?
+            if let anchor = rooms.first {
+                // The pinned SDK's authenticated global-account-data bridge is
+                // a one-shot read, so another device's classification need not
+                // wait for our next sync before a create decision.
+                raw = try await room(id: anchor.roomID).fetchGlobalAccountDataRaw(eventType: "m.direct")
+            } else {
+                guard hasCompletedInitialSync else { throw LiveMatrixAdapterFailure.unavailable }
+                raw = try await runtime.client.accountData(eventType: "m.direct")
+            }
+            try runtime.requireCurrent()
+            for roomID in try MobileDirectRoomPolicy.roomIDs(accountData: raw, userID: target.rawValue) {
+                guard let room = try runtime.client.getRoom(roomId: roomID) else {
+                    // Another device's DM can precede our local room sync.
+                    // Wait for it rather than create a duplicate.
+                    throw LiveMatrixAdapterFailure.unavailable
+                }
+                let info = try await room.roomInfo()
+                guard info.membership == .joined, !info.isSpace,
+                      info.activeMembersCount <= 2 else { continue }
+                // Unknown member state cannot justify a new DM.
+                let members = try await Self.cachedMembers(from: room, synchronize: true, includeInvited: true)
+                let create = try await room.stateEvents(eventType: .roomCreate)
+                guard MobileDirectRoomPolicy.canReuse(
+                    isJoined: info.membership == .joined, isSpace: info.isSpace,
+                    activeMemberCount: info.activeMembersCount, activeMemberIDs: members.map(\.userID),
+                    target: target.rawValue,
+                    hasCustomRoomType: create.contains { MobileRoomTypePolicy.roomType(createContentJSON: $0.contentJson) != nil }
+                ) else { continue }
+                try runtime.requireCurrent()
+                return roomID
+            }
+            if let existing = HomeAddFriendPolicy.existingRoomID(in: rooms, matrixUserID: target.rawValue) {
+                return existing
+            }
             let roomID = try await runtime.client.createRoom(request: CreateRoomParameters(
                 name: nil,
                 isEncrypted: false,
@@ -520,6 +602,9 @@ final class LiveMatrixSession {
             guard let room = try runtime.client.getRoom(roomId: roomID) else {
                 throw LiveMatrixAdapterFailure.unavailable
             }
+            let info = try await room.roomInfo()
+            guard info.membership == .invited else { return false }
+            try runtime.requireCurrent()
             try await room.leave()
             try runtime.requireCurrent()
             return true
@@ -621,14 +706,13 @@ final class LiveMatrixSession {
         }
     }
 
-    /// Cached joined members for the info sheet. This deliberately avoids a
-    /// membership sync: opening the sheet must not introduce an independent
-    /// network read or hold up the chat.
+    /// SDK-synchronized joined members. Lazy-loaded room heroes are never a
+    /// membership roster; the SDK fetches missing state and owns its cache.
     func members(roomID: String) async -> [LiveMatrixMemberRow]? {
         do {
             let room = try room(id: roomID)
             let members = try await Task.detached(priority: .userInitiated) {
-                try await Self.cachedMembers(from: room)
+                try await Self.cachedMembers(from: room, synchronize: true)
             }.value
             try runtime.requireCurrent()
             return members
@@ -637,15 +721,15 @@ final class LiveMatrixSession {
         }
     }
 
-    nonisolated private static func cachedMembers(from room: Room) async throws -> [LiveMatrixMemberRow] {
-        let iterator = try await room.membersNoSync()
+    nonisolated fileprivate static func cachedMembers(from room: Room, synchronize: Bool = false, includeInvited: Bool = false) async throws -> [LiveMatrixMemberRow] {
+        let iterator = try await (synchronize ? room.members() : room.membersNoSync())
         var members = [LiveMatrixMemberRow]()
         let maximumMembers = min(Int(iterator.len()), 10_000)
         members.reserveCapacity(maximumMembers)
         while members.count < maximumMembers,
               let chunk = iterator.nextChunk(chunkSize: UInt32(min(100, maximumMembers - members.count))),
               !chunk.isEmpty {
-            for member in chunk where member.membership == .join {
+            for member in chunk where member.membership == .join || (includeInvited && member.membership == .invite) {
                 members.append(LiveMatrixMemberRow(
                     userID: member.userId,
                     displayName: member.displayName ?? member.userId,
@@ -1201,7 +1285,9 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
             inviterDisplayName: info.inviter?.displayName ?? preview.name,
             latestTimestamp: preview.timestamp,
             isEncrypted: encrypted(info.encryptionState),
-            roomType: type
+            roomType: type,
+            avatarURL: info.avatarUrl ?? (info.isDirect ? info.inviter?.avatarUrl : nil),
+            isDirect: info.isDirect
         )
     }
 
@@ -1223,11 +1309,12 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         let bot = await botData
         let type = await roomTypeValue
         let name = info.displayName ?? info.rawName ?? info.id
+        let members = (try? await LiveMatrixSession.cachedMembers(from: room, synchronize: true, includeInvited: true)) ?? []
         return LiveMatrixRoomRow(roomID: info.id, displayName: name,
                                  avatarURL: info.avatarUrl,
                                  heroAvatarURL: await heroAvatarURL(
                                     from: info, room: room, ownUserID: room.ownUserId(),
-                                    latestSenderID: preview.isOwn ? nil : preview.senderID
+                                    members: members
                                  ),
                                  latestText: suppressed ? nil : preview.text,
                                  latestWasDeliveryNotice: suppressed,
@@ -1245,25 +1332,23 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
                                  isFavourite: info.isFavourite,
                                  isMuted: info.cachedUserDefinedNotificationMode == .mute,
                                  isDirect: info.isDirect || info.isDm,
-                                 memberUserIDs: info.heroes.map(\.userId),
+                                 memberUserIDs: members.map(\.userID).filter { $0 != room.ownUserId() },
                                  memberCount: info.activeMembersCount,
                                  roomType: type,
                                  isEncrypted: Self.encrypted(info.encryptionState),
                                  appBotHiddenAt: bot.hiddenAt,
-                                 legacyAppBotMove: bot.move)
+                                 legacyAppBotMove: bot.move,
+                                 memberProfiles: members)
     }
 
-    /// The other member's profile photo for a one-to-one room. The SDK's
-    /// room-list heroes already carry it for most direct chats; a named room
-    /// without heroes still names the latest sender, whose member record is
-    /// one cached read away.
+    /// The other joined member's photo, including named DMs with no heroes.
     nonisolated private static func heroAvatarURL(from info: RoomInfo, room: Room,
                                                   ownUserID: String,
-                                                  latestSenderID: String?) async -> String? {
+                                                  members: [LiveMatrixMemberRow]) async -> String? {
         guard info.activeMembersCount <= 2 else { return nil }
-        let other = info.heroes.first(where: { $0.userId != ownUserID })
-        if let avatar = other?.avatarUrl { return avatar }
-        let userID = other?.userId ?? latestSenderID
+        let other = members.first(where: { $0.userID != ownUserID })
+        if let avatar = other?.avatarURL { return avatar }
+        let userID = other?.userID
         guard let userID, userID != ownUserID else { return nil }
         return try? await room.memberAvatarUrl(userId: userID)
     }

@@ -327,6 +327,7 @@ struct HomeActions {
     var deleteAppRoom: ((String) -> Void)?
     var declineInvitation: ((String) -> Void)?
     var addFriend: ((String) async -> HomeAddFriendResult)?
+    var peopleDiscovery: HomePeopleDiscoveryActions?
     var newGroup: HomeGroupActions?
     var newAssistant: HomeAssistantActions?
     var founderDraft: FounderDraftActions?
@@ -350,6 +351,7 @@ struct HomeActions {
          deleteAppRoom: ((String) -> Void)? = nil,
          declineInvitation: ((String) -> Void)? = nil,
          addFriend: ((String) async -> HomeAddFriendResult)? = nil,
+         peopleDiscovery: HomePeopleDiscoveryActions? = nil,
          newGroup: HomeGroupActions? = nil,
          newAssistant: HomeAssistantActions? = nil,
          founderDraft: FounderDraftActions? = nil,
@@ -372,6 +374,7 @@ struct HomeActions {
         self.deleteAppRoom = deleteAppRoom
         self.declineInvitation = declineInvitation
         self.addFriend = addFriend
+        self.peopleDiscovery = peopleDiscovery
         self.newGroup = newGroup
         self.newAssistant = newAssistant
         self.founderDraft = founderDraft
@@ -1020,7 +1023,7 @@ private struct HomeStartChatSheet: View {
     @ViewBuilder private var creationActionViews: some View {
         if let addFriend = actions.addFriend {
             NavigationLink {
-                HomeAddFriendView(design: design, submit: addFriend) { roomID in
+                HomeAddFriendView(design: design, submit: addFriend, discovery: actions.peopleDiscovery) { roomID in
                     close()
                     actions.openRoom(roomID)
                 }
@@ -1089,6 +1092,7 @@ private struct HomeStartChatSheet: View {
 private struct HomeAddFriendView: View {
     let design: LiveDesign
     let submit: (String) async -> HomeAddFriendResult
+    var discovery: HomePeopleDiscoveryActions? = nil
     let openRoom: (String) -> Void
 
     private enum Presentation: Equatable {
@@ -1101,6 +1105,8 @@ private struct HomeAddFriendView: View {
         case startFailed
     }
 
+    @State private var matches = [HomeGroupCandidate]()
+    @State private var directoryFailed = false
     @State private var query = ""
     @State private var presentation: Presentation = .idle
     @State private var request: Task<Void, Never>?
@@ -1141,6 +1147,28 @@ private struct HomeAddFriendView: View {
                 .accessibilityIdentifier("home.addFriend.find")
             }
 
+            if !matches.isEmpty {
+                Section(copy(.people)) {
+                    ForEach(matches) { person in
+                        Button {
+                            guard let discovery, presentation != .searching else { return }
+                            presentation = .searching
+                            request = Task { @MainActor in
+                                let result = await discovery.open(person.id)
+                                guard !Task.isCancelled else { return }
+                                if case let .openRoom(roomID) = result { openRoom(roomID) }
+                                else { presentation = .startFailed }
+                            }
+                        } label: {
+                            HomeDiscoveryPersonRow(design: design, person: person, load: discovery?.loadMatrixThumbnail)
+                        }
+                        .disabled(presentation == .searching)
+                    }
+                }
+            }
+            if directoryFailed {
+                Text(copy(.searchFailed)).foregroundStyle(atum.color(.danger, scheme: scheme))
+            }
             if let notice {
                 Section {
                     Text(notice)
@@ -1155,6 +1183,16 @@ private struct HomeAddFriendView: View {
         .background(atum.color(.ground, scheme: scheme))
         .navigationTitle(copy(.addFriendTitle))
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: query) {
+            matches = []
+            directoryFailed = false
+            guard let discovery, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            let found = await discovery.search(query)
+            guard !Task.isCancelled else { return }
+            matches = found ?? []
+            directoryFailed = found == nil
+        }
         .onAppear { focused = true }
         .onChange(of: query) { _, _ in
             request?.cancel()
@@ -1333,6 +1371,7 @@ private struct HomeNewGroupView: View {
     @State private var query = ""
     @State private var selected = Set<String>()
     @State private var discovered = [HomeGroupCandidate]()
+    @State private var directoryMatches = [HomeGroupCandidate]()
     @State private var lookupPresentation: LookupPresentation = .idle
     @State private var lookupTask: Task<Void, Never>?
     @State private var creationTask: Task<Void, Never>?
@@ -1431,6 +1470,15 @@ private struct HomeNewGroupView: View {
                 Rectangle().fill(atum.color(.frame, scheme: scheme)).frame(height: 0.5)
             }
         }
+        .task(id: query) {
+            directoryMatches = []
+            guard let search = actions.search, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            let found = await search(query)
+            guard !Task.isCancelled else { return }
+            directoryMatches = found ?? []
+            if found == nil { lookupPresentation = .failed }
+        }
         .onAppear { nameFocused = true }
         .onChange(of: name) { _, _ in createFailed = false }
         .onChange(of: query) { _, _ in
@@ -1446,7 +1494,7 @@ private struct HomeNewGroupView: View {
 
     private var candidates: [HomeGroupCandidate] {
         var seen = Set<String>()
-        return (actions.candidates + discovered).filter { seen.insert($0.id).inserted }
+        return (directoryMatches + discovered + actions.candidates).filter { seen.insert($0.id).inserted }
     }
 
     private var people: [HomeGroupCandidate] { candidates.filter { $0.kind == .person } }
@@ -1465,14 +1513,13 @@ private struct HomeNewGroupView: View {
             createFailed = false
             nameFocused = false
             if isSelected { selected.remove(candidate.id) }
-            else if canSelect { selected.insert(candidate.id) }
+            else if canSelect {
+                if !discovered.contains(where: { $0.id == candidate.id }) { discovered.append(candidate) }
+                selected.insert(candidate.id)
+            }
         } label: {
             HStack(spacing: 12) {
-                AtumAvatar(kind: candidate.kind == .assistant ? .assistant : .person,
-                           name: candidate.name, size: 36)
-                Text(verbatim: candidate.name)
-                    .foregroundStyle(atum.color(.ink, scheme: scheme))
-                    .lineLimit(1)
+                HomeDiscoveryPersonRow(design: design, person: candidate, load: actions.loadMatrixThumbnail)
                 Spacer(minLength: 8)
                 if isSelected {
                     Image(atum.symbol(.check))
@@ -2519,4 +2566,36 @@ private enum StartChatCopyKey: String {
     case assistantCreateFailed = "src.matrix.roster-create-copy.copies.assistantCreateFailed"
     case retry = "src.matrix.chat-copy.copies.retry"
     case cancel = "src.matrix.chat-copy.copies.cancel"
+}
+
+/// The existing Kit face and text stack, shared by discovery and group pickers.
+/// Handles stay here; chat names and messages never consume this enrichment.
+private struct HomeDiscoveryPersonRow: View {
+    let design: LiveDesign
+    let person: HomeGroupCandidate
+    let load: ((String, Int) async -> Data?)?
+    @State private var art: AtumAvatarArt?
+    @Environment(\.colorScheme) private var scheme
+    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AtumAvatar(kind: person.kind == .assistant ? .assistant : .person,
+                       name: person.name, art: art, size: 36)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: person.name).foregroundStyle(atum.color(.ink, scheme: scheme)).lineLimit(1)
+                if let handle = person.handle {
+                    Text(verbatim: "@" + handle).font(.caption).foregroundStyle(atum.color(.muted, scheme: scheme)).lineLimit(1)
+                }
+            }
+        }
+        .frame(minHeight: 44)
+        .task(id: person.avatarURL) {
+            art = nil
+            guard let uri = person.avatarURL, let load,
+                  let bytes = await load(uri, AtumAvatar.thumbnailPixelSide(for: 36)),
+                  !Task.isCancelled else { return }
+            art = await AtumAvatarArt.load(data: bytes, pixelSide: AtumAvatar.thumbnailPixelSide(for: 36))
+        }
+    }
 }

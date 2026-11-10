@@ -797,10 +797,17 @@ struct AppRoot: View {
             addFriend: model.canAddFriend ? { handle in
                 await model.addFriend(handle)
             } : nil,
+            peopleDiscovery: model.canAddFriend ? HomePeopleDiscoveryActions(
+                search: { await model.searchPeople($0) },
+                open: { await model.openPerson($0) },
+                loadMatrixThumbnail: { await model.avatarThumbnail(uri: $0, pixelSide: $1) }
+            ) : nil,
             newGroup: model.canCreateGroup ? HomeGroupActions(
                 candidates: model.groupCandidates,
                 lookup: { handle in await model.lookupGroupPerson(handle) },
-                create: { name, members in await model.createGroup(name, selected: members) }
+                create: { name, members in await model.createGroup(name, selected: members) },
+                search: { await model.searchPeople($0) },
+                loadMatrixThumbnail: { await model.avatarThumbnail(uri: $0, pixelSide: $1) }
             ) : nil,
             newAssistant: model.canCreateAssistant ? HomeAssistantActions(
                 pending: model.hasPendingAssistantLifecycle,

@@ -1202,6 +1202,28 @@ final class S2StateTests: XCTestCase {
                        "the fallback keeps the room under its own ID and after the server's agents")
     }
 
+    func testNamelessDirectAndGroupInvitesRemainActionableWithSDKAvatars() throws {
+        let invites = [
+            LiveMatrixInvite(roomID: "!dm:example.test", inviterID: nil, displayName: " ",
+                             avatarURL: "mxc://example.test/person", isDirect: true),
+            LiveMatrixInvite(roomID: "!group:example.test", inviterID: "@member:example.test",
+                             displayName: "Friends", avatarURL: "mxc://example.test/group", isDirect: false)
+        ]
+        let rows = LiveRosterRows.rows(.init(
+            agents: [], apps: [], rooms: [], invites: invites, pointers: [:],
+            hiddenRooms: MobileHiddenRoomLedger(), locale: "en"
+        )).rows
+        XCTAssertEqual(rows.map(\.id), invites.map(\.roomID))
+        XCTAssertTrue(rows.allSatisfy { $0.isInvitation && $0.canOpen && !$0.title.isEmpty })
+        XCTAssertEqual(rows.map(\.kind), [.people, .group])
+        XCTAssertEqual(rows.map(\.matrixAvatarURL), invites.map(\.avatarURL))
+        for row in rows {
+            let home = HomeRow(product: row, locale: Locale(identifier: "en"))
+            XCTAssertEqual(home.kind, .invitation)
+            XCTAssertEqual(home.preview.value, .invitation)
+        }
+    }
+
     func testUnknownTypeInviteFromAnAgentOrBotNeverBecomesAPersonInvitation() throws {
         let agentID = "00000000-0000-4000-8000-38e60b5c1238"
         let appID = "00000000-0000-4000-8000-f726a5bca776"

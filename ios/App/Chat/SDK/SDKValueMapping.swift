@@ -98,10 +98,11 @@ extension ChatMedia {
             return ChatMedia(sourceHandle: video.source.toJson(),
                              thumbnailSourceHandle: video.info?.thumbnailSource?.toJson(),
                              mimetype: video.info?.mimetype, filename: video.filename,
-                             byteSize: video.info?.size)
+                             byteSize: video.info?.size, nativeKind: .video)
         case let .audio(audio):
             return ChatMedia(sourceHandle: audio.source.toJson(), mimetype: audio.info?.mimetype,
-                             filename: audio.filename, byteSize: audio.info?.size)
+                             filename: audio.filename, byteSize: audio.info?.size,
+                             nativeKind: .audio, isVoice: audio.voice != nil)
         case .emote, .gallery, .notice, .text, .location, .other:
             return nil
         }

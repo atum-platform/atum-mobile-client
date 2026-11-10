@@ -26,6 +26,7 @@ enum HomeAddFriendPolicy {
         rooms
             .filter {
                 $0.isDirect && $0.memberCount <= 2 && $0.memberUserIDs.contains(matrixUserID)
+                    && !ConversationTypeGuard.excludedFromBotAndAgent(roomType: $0.roomType)
             }
             .sorted {
                 let left = $0.latestTimestamp ?? 0
@@ -41,6 +42,8 @@ struct HomeGroupCandidate: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let kind: Kind
+    var avatarURL: String? = nil
+    var handle: String? = nil
 }
 
 enum HomeGroupLookupResult: Equatable, Sendable {
@@ -110,10 +113,18 @@ enum HomeAssistantLifecyclePolicy {
     }
 }
 
+struct HomePeopleDiscoveryActions {
+    let search: (String) async -> [HomeGroupCandidate]?
+    let open: (String) async -> HomeAddFriendResult
+    let loadMatrixThumbnail: ((String, Int) async -> Data?)?
+}
+
 struct HomeGroupActions {
     let candidates: [HomeGroupCandidate]
     let lookup: (String) async -> HomeGroupLookupResult
     let create: (String, [HomeGroupCandidate]) async -> HomeGroupCreateResult
+    var search: ((String) async -> [HomeGroupCandidate]?)? = nil
+    var loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil
 }
 
 enum HomeGroupPolicy {
@@ -434,15 +445,18 @@ enum LiveRosterRows {
                agentSenders.contains(inviter) || catalogBots.contains(inviter) {
                 continue
             }
-            guard let title = [invite.displayName, invite.inviterDisplayName]
+            // Stripped invite state may arrive before profiles. Keep the invite
+            // actionable even then; the room ID is the SDK's stable last resort.
+            let title = [invite.displayName, invite.inviterDisplayName]
                 .compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) })
-                .first(where: { !$0.isEmpty }) else { continue }
+                .first(where: { !$0.isEmpty }) ?? invite.roomID
             rows.append(LiveProductRoom(
                 id: invite.roomID,
-                kind: .people,
+                kind: invite.isDirect ? .people : .group,
                 title: title,
                 previewContent: .none,
                 latestEventAt: invite.latestTimestamp.map { Date(timeIntervalSince1970: Double($0) / 1_000) },
+                matrixAvatarURL: invite.avatarURL,
                 isInvitation: true,
                 claimsConversationType: ConversationRoomType.isClaimed(invite.roomType)
             ))

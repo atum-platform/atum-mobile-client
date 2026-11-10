@@ -5,6 +5,46 @@ import XCTest
 /// hidden row, superseded working lines (B17), `showsQuote` judged after
 /// hiding (B21), the sender line (B16, S1a form), typing and loading rows.
 final class ProjectionTests: XCTestCase {
+    func testNonTextAndUndecryptableMessagesSurviveProjectionAndDecryptionUpdates() throws {
+        let facts: [ContentFact] = [
+            .image(caption: nil, width: nil, height: nil), .file(name: "report.pdf", caption: nil),
+            .video(name: "clip", caption: nil), .audio(name: "voice", caption: nil),
+            .location(description: nil, body: "geo:21,105"), .customMessageLike,
+            .undecryptable(.unknown), .undecryptable(.sentBeforeWeJoined)
+        ]
+        let items = facts.enumerated().map { index, fact in
+            let content = ContentRules.content(fact)
+            return ChatItem(id: "event.\(index)", kind: content.kind, sender: F.agent,
+                            body: content.body)
+        }
+        var buffer = TimelineBuffer()
+        try buffer.apply([.reset(items)])
+        let rows = Projection.rows(buffer.items, context: F.assistantRoom())
+        XCTAssertEqual(rows.map(\.id), items.map(\.id), "no non-text event silently disappears")
+        XCTAssertEqual(rows.map(\.item.kind), items.map(\.kind))
+        var decrypted = items[6]
+        decrypted.kind = .image(width: 100, height: 100)
+        decrypted.media = ChatMedia(sourceHandle: "encrypted-sdk-source")
+        try buffer.apply([.set(index: 6, item: decrypted)])
+        let updated = Projection.rows(buffer.items, context: F.assistantRoom())
+        XCTAssertEqual(updated.map(\.id), rows.map(\.id), "decryption replaces the same event")
+        XCTAssertEqual(updated[6].item.media, decrypted.media)
+    }
+
+    func testNativeAudioVideoAndVoiceKindsSurviveAbsentOrMisleadingFileMetadata() {
+        for kind in [MediaKind.audio, .video] {
+            let media = ChatMedia(sourceHandle: "sdk-source", mimetype: "application/octet-stream",
+                                  filename: "attachment", nativeKind: kind, isVoice: kind == .audio)
+            XCTAssertEqual(media.presentationKind(), kind)
+            let item = ChatItem(id: "media", kind: .file(name: "attachment"), sender: F.agent, media: media)
+            let projected = Projection.rows([item], context: F.assistantRoom())
+            XCTAssertEqual(projected.first?.item.media, media)
+            XCTAssertEqual(projected.first?.item.media?.isVoice, kind == .audio)
+        }
+        XCTAssertEqual(ChatMedia(sourceHandle: "sdk-source", filename: "report.pdf").presentationKind(), .pdf)
+        XCTAssertEqual(ChatMedia(sourceHandle: "sdk-source").presentationKind(fallbackFilename: "report.pdf"), .pdf)
+    }
+
     // MARK: Hiding
 
     func testS1aHidesEveryVirtualItem() {
