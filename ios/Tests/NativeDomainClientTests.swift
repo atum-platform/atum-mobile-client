@@ -3020,3 +3020,44 @@ extension NativeDomainClientTests {
         } catch {}
     }
 }
+
+// MARK: Assistant pet (card Pet row, AS-2)
+
+extension NativeDomainClientTests {
+    func testAgentPetReadsUseOnlyThePetAndShelfRoutes() async throws {
+        let assistantID = try NativeID(agentID)
+        let value = client(TestAuthorization(first: "pet-token"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer pet-token")
+            let base = "/api/matrix/v1/agents/\(self.agentID)"
+            switch request.url?.path {
+            case base + "/pet":
+                return .json(Data("""
+                {"owner":"o","agent":"a","revision":2,"provenance":"explicit","access":"owned",
+                 "visitEndsAt":null,"serverTime":"2026-11-11T00:00:00Z",
+                 "pet":{"ref":{"kind":"personal","pet_id":"p-1"},"enabled":true,"scale":1}}
+                """.utf8))
+            case base + "/pets":
+                return .json(Data("""
+                {"owner":"o","agent":"a","serverTime":"2026-11-11T00:00:00Z",
+                 "items":[{"ref":{"kind":"bundled","slug":"gigi"},"slug":"gigi","name":"Gigi",
+                           "access":"owned","offer":null}],
+                 "personal":[{"pet_id":"p-1","revision":1,"display_name":"Biscuit","description":"",
+                              "content_sha256":"x","byte_size":1,"deleted_at":null,"updated_at":"t"}],
+                 "visit":{"state":"none","startedAt":null,"endsAt":null},
+                 "hatch":{"offer":null,"creditEntitlementId":null,"roundsLeft":0}}
+                """.utf8))
+            default:
+                XCTFail("Unexpected path \(request.url?.path ?? "")")
+                return .init(status: 404)
+            }
+        }
+        let selection = try await value.agentPet(assistantID: assistantID)
+        XCTAssertEqual(selection.pet, .init(ref: .personal(petID: "p-1"), enabled: true))
+        let catalog = try await value.agentPetCatalog(assistantID: assistantID)
+        XCTAssertEqual(catalog.items.first?.ref, .bundled(slug: "gigi"))
+        XCTAssertEqual(AgentPetName.resolve(selection, catalog: catalog, isPrimary: false), "Biscuit")
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
+    }
+}

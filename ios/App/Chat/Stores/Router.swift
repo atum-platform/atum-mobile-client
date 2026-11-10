@@ -232,6 +232,25 @@ final class Router: RouterOpening {
         }
     }
 
+    /// The Store shelf an assistant card asked for (Pet → Pets, "Find more
+    /// skills" → Skills, desktop's `openShelf`). The Store scrolls to it once
+    /// and clears it; a later request replaces it.
+    private(set) var storeShelfRequest: StoreSectionKind?
+
+    /// Shows the Store at its root, scrolled to `shelf`.
+    func openStore(shelf: StoreSectionKind) {
+        storePath = NavigationPath()
+        storeShelfRequest = shelf
+        if selectedTab != .store {
+            selectedTab = .store
+            onUserSelectedTab(.store)
+        }
+    }
+
+    func storeShelfShown() {
+        storeShelfRequest = nil
+    }
+
     /// Called by the tab shell for both user selection and a selected-tab
     /// re-tap.  A re-tap pops that tab only; Home at root is the roster's
     /// scroll-to-top affordance.

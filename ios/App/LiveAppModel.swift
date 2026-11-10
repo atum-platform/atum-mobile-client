@@ -1704,8 +1704,24 @@ final class LiveAppModel {
                 guard let self else { return .failed }
                 return await self.renameAssistantDefinition(roomID: roomID,
                                                             snapshot: snapshot, name: name)
-            }
+            },
+            pet: AssistantPetActions(read: { [weak self] in
+                await self?.readAssistantPetName(roomID: roomID)
+            })
         )
+    }
+
+    /// The card's Pet row value (AS-2): the assistant's pet by name, read from
+    /// `agents/{id}/pet` (plus the shelf only when a personal pet or the
+    /// primary's stand-in needs it). Any failure is nil, so the row says
+    /// "Choose", as desktop's `useAgentPetName` does.
+    private func readAssistantPetName(roomID: String) async -> String? {
+        guard let client = domainClient, let agent = agentForRoom(roomID) else { return nil }
+        guard let selection = try? await client.agentPet(assistantID: agent.id) else { return nil }
+        let catalog = AgentPetName.needsCatalog(selection, isPrimary: agent.isDefault)
+            ? try? await client.agentPetCatalog(assistantID: agent.id) : nil
+        guard domainClient === client, agentForRoom(roomID)?.id == agent.id else { return nil }
+        return AgentPetName.resolve(selection, catalog: catalog, isPrimary: agent.isDefault)
     }
 
     func assistantModelActions(roomID: String) -> AssistantModelActions? {

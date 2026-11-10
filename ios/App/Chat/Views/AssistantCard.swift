@@ -69,7 +69,10 @@ struct AssistantCard: View {
     let routines: AssistantRoutineActions?
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
     let onMessage: (() -> Void)?
-    let onOpenStore: (() -> Void)?
+    /// Opens the Store on one shelf: Pet opens Pets and "Find more skills"
+    /// opens Skills, as desktop's `openShelf` does. Nil in hosts without a
+    /// Store, and then the card has no Pet row (desktop: no Store, no row).
+    let onOpenStore: ((StoreSectionKind) -> Void)?
 
     @State private var snapshot: AgentDefinitionSnapshot?
     @State private var persona: AssistantPersona?
@@ -100,7 +103,11 @@ struct AssistantCard: View {
     @State private var routineTaskGeneration: UInt64 = 0
     @State private var routinePhase: AgentRoutinesProbe.Phase = .idle
     @State private var routineProbed = false
+    @State private var petName: String?
     @Environment(\.colorScheme) private var scheme
+    /// The session is offline or in error: desktop's card caption
+    /// "You're offline. You can edit once you're connected."
+    @Environment(\.showsConnectionGlyph) private var offline
 
     private enum Field: Hashable {
         case name, what, who, instructions
@@ -118,7 +125,7 @@ struct AssistantCard: View {
          home: AssistantHomeActions?, modelDestinations: AssistantModelDestinationActions?,
          avatar: AssistantAvatarActions?, routines: AssistantRoutineActions?,
          loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil,
-         onMessage: (() -> Void)? = nil, onOpenStore: (() -> Void)? = nil) {
+         onMessage: (() -> Void)? = nil, onOpenStore: ((StoreSectionKind) -> Void)? = nil) {
         self.design = design
         self.identity = identity
         self.entry = entry
@@ -152,8 +159,8 @@ struct AssistantCard: View {
             persona: persona?.kind ?? .template,
             hasHome: home != nil,
             hasModel: models != nil || modelDestinations != nil,
-            hasPet: true,
-            hasSkills: true,
+            hasPet: AssistantCardLayout.showsPet(storeAvailable: onOpenStore != nil),
+            hasSkills: AssistantCardLayout.showsSkills(count: skills.count),
             hasRoutines: routines != nil
         )
     }
@@ -168,6 +175,7 @@ struct AssistantCard: View {
             VStack(spacing: 0) {
                 header
                 band
+                offlineCaption
                 handleSection
                 personaSection
                 rowsSection
@@ -367,6 +375,18 @@ struct AssistantCard: View {
             }
             .accessibilityLabel(copy.text(.nameLabel, [.text(displayName)]))
             .accessibilityIdentifier("assistant.card.name")
+    }
+
+    @ViewBuilder private var offlineCaption: some View {
+        if offline {
+            Text(copy.text(.offline))
+                .font(.footnote)
+                .foregroundStyle(atum.color(.soft, scheme: scheme))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("assistant.card.offline")
+        }
     }
 
     // MARK: Persona
@@ -622,11 +642,13 @@ struct AssistantCard: View {
             ?? choice.model
     }
 
+    /// Desktop's Pet row: "Pet · {name}", or "Choose" when this assistant
+    /// has no pet to show; it opens the Store's Pets shelf.
     private var petRow: some View {
         Button {
-            onOpenStore?()
+            onOpenStore?(.pets)
         } label: {
-            cardRow(label: copy.text(.pet), value: copy.text(.petChoose))
+            cardRow(label: copy.text(.pet), value: petName ?? copy.text(.petChoose))
         }
         .buttonStyle(.plain)
         .disabled(onOpenStore == nil)
@@ -637,45 +659,56 @@ struct AssistantCard: View {
         snapshot?.definition?.skills ?? []
     }
 
+    /// Desktop's "Skills · N" row, drawn only when there are skills: the
+    /// value is the count alone, the names read as people say them
+    /// (`skillLabel`), and "Find more skills" opens the Skills shelf.
+    /// `skillsLabel` ("Skills, 3") is the row's accessibility label, as on
+    /// desktop, never its visible value.
     private var skillsRow: some View {
         VStack(spacing: 0) {
             Button {
-                guard !skills.isEmpty || onOpenStore != nil else { return }
                 withAnimation(.easeInOut(duration: 0.18)) { skillsExpanded.toggle() }
             } label: {
-                cardRow(label: copy.text(.skills), value: skillsValue)
+                cardRow(label: copy.text(.skills), value: "\(skills.count)")
             }
             .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(design.text(AssistantCardCopyKey.skillsLabel.rawValue,
+                                            arguments: [.number(Int64(skills.count))]))
+            .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("assistant.card.skills")
             if skillsExpanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    if skills.isEmpty {
-                        EmptyView()
-                    } else {
-                        ForEach(skills, id: \.name) { skill in
-                            Text(verbatim: skill.name)
-                                .font(.footnote)
-                                .foregroundStyle(atum.color(.soft, scheme: scheme))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                    ForEach(skills, id: \.name) { skill in
+                        Text(verbatim: AssistantSkillLabel.label(skill.name))
+                            .font(.footnote)
+                            .foregroundStyle(atum.color(.soft, scheme: scheme))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if let onOpenStore {
-                        Button(copy.text(.findSkills)) { onOpenStore() }
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(atum.color(.ink, scheme: scheme))
-                            .accessibilityIdentifier("assistant.card.skills.find")
+                        Divider()
+                        Button { onOpenStore(.skills) } label: {
+                            HStack(spacing: 8) {
+                                Text(copy.text(.findSkills))
+                                Spacer(minLength: 8)
+                                Image(atum.symbol(.arrowUpRight))
+                                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                                    .accessibilityHidden(true)
+                            }
+                            .frame(minHeight: 32)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .accessibilityIdentifier("assistant.card.skills.find")
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
             }
         }
-    }
-
-    private var skillsValue: String {
-        let key = AssistantCardCopyKey.skillsLabel.rawValue
-        guard design.copy.contains(key) else { return "\(skills.count)" }
-        return design.text(key, arguments: [.number(Int64(skills.count))])
     }
 
     @ViewBuilder private var routinesRow: some View {
@@ -716,7 +749,16 @@ struct AssistantCard: View {
         loading = true
         await loadDefinition(force: false)
         loading = false
-        await loadModel()
+        async let model: Void = loadModel()
+        async let pet: Void = loadPet()
+        _ = await (model, pet)
+    }
+
+    /// Desktop reads the pet only where the row is drawn (with a Store) and
+    /// keeps "Choose" when the read fails.
+    @MainActor private func loadPet() async {
+        guard onOpenStore != nil, let pet = definition?.pet else { return }
+        petName = await pet.read()
     }
 
     @MainActor private func loadDefinition(force: Bool) async {
@@ -958,7 +1000,7 @@ struct AssistantCard: View {
         case .failed: return copy.text(.retry)
         case .ready:
             guard let count = routineProbe?.routineCount else { return nil }
-            return AgentRoutinesCardValue.text(count: count)
+            return copy.routineCount(count)
         case .idle, .loading: return nil
         }
     }
@@ -1007,6 +1049,8 @@ enum AssistantCardCopyKey: String {
     case skillsLabelOne = "src.matrix.assistant-card.copy.assistantCardCopies.skillsLabel.count=1"
     case findSkills = "src.matrix.assistant-card.copy.assistantCardCopies.findSkills"
     case routines = "src.matrix.assistant-card.copy.assistantCardCopies.routines"
+    /// Not in this pin yet: read behind `design.copy.contains` (`routineCount`).
+    case routineCount = "src.matrix.assistant-card.copy.assistantCardCopies.routineCount"
     case addRoutine = "src.matrix.assistant-card.copy.assistantCardCopies.addRoutine"
     case routineEmpty = "src.matrix.assistant-card.copy.assistantCardCopies.routineEmpty"
     case routineLegacyPending = "src.matrix.assistant-card.copy.assistantCardCopies.routineLegacyPending"
@@ -1041,6 +1085,7 @@ enum AssistantCardCopyKey: String {
     case routineWaiting = "src.matrix.assistant-card.copy.assistantCardCopies.routineWaiting"
     case problemsDuplicate = "src.matrix.assistant-card.copy.assistantCardCopies.problems.duplicate"
     case problemsTooLong = "src.matrix.assistant-card.copy.assistantCardCopies.problems.tooLong"
+    case setupRow = "src.matrix.assistant-card.copy.assistantCardCopies.setupRow"
     case setupRowNotReady = "src.matrix.assistant-card.copy.assistantCardCopies.setupRowNotReady"
     case setupRowWorking = "src.matrix.assistant-card.copy.assistantCardCopies.setupRowWorking"
 }
@@ -1053,6 +1098,28 @@ struct AssistantCardCopy {
               _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key.rawValue, arguments: arguments)
     }
+
+    /// A routine word the pin may not carry yet: the pin first, then
+    /// desktop's own value in the app language (`AssistantRoutinePendingCopy`).
+    func routine(_ key: AssistantRoutinePendingCopy.Key, name: String? = nil) -> String {
+        if design.copy.contains(key.exportKey) {
+            return design.text(key.exportKey, arguments: name.map { [.text($0)] } ?? [])
+        }
+        return AssistantRoutinePendingCopy.text(key, locale: design.locale, name: name)
+    }
+
+    /// The value beside "Routines": "3 routines", "No routines", "Chưa có".
+    func routineCount(_ count: Int) -> String {
+        let key = AssistantCardCopyKey.routineCount.rawValue
+        if design.copy.contains(key) { return design.text(key, arguments: [.number(Int64(max(0, count)))]) }
+        return AssistantRoutinePendingCopy.count(count, locale: design.locale)
+    }
+}
+
+/// The card's pet read: the name of the pet this assistant has, or nil for
+/// "Choose" (none saved, hidden, not nameable, or the read failed).
+struct AssistantPetActions {
+    let read: () async -> String?
 }
 
 /// The few card words that live outside the assistant-card export group, plus
