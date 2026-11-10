@@ -22,13 +22,13 @@ enum RoomRootDestination: Equatable {
         // platform's conversation directory decides before the kind does, and a
         // room that only claims the type opens nowhere.
         switch classification {
-        case .conversation, .privateCos: return .teamSpace
+        case .conversation, .privateCos, .notesSelf: return .teamSpace
         case .quarantined: return nil
         case .company, .personal, .unknown: break
         }
         guard roomKind == .group else { return .personal }
         return switch classification {
-        case .company, .conversation, .privateCos: .teamSpace
+        case .company, .conversation, .privateCos, .notesSelf: .teamSpace
         case .personal: .personal
         case .quarantined, .unknown: nil
         }
@@ -395,7 +395,8 @@ struct AppRoot: View {
                     conversations: conversationListActions,
                     loadMatrixThumbnail: { uri, side in
                         await model.avatarThumbnail(uri: uri, pixelSide: side)
-                    }
+                    },
+                    directMessages: directMessagesActions
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -604,7 +605,7 @@ struct AppRoot: View {
                 // A conversation (or a room that claims to be one) is never a Home row,
                 // whatever its member count says.
                 switch model.companyWorkspace.roomClassification(room.id) {
-                case .conversation, .privateCos, .quarantined: return false
+                case .conversation, .privateCos, .notesSelf, .quarantined: return false
                 case .company, .personal, .unknown:
                     guard room.kind == .group else { return true }
                     return model.companyWorkspace.roomClassification(room.id) == .personal
@@ -721,11 +722,13 @@ struct AppRoot: View {
                     assistantPresentation: model.assistantPresentationActions(roomID: roomID),
                     assistantRoutines: model.assistantRoutineActions(roomID: roomID),
                     openStore: { router.select(tab: .store) },
-                    exitRoom: { roomID, action in
+                    // The Chief of Staff and "You" offer no Delete chat, Leave or Ignore (lane 2 D5).
+                    exitRoom: model.offersPersonalExits(roomID: roomID) ? { roomID, action in
                         model.exitRoom(roomID, action)
                         router.popHomeToRoot()
-                    },
-                    setIgnored: { await model.setIgnored(userID: $0, ignored: $1) },
+                    } : nil,
+                    setIgnored: model.offersPersonalExits(roomID: roomID)
+                        ? { await model.setIgnored(userID: $0, ignored: $1) } : nil,
                     viewerIsFounder: model.isFounderAccount,
                     setLowPriority: { model.setRoomLowPriority($0, isLowPriority: $1) },
                     loadDetails: { await model.chatPanelDetails(roomID: $0) },
@@ -876,6 +879,25 @@ struct AppRoot: View {
                 _ = await store.setHidden(companyID: companyID, conversationID: conversationID, hidden: hidden)
             },
             routeToRoom: { companyID, roomID in requestRoomOpen(roomID, requiringCompany: companyID) })
+    }
+
+    /// "You" and the Chief of Staff in Direct messages. Each is fenced to the company tapped in.
+    private var directMessagesActions: DirectMessagesActions {
+        DirectMessagesActions(
+            openNotes: { companyID in
+                guard model.companyWorkspace.activeCompanyID == companyID,
+                      let roomID = await model.companyNotesSelfRoom(companyID: companyID) else { return false }
+                return await openRoomAndRoute(roomID, requiringCompany: companyID)
+            },
+            openChiefOfStaff: { companyID in
+                guard model.companyWorkspace.activeCompanyID == companyID,
+                      let roomID = await model.companyWorkspace.privateCosRoomToOpen(companyID: companyID)
+                else { return false }
+                return await openRoomAndRoute(roomID, requiringCompany: companyID)
+            },
+            retryChiefOfStaff: { companyID in
+                await model.companyWorkspace.retryPrivateCos(companyID: companyID)
+            })
     }
 
     /// Add people and Hide from inside an open conversation.
