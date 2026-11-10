@@ -37,20 +37,27 @@ public enum AppleStorePurchaseResult: Sendable {
 @MainActor public final class ApplePurchaseCoordinator: ObservableObject {
     public enum State: Equatable, Sendable {
         case idle, loading, unavailable, closed, ready, purchasing, pending, cancelled, retrying
-        case succeeded, needsSupport(String), otherAccount, revoked
+        case succeeded, needsSupport(String), otherAccount, revoked, sandboxCapExceeded
     }
     public static let productIDs: Set<String> = ["com.atum.mobile.protons.100k", "com.atum.mobile.protons.500k"]
     @Published public private(set) var state: State = .idle
     @Published public private(set) var packs: [AppleProductsResponse.Pack] = []
     @Published public private(set) var products: [AppleStoreProduct] = []
     public var canPurchase: Bool {
-        checkoutOpen && !products.isEmpty && [.ready, .cancelled, .succeeded].contains(state)
-            && !purchaseStates.values.contains { [.purchasing, .pending, .retrying].contains($0) }
+        guard checkoutOpen, !products.isEmpty,
+              !purchaseStates.values.contains(where: { [.purchasing, .pending, .retrying].contains($0) })
+        else { return false }
+        switch state {
+        case .ready, .cancelled, .succeeded, .needsSupport, .otherAccount, .revoked: return true
+        default: return false
+        }
     }
     public func purchaseState(for productID: String) -> State { purchaseStates[productID] ?? .idle }
 
     private let store: any ApplePurchaseStore
     private let environment: ApplePurchaseEnvironment
+    /// Selected only by this account's catalogue, including on the production API.
+    @Published public private(set) var acceptedEnvironment: ApplePurchaseEnvironment?
     private let sleep: @MainActor (UInt64) async throws -> Void
     private let refreshWallet: @MainActor () async -> Void
     private var api: (any ApplePurchasesAPI)?
@@ -92,6 +99,7 @@ public enum AppleStorePurchaseResult: Sendable {
         submissions.values.forEach { $0.cancel() }; submissions.removeAll()
         let switchedAccount = self.accountID != accountID
         self.accountID = accountID; self.api = api
+        acceptedEnvironment = nil
         checkoutOpen = false; products = []; packs = []; purchaseStates = [:]; state = .idle
         // Re-fetch after every account switch; don't strand token-bound transactions.
         if switchedAccount { tokens.removeAll() }
@@ -112,7 +120,12 @@ public enum AppleStorePurchaseResult: Sendable {
         do {
             let catalog = try await api.appleProducts()
             guard isCurrent(scope) else { return }
-            guard catalog.environment == environment else { state = .unavailable; return }
+            // v1.2: TestFlight/App Review use the production origin. Only the
+            // server can select Sandbox for the authenticated allowlisted owner.
+            guard environment == .production || catalog.environment == environment else {
+                acceptedEnvironment = nil; state = .unavailable; return
+            }
+            acceptedEnvironment = catalog.environment
             guard catalog.checkoutOpen else { state = .closed; return }
             let ids = Set(catalog.products.map(\.productId)).intersection(Self.productIDs)
             guard !ids.isEmpty else { state = .unavailable; return }
@@ -129,7 +142,8 @@ public enum AppleStorePurchaseResult: Sendable {
     }
 
     public func purchase(_ id: String) async {
-        guard canPurchase, products.contains(where: { $0.id == id }), let api, let accountID else { return }
+        guard canPurchase, products.contains(where: { $0.id == id }), let api, let accountID,
+              let environment = acceptedEnvironment else { return }
         let scope = generation
         state = .purchasing; purchaseStates[id] = .purchasing
         do {
@@ -146,7 +160,8 @@ public enum AppleStorePurchaseResult: Sendable {
             guard isCurrent(scope) else { return }
             switch result {
             case let .verified(transaction):
-                guard transaction.productID == id, transaction.environment == environment else {
+                guard transaction.productID == id, transaction.environment == environment,
+                      transaction.environment == acceptedEnvironment else {
                     state = .unavailable; purchaseStates[id] = .unavailable
                     return
                 }
@@ -180,7 +195,8 @@ public enum AppleStorePurchaseResult: Sendable {
     private func isCurrent(_ scope: UUID) -> Bool { generation == scope && !Task.isCancelled }
 
     private func enqueue(_ transaction: AppleVerifiedTransaction) {
-        guard let api, accountID != nil, transaction.environment == environment,
+        guard let api, accountID != nil, let environment = acceptedEnvironment,
+              transaction.environment == environment,
               Self.productIDs.contains(transaction.productID), submissions[transaction.id] == nil,
               !finished.contains(transaction.id) else { return }
         let scope = generation
@@ -213,6 +229,13 @@ public enum AppleStorePurchaseResult: Sendable {
                     return
                 } catch {
                     guard self.isCurrent(scope) else { return }
+                    if let error = error as? ApplePurchaseError, error.reason == .sandboxCapExceeded {
+                        // No durable outcome: keep StoreKit's transaction unfinished.
+                        // A later explicit restore/replay can settle after a cap raise.
+                        self.checkoutOpen = false; self.state = .sandboxCapExceeded
+                        self.purchaseStates[transaction.productID] = self.state
+                        return
+                    }
                     if let error = error as? ApplePurchaseError, error.error == .closed {
                         self.checkoutOpen = false; self.products = []; self.state = .closed
                     } else { self.state = .retrying }

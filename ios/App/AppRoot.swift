@@ -316,7 +316,7 @@ struct AppRoot: View {
                 teamSpace: model.companyWorkspace.tabBadge(signals: companySignals))
         ) {
             HomeScreen(design: design, router: router,
-                       accountName: accountPresentation.name,
+                       accountName: accountPresentation.name(unnamed: PeopleNameWords.unnamed),
                        accountAvatarURL: accountPresentation.avatarURL,
                        presentation: home,
                        actions: homeActions,
@@ -348,7 +348,8 @@ struct AppRoot: View {
                 onStartApp: { startAppChat($0) },
                 setAppShortcutVisibility: { appID, shown in
                     await model.setAppShortcutVisibility(appID: appID, shown: shown)
-                }
+                },
+                commerce: model.storeCommerce
             )
         } teamSpace: {
             TeamSpaceScreen(
@@ -407,6 +408,7 @@ struct AppRoot: View {
                           presentation: accountPresentation,
                           actions: accountActions,
                           store: presentation.store,
+                          storeCommerce: model.storeCommerce,
                           refreshStore: { await model.refreshProduct() },
                           openStoreRoom: { roomID in
                               router.dismissAccount()

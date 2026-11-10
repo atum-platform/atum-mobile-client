@@ -64,6 +64,11 @@ enum S6ScriptedScenario: String, CaseIterable {
     case storeStale = "store.stale"
     case storePartial = "store.partial"
     case storeOpenApp = "store.open-app"
+    /// Store acquisition over a synthetic `StoreCommerceAPI` (no client, no Protons).
+    case storeAcquire = "store.acquire"
+    case storeInsufficient = "store.insufficient"
+    case storeUncertain = "store.uncertain"
+    case storeOwned = "store.owned"
     case accountDefault = "account.default"
     case accountRestore = "account.restore"
     case recoveryRejected = "recovery.rejected"

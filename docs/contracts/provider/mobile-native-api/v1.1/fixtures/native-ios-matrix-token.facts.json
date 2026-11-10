@@ -1,0 +1,16 @@
+{
+  "origin": null,
+  "cookie": false,
+  "xAtumPrincipal": false,
+  "now": 1791200000,
+  "introspection": {
+    "active": true,
+    "token_type": "access_token",
+    "scope": "openid",
+    "client_id": "01JPHNMXPQ7R8S9T0V2W3X4Y5Z",
+    "sub": "01JZZZZZZZZZZZZZZZZZZZZZZA",
+    "exp": 1791200300,
+    "nbf": 1791199990,
+    "iat": 1791199990
+  }
+}

@@ -241,7 +241,7 @@ final class LiveMatrixSession {
             try runtime.requireCurrent()
             let profile = try await runtime.client.getProfile(userId: userID)
             try runtime.requireCurrent()
-            return HomeGroupCandidate(id: userID, name: profile.displayName ?? userID,
+            return HomeGroupCandidate(id: userID, name: PeopleNameWords.person(profile.displayName, userID: userID),
                                       kind: .person, avatarURL: profile.avatarUrl)
         } catch { return nil }
     }
@@ -256,7 +256,7 @@ final class LiveMatrixSession {
             let result = try await runtime.client.searchUsers(searchTerm: term, limit: 30)
             try runtime.requireCurrent()
             return result.results.filter { $0.userId != runtime.ticket.session.userID }.map {
-                HomeGroupCandidate(id: $0.userId, name: $0.displayName ?? $0.userId,
+                HomeGroupCandidate(id: $0.userId, name: PeopleNameWords.person($0.displayName, userID: $0.userId),
                                    kind: .person, avatarURL: $0.avatarUrl)
             }
         } catch { return nil }
@@ -782,7 +782,7 @@ final class LiveMatrixSession {
                     default: continue
                     }
                     members.append(.init(userID: member.userId,
-                                         displayName: member.displayName ?? member.userId,
+                                         displayName: PeopleNameWords.person(member.displayName, userID: member.userId),
                                          avatarURL: member.avatarUrl,
                                          power: Self.power(member.powerLevel),
                                          membership: membership))
@@ -818,7 +818,7 @@ final class LiveMatrixSession {
             case .remove: try await room.kickUser(userId: userID, reason: nil)
             case .ban: try await room.banUser(userId: userID, reason: nil)
             case .unban: try await room.unbanUser(userId: userID, reason: nil)
-            case .block, .unblock: return false
+            case .block, .unblock, .report: return false
             }
             try runtime.requireCurrent()
             return true
@@ -866,7 +866,7 @@ final class LiveMatrixSession {
             for member in chunk where member.membership == .join || (includeInvited && member.membership == .invite) {
                 members.append(LiveMatrixMemberRow(
                     userID: member.userId,
-                    displayName: member.displayName ?? member.userId,
+                    displayName: PeopleNameWords.person(member.displayName, userID: member.userId),
                     avatarURL: member.avatarUrl
                 ))
                 if members.count == maximumMembers { break }
@@ -1409,15 +1409,18 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         let type = await Self.roomType(from: room)
         let preview: (timestamp: UInt64?, inviter: String?, name: String?) = switch await latest {
         case let .remoteInvite(timestamp, inviter, profile):
-            (UInt64(timestamp), inviter, senderName(from: profile))
+            (UInt64(timestamp), inviter, senderName(from: profile, userID: inviter ?? ""))
         default:
             (nil, nil, nil)
         }
         return LiveMatrixInvite(
             roomID: info.id,
             inviterID: info.inviter?.userId ?? preview.inviter,
-            displayName: info.displayName ?? info.rawName ?? preview.name,
-            inviterDisplayName: info.inviter?.displayName ?? preview.name,
+            // Readable names only; the roster row falls back to the unnamed words.
+            displayName: [info.displayName, info.rawName, preview.name]
+                .lazy.compactMap(MatrixPersonName.readableRoomName).first,
+            inviterDisplayName: info.inviter.flatMap { MatrixPersonName.name($0.displayName, userID: $0.userId) }
+                ?? preview.name,
             latestTimestamp: preview.timestamp,
             isEncrypted: encrypted(info.encryptionState),
             roomType: type,
@@ -1443,7 +1446,8 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         } ?? false
         let bot = await botData
         let type = await roomTypeValue
-        let name = info.displayName ?? info.rawName ?? info.id
+        let name = [info.displayName, info.rawName].lazy.compactMap(MatrixPersonName.readableRoomName).first
+            ?? PeopleNameWords.room(nil, isDirect: info.isDirect)
         let members = (try? await LiveMatrixSession.cachedMembers(from: room, synchronize: true, includeInvited: true)) ?? []
         return LiveMatrixRoomRow(roomID: info.id, displayName: name,
                                  avatarURL: info.avatarUrl,
@@ -1534,7 +1538,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         switch event {
         case let .remote(timestamp, sender, isOwn, profile, content):
             return LiveLatestEventPreview(text: text(from: content), content: previewContent(from: content),
-                                          senderID: sender, senderName: senderName(from: profile),
+                                          senderID: sender, senderName: senderName(from: profile, userID: sender),
                                           isOwn: isOwn, isNotice: isNotice(content),
                                           sendState: .sent, timestamp: UInt64(timestamp))
         case let .local(timestamp, sender, profile, content, state):
@@ -1544,7 +1548,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
             case .cannotBeSent: .cannotBeSent
             }
             return LiveLatestEventPreview(text: text(from: content), content: previewContent(from: content),
-                                          senderID: sender, senderName: senderName(from: profile),
+                                          senderID: sender, senderName: senderName(from: profile, userID: sender),
                                           isOwn: true, isNotice: isNotice(content),
                                           sendState: sendState, timestamp: UInt64(timestamp))
         case .none, .remoteInvite:
@@ -1552,9 +1556,10 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         }
     }
 
-    nonisolated private static func senderName(from profile: ProfileDetails) -> String? {
+    /// The sender's own name, or nil: never their Matrix ID or its opaque localpart.
+    nonisolated private static func senderName(from profile: ProfileDetails, userID: String) -> String? {
         guard case let .ready(displayName, _, _, _, _) = profile else { return nil }
-        return displayName
+        return MatrixPersonName.name(displayName, userID: userID)
     }
 
     nonisolated private static func isNotice(_ content: TimelineItemContent) -> Bool {

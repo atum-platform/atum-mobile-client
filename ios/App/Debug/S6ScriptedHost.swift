@@ -33,6 +33,10 @@ struct S6ScriptedHost: View {
             case .storeCatalog, .storeFirstLoad, .storeEmpty, .storeUnavailable,
                  .storeStale, .storePartial, .storeOpenApp:
                 storeHost
+            case .storeAcquire: StoreCommerceScriptedHost(design: design, mode: .acquire)
+            case .storeInsufficient: StoreCommerceScriptedHost(design: design, mode: .insufficient)
+            case .storeUncertain: StoreCommerceScriptedHost(design: design, mode: .uncertain)
+            case .storeOwned: StoreCommerceScriptedHost(design: design, mode: .owned)
             case .accountDefault, .accountRestore, .recoveryRejected, .recoveryDone,
                  .accountKey, .signOutPlain, .signOutSaveKey, .accountLegal:
                 accountHost
@@ -142,7 +146,8 @@ struct S6ScriptedHost: View {
             matrixUserID: "@an:atum.invalid", displayName: "An",
             offersHistoryRecovery: restore, holdsRecoveryKey: key,
             recoveryKeySavedOnThisPhone: false, signOutInProgress: false,
-            signOutFailureToken: 0, version: "1.0.0 (202610130001)"
+            signOutFailureToken: 0, version: "1.0.0 (202610130001)",
+            directoryHandle: "an"
         )
     }
 
