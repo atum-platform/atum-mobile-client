@@ -32,6 +32,8 @@ final class MessageActionsPresenter {
     var selectText: SelectTextRequest?
     var deleteRequest: DeleteRequest?
     var failedSend: FailedSendRequest?
+    /// "Báo cáo" on someone else's message: the report sheet (HC-2).
+    var reportRequest: ReportMessageRequest?
     /// The message-actions overlay on screen, if any.
     var actionsOverlay: MessageOverlayRequest?
     /// A link tapped in the select-text sheet (B17): the sheet closes first
@@ -50,6 +52,7 @@ final class MessageActionsPresenter {
     /// not count as visible, so no receipt goes out meanwhile (B13).
     var covers: Bool {
         actionsOverlay != nil || selectText != nil || deleteRequest != nil || failedSend != nil
+            || reportRequest != nil
     }
 
     /// B8: tapping "Chưa gửi được" under a failed bubble (the row view's
@@ -58,6 +61,12 @@ final class MessageActionsPresenter {
         failedSend = FailedSendRequest(itemID: row.id, body: row.item.body,
                                        kind: row.item.kind, media: row.item.media)
     }
+}
+
+/// "Báo cáo" on one message: the sheet asks for an optional reason first.
+struct ReportMessageRequest: Identifiable, Equatable {
+    let itemID: String
+    var id: String { itemID }
 }
 
 /// "Xóa với mọi người?" for one of my messages (B20; desktop asks the same).
@@ -81,9 +90,11 @@ extension View {
     /// store's parse of an answer (`ConversationStore.parsedBody(for:)`), so
     /// the preview and the select-text sheet never parse again.
     func messageMenu(row: ChatRow, kind: RoomKind, roomTitle: String, ownUserID: String?,
+                     nonPersonSenders: Set<String>?,
                      parsedBody: AttributedString?, design: LiveDesign, actions: ChatActions,
                      presenter: MessageActionsPresenter) -> some View {
         modifier(MessageMenuModifier(row: row, kind: kind, roomTitle: roomTitle, ownUserID: ownUserID,
+                                     nonPersonSenders: nonPersonSenders,
                                      parsedBody: parsedBody, design: design, actions: actions, presenter: presenter))
     }
 
@@ -114,6 +125,8 @@ private struct MessageMenuModifier: ViewModifier {
     let kind: RoomKind
     let roomTitle: String
     let ownUserID: String?
+    /// Every assistant and app bot the chat knows; nil offers no Report.
+    let nonPersonSenders: Set<String>?
     let parsedBody: AttributedString?
     let design: LiveDesign
     let actions: ChatActions
@@ -122,7 +135,7 @@ private struct MessageMenuModifier: ViewModifier {
     @State private var frame: CGRect = .zero
 
     func body(content: Content) -> some View {
-        let items = MessageMenuRules.items(for: row.item, in: kind)
+        let items = MessageMenuRules.items(for: row.item, in: kind, nonPersonSenders: nonPersonSenders)
         if items.isEmpty {
             content
         } else {
@@ -177,6 +190,7 @@ enum MessageMenuActions {
         case .copy: ChatCopy.text(design, ChatCopy.Key.copy)
         case .selectText: ChatCopy.text(design, ChatCopy.Key.selectText)
         case .edit: ChatCopy.text(design, ChatCopy.Key.edit)
+        case .report: ChatCopy.text(design, ChatCopy.Key.report)
         case .delete: ChatCopy.text(design, ChatCopy.Key.delete)
         }
     }
@@ -188,6 +202,9 @@ enum MessageMenuActions {
         case .copy: .copy
         case .selectText: .fileText
         case .edit: .pencil
+        // The vendored Phosphor subset has no flag (desktop's Flag); the
+        // warning circle is the Kit's nearest mark.
+        case .report: .alertCircle
         case .delete: .trash
         }
     }
@@ -203,6 +220,7 @@ enum MessageMenuActions {
             presenter.selectText = SelectTextRequest(itemID: row.id, body: row.item.body,
                                                      parsed: parsedBody)
         case .edit: actions.edit(row.id)
+        case .report: presenter.reportRequest = ReportMessageRequest(itemID: row.id)
         case .delete:
             if MessageMenuRules.deleteNeedsConfirmation(row.item) {
                 presenter.deleteRequest = DeleteRequest(itemID: row.id,
@@ -363,7 +381,7 @@ struct MessageActionsOverlay: View {
                     }
                     // A sheet or the delete alert can only be presented once
                     // the cover has gone; the rest act at once.
-                    if item == .selectText || item == .delete {
+                    if item == .selectText || item == .delete || item == .report {
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(120))
                             run()
@@ -612,6 +630,11 @@ private struct MessageActionSheets: ViewModifier {
             .sheet(item: $presenter.failedSend) { request in
                 FailedSendSheet(request: request, design: design, actions: actions)
             }
+            .sheet(item: $presenter.reportRequest) { request in
+                ReportSheet(design: design, subject: .message) { reason in
+                    await actions.report(request.itemID, reason)
+                }
+            }
             .alert(ChatCopy.text(design, ChatCopy.Key.deleteMessageTitle),
                    isPresented: Binding(get: { presenter.deleteRequest != nil },
                                         set: { if !$0 { presenter.deleteRequest = nil } }),
@@ -630,5 +653,155 @@ private struct MessageActionSheets: ViewModifier {
         guard let name = request.assistantName, !name.isEmpty else { return body }
         // Two exported sentences, one per line: no separator is written here.
         return body + "\n" + ChatCopy.text(design, ChatCopy.Key.deleteMessageAssistantNote, [.text(name)])
+    }
+}
+
+/// Report words the export does not carry yet (`ReportPendingCopy`): the key
+/// once the pin has it, else its closest exported stand-in.
+@MainActor
+enum ReportCopy {
+    static func text(_ design: LiveDesign, _ key: ReportPendingCopy) -> String {
+        if let text = try? design.copy.text(key.rawValue, locale: design.locale) { return text }
+        return ChatCopy.text(design, key.fallback)
+    }
+}
+
+/// The report sheet (desktop `MatrixReportDialog`), for a message or a
+/// person: its title, one line, an optional one-line reason and Report.
+/// Nothing else is asked; the reason is the person's own words, sent with the
+/// Matrix report and never with message content. A failure says so and the
+/// sheet stays open; a sent report says "Report sent." for a beat, then the
+/// sheet closes.
+struct ReportSheet: View {
+    enum Subject: Equatable {
+        case message
+        case person
+    }
+
+    let design: LiveDesign
+    let subject: Subject
+    /// Sends the report with the reason as typed (`ReportPolicy.reason`
+    /// trims it); true once the homeserver took it.
+    let send: @MainActor (String?) async -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+    @State private var reason = ""
+    @State private var status = Status.idle
+    @State private var failed = false
+    @FocusState private var reasonFocused: Bool
+
+    private enum Status { case idle, sending, sent }
+
+    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+
+    private var title: String {
+        switch subject {
+        case .message: ChatCopy.text(design, .reportTitle)
+        // PENDING-COPY:src.matrix.chat-copy.copies.reportPersonTitle
+        case .person: ReportCopy.text(design, .reportPersonTitle)
+        }
+    }
+
+    private var line: String {
+        switch subject {
+        case .message: ChatCopy.text(design, .reportBody)
+        // PENDING-COPY:src.matrix.chat-copy.copies.reportPersonBody
+        case .person: ReportCopy.text(design, .reportPersonBody)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(verbatim: line)
+                        .font(.subheadline)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                    // PENDING-COPY:src.matrix.chat-copy.copies.reportReason
+                    TextField(ReportCopy.text(design, .reportReason), text: $reason)
+                        .focused($reasonFocused)
+                        .submitLabel(.send)
+                        .onSubmit(submit)
+                        .disabled(status != .idle)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 48)
+                        .background(atum.color(.cell, scheme: scheme),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .onChange(of: reason) { _, new in
+                            if new.count > ReportPolicy.reasonLimit {
+                                reason = String(new.prefix(ReportPolicy.reasonLimit))
+                            }
+                        }
+                        .accessibilityIdentifier("report.reason")
+                    if failed {
+                        Label { Text(ChatCopy.text(design, .errorGeneric)) } icon: {
+                            Image(atum.symbol(.alertCircle))
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.danger, scheme: scheme))
+                        .accessibilityIdentifier("report.failed")
+                    }
+                    if status == .sent {
+                        Label { Text(ChatCopy.text(design, .reportSent)) } icon: {
+                            Image(atum.symbol(.checkCircle))
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .accessibilityIdentifier("report.sent")
+                    }
+                }
+                .padding(16)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(ChatCopy.text(design, .cancel)) { dismiss() }
+                        .disabled(status == .sending)
+                        .accessibilityIdentifier("report.cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: submit) {
+                        if status == .sending {
+                            ProgressView()
+                        } else {
+                            Text(ChatCopy.text(design, .report))
+                        }
+                    }
+                    .disabled(status != .idle)
+                    .accessibilityIdentifier("report.send")
+                }
+            }
+        }
+        .atumDesign(design)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(status == .sending)
+        .sensoryFeedback(.success, trigger: status == .sent)
+        .onAppear { reasonFocused = true }
+        .accessibilityIdentifier("report.sheet")
+    }
+
+    private func submit() {
+        guard status == .idle else { return }
+        status = .sending
+        failed = false
+        let typed = reason
+        Task { @MainActor in
+            let sent = await send(ReportPolicy.reason(typed))
+            guard sent else {
+                status = .idle
+                failed = true
+                AccessibilityNotification.Announcement(ChatCopy.text(design, .errorGeneric)).post()
+                return
+            }
+            status = .sent
+            AccessibilityNotification.Announcement(ChatCopy.text(design, .reportSent)).post()
+            try? await Task.sleep(for: .milliseconds(900))
+            dismiss()
+        }
     }
 }

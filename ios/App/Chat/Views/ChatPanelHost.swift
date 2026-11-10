@@ -121,6 +121,7 @@ struct ChatMembersPage: View {
     @State private var confirming: Confirmation?
     @State private var failureToken: UInt64 = 0
     @State private var pending: String?
+    @State private var reporting: ReportPersonRequest?
 
     private struct Confirmation: Equatable {
         let userID: String
@@ -169,11 +170,17 @@ struct ChatMembersPage: View {
                                         memberIsSelf: row.member.isCurrentUser,
                                         in: .group, viewerIsFounder: actions.viewerIsFounder)
         let blocked = details?.ignoredUserIDs.contains(row.member.userID) == true
+        // Desktop `conversation-controls.tsx`: Report sits after Ignore, for a person only.
+        let mayReport = actions.reportPerson != nil
+            && ReportPolicy.mayReportPerson(row.member.reportMember, isSelf: row.member.isCurrentUser,
+                                            in: .group, viewerIsFounder: actions.viewerIsFounder)
         guard let moderation = details?.moderation, actions.moderateMember != nil else {
-            return mayBlock && !row.member.isCurrentUser ? [blocked ? .unblock : .block] : []
+            return ChatMemberModeration.personalActions(isSelf: row.member.isCurrentUser, mayBlock: mayBlock,
+                                                        isBlocked: blocked, mayReport: mayReport)
         }
         return moderation.actions(targetPower: row.power, membership: row.membership,
-                                  isSelf: row.member.isCurrentUser, mayBlock: mayBlock, isBlocked: blocked)
+                                  isSelf: row.member.isCurrentUser, mayBlock: mayBlock, isBlocked: blocked,
+                                  mayReport: mayReport)
     }
 
     var body: some View {
@@ -206,6 +213,11 @@ struct ChatMembersPage: View {
         } message: { confirmation in
             if let body = confirmationBody(confirmation.action) { Text(verbatim: body) }
         }
+        .sheet(item: $reporting) { request in
+            ReportSheet(design: design, subject: .person) { reason in
+                await actions.reportPerson?(request.userID, reason) ?? false
+            }
+        }
         .sensoryFeedback(.error, trigger: failureToken)
     }
 
@@ -231,8 +243,12 @@ struct ChatMembersPage: View {
             } else if !available.isEmpty {
                 Menu {
                     ForEach(available, id: \.self) { action in
-                        Button(role: action == .unblock || action == .unban ? nil : .destructive) {
-                            if action == .unblock {
+                        Button(role: action == .unblock || action == .unban || action == .report
+                               ? nil : .destructive) {
+                            if action == .report {
+                                // The report sheet asks for its own reason; no confirmation first.
+                                reporting = ReportPersonRequest(userID: row.member.userID)
+                            } else if action == .unblock {
                                 run(Confirmation(userID: row.member.userID, name: row.member.name, action: action))
                             } else {
                                 confirming = Confirmation(userID: row.member.userID, name: row.member.name,
@@ -271,6 +287,9 @@ struct ChatMembersPage: View {
             case .unblock: succeeded = await actions.setIgnored?(confirmation.userID, false) ?? false
             case .remove, .ban, .unban:
                 succeeded = await actions.moderateMember?(info.roomID, confirmation.userID, confirmation.action) ?? false
+            case .report:
+                // Reported through its sheet (`reporting`), never confirmed here.
+                succeeded = true
             }
             pending = nil
             if !succeeded {
@@ -284,6 +303,7 @@ struct ChatMembersPage: View {
     private func glyph(_ action: ChatMemberAction) -> AtumGlyph {
         switch action {
         case .block, .unblock: .eyeOff
+        case .report: .alertCircle
         case .remove: .logOut
         case .ban, .unban: .shield
         }
@@ -293,6 +313,8 @@ struct ChatMembersPage: View {
         switch action {
         case .block: design.text(ChatInfoHome.blockKey)
         case .unblock: design.text(ChatInfoHome.unblockKey)
+        // PENDING-COPY:src.matrix.chat-copy.copies.reportPerson
+        case .report: ReportCopy.text(design, .reportPerson)
         case .remove: design.text("src.matrix.conversation-copy.copies.remove")
         case .ban: design.text("src.matrix.moderation-copy.copies.ban")
         case .unban: design.text("src.matrix.moderation-copy.copies.unban")
@@ -304,6 +326,8 @@ struct ChatMembersPage: View {
         let name: [AtumCopy.Argument] = [.text(confirming.name)]
         return switch confirming.action {
         case .block, .unblock: design.text("src.matrix.chat-copy.copies.memberIgnoreTitle", arguments: name)
+        // Never confirmed here: the report sheet has its own title.
+        case .report: ""
         case .remove: design.text("src.matrix.chat-copy.copies.memberRemoveTitle", arguments: name)
         case .ban: design.text("src.matrix.chat-copy.copies.memberBanTitle", arguments: name)
         case .unban: design.text("src.matrix.chat-copy.copies.memberUnbanTitle", arguments: name)
@@ -314,6 +338,7 @@ struct ChatMembersPage: View {
         switch action {
         case .block, .unblock: design.text("src.matrix.moderation-copy.copies.notice")
         case .remove: design.text("src.matrix.chat-copy.copies.memberRemoveBody")
+        case .report: nil
         case .ban: design.text("src.matrix.moderation-copy.copies.banNotice")
         case .unban: nil
         }
