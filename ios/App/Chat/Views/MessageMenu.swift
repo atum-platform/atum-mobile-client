@@ -422,18 +422,24 @@ struct MessageActionsOverlay: View {
 }
 
 /// Offers its child at most `maxWidth` and takes the child's own size, so a
-/// short message keeps a short bubble and a long one wraps.
+/// short message keeps a short bubble and a long one wraps. `maxHeight`
+/// caps the height without ever growing a short message to it (a flexible
+/// `.frame(maxHeight:)` takes the whole cap when offered more).
 private struct HugWidth: Layout {
     let maxWidth: CGFloat
+    var maxHeight: CGFloat? = nil
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let child = subviews.first else { return .zero }
-        return child.sizeThatFits(ProposedViewSize(width: min(proposal.width ?? maxWidth, maxWidth), height: nil))
+        let size = child.sizeThatFits(ProposedViewSize(width: min(proposal.width ?? maxWidth, maxWidth), height: nil))
+        return CGSize(width: size.width, height: min(size.height, maxHeight ?? .infinity))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        // The child keeps its own height; a cut one runs past the bottom and
+        // is clipped by the caller.
         subviews.first?.place(at: bounds.origin, anchor: .topLeading,
-                              proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }
 
@@ -452,8 +458,7 @@ private struct MessageMenuPreview: View {
     var body: some View {
         let own = row.item.isOwn
         let shape = RoundedRectangle(cornerRadius: ChatLayout.bubbleRadius, style: .continuous)
-        HugWidth(maxWidth: 292) { content }
-            .frame(maxHeight: maxHeight.map { max(0, $0 - 18) }, alignment: .top)
+        HugWidth(maxWidth: 292, maxHeight: maxHeight.map { max(0, $0 - 18) }) { content }
             .clipped()
             .padding(.vertical, 9)
             .padding(.horizontal, 14)

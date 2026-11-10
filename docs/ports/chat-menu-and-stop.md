@@ -109,7 +109,28 @@ is missing:
    by a Mac from its own records are out of reach (contract rule 5). Owner
    decision O4 is still open.
 
-## Verification
+## Verification (2026-11-10, local, under the shared build lock)
 
-See the session's final report and the commit message for the exact commands
-and results.
+- `swift test --package-path ios -j 2`: 526 tests, 0 failures, 25 of them new
+  (turn signal, stop machine, menu layout, `/cloud/stop` shapes).
+- Public client checks: design import verify plus 8 importer tests, push
+  fixtures plus 2 projection tests, and `plutil -lint` of the project all
+  pass. The npm Megolm check was not run; this change does not touch it.
+- App `xcodebuild build-for-testing` (iPhone simulator): succeeded.
+- UI, light mode, iPhone 18 Pro, scripted:
+  - Passed: `testAnswerMenuInMyAssistantChatAndSelectText`,
+    `testPeopleChatMenuAndEdit`, `testReactionsToggleFromThePaletteAndTheChips`
+    and all four `TurnStopUITests` (stopped; stop requested; failure, then a
+    retry with the same request ID; no route means no Stop).
+  - `testTheLiftedMessageShowsOnceAndNothingCoversIt`: the text-once,
+    on-screen and no-overlap checks passed. Its close tap at the top of the
+    screen failed, because the capsule now sits there. The test now closes at
+    the left edge; that fix has not been re-run.
+  - Not run: dark mode, and `testGroupChatMenu`, whose close tap was moved
+    off the capsule the same way.
+- Captures showed the lifted bubble growing to its height cap (empty space
+  under short text). Fixed by capping inside `HugWidth`; that fix is built but
+  not re-captured.
+- `xcodebuild test-without-building` twice failed to exit after its tests
+  finished: about 21 minutes idle, then `timeout 900` (exit 124), with a
+  partial result bundle. It is not tied to a particular test.

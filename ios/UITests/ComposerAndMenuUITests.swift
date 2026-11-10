@@ -493,6 +493,28 @@ final class ComposerUITests: WS3UITestCase {
     }
 }
 
+extension WS3UITestCase {
+    /// Closes the actions overlay with a tap on its dim at the left edge,
+    /// mid-screen: the capsule, the copy and the menu sit 16 pt in from the
+    /// edges, and the top of the screen may hold the capsule.
+    @MainActor
+    func closeMenu(_ app: XCUIApplication) {
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 6, dy: window.frame.midY)).tap()
+    }
+
+    /// A capture written straight to `ui-evidence/` as a PNG (as
+    /// `TranscriptUITestCase` does), so it survives without a result bundle.
+    @MainActor
+    func keepEvidence(_ name: String, of app: XCUIApplication) {
+        keepScreenshot(name, of: app)
+        let folder = TranscriptUITestCase.liveEvidence
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? app.screenshot().pngRepresentation.write(to: folder.appendingPathComponent("\(type(of: self)).\(name).png"))
+    }
+}
+
 final class MessageMenuUITests: WS3UITestCase {
     private let answer = "row.chat.actions.0002"
     private let mineWithAnswerBelow = "row.chat.actions.0004"
@@ -632,7 +654,7 @@ final class MessageMenuUITests: WS3UITestCase {
         XCTAssertTrue(menuButton(app, "Trả lời").waitForExistence(timeout: Self.waitSeconds))
         XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép"])
         keepScreenshot("kinds-4-group-theirs-menu", of: app)
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        closeMenu(app)
         openMenu(app, row: "row.chat.kinds.0019", text: "hẹn 12 giờ")
         XCTAssertTrue(menuButton(app, "Sửa").waitForExistence(timeout: Self.waitSeconds))
         XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép", "Sửa", "Xóa"])
@@ -753,8 +775,13 @@ final class MessageMenuUITests: WS3UITestCase {
             let copies = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label CONTAINS %@", text)).allElementsBoundByIndex
                 .filter { $0.isHittable }
-            XCTAssertEqual(copies.count, 1, "the text shows once: \(copies.map(\.identifier))")
-            XCTAssertEqual(copies.first?.identifier, "menu.preview")
+            // The copy may expose its text view as a second element; every
+            // visible match must be inside the lifted copy, none elsewhere.
+            XCTAssertFalse(copies.isEmpty, "the lifted copy shows the text")
+            let outside = copies.filter { !preview.frame.insetBy(dx: -1, dy: -1).contains($0.frame) }
+            XCTAssertTrue(outside.isEmpty, "the text shows once: "
+                + outside.map { "\($0.identifier) \($0.elementType.rawValue) \($0.frame)" }.joined(separator: ", "))
+            print("MENU \(row) matches: " + copies.map { "\($0.identifier) \($0.frame)" }.joined(separator: ", "))
             let window = app.windows.firstMatch.frame
             let parts = [reactions.frame, preview.frame, menu.frame]
             for part in parts {
@@ -768,9 +795,9 @@ final class MessageMenuUITests: WS3UITestCase {
             for button in reactions.buttons.allElementsBoundByIndex {
                 XCTAssertGreaterThanOrEqual(min(button.frame.width, button.frame.height), 44, button.label)
             }
-            keepScreenshot("actions-10-lifted-\(row)", of: app)
+            keepEvidence("actions-10-lifted-\(row)", of: app)
             // A tap on the dim closes it and the row comes back.
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
+            closeMenu(app)
             waitForAbsence(menu)
             XCTAssertTrue(element(app, row).waitForExistence(timeout: Self.waitSeconds), "the row is back")
         }
@@ -816,7 +843,7 @@ final class TurnStopUITests: WS3UITestCase {
         // 44 wide; 36 tall in the layout so the row never jumps, with its
         // hit shape 4 pt beyond above and below.
         XCTAssertGreaterThanOrEqual(stop.frame.width, 44)
-        keepScreenshot("stop-1-working", of: app)
+        keepEvidence("stop-1-working", of: app)
         stop.tap()
         stop.tap()  // a second tap while the request is out sends nothing
         let line = element(app, "composer.turn")
@@ -824,7 +851,7 @@ final class TurnStopUITests: WS3UITestCase {
         XCTAssertTrue(eventually(5) { line.label == "Đã dừng tác vụ" }, line.label)
         XCTAssertFalse(stop.exists, "no Stop once stopped")
         XCTAssertEqual(stopRequests().count, 1, "\(stopRequests())")
-        keepScreenshot("stop-2-stopped", of: app)
+        keepEvidence("stop-2-stopped", of: app)
     }
 
     @MainActor
@@ -838,7 +865,7 @@ final class TurnStopUITests: WS3UITestCase {
         XCTAssertTrue(line.waitForExistence(timeout: 3))
         XCTAssertEqual(line.label, "Đã yêu cầu dừng. Đang chờ xác nhận.")
         XCTAssertFalse(stop.isEnabled, "never shown as stopped on stop_requested")
-        keepScreenshot("stop-3-requested", of: app)
+        keepEvidence("stop-3-requested", of: app)
     }
 
     @MainActor
