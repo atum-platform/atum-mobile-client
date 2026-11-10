@@ -782,6 +782,24 @@ final class S2StateTests: XCTestCase {
         XCTAssertTrue(read.isMuted)
     }
 
+    /// Every live room passes through this projection; a field it drops is lost
+    /// app-wide. A company channel's `m.room.avatar` is the company logo.
+    func testRosterProjectionKeepsEveryFieldItDoesNotOverride() {
+        let room = LiveProductRoom(id: "!channel:atum.test", kind: .group, title: "general",
+                                   detail: "Acme", latestEventAt: Date(timeIntervalSince1970: 1_000),
+                                   latestSenderName: "Lan", matrixAvatarURL: "mxc://atum.test/hero",
+                                   avatarSHA256: "abc", appAccent: "#123456",
+                                   unreadCount: 3, notificationCount: 2, highlightCount: 1,
+                                   isMarkedUnread: true, isPinned: true, isMuted: true,
+                                   isLowPriority: true, canOpen: false, isAwaitingRoom: true,
+                                   isComingSoon: true, awaitsStart: true, isFounder: true,
+                                   claimsConversationType: true,
+                                   roomAvatarURL: "mxc://atum.test/acme-logo")
+        XCTAssertEqual(room.withRosterState(), room)
+        XCTAssertEqual(room.withRosterState(pinnedOverride: false).roomAvatarURL,
+                       "mxc://atum.test/acme-logo")
+    }
+
     func testAuthoritativeReadProjectionRestoresEveryBadgeCounter() {
         let room = LiveProductRoom(id: "room", kind: .people, title: "Lan",
                                    unreadCount: 0, notificationCount: 0, highlightCount: 0,

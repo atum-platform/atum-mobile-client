@@ -227,7 +227,8 @@ struct LiveProductRoom: Identifiable, Equatable {
             isInvitation: isInvitation, canOpen: canOpen,
             isAwaitingRoom: isAwaitingRoom, isAppBotRoom: isAppBotRoom,
             isComingSoon: isComingSoon, awaitsStart: awaitsStart, isFounder: isFounder,
-            claimsConversationType: claimsConversationType
+            claimsConversationType: claimsConversationType,
+            roomAvatarURL: roomAvatarURL
         )
     }
 }
