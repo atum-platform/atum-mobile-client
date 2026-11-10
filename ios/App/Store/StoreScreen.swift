@@ -121,6 +121,10 @@ struct StoreScreen: View {
 
     private func itemTitle(_ itemID: String) -> String {
         if let item = store.items.first(where: { $0.id == itemID }) { return item.title }
+        // An offer may disappear from the shop while the item remains owned.
+        if let item = commerce?.catalog.first(where: { $0.itemID == itemID }) {
+            return item.title.localized(locale: design.locale, fallback: itemID)
+        }
         let kind = itemID.split(separator: "/").first.map(String.init)
         return copy(kind == "skill" ? "desktop.atum.discover.skillsSection"
             : kind == "pet" ? "desktop.atum.discover.petsSection" : "desktop.atum.discover.agentsSection")
@@ -132,10 +136,7 @@ struct StoreScreen: View {
             .monospacedDigit()
             .lineLimit(1)
             .padding(.horizontal, 6)
-            .accessibilityLabel([
-                copy("desktop.atum.discover.protons", [.text(value)]),
-                copy("src.matrix.mobile-device-copy.mobileDeviceCopy.accountRowsWalletLabel"),
-            ].joined(separator: ", "))
+            .accessibilityLabel(copy(StoreCopyKey.protons, [.text(value)]))
             .accessibilityIdentifier("store.balance")
     }
 
@@ -361,13 +362,14 @@ private struct StoreTrailingText: View {
     let design: LiveDesign
     let text: String
     var quiet = false
+    var lineLimit: Int? = 1
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Text(text)
             .font(design.kit.font(.callout).weight(.semibold))
             .foregroundStyle(design.kit.color(quiet ? .ink3 : .ink, scheme: scheme))
-            .lineLimit(1)
+            .lineLimit(lineLimit)
     }
 }
 
@@ -436,7 +438,10 @@ struct StoreItemRow: View {
                 .font(design.kit.font(.callout))
                 .accessibilityHidden(true)
         case .price:
-            if let value = item.price {
+            if let offer = item.offer, offer.billingInterval == .month {
+                StoreTrailingText(design: design, text: StorePricePresentation.text(offer, design: design),
+                                  lineLimit: nil)
+            } else if let value = item.price {
                 if value == "0" {
                     StoreTrailingText(design: design, text: design.text(StoreCopyKey.free), quiet: true)
                 } else {
@@ -457,7 +462,9 @@ struct StoreItemRow: View {
         case .owned: parts.append(design.text(StoreCopyKey.owned))
         case .pending: parts.append(design.text(StoreCopyKey.detailPending))
         case .price:
-            if let value = item.price {
+            if let offer = item.offer, offer.billingInterval == .month {
+                parts.append(StorePricePresentation.text(offer, design: design))
+            } else if let value = item.price {
                 parts.append(value == "0" ? design.text(StoreCopyKey.free)
                              : design.text(StoreCopyKey.protons, arguments: [.text(value)]))
             }

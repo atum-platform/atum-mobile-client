@@ -6282,6 +6282,7 @@ final class LiveAppModel {
             $0.canOpen && !$0.isInvitation && !$0.id.hasPrefix("app:")
         }.map(\.id))
         let items = (storeCatalogRead.value?.items ?? [])
+            .filter(\.isVisibleInStore)
             .sorted { left, right in
                 left.sortOrder == right.sortOrder
                     ? left.itemID < right.itemID
@@ -6368,7 +6369,7 @@ final class LiveAppModel {
             return LiveProductStoreRead(
                 availability: .ready,
                 walletValue: walletRead.value.map {
-                    MicroProtonFormat.string($0.balances.available,
+                    MicroProtonFormat.balance($0.balances.available,
                                              locale: Locale.current.identifier)
                 },
                 items: items,

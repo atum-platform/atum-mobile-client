@@ -21,6 +21,30 @@ final class StoreCommercePresentationTests: XCTestCase {
         }
     }
 
+    func testMonthlyPriceFormattingUsesDesktopKeysAndBothPreciseAmounts() throws {
+        let json = #"{"id":"11111111-1111-4111-8111-111111111111","version":1,"priceMicroProtons":19000123456,"renewalPriceMicroProtons":39000654321,"scope":"account","billingInterval":"month","delivery":"cloud"}"#
+        let offer = try StoreWire.decode(StoreCatalogOffer.self, from: Data(json.utf8))
+        var keys = [String]()
+        let parts = StorePricePresentation.parts(offer, locale: "en") { key, arguments in
+            keys.append(key)
+            if key == StorePricePresentation.CopyKey.monthlyFirst { return "\(arguments[0]) Protons first month" }
+            if key == StorePricePresentation.CopyKey.monthlyThen { return "then \(arguments[0])/mo" }
+            XCTFail("Unexpected key: \(key)")
+            return key
+        }
+        XCTAssertEqual(keys, [StorePricePresentation.CopyKey.monthlyFirst, StorePricePresentation.CopyKey.monthlyThen])
+        XCTAssertEqual(parts.joined(separator: " · "), "19,000.123456 Protons first month · then 39,000.654321/mo")
+    }
+
+    @MainActor func testMonthlyPresentationRetainsBothAmountsWithPinnedExport() throws {
+        let json = #"{"id":"11111111-1111-4111-8111-111111111111","version":1,"priceMicroProtons":19000123456,"renewalPriceMicroProtons":39000654321,"scope":"account","billingInterval":"month","delivery":"cloud"}"#
+        let offer = try StoreWire.decode(StoreCatalogOffer.self, from: Data(json.utf8))
+        let design = try LiveDesign()
+        let text = StorePricePresentation.text(offer, design: design)
+        XCTAssertTrue(text.contains(MicroProtonFormat.string(offer.priceMicroProtons, locale: design.locale)))
+        XCTAssertTrue(text.contains(MicroProtonFormat.string(offer.renewalPriceMicroProtons!, locale: design.locale)))
+    }
+
     func testUnansweredWritesNeverClaimNothingWasCharged() {
         let uncharged = [StoreCopyKey.failed, StoreCopyKey.purchaseUnavailable]
         for state in [StoreAcquireState.uncertain, .forbidden, .offline] {

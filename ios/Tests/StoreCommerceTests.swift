@@ -47,6 +47,74 @@ final class StoreCommerceContractTests: XCTestCase {
     }
 }
 
+final class StoreFormattingAndVisibilityTests: XCTestCase {
+    private func item(_ file: String, change: (inout [String: Any]) -> Void = { _ in }) throws -> StoreCatalogItem {
+        let url = Bundle.module.url(forResource: "store-v1.1", withExtension: nil)!
+            .appendingPathComponent(file + ".json")
+        let catalog = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        var row = (catalog["items"] as! [[String: Any]])[0]
+        change(&row)
+        return try StoreWire.decode(StoreCatalogItem.self, from: JSONSerialization.data(withJSONObject: row))
+    }
+
+    func testBalancesFloorWithoutLosingPricePrecision() {
+        for (micro, expected) in [(Int64(0), "0"), (1, "0"), (999_999, "0"),
+                                  (1_000_000, "1"), (1_999_999, "1"),
+                                  (12_345_678_912, "12,345"), (-1, "0"),
+                                  (NativeAPI.maximumInteger, "9,007,199,254")] {
+            XCTAssertEqual(MicroProtonFormat.balance(micro, locale: "en"), expected)
+        }
+        XCTAssertEqual(MicroProtonFormat.balance(12_345_999_999, locale: "vi"), "12.345")
+        XCTAssertEqual(MicroProtonFormat.string(12_345_678_912, locale: "en"), "12,345.678912")
+        XCTAssertEqual(MicroProtonFormat.string(1, locale: "en"), "0.000001")
+    }
+
+    func testMonthlyPricePartsKeepBothExactAmounts() throws {
+        let monthly = try item("catalog-monthly-agent") { row in
+            var offer = row["offer"] as! [String: Any]
+            offer["priceMicroProtons"] = 19_000_123_456
+            offer["renewalPriceMicroProtons"] = 39_000_654_321
+            row["offer"] = offer
+        }
+        XCTAssertEqual(monthly.offer?.priceParts, [.firstMonth(19_000_123_456), .thenMonthly(39_000_654_321)])
+        let freeFirst = try item("catalog-monthly-agent") { row in
+            var offer = row["offer"] as! [String: Any]
+            offer["priceMicroProtons"] = 0
+            offer["renewalPriceMicroProtons"] = 39_000_000_000
+            row["offer"] = offer
+        }
+        XCTAssertEqual(freeFirst.offer?.priceParts, [.freeFirstMonth, .thenMonthly(39_000_000_000)])
+    }
+
+    func testEqualMonthlyPriceAndOneTimePricesMatchDesktop() throws {
+        for value: Int64 in [0, 1, 39_000_000_000] {
+            let monthly = try item("catalog-monthly-agent") { row in
+                var offer = row["offer"] as! [String: Any]
+                offer["priceMicroProtons"] = value
+                offer["renewalPriceMicroProtons"] = value
+                row["offer"] = offer
+            }
+            XCTAssertEqual(monthly.offer?.priceParts, value == 0 ? [.free] : [.monthly(value)])
+            let oneTime = try item("catalog-pet") { row in
+                var offer = row["offer"] as! [String: Any]
+                offer["priceMicroProtons"] = value
+                row["offer"] = offer
+            }
+            XCTAssertEqual(oneTime.offer?.priceParts, value == 0 ? [.free] : [.amount(value)])
+        }
+    }
+
+    func testOfferlessAndUnavailableItemsStayOutWhileHubAndMonthlyStayVisible() throws {
+        XCTAssertFalse(try item("catalog-null-offer").isVisibleInStore)
+        XCTAssertFalse(try item("v11-catalog-unavailable").isVisibleInStore)
+        XCTAssertFalse(try item("catalog-pet") { $0["deliverable"] = false }.isVisibleInStore)
+        XCTAssertTrue(try item("v11-catalog-hub-skill").isVisibleInStore)
+        XCTAssertTrue(try item("catalog-pet").isVisibleInStore)
+        XCTAssertTrue(try item("catalog-monthly-agent").isVisibleInStore)
+        XCTAssertTrue(try item("v11-catalog-gift-owned").isVisibleInStore)
+    }
+}
+
 @MainActor final class StoreAcquisitionTests: XCTestCase {
     final class Journal: StoreAttemptJournal {
         var values = [String: [StorePurchaseAttempt]]()

@@ -221,7 +221,7 @@ struct StoreCommerceScriptedHost: View {
     private var presentation: LiveProductStoreRead {
         let catalog = (try? StoreWire.decode(StoreCatalogResponse.self, from: JSONSerialization.data(
             withJSONObject: ["items": ScriptedStoreAPI.catalogItems])).items) ?? []
-        let items = catalog.map { item in
+        let items = catalog.filter(\.isVisibleInStore).map { item in
             LiveProductStoreItem(
                 id: item.itemID,
                 kind: item.kind == .pet ? .pet : item.kind == .skill ? .skill : .agent,
@@ -234,7 +234,7 @@ struct StoreCommerceScriptedHost: View {
                 needs: item.needs, install: item.install)
         }
         let walletValue = commerce.wallet.map {
-            MicroProtonFormat.string($0.balances.available, locale: "vi_VN")
+            MicroProtonFormat.balance($0.balances.available, locale: "vi_VN")
         }
         return .init(availability: .ready, walletValue: walletValue, items: items, apps: [])
     }

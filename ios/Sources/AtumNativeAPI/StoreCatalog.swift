@@ -41,6 +41,13 @@ public struct StoreCatalogItem: Decodable, Equatable, Identifiable, Sendable {
 
     public var id: String { itemID }
 
+    /// An offer-less official Hub skill is installed by the Hub. Other rows
+    /// need an offer the provider can fulfil; entitlements stay in Purchased.
+    public var isVisibleInStore: Bool {
+        if kind == .skill && offer == nil && install != nil { return true }
+        return offer != nil && deliverable != false
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
         itemID = try c.string("itemId", minimum: 1, maximum: 128,
@@ -110,6 +117,23 @@ public struct StoreCatalogOffer: Decodable, Equatable, Sendable {
     public let scope: Scope
     public let billingInterval: BillingInterval
     public let delivery: Delivery
+
+    /// Semantic parts of desktop storePriceParts, before localization. Prices
+    /// remain integer micro-Protons until the final six-place formatter.
+    public enum PricePart: Equatable, Sendable {
+        case free, amount(Int64), monthly(Int64), firstMonth(Int64), freeFirstMonth, thenMonthly(Int64)
+    }
+
+    public var priceParts: [PricePart] {
+        if billingInterval == .month {
+            if let renewalPriceMicroProtons, renewalPriceMicroProtons != priceMicroProtons {
+                return [priceMicroProtons == 0 ? .freeFirstMonth : .firstMonth(priceMicroProtons),
+                        .thenMonthly(renewalPriceMicroProtons)]
+            }
+            return [priceMicroProtons == 0 ? .free : .monthly(priceMicroProtons)]
+        }
+        return [priceMicroProtons == 0 ? .free : .amount(priceMicroProtons)]
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)

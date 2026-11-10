@@ -207,12 +207,17 @@ struct StoreItemSheet: View {
     private func priceRows(_ offer: StoreCatalogOffer) -> some View {
         VStack(spacing: 0) {
             StoreValueRow(design: design, label: copy(StoreCopyKey.reviewPrice)) {
-                StoreProtonsText(design: design, microProtons: offer.priceMicroProtons)
+                if offer.billingInterval == .month {
+                    Text(verbatim: StorePricePresentation.text(offer, design: design))
+                        .monospacedDigit()
+                } else {
+                    StoreProtonsText(design: design, microProtons: offer.priceMicroProtons)
+                }
             }
             if let balance = freshBalance, phase.showsBalance {
                 Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, 14)
                 StoreValueRow(design: design, label: copy(StoreCopyKey.walletLabel)) {
-                    StoreProtonsText(design: design, microProtons: balance, emphasis: false)
+                    StoreProtonsText(design: design, microProtons: balance, emphasis: false, isBalance: true)
                 }
                 .accessibilityIdentifier("store.detail.balance")
             }
@@ -554,12 +559,12 @@ private struct StoreReviewView: View {
             // the current balance and, after the chevron, what remains.
             StoreValueRow(design: design, label: design.text(StoreCopyKey.walletLabel)) {
                 HStack(spacing: 6) {
-                    StoreProtonsText(design: design, microProtons: quote.balance, emphasis: false)
+                    StoreProtonsText(design: design, microProtons: quote.balance, emphasis: false, isBalance: true)
                     Image(atum.symbol(.chevronRight))
                         .font(kit.font(.caption))
                         .foregroundStyle(kit.color(.ink3, scheme: scheme))
                         .accessibilityHidden(true)
-                    StoreProtonsText(design: design, microProtons: quote.resultingBalance)
+                    StoreProtonsText(design: design, microProtons: quote.resultingBalance, isBalance: true)
                 }
             }
             .accessibilityIdentifier("store.review.balance")
@@ -686,10 +691,13 @@ struct StoreProtonsText: View {
     let design: LiveDesign
     let microProtons: Int64
     var emphasis = true
+    var isBalance = false
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let value = StoreOutcomePresentation.protons(microProtons)
+        let value = isBalance
+            ? MicroProtonFormat.balance(microProtons, locale: Locale.current.identifier)
+            : StoreOutcomePresentation.protons(microProtons)
         HStack(spacing: 3) {
             ProtonMark(.small)
             Text(verbatim: value).monospacedDigit()

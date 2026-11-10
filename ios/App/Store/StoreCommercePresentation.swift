@@ -183,3 +183,47 @@ enum StoreOutcomePresentation {
         return ISO8601DateFormatter().date(from: whole)
     }
 }
+
+/// Desktop storePriceParts (store-card.tsx:129–146), using the export for words.
+/// Monthly keys are pending the coordinator's export repin; their placeholders
+/// name the missing key and retain the exact amount instead of hiding a cost.
+enum StorePricePresentation {
+    enum CopyKey {
+        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthly
+        static let monthly = "src.matrix.store.store-copy.matrixStoreCopy.monthly"
+        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthlyFirst
+        static let monthlyFirst = "src.matrix.store.store-copy.matrixStoreCopy.monthlyFirst"
+        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthlyFreeFirst
+        static let monthlyFreeFirst = "src.matrix.store.store-copy.matrixStoreCopy.monthlyFreeFirst"
+        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthlyThen
+        static let monthlyThen = "src.matrix.store.store-copy.matrixStoreCopy.monthlyThen"
+        static let pending = [monthly, monthlyFirst, monthlyFreeFirst, monthlyThen]
+    }
+
+    static func parts(_ offer: StoreCatalogOffer, locale: String,
+                      copy: (String, [String]) -> String) -> [String] {
+        func amount(_ value: Int64) -> String { MicroProtonFormat.string(value, locale: locale) }
+        return offer.priceParts.map { part in
+            switch part {
+            case .free: return copy(StoreCopyKey.free, [])
+            case .amount(let value): return copy(StoreCopyKey.protons, [amount(value)])
+            case .monthly(let value):
+                return copy(StoreCopyKey.protons, [amount(value)]) + " " + copy(CopyKey.monthly, [])
+            case .firstMonth(let value): return copy(CopyKey.monthlyFirst, [amount(value)])
+            case .freeFirstMonth: return copy(CopyKey.monthlyFreeFirst, [])
+            case .thenMonthly(let value): return copy(CopyKey.monthlyThen, [amount(value)])
+            }
+        }
+    }
+
+    @MainActor static func text(_ offer: StoreCatalogOffer, design: LiveDesign) -> String {
+        parts(offer, locale: design.locale) { key, arguments in
+            if CopyKey.pending.contains(key),
+               (try? design.copy.text(key, locale: design.locale,
+                                      arguments: arguments.map { .text($0) })) == nil {
+                return ([key] + arguments).joined(separator: " ")
+            }
+            return design.text(key, arguments: arguments.map { .text($0) })
+        }.joined(separator: " · ")
+    }
+}

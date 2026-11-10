@@ -251,3 +251,84 @@ free-row assertion was updated to the button row label.
 - UI test fixes only: long copy is matched by label predicate (query identifiers have a length cap), the renewal dialog's Confirm is the hittable one of its label, and the deliberate second Confirm press uses one snapshot so a finished write can't fail the query.
 - Locked runs on the iPhone 17 simulator (iOS 27.0): `swift test --package-path ios -j 2` 0 failures; `-only-testing:AtumMobileUITests/StoreCommerceUITests` 5 of 5 passed.
 - Dev-only follow-up: `scripts/generate-native-store-fixtures.py --check` needs five `*token*.facts.json` upstream fixtures that stay private (`.gitignore`); CI does not run it.
+
+## ST-2 / F-12 preparation — 2026-11-10
+
+Rebased the two unpublished Store commits from `3aa5abf` onto `origin/main`
+`308c5d8`. The project-file conflict was two independent source-list additions;
+kept both Shared Collections sources and `LiveStoreCommerce.swift`. The rebase
+also preserves main's room-avatar and other live-model changes. Local commits
+only; the coordinator owns integration and publication.
+
+### Behavior and desktop evidence
+
+- **F-2 / lane 4 slice 2:** `MicroProtonFormat.balance` clamps negative values to
+  zero and floors integer micro-Protons before localized grouping, matching
+  `matrix/wallet-ui.ts:9–11`. The shared wallet projection feeds the Store chip,
+  Account entry and Settings → Protons. Item-detail and review balances (both
+  current and resulting) use the same floor. Offer prices, renewal prices and
+  recorded purchase amounts retain all six fractional places; purchase arithmetic
+  continues to use the original micro-Protons.
+- **F-3 / C5:** `StoreCatalogOffer.priceParts` matches
+  `matrix/store/store-card.tsx:129–146`: different first and renewal prices produce
+  first-month plus then-monthly parts, a free first month has its own part, equal
+  monthly prices show the period once, and a wholly free offer says Free. Store
+  rows, VoiceOver labels and item details share the final formatter. Monthly
+  price text can wrap so the existing one-line limit cannot hide renewal. The monthly
+  words need the export repin below; until then clearly named key placeholders
+  keep the exact amounts visible. No handwritten localized production copy.
+- **F-5:** hide offer-less non-Hub listings, and explicitly undeliverable offers.
+  An official Hub skill remains informational and visible, matching the Hub
+  exception in `matrix/store/discover-view.tsx:210–216`. Monthly offers remain
+  informational on iOS; this does not enable hire checkout. Entitlements and
+  purchases are not filtered, so ownership history remains available. Purchased
+  resolves hidden listings' titles from the commerce catalog before falling
+  back to kind labels.
+- The balance chip's accessible label is just the exported “N Protons” phrase;
+  it no longer appends the wallet row label. Visual/layout redesign remains for
+  the following UI pass.
+- **F-12 / lane 4 slice 3:** restored the five exact synthetic admission-facts
+  fixtures from the existing native-API 1.1 pin. Five explicit `.gitignore`
+  exceptions make them tracked; the broad token-file ignore and public guard
+  remain intact. The files contain mock introspection facts, no bearer tokens,
+  secrets or user accounts. The provider digest is unchanged.
+
+### Scope and verification
+
+Shared edits are limited to the live Store projection in `LiveAppModel.swift`
+and the separate balance formatter in `Sources/AtumNativeAPI/NativeAPI.swift`.
+No paid/bonus balance split, VND rate, checkout path or UI redesign was added.
+The scripted commerce host uses the same floor and visibility predicate.
+
+Final verification completed 2026-11-11 (every heavy command used the shared
+lock, task-specific DerivedData/scratch directories and two jobs):
+
+| Check | Result |
+| --- | --- |
+| Full `swift test --package-path ios` | PASS: 1,243 tests (647 design/API, 564 chat, 16 Drive, 16 telemetry), zero failures. Includes the four new formatting/visibility tests and existing Store contract/acquisition/projection tests. |
+| `generate-native-store-fixtures.py --check` | PASS: provider pins and exact selected fixture bytes. |
+| `import-design-exports --verify` | PASS: design bundle unchanged. |
+| Project `plutil -lint`, staged `git diff --check` | PASS. |
+| Simulator `StoreCommercePresentationTests` | PASS: 7 tests, zero failures (0.143 seconds), serial simulator testing. An initial parallel-enabled launch stalled before any test result; the serial run resolved it. The two new offer fixtures use `StoreWire.decode` for the required integer preflight; the initial plain-decoder fixture mistake was fixed before the passing run. |
+| Explicit simulator app build | PASS: `BUILD SUCCEEDED`, arm64 simulator, signing disabled. |
+| `StoreCommerceUITests` | PASS: 5 tests, zero failures (277.030 seconds), with `-parallel-testing-enabled NO`. Covers review/confirm, insufficient balance, recipient ownership and renewal cancellation, AX5 review, and uncertain-purchase recovery. |
+| `public_guard.py --base origin/main --head HEAD` | PASS: three new commits; raw paths/modes, ancestry, identifiers, gitleaks secrets and metadata. Rechecked after the final documentation amendment. |
+
+Physical-iPhone / locale captures belong to the coordinator's acceptance pass.
+All simulators were shut down at the end of each locked batch. The task's
+DerivedData and Swift scratch folders are removed after final verification;
+the shared SPM cache is preserved. No push, PR, CI or deployment was performed.
+
+### PENDING-COPY (export dependency; proposed namespace for coordinator repin)
+
+All four placeholders are in `StorePricePresentation.CopyKey`; the formatter
+resolves the export automatically once those keys exist. Coordinate the final
+namespace with the copy worker when repinning. English and Vietnamese text below
+is desktop `matrix/store/store-copy.ts:212–215,330–333`, not phone-owned copy.
+
+| Key | en | vi | Used by |
+| --- | --- | --- | --- |
+| `src.matrix.store.store-copy.matrixStoreCopy.monthly` | `/ month` | `/ tháng` | Equal-price monthly Store row/detail |
+| `src.matrix.store.store-copy.matrixStoreCopy.monthlyFirst` | `%1$@ Protons first month` | `%1$@ Proton tháng đầu` | First-month price part |
+| `src.matrix.store.store-copy.matrixStoreCopy.monthlyFreeFirst` | `Free first month` | `Tháng đầu miễn phí` | Free first-month price part |
+| `src.matrix.store.store-copy.matrixStoreCopy.monthlyThen` | `then %1$@/mo` | `sau đó %1$@/tháng` | Renewal price part |
