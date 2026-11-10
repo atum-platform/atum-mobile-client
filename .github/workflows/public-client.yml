@@ -11,13 +11,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   client:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
@@ -56,6 +56,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build simulator without signing
         run: >-
           xcodebuild -project ios/AtumMobile.xcodeproj -scheme AtumMobile
@@ -63,3 +64,27 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath /tmp/atum-public-derived
           CODE_SIGNING_ALLOWED=NO build
+
+  swift:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - run: swift --version
+      - run: swift test --package-path ios -j 2
+
+  resources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -p test_import_design_exports.py -v
+      - run: python3 -m unittest discover -s tests -p test_native_push_projection.py -v
+      - run: python3 scripts/import-design-exports --verify
+      - run: python3 scripts/generate-native-push-fixtures.py --check
