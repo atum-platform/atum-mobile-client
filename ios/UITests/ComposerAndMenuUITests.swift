@@ -493,6 +493,28 @@ final class ComposerUITests: WS3UITestCase {
     }
 }
 
+extension WS3UITestCase {
+    /// Closes the actions overlay with a tap on its dim at the left edge,
+    /// mid-screen: the capsule, the copy and the menu sit 16 pt in from the
+    /// edges, and the top of the screen may hold the capsule.
+    @MainActor
+    func closeMenu(_ app: XCUIApplication) {
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 6, dy: window.frame.midY)).tap()
+    }
+
+    /// A capture written straight to `ui-evidence/` as a PNG (as
+    /// `TranscriptUITestCase` does), so it survives without a result bundle.
+    @MainActor
+    func keepEvidence(_ name: String, of app: XCUIApplication) {
+        keepScreenshot(name, of: app)
+        let folder = TranscriptUITestCase.liveEvidence
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? app.screenshot().pngRepresentation.write(to: folder.appendingPathComponent("\(type(of: self)).\(name).png"))
+    }
+}
+
 final class MessageMenuUITests: WS3UITestCase {
     private let answer = "row.chat.actions.0002"
     private let mineWithAnswerBelow = "row.chat.actions.0004"
@@ -632,7 +654,7 @@ final class MessageMenuUITests: WS3UITestCase {
         XCTAssertTrue(menuButton(app, "Trả lời").waitForExistence(timeout: Self.waitSeconds))
         XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép"])
         keepScreenshot("kinds-4-group-theirs-menu", of: app)
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        closeMenu(app)
         openMenu(app, row: "row.chat.kinds.0019", text: "hẹn 12 giờ")
         XCTAssertTrue(menuButton(app, "Sửa").waitForExistence(timeout: Self.waitSeconds))
         XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép", "Sửa", "Xóa"])
@@ -734,5 +756,142 @@ final class MessageMenuUITests: WS3UITestCase {
         XCTAssertEqual(shownItems(app), ["Sao chép", "Chọn văn bản"])
         XCTAssertFalse(paletteButton(app, "😂").exists, "no reactions in bot rooms")
         keepScreenshot("kinds-6-bot-answer-menu", of: app)
+    }
+
+    /// Review A1: while the menu is open the pressed message shows once (its
+    /// lifted copy; the row itself is hidden), and the capsule, the copy and
+    /// the menu never overlap one another or leave the screen. Every reaction
+    /// is at least 44 pt to tap.
+    @MainActor
+    func testTheLiftedMessageShowsOnceAndNothingCoversIt() {
+        let app = launchChat(.chatActions)
+        for (row, text) in [(answer, "Dự án Góc Phố"), (laterAnswer, "Kết luận")] {
+            openMenu(app, row: row, text: text)
+            let reactions = element(app, "menu.reactions")
+            let preview = element(app, "menu.preview")
+            let menu = element(app, "menu.items")
+            XCTAssertTrue(reactions.waitForExistence(timeout: Self.waitSeconds))
+            XCTAssertTrue(preview.exists && menu.exists)
+            let copies = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@", text)).allElementsBoundByIndex
+                .filter { $0.isHittable }
+            // The copy may expose its text view as a second element; every
+            // visible match must be inside the lifted copy, none elsewhere.
+            XCTAssertFalse(copies.isEmpty, "the lifted copy shows the text")
+            let outside = copies.filter { !preview.frame.insetBy(dx: -1, dy: -1).contains($0.frame) }
+            XCTAssertTrue(outside.isEmpty, "the text shows once: "
+                + outside.map { "\($0.identifier) \($0.elementType.rawValue) \($0.frame)" }.joined(separator: ", "))
+            print("MENU \(row) matches: " + copies.map { "\($0.identifier) \($0.frame)" }.joined(separator: ", "))
+            let window = app.windows.firstMatch.frame
+            let parts = [reactions.frame, preview.frame, menu.frame]
+            for part in parts {
+                XCTAssertTrue(window.contains(part), "on screen: \(part)")
+            }
+            for (index, part) in parts.enumerated() {
+                for other in parts.dropFirst(index + 1) {
+                    XCTAssertFalse(part.insetBy(dx: 0.5, dy: 0.5).intersects(other), "\(part) covers \(other)")
+                }
+            }
+            for button in reactions.buttons.allElementsBoundByIndex {
+                XCTAssertGreaterThanOrEqual(min(button.frame.width, button.frame.height), 44, button.label)
+            }
+            keepEvidence("actions-10-lifted-\(row)", of: app)
+            // A tap on the dim closes it and the row comes back.
+            closeMenu(app)
+            waitForAbsence(menu)
+            XCTAssertTrue(element(app, row).waitForExistence(timeout: Self.waitSeconds), "the row is back")
+        }
+    }
+}
+
+/// Review C1: in my assistant's chat, while it works on what I sent, the
+/// empty send circle is Stop; the request is sent once, with an honest
+/// pending line, and a failure brings Stop back and re-sends the same key.
+/// Hosts without the stop route (live today, and scripted without
+/// `-AtumScriptedTurnStop`) draw no Stop at all.
+final class TurnStopUITests: WS3UITestCase {
+    private let probe = TranscriptUITestCase.liveEvidence
+        .appendingPathComponent("probe/\(UUID().uuidString)", isDirectory: true)
+
+    @MainActor
+    private func launch(answer: String?) -> XCUIApplication {
+        var extra = ["-AtumUITestProbeDir", probe.path]
+        if let answer { extra += [AtumLaunchArguments.scriptedTurnStopFlag, answer] }
+        return launchChat(.chatTurnStop, extra: extra)
+    }
+
+    @MainActor
+    private func ask(_ app: XCUIApplication) {
+        field(app).tap()
+        field(app).typeText("Tóm tắt giúp mình")
+        element(app, AccessibilityID.composerSend).tap()
+    }
+
+    @MainActor
+    private func stopRequests() -> [String] {
+        let text = (try? String(contentsOf: probe.appendingPathComponent("turn-stop.txt"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").map { String($0.split(separator: " ", maxSplits: 1).last ?? "") }
+    }
+
+    @MainActor
+    func testStopWhileWorkingThenStopped() {
+        let app = launch(answer: "stopped")
+        ask(app)
+        let stop = element(app, "composer.stop")
+        XCTAssertTrue(stop.waitForExistence(timeout: 8), "Stop while Atum works")
+        XCTAssertEqual(stop.label, "Dừng")
+        // 44 wide; 36 tall in the layout so the row never jumps, with its
+        // hit shape 4 pt beyond above and below.
+        XCTAssertGreaterThanOrEqual(stop.frame.width, 44)
+        keepEvidence("stop-1-working", of: app)
+        stop.tap()
+        stop.tap()  // a second tap while the request is out sends nothing
+        let line = element(app, "composer.turn")
+        XCTAssertTrue(line.waitForExistence(timeout: 3))
+        XCTAssertTrue(eventually(5) { line.label == "Đã dừng tác vụ" }, line.label)
+        XCTAssertFalse(stop.exists, "no Stop once stopped")
+        XCTAssertEqual(stopRequests().count, 1, "\(stopRequests())")
+        keepEvidence("stop-2-stopped", of: app)
+    }
+
+    @MainActor
+    func testStopRequestedWaitsForConfirmation() {
+        let app = launch(answer: "stop_requested")
+        ask(app)
+        let stop = element(app, "composer.stop")
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        stop.tap()
+        let line = element(app, "composer.turn")
+        XCTAssertTrue(line.waitForExistence(timeout: 3))
+        XCTAssertEqual(line.label, "Đã yêu cầu dừng. Đang chờ xác nhận.")
+        XCTAssertFalse(stop.isEnabled, "never shown as stopped on stop_requested")
+        keepEvidence("stop-3-requested", of: app)
+    }
+
+    @MainActor
+    func testAFailedStopComesBackAndTheRetryResendsTheSameRequest() {
+        let app = launch(answer: "failed-then-stopped")
+        ask(app)
+        let stop = element(app, "composer.stop")
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        stop.tap()
+        XCTAssertTrue(eventually(5) { stop.exists && stop.isEnabled && self.stopRequests().count == 1 },
+                      "Stop comes back after the failure")
+        XCTAssertFalse(element(app, "composer.turn").exists, "nothing claims it stopped")
+        stop.tap()
+        XCTAssertTrue(eventually(5) { self.element(app, "composer.turn").label == "Đã dừng tác vụ" })
+        let requests = stopRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(Set(requests).count, 1, "the same event and request ID: \(requests)")
+    }
+
+    @MainActor
+    func testNoStopRouteNoStop() {
+        let app = launch(answer: nil)
+        ask(app)
+        XCTAssertTrue(element(app, "composer.pill").waitForExistence(timeout: 3))
+        XCTAssertTrue(eventually(8) { (self.element(app, "composer.pill").value as? String) == "Đang thực hiện tác vụ này" },
+                      "the pill reads as working")
+        XCTAssertFalse(element(app, "composer.stop").exists, "never a dead button")
     }
 }

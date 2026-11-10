@@ -81,6 +81,29 @@ struct ScriptedChatHost: View {
     private static let pinsAreFull = ProcessInfo.processInfo.arguments
         .contains(AtumLaunchArguments.scriptedPinsFullFlag)
 
+    /// `-AtumScriptedTurnStop`: a synthetic stop route. Each request is
+    /// logged (`turn-stop.txt`: event ID and request ID) so a UI test can
+    /// prove a retry re-sends the same key.
+    private static let scriptedTurnStop: AssistantTurnStopActions? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: AtumLaunchArguments.scriptedTurnStopFlag),
+              index + 1 < arguments.count else { return nil }
+        let answer = arguments[index + 1]
+        var calls = 0
+        return AssistantTurnStopActions { intent in
+            calls += 1
+            UITestProbe.append("stop \(intent.eventID) \(intent.requestID)", to: "turn-stop.txt")
+            try? await Task.sleep(for: .milliseconds(400))
+            switch answer {
+            case "stopped": return .stopped
+            case "stop_requested": return .stopRequested
+            case "completed": return .completed
+            case "failed-then-stopped": return calls == 1 ? .failed : .stopped
+            default: return .failed
+            }
+        }
+    }()
+
     private static let startAt: Date? = {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-AtumScriptedStartAt"), index + 1 < arguments.count,
@@ -226,7 +249,9 @@ struct ScriptedChatHost: View {
                                     }
                                     UITestProbe.append("\(action.rawValue) \(userID)", to: "panel.txt")
                                     return true
-                                }
+                                },
+                                assistantTurnStop: script.context.kind == .assistant
+                                    ? Self.scriptedTurnStop : nil
                             ),
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,

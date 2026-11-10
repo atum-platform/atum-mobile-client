@@ -159,7 +159,9 @@ struct ChatScreen: View {
                                          modelActions: infoActions.assistantModels,
                                          modelDestinations: infoActions.assistantModelDestinations,
                                          modelRefreshToken: composerModelRefreshToken,
-                                         modelPickerPresented: $composerModelPresented)
+                                         modelPickerPresented: $composerModelPresented,
+                                         turnStopActions: store.kind == .assistant
+                                             ? infoActions.assistantTurnStop : nil)
                         }
                     }
                 }

@@ -74,6 +74,17 @@ extension ScriptedChats {
                               sends: .succeeds(after: 1.5), replies: sendReplies, names: Cast.names)
     }
 
+    /// Review C1: Atum reads what I send and keeps typing; no answer comes,
+    /// so the turn stays in progress for the composer's Stop.
+    static func chatTurnStop(_ env: ScriptedEnvironment) -> ScriptedScript {
+        let name = ScriptedScenario.chatTurnStop.rawValue
+        return ScriptedScript(name: name, title: "Atum", context: assistant,
+                              initial: shortTranscript(name: name, messages: 6, env: env, seed: 21),
+                              sends: .succeeds(after: 0.5),
+                              replies: ScriptedReplies(sender: Cast.atum, seenAfter: 0.8, typingAfter: 1.2),
+                              names: Cast.names)
+    }
+
     /// Atum in `chat.send`: the receipt, the dots and the answer wait long
     /// enough for U4b to see "Đã gửi" before "Đã xem".
     static let sendReplies = ScriptedReplies(sender: Cast.atum, seenAfter: 2.5, typingAfter: 4, answerAfter: 6,

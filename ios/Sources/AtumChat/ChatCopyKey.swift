@@ -139,4 +139,12 @@ public enum ChatCopyKey: String, CaseIterable, Sendable {
     case appBotContinueRouteBody = "src.matrix.mobile-copy.mobileChatCopy.appBot.continueOnMac.routeBody"
     case appBotGotIt = "src.matrix.mobile-copy.mobileChatCopy.appBot.gotIt"
     case appBotRoomFailed = "src.matrix.mobile-copy.mobileChatCopy.appBot.roomFailed"
+
+    // The composer's working state and Stop (review C1). "Stop" is the
+    // desktop composer's own label; the three lines are the exported phone
+    // chat states (`mobileDeviceCopy.chatStates*`).
+    case stopTurn = "shared.matrix-action-copy.matrixActionCopy.cancelHermes"
+    case turnRunning = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesTurnRunningText"
+    case turnStopRequested = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesStopRequestedText"
+    case turnStopped = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesStoppedText"
 }

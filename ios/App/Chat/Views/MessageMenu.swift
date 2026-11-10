@@ -10,8 +10,11 @@ import UIKit
 // FlowPhone3 › Message actions: over a dimmed chat, a glass reaction capsule
 // (desktop's set) above the message and a short glass menu under it: "Trả
 // lời", "Sao chép", "Chọn văn bản" on answers, "Sửa" on my messages in people
-// chats, "Xóa" (danger) on my messages. The system context menu cannot be
-// restyled, so this is a custom overlay presented from the long press. Which items a
+// chats, "Xóa" (danger) on my messages. The system `contextMenu(menuItems:
+// preview:)` was weighed first (review A1): its preview is not interactive,
+// so it cannot carry the reaction capsule, and it has no reaction accessory
+// API. So this stays a custom overlay presented from the long press, laid out
+// as the system lifts a preview (see `MessageActionsOverlay`). Which items a
 // row offers is `MessageMenuRules` (tested); every action goes through the
 // frozen `ChatActions`, which the store enforces again.
 //
@@ -123,7 +126,14 @@ private struct MessageMenuModifier: ViewModifier {
         if items.isEmpty {
             content
         } else {
+            // Review A1: while its menu is open the row is lifted, so the
+            // original is hidden and only the overlay's copy shows (the
+            // system context menu does the same). The overlay is modal, so
+            // VoiceOver never reaches the hidden row either.
+            let lifted = presenter.actionsOverlay?.id == row.id
             content
+                .opacity(lifted ? 0 : 1)
+                .accessibilityHidden(lifted)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
                 // Simultaneous, so the answer's own text views (links, the
                 // markdown renderer) never swallow the press.
@@ -204,11 +214,14 @@ enum MessageMenuActions {
     }
 }
 
-/// FlowPhone3 › Message actions. The chat dims; the message stays where it
-/// was pressed (moved only as far as needed to fit), with a glass reaction
-/// capsule above it (radius 26, padding 10/16, 26 pt emoji, gap 14) and a
-/// glass menu under it (250 wide, radius 22, 46 pt rows, glyph trailing,
-/// "Xóa" in danger). A tap outside closes it.
+/// FlowPhone3 › Message actions, laid out the way the system lifts a context
+/// menu (review A1): the pressed row is hidden (`MessageMenuModifier`), so only
+/// its lifted copy shows; the chat behind sits under a material blur plus the
+/// Kit scrim, which separates the layers in light and dark (and turns opaque
+/// under Reduce Transparency); and `MessageMenuLayout` keeps the copy where it
+/// was pressed with the glass reaction capsule and the glass menu on opposite
+/// sides of it, flipping them for a message low on the screen, so neither
+/// ever covers the copy, the other, or the bars. A tap outside closes it.
 struct MessageActionsOverlay: View {
     let request: MessageOverlayRequest
     let design: LiveDesign
@@ -218,40 +231,62 @@ struct MessageActionsOverlay: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
-    @State private var stackHeight: CGFloat = 0
+    @State private var reactionsHeight: CGFloat = 0
+    @State private var previewHeight: CGFloat = 0
+    @State private var menuHeight: CGFloat = 0
+    /// Review A2: the palette and the menu follow Dynamic Type, within limits
+    /// that keep six reactions on one line of a phone.
+    @ScaledMetric(relativeTo: .title2) private var emojiSize: CGFloat = 26
+    @ScaledMetric(relativeTo: .title2) private var reactionTarget: CGFloat = 44
+    @ScaledMetric(relativeTo: .body) private var menuWidth: CGFloat = 250
 
     private var kit: AtumKit { design.kit }
     private var own: Bool { request.row.item.isOwn }
+    private var hasReactions: Bool { request.items.contains(.react) }
+    private var menuRows: [MessageMenuItem] { request.items.filter { $0 != .react } }
+
+    /// Space kept from the safe area's edges, and between the parts.
+    private static let margin: CGFloat = 8
+    private static let gap: CGFloat = 8
 
     var body: some View {
         GeometryReader { proxy in
-            let space = proxy.frame(in: .global)
+            let origin = proxy.frame(in: .global).minY
+            let top = Double(Self.margin)
+            let bottom = Double(max(Self.margin, proxy.size.height - Self.margin))
+            let layout = MessageMenuLayout.place(
+                sourceTop: Double(request.sourceFrame.minY - origin), bounds: top...bottom,
+                reactions: hasReactions ? Double(reactionsHeight) : nil,
+                preview: Double(previewHeight), menu: Double(menuHeight), gap: Double(Self.gap))
+            // The most the copy may take, whatever its own height.
+            let room = bottom - top - (hasReactions ? Double(reactionsHeight + Self.gap) : 0)
+                - (menuRows.isEmpty ? 0 : Double(menuHeight + Self.gap))
+            let measured = previewHeight > 0 && (menuRows.isEmpty || menuHeight > 0)
+                && (!hasReactions || reactionsHeight > 0)
             ZStack(alignment: .topLeading) {
-                kit.color(.scrim, scheme: scheme)
-                    .opacity(shown ? 1 : 0)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { close() }
-                    .accessibilityHidden(true)
-                VStack(alignment: own ? .trailing : .leading, spacing: 8) {
-                    if request.items.contains(.react) {
+                backdrop
+                ZStack(alignment: .topLeading) {
+                    if hasReactions {
                         reactions
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { reactionsHeight = $0 }
+                            .modifier(Placed(top: layout.reactionsTop ?? 0, own: own))
                     }
-                    MessageMenuPreview(row: request.row, kind: request.kind,
-                                       parsedBody: request.parsedBody, design: design)
-                    menu
+                    MessageMenuPreview(row: request.row, kind: request.kind, parsedBody: request.parsedBody,
+                                       design: design, maxHeight: CGFloat(max(0, room)))
+                        .contentShape(Rectangle())
+                        .onTapGesture { close() }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewHeight = $0 }
+                        .modifier(Placed(top: layout.previewTop, own: own))
+                    if !menuRows.isEmpty {
+                        menu(width: min(menuWidth, proxy.size.width - 2 * ChatLayout.sideMargin))
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
+                            .modifier(Placed(top: layout.menuTop, own: own))
+                    }
                 }
-                // A tap anywhere but a reaction or a menu row closes it, as
-                // the system menu did (the message itself included).
-                .contentShape(Rectangle())
-                .onTapGesture { close() }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stackHeight = $0 }
-                .frame(maxWidth: .infinity, alignment: own ? .trailing : .leading)
-                .padding(.horizontal, ChatLayout.sideMargin)
-                .offset(y: top(in: proxy.size, origin: space.minY))
-                .scaleEffect(shown || reduceMotion ? 1 : 0.96,
-                             anchor: own ? .topTrailing : .topLeading)
-                .opacity(shown ? 1 : 0)
+                .scaleEffect(shown || reduceMotion ? 1 : 0.96)
+                // Nothing shows until every part has been measured once, so
+                // the first frame never draws a part in the wrong place.
+                .opacity(shown && measured ? 1 : 0)
             }
         }
         .onAppear {
@@ -263,46 +298,55 @@ struct MessageActionsOverlay: View {
         .atumDesign(design)
     }
 
-    /// The stack's top: the message keeps its place under the capsule, moved
-    /// only as far as it must to stay inside the safe area.
-    private func top(in size: CGSize, origin: CGFloat) -> CGFloat {
-        let capsule: CGFloat = request.items.contains(.react) ? 54 + 8 : 0
-        let wanted = request.sourceFrame.minY - origin - capsule
-        let lowest = size.height - stackHeight - 8
-        return max(8, min(wanted, lowest))
+    /// The material dim: blur, then the Kit scrim over it.
+    private var backdrop: some View {
+        ZStack {
+            Rectangle().fill(.regularMaterial)
+            kit.color(.scrim, scheme: scheme)
+        }
+        .opacity(shown ? 1 : 0)
+        .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .onTapGesture { close() }
+        .accessibilityHidden(true)
+        .accessibilityIdentifier(Self.backdropID)
     }
 
     private var reactions: some View {
         let choices = MessageMenuRules.reactionChoices(for: request.row.item, ownUserID: request.ownUserID)
-        return HStack(spacing: 14) {
+        let target = min(reactionTarget, 52)
+        return HStack(spacing: 2) {
             ForEach(choices, id: \.key) { choice in
                 Button {
                     actions.toggleReaction(request.row.id, choice.key)
                     close()
                 } label: {
                     Text(verbatim: choice.key)
-                        .font(.system(size: 26))
-                        .frame(width: 34, height: 34)
+                        .font(.system(size: min(emojiSize, 34)))
+                        // At least 44 pt to tap (the Kit's phone control height).
+                        .frame(width: target, height: target)
                         .background {
                             if choice.isSelected {
-                                Circle().fill(kit.color(.fillSelected, scheme: scheme))
+                                Circle().fill(kit.color(.fillSelected, scheme: scheme)).padding(4)
                             }
                         }
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(ChatCopy.text(design, ChatCopy.Key.reactWith, [.text(choice.key)]))
                 .accessibilityAddTraits(choice.isSelected ? .isSelected : [])
             }
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
         .modifier(LiveGlass(design: design, radius: 26))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(Self.reactionsID)
     }
 
-    private var menu: some View {
-        let rows = request.items.filter { $0 != .react }
-        return VStack(spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element) { index, item in
+    private func menu(width: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(menuRows.enumerated()), id: \.element) { index, item in
                 if index > 0 {
                     Rectangle()
                         .fill(kit.color(.line, scheme: scheme))
@@ -333,7 +377,7 @@ struct MessageActionsOverlay: View {
                             .font(.body)
                         Spacer(minLength: 8)
                         Image(design.symbol(MessageMenuActions.glyph(item).rawValue))
-                            .font(.system(size: 18))
+                            .font(.body)
                             .accessibilityHidden(true)
                     }
                     .foregroundStyle(kit.color(item == .delete ? .danger : .ink, scheme: scheme))
@@ -345,8 +389,10 @@ struct MessageActionsOverlay: View {
                 .accessibilityLabel(MessageMenuActions.title(item, design: design))
             }
         }
-        .frame(width: 250)
+        .frame(width: width)
         .modifier(LiveGlass(design: design, radius: 22))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(Self.menuID)
     }
 
     private func close() {
@@ -354,21 +400,46 @@ struct MessageActionsOverlay: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) { presenter.actionsOverlay = nil }
     }
+
+    /// The overlay's parts, for UI tests (beside the frozen row IDs).
+    static let reactionsID = "menu.reactions"
+    static let previewID = "menu.preview"
+    static let menuID = "menu.items"
+    static let backdropID = "menu.backdrop"
+
+    /// One part at its layout top, on the message's side of the screen.
+    private struct Placed: ViewModifier {
+        let top: Double
+        let own: Bool
+
+        func body(content: Content) -> some View {
+            content
+                .frame(maxWidth: .infinity, alignment: own ? .trailing : .leading)
+                .padding(.horizontal, ChatLayout.sideMargin)
+                .offset(y: CGFloat(top))
+        }
+    }
 }
 
 /// Offers its child at most `maxWidth` and takes the child's own size, so a
-/// short message keeps a short bubble and a long one wraps.
+/// short message keeps a short bubble and a long one wraps. `maxHeight`
+/// caps the height without ever growing a short message to it (a flexible
+/// `.frame(maxHeight:)` takes the whole cap when offered more).
 private struct HugWidth: Layout {
     let maxWidth: CGFloat
+    var maxHeight: CGFloat? = nil
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let child = subviews.first else { return .zero }
-        return child.sizeThatFits(ProposedViewSize(width: min(proposal.width ?? maxWidth, maxWidth), height: nil))
+        let size = child.sizeThatFits(ProposedViewSize(width: min(proposal.width ?? maxWidth, maxWidth), height: nil))
+        return CGSize(width: size.width, height: min(size.height, maxHeight ?? .infinity))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        // The child keeps its own height; a cut one runs past the bottom and
+        // is clipped by the caller.
         subviews.first?.place(at: bounds.origin, anchor: .topLeading,
-                              proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }
 
@@ -379,18 +450,23 @@ private struct MessageMenuPreview: View {
     let kind: RoomKind
     let parsedBody: AttributedString?
     let design: LiveDesign
+    /// The most the bubble may take (`MessageMenuLayout`'s room); a longer
+    /// message is cut at the bottom inside its bubble.
+    var maxHeight: CGFloat? = nil
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let own = row.item.isOwn
         let shape = RoundedRectangle(cornerRadius: ChatLayout.bubbleRadius, style: .continuous)
-        HugWidth(maxWidth: 292) { content }
+        HugWidth(maxWidth: 292, maxHeight: maxHeight.map { max(0, $0 - 18) }) { content }
+            .clipped()
             .padding(.vertical, 9)
             .padding(.horizontal, 14)
             .foregroundStyle(design.kit.color(own ? .onBubbleOwn : .ink, scheme: scheme))
             .background(design.kit.color(own ? .bubbleOwn : .surface, scheme: scheme), in: shape)
             .atumKitElevation(.one, in: shape)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(MessageActionsOverlay.previewID)
     }
 
     @ViewBuilder private var content: some View {
