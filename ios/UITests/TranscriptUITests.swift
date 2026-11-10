@@ -325,14 +325,16 @@ final class TranscriptUITests: TranscriptUITestCase {
         keepScreenshot("u9-axxxl-reactions", of: app)
     }
 
-    /// U10: an empty chat shows the Cormorant greeting once the start of
-    /// the room is reached.
+    /// U10, HC-4: an empty assistant chat shows desktop's greeting once the
+    /// start of the room is reached.
     @MainActor
     func testU10EmptyChatShowsTheGreeting() {
         let app = launchChat(ScriptedScenario.chatEmpty.rawValue)
         let greeting = element(app, "chat.greeting")
         XCTAssertTrue(greeting.waitForExistence(timeout: 3), "U10: no greeting")
-        XCTAssertEqual(greeting.label, "Hôm nay ta làm gì?")
+        // HC-4: desktop's assistant greeting, its prompt and starters.
+        XCTAssertTrue(app.staticTexts["Hôm nay mình giúp gì cho bạn?"].exists)
+        XCTAssertTrue(element(app, "chat.starter.2").exists, "no starters")
         assertNoBannedWords(app)
         keepScreenshot("u10-greeting", of: app)
     }

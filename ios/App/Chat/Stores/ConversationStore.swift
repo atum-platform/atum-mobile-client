@@ -166,6 +166,16 @@ final class LiveConversationStore: ConversationStore {
         }
     }
 
+    /// HC-4: a starter chip was picked in the empty assistant chat. Its words
+    /// fill the composer (desktop `composer.edit`), the keyboard comes up, and
+    /// nothing is sent.
+    private(set) var composerFocusRequest: UInt64 = 0
+
+    func pickStarter(_ text: String) {
+        draft = text
+        composerFocusRequest &+= 1
+    }
+
     // MARK: Mentions
 
     /// People the composer can mention here: the room's joined members, with

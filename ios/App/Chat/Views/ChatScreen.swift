@@ -122,8 +122,12 @@ struct ChatScreen: View {
                         )
                     } else if let appBot {
                         AppBotHero(app: appBot, design: design)
+                    } else if EmptyChatPolicy.content(for: store.kind) == .assistantGreeting {
+                        EmptyChatGreeting(face: greetingFace(roomFace),
+                                          onPickStarter: conversationChat?.banner == nil
+                                              ? { store.pickStarter($0) } : nil)
                     } else {
-                        EmptyChatGreeting()
+                        EmptyChatNote()
                     }
                 }
             }
@@ -405,6 +409,17 @@ struct ChatScreen: View {
         known.union(members.values.filter { $0.isAssistant || $0.isApp }.map(\.userID))
     }
 
+    /// The assistant's face for its empty chat (desktop `--atum-avatar-lg`):
+    /// the title capsule's own face, so Atum's crescent, a photo or a mark
+    /// look the same in both places.
+    @ViewBuilder private func greetingFace(_ roomFace: ChatFace) -> some View {
+        if let info {
+            ChatInfoAvatar(info: info, size: 64, loadMatrixThumbnail: loadMatrixThumbnail)
+        } else {
+            ChatFaceView(face: roomFace, size: 64)
+        }
+    }
+
     static func avatarKind(_ kind: RoomKind) -> AtumAvatarKind {
         switch kind {
         case .assistant: .assistant
@@ -444,8 +459,9 @@ struct ChatScreen: View {
         mediaPresenter.dismissAll()
     }
 
-    /// B2, §3.3, U10: the greeting shows in an empty chat once the start of
-    /// the room is reached (coordinator decision 6: in every room kind).
+    /// B2, §3.3, U10: the empty state shows once the start of the room is
+    /// reached: the assistant greeting in an assistant's chat, "No messages
+    /// yet." elsewhere (HC-4, desktop `app.tsx` `Conversation`).
     static func isEmptyChat(rows: [ChatRow], pagination: PaginationState) -> Bool {
         guard !rows.contains(where: { $0.item.kind.isEventContent }) else { return false }
         return pagination == .idle(hitTimelineStart: true) || rows.contains { $0.item.kind == .timelineStart }

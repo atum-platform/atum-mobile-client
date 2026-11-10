@@ -165,7 +165,9 @@ final class S1MatrixUITests: TranscriptUITestCase {
         let app = launchChatCell(ScriptedScenario.chatEmpty.rawValue)
         let greeting = element(app, "chat.greeting")
         XCTAssertTrue(greeting.waitForExistence(timeout: 3), "no greeting")
-        XCTAssertEqual(greeting.label, word("Hôm nay ta làm gì?", "What shall we do today?"))
+        // HC-4: desktop's assistant greeting: the prompt and three starters.
+        XCTAssertTrue(app.staticTexts[word("Hôm nay mình giúp gì cho bạn?", "What can I do for you today?")].exists)
+        XCTAssertTrue(element(app, "chat.starter.0").exists, "no starters")
         try check(app, "empty")
     }
 
