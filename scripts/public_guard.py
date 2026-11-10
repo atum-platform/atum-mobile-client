@@ -13,9 +13,11 @@ import tempfile
 
 VERSION = '8.30.1'
 # Generic identifier classes only; secret adjudication is never supported.
+# A 12-digit run is an AWS account id unless it is the last group of a UUID
+# (synthetic fixture UUIDs often end in an all-digit group).
 PATTERNS = [r'/Users/[^/\s"\']+', r'/home/[^/\s"\']+/',
             r'[\w.-]+\.ts\.net', r'100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+',
-            r'arn:aws:', r'\bi-[0-9a-f]{8,17}\b', r'\b\d{12}\b',
+            r'arn:aws:', r'\bi-[0-9a-f]{8,17}\b', r'(?<![0-9a-f]{4}-)\b\d{12}\b',
             r'[\w.+-]+@[\w.-]+\.[a-z]{2,}',
             r'[a-z]{20}\.supabase\.co',
             r'\b[\w-]+(?:\.[\w-]+)*\.(?:internal|local|lan)\b']

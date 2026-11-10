@@ -82,6 +82,15 @@ class GuardTests(unittest.TestCase):
                 self.add_file(path)
                 self.check(False)
 
+    def test_allowed_uuid_node_of_digits(self):
+        node = '0' * 11 + '1'
+        self.add_file('fixture.json', '{"id": "00000000-0000-4000-8000-' + node + '"}')
+        self.check(True)
+
+    def test_denied_bare_account_id(self):
+        self.add_file('README.md', 'account '+'123456'+'789012')
+        self.check(False)
+
     def test_denied_internal_hostname(self):
         self.add_file('README.md', 'host.'+'internal')
         self.check(False)

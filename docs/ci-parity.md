@@ -123,3 +123,13 @@ policy, retained all CI parity lanes, added base-trusted local preflight and
 report-only CI installation bootstrap. Full new-commit outbound preflight and
 focused guard tests pass on both amended heads. Built locally; no push, PR,
 settings changes, CI execution or spending. Coordinator owns publication/review.
+
+## 2026-11-10: UUID node groups are not AWS account ids
+
+The outbound guard's AWS-account pattern (`\b\d{12}\b`) also matched the last group of synthetic
+fixture UUIDs whose last group is all digits (the zero-padded test UUIDs), so vendored provider contract packs
+(hash-pinned upstream, so not editable here) were refused as "new identifier". The pattern is now
+`(?<![0-9a-f]{4}-)\b\d{12}\b`: a bare 12-digit run is still refused, a UUID's final group is not.
+Tests `test_allowed_uuid_node_of_digits` and `test_denied_bare_account_id` cover both; the reviewed
+blob hashes for the guard and its tests are updated in `scripts/public-boundary.json`. Every other
+identifier class, the gitleaks scan and the path policy are unchanged.
