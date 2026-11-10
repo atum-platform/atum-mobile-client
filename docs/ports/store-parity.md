@@ -328,7 +328,7 @@ is desktop `matrix/store/store-copy.ts:212–215,330–333`, not phone-owned cop
 
 | Key | en | vi | Used by |
 | --- | --- | --- | --- |
-| `src.matrix.store.store-copy.matrixStoreCopy.monthly` | `/ month` | `/ tháng` | Equal-price monthly Store row/detail |
-| `src.matrix.store.store-copy.matrixStoreCopy.monthlyFirst` | `%1$@ Protons first month` | `%1$@ Proton tháng đầu` | First-month price part |
-| `src.matrix.store.store-copy.matrixStoreCopy.monthlyFreeFirst` | `Free first month` | `Tháng đầu miễn phí` | Free first-month price part |
-| `src.matrix.store.store-copy.matrixStoreCopy.monthlyThen` | `then %1$@/mo` | `sau đó %1$@/tháng` | Renewal price part |
+| `src.matrix.mobile-copy.mobileScreensCopy.store.monthly` | `/ month` | `/ tháng` | Equal-price monthly Store row/detail |
+| `src.matrix.mobile-copy.mobileScreensCopy.store.monthlyFirst` | `%1$@ Protons first month` | `%1$@ Proton tháng đầu` | First-month price part |
+| `src.matrix.mobile-copy.mobileScreensCopy.store.monthlyFreeFirst` | `Free first month` | `Tháng đầu miễn phí` | Free first-month price part |
+| `src.matrix.mobile-copy.mobileScreensCopy.store.monthlyThen` | `then %1$@/mo` | `sau đó %1$@/tháng` | Renewal price part |

@@ -185,18 +185,18 @@ enum StoreOutcomePresentation {
 }
 
 /// Desktop storePriceParts (store-card.tsx:129–146), using the export for words.
-/// Monthly keys are pending the coordinator's export repin; their placeholders
+/// Monthly keys arrive with the wave 1 copy repin (desktop `c14d74a`); until then the placeholders
 /// name the missing key and retain the exact amount instead of hiding a cost.
 enum StorePricePresentation {
     enum CopyKey {
-        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthly
-        static let monthly = "src.matrix.store.store-copy.matrixStoreCopy.monthly"
-        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthlyFirst
-        static let monthlyFirst = "src.matrix.store.store-copy.matrixStoreCopy.monthlyFirst"
-        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthlyFreeFirst
-        static let monthlyFreeFirst = "src.matrix.store.store-copy.matrixStoreCopy.monthlyFreeFirst"
-        // PENDING-COPY:src.matrix.store.store-copy.matrixStoreCopy.monthlyThen
-        static let monthlyThen = "src.matrix.store.store-copy.matrixStoreCopy.monthlyThen"
+        // PENDING-COPY:src.matrix.mobile-copy.mobileScreensCopy.store.monthly
+        static let monthly = "src.matrix.mobile-copy.mobileScreensCopy.store.monthly"
+        // PENDING-COPY:src.matrix.mobile-copy.mobileScreensCopy.store.monthlyFirst
+        static let monthlyFirst = "src.matrix.mobile-copy.mobileScreensCopy.store.monthlyFirst"
+        // PENDING-COPY:src.matrix.mobile-copy.mobileScreensCopy.store.monthlyFreeFirst
+        static let monthlyFreeFirst = "src.matrix.mobile-copy.mobileScreensCopy.store.monthlyFreeFirst"
+        // PENDING-COPY:src.matrix.mobile-copy.mobileScreensCopy.store.monthlyThen
+        static let monthlyThen = "src.matrix.mobile-copy.mobileScreensCopy.store.monthlyThen"
         static let pending = [monthly, monthlyFirst, monthlyFreeFirst, monthlyThen]
     }
 
