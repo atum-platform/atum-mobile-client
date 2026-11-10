@@ -39,6 +39,19 @@ final class ContentRulesTests: XCTestCase {
         XCTAssertEqual(row(.location(description: nil, body: "geo:21,105")).body, "geo:21,105")
     }
 
+    func testAnEmptyLocationDescriptionDoesNotHideTheLocationBody() {
+        for description in ["", " ", "\n\t"] {
+            XCTAssertEqual(row(.location(description: description, body: "geo:21,105")),
+                           RowContent(kind: .message, body: "geo:21,105", isEdited: false))
+        }
+    }
+
+    func testLocationUsesTheSDKCoordinatesWhenThereIsNoReadableFallback() {
+        let location = row(.location(description: " ", body: "", geoURI: "geo:21,105"))
+        XCTAssertEqual(location.kind, .message)
+        XCTAssertEqual(location.body, "geo:21,105")
+    }
+
     func testFallbackBodiesShowAsTextAndAnEmptyOneIsTheGenericPlaceholder() {
         for fact in [ContentFact.gallery(body: "3 photos"), .otherMessageType(body: "custom"),
                      .sticker(body: "cat"), .poll(question: "Lunch?")] {

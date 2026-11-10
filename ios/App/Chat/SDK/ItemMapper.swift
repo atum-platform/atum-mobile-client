@@ -213,7 +213,7 @@ final class ItemMapper {
         case let .file(file): .file(name: file.filename, caption: file.caption)
         case let .video(video): .video(name: video.filename, caption: video.caption)
         case let .audio(audio): .audio(name: audio.filename, caption: audio.caption)
-        case let .location(location): .location(description: location.description, body: location.body)
+        case let .location(location): .location(description: location.description, body: location.body, geoURI: location.geoUri)
         case let .gallery(gallery): .gallery(body: gallery.body)
         case let .other(_, body): .otherMessageType(body: body)
         }

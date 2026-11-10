@@ -863,8 +863,10 @@ final class LiveAppModel {
             for userID in room.memberUserIDs where !excluded.contains(userID) {
                 let timestamp = room.latestTimestamp ?? 0
                 if newest[userID]?.timestamp ?? 0 > timestamp { continue }
+                let profile = room.memberProfiles.first { $0.userID == userID }
                 newest[userID] = (
-                    HomeGroupCandidate(id: userID, name: room.displayName, kind: .person),
+                    HomeGroupCandidate(id: userID, name: profile?.displayName ?? room.displayName,
+                                       kind: .person, avatarURL: profile?.avatarURL),
                     timestamp
                 )
             }
@@ -1122,6 +1124,30 @@ final class LiveAppModel {
         assistantLifecycleStore = nil
     }
 
+    func searchPeople(_ query: String) async -> [HomeGroupCandidate]? {
+        guard let session = liveMatrix, let results = await session.searchPeople(query),
+              liveMatrix === session, !Task.isCancelled else { return nil }
+        let nonPeople = Set((agentsRead.value?.agents.compactMap { $0.matrixUser?.rawValue } ?? [])
+            + (appsRead.value?.apps.compactMap { $0.bot?.userID.rawValue } ?? []))
+        var people = results.filter { !nonPeople.contains($0.id) }
+        // The phone currently has only exact forward alias lookup. Enrich a
+        // matching SDK result, never bypass directory visibility with an alias hit.
+        if let handle = HomeAddFriendPolicy.handle(query), let client = domainClient,
+           let lookup = try? await client.aliasLookup(handle: handle),
+           case let .assigned(assignment) = lookup,
+           let index = people.firstIndex(where: { $0.id == assignment.matrixUser?.rawValue }) {
+            people[index].handle = assignment.handle.rawValue
+        }
+        guard liveMatrix === session, !Task.isCancelled else { return nil }
+        return people
+    }
+
+    func openPerson(_ userID: String) async -> HomeAddFriendResult {
+        guard let target = try? NativeMatrixUser(userID), let session = liveMatrix,
+              target.rawValue != context?.runtime.ticket.session.userID else { return .notMessageable }
+        return await openDirectPerson(target, session: session)
+    }
+
     /// Exact handle lookup followed by reuse-or-create. No roster row is
     /// synthesized: success is returned only after the current Matrix room
     /// list publishes the joined room.
@@ -1152,6 +1178,10 @@ final class LiveAppModel {
               let target = assignment.matrixUser,
               target.rawValue != ownUserID else { return .notMessageable }
 
+        return await openDirectPerson(target, session: session)
+    }
+
+    private func openDirectPerson(_ target: NativeMatrixUser, session: LiveMatrixSession) async -> HomeAddFriendResult {
         if let roomID = HomeAddFriendPolicy.existingRoomID(
             in: session.rooms, matrixUserID: target.rawValue
         ) {
@@ -1196,9 +1226,12 @@ final class LiveAppModel {
                   let matrixUser = assignment.matrixUser,
                   matrixUser.rawValue != ownUserID else { return .notMessageable }
             let known = groupCandidates.first(where: { $0.id == matrixUser.rawValue })
-            return .candidate(known ?? HomeGroupCandidate(
-                id: matrixUser.rawValue, name: "@" + handle.rawValue, kind: .person
-            ))
+            let profile = await session.personProfile(userID: matrixUser.rawValue)
+            guard liveMatrix === session, !Task.isCancelled else { return .failed }
+            var candidate = known ?? profile ?? HomeGroupCandidate(
+                id: matrixUser.rawValue, name: matrixUser.rawValue, kind: .person)
+            candidate.handle = assignment.handle.rawValue
+            return .candidate(candidate)
         } catch let failure as NativeDomainClientFailure {
             if case let .http(http) = failure, http.response.error == .rateLimited {
                 return .rateLimited(http.retryAfterSeconds.flatMap(Int.init(exactly:)))
@@ -3006,7 +3039,7 @@ final class LiveAppModel {
         if firstRunMarker == .unknown {
             Task { @MainActor [weak self] in await self?.refreshFirstRunMarker() }
         }
-        if ComposerRules.offersMentions(kind: info.context.kind), let session = liveMatrix {
+        if let session = liveMatrix {
             let ownUserID = info.context.ownUserID
             let localeIdentifier = appLanguage
             // The member list in chat info is for personal groups; a company
@@ -3035,7 +3068,7 @@ final class LiveAppModel {
                 guard !Task.isCancelled,
                       self.liveMatrix === session,
                       self.conversation?.roomID == roomID else { return }
-                if listsMembers { self.conversationMembers = ordered }
+                if listsMembers || info.context.kind == .person { self.conversationMembers = ordered }
                 self.conversation?.setMentionCandidates(MentionRules.candidates(
                     members: ordered.map { (userID: $0.userID, displayName: $0.displayName) },
                     roster: roster, ownUserID: ownUserID))

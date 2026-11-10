@@ -31,7 +31,7 @@ public enum ContentFact: Equatable, Sendable {
     case file(name: String, caption: String?)
     case video(name: String, caption: String?)
     case audio(name: String, caption: String?)
-    case location(description: String?, body: String)
+    case location(description: String?, body: String, geoURI: String? = nil)
     case gallery(body: String)
     /// A message type the bindings do not name, with its fallback body.
     case otherMessageType(body: String)
@@ -86,8 +86,11 @@ public enum ContentRules {
             return RowContent(kind: .image(width: width, height: height), body: caption ?? "", isEdited: isEdited)
         case let .file(name, caption), let .video(name, caption), let .audio(name, caption):
             return RowContent(kind: .file(name: name), body: caption ?? "", isEdited: isEdited)
-        case let .location(description, body):
-            return text(description ?? body, isEdited: isEdited)
+        case let .location(description, body, geoURI):
+            let fallback = [description, body, geoURI]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { !$0.isEmpty } ?? ""
+            return text(fallback, isEdited: isEdited)
         case let .gallery(body), let .otherMessageType(body):
             return text(body, isEdited: isEdited)
         case let .sticker(body):
