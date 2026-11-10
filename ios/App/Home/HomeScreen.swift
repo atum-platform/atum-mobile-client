@@ -2554,7 +2554,7 @@ private enum StartChatCopyKey: String {
     case groupCreateTitle = "src.matrix.group-picker-copy.copies.createTitle"
     case groupName = "src.matrix.group-picker-copy.copies.groupName"
     case groupNamePlaceholder = "src.matrix.group-picker-copy.copies.groupNamePlaceholder"
-    case groupFull = "src.matrix.group-picker-copy.copies.full"
+    case groupFull = "src.matrix.group-picker-copy.copies.block.full"
     case newAssistant = "src.matrix.roster-create-copy.copies.newAssistant"
     case assistantIntro = "src.matrix.roster-create-copy.copies.assistantIntro"
     case assistantName = "src.matrix.roster-create-copy.copies.assistantName"
