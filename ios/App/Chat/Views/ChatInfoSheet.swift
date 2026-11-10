@@ -15,6 +15,18 @@ struct ChatInfoMember: Identifiable, Equatable {
     var isApp = false
 
     var id: String { userID }
+
+    /// Who they are, for Report (`ReportPolicy.mayReportPerson`).
+    var reportMember: ReportPolicy.Member {
+        if isApp { return .app }
+        return isAssistant ? .assistant : .person
+    }
+}
+
+/// Report person, asked from the panel or a Members row (HC-2).
+struct ReportPersonRequest: Identifiable, Equatable {
+    let userID: String
+    var id: String { userID }
 }
 
 enum ChatInfoAppTier {
@@ -173,6 +185,9 @@ struct ChatInfoActions {
     var exitRoom: ((String, ChatExitAction) -> Void)?
     /// Matrix ignore for a person in this chat's people.
     var setIgnored: ((String, Bool) async -> Bool)?
+    /// Report person (user ID, optional reason), beside Block; true once
+    /// sent. Nil hides Report (the chat screen supplies it from its store).
+    var reportPerson: ((String, String?) async -> Bool)?
     /// The signed-in account is the Founder: the Founder chat is kept.
     var viewerIsFounder = false
     /// Matrix `m.lowpriority` for a person or group chat.
@@ -328,6 +343,7 @@ struct ChatInfoHome: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmation: SheetConfirmation?
+    @State private var reporting: ReportPersonRequest?
 
     private enum SheetConfirmation: Equatable {
         case leaveCompany
@@ -363,6 +379,17 @@ struct ChatInfoHome: View {
     private var ignorablePeer: ChatInfoMember? {
         guard exitRoom == .person || exitRoom == .founder else { return nil }
         return info.members.first { mayIgnore($0) }
+    }
+
+    /// A person chat's other person, when they may be reported (desktop
+    /// `person-info-panel.tsx`: Report sits above Block). A group's people are
+    /// reported from its Members page.
+    private var reportablePeer: ChatInfoMember? {
+        guard actions.reportPerson != nil, exitRoom == .person || exitRoom == .founder else { return nil }
+        return info.members.first {
+            ReportPolicy.mayReportPerson($0.reportMember, isSelf: $0.isCurrentUser, in: exitRoom,
+                                         viewerIsFounder: actions.viewerIsFounder)
+        }
     }
 
     /// A personal chat (a person or a group of people, not a Team Space room):
@@ -468,6 +495,11 @@ struct ChatInfoHome: View {
                                                        : "src.matrix.chat-copy.copies.leaveBody"))
             case .ignore:
                 Text(design.text("src.matrix.chat-copy.copies.blockPersonBody"))
+            }
+        }
+        .sheet(item: $reporting) { request in
+            ReportSheet(design: design, subject: .person) { reason in
+                await actions.reportPerson?(request.userID, reason) ?? false
             }
         }
         .sensoryFeedback(.error, trigger: info.actionFailureToken)
@@ -880,11 +912,20 @@ struct ChatInfoHome: View {
         design.text(action == .deleteChat ? "src.matrix.chat-copy.copies.deleteChat" : "desktop.dm.group.leave")
     }
 
-    /// Block the other person (person chats) and Delete chat / Leave group, in
-    /// one quiet group at the end, as on the desktop. Block is undone in place.
+    /// Report and Block the other person (person chats) and Delete chat /
+    /// Leave group, in one quiet group at the end, as on the desktop. Block is
+    /// undone in place.
     @ViewBuilder private var exitSection: some View {
-        if ignorablePeer != nil || exitAction != nil {
+        if reportablePeer != nil || ignorablePeer != nil || exitAction != nil {
             VStack(spacing: 0) {
+                if let peer = reportablePeer {
+                    // PENDING-COPY:src.matrix.chat-copy.copies.reportPerson
+                    actionRow(glyph: .alertCircle, title: ReportCopy.text(design, .reportPerson),
+                              tone: .ink, id: "info.report") {
+                        reporting = ReportPersonRequest(userID: peer.userID)
+                    }
+                    if ignorablePeer != nil || exitAction != nil { Divider().padding(.leading, 48) }
+                }
                 if let peer = ignorablePeer {
                     let blocked = details?.ignoredUserIDs.contains(peer.userID) == true
                     actionRow(glyph: .eyeOff, title: design.text(blocked ? Self.unblockKey : Self.blockKey),

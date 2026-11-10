@@ -26,6 +26,9 @@ public struct ChatActions: Sendable {
     /// into the composer (`ConversationStore.beginEdit`; contract amendment,
     /// S1 day 1).
     public var edit: @MainActor @Sendable (_ itemID: String) -> Void
+    /// "Báo cáo" on someone else's message, with the person's optional
+    /// reason (`ReportPolicy`). True once the homeserver took the report.
+    public var report: @MainActor @Sendable (_ itemID: String, _ reason: String?) async -> Bool
 
     public init(retrySend: @escaping @MainActor @Sendable (String) -> Void = { _ in },
                 deleteSend: @escaping @MainActor @Sendable (String) -> Void = { _ in },
@@ -34,7 +37,8 @@ public struct ChatActions: Sendable {
                 toggleReaction: @escaping @MainActor @Sendable (String, String) -> Void = { _, _ in },
                 openLink: @escaping @MainActor @Sendable (String) -> Void = { _ in },
                 delete: @escaping @MainActor @Sendable (String) -> Void = { _ in },
-                edit: @escaping @MainActor @Sendable (String) -> Void = { _ in }) {
+                edit: @escaping @MainActor @Sendable (String) -> Void = { _ in },
+                report: @escaping @MainActor @Sendable (String, String?) async -> Bool = { _, _ in false }) {
         self.retrySend = retrySend
         self.deleteSend = deleteSend
         self.copy = copy
@@ -43,6 +47,7 @@ public struct ChatActions: Sendable {
         self.openLink = openLink
         self.delete = delete
         self.edit = edit
+        self.report = report
     }
 
     public static let none = ChatActions()

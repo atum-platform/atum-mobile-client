@@ -66,3 +66,10 @@ ops/
 *token*.json
 *auth-session*
 *device-ids*
+
+# Frozen synthetic admission facts: no bearer tokens or credentials.
+!/docs/contracts/provider/mobile-native-api/v1.1/fixtures/native-browser-domain-token.facts.json
+!/docs/contracts/provider/mobile-native-api/v1.1/fixtures/native-ios-domain-token.facts.json
+!/docs/contracts/provider/mobile-native-api/v1.1/fixtures/native-ios-matrix-token.facts.json
+!/docs/contracts/provider/mobile-native-api/v1.1/fixtures/native-mac-domain-token.facts.json
+!/docs/contracts/provider/mobile-native-api/v1.1/fixtures/native-mac-matrix-token.facts.json

@@ -1,0 +1,1367 @@
+{
+  "contract_id": "atum.mobile-native-api",
+  "version": "1.1",
+  "status": "frozen",
+  "pack_files": [
+    "README.md",
+    "contract.json",
+    "fixtures/aasa-wildcard-path.document.json",
+    "fixtures/aasa-wrong-team.document.json",
+    "fixtures/aasa.document.json",
+    "fixtures/agents-missing-principal.response.json",
+    "fixtures/agents.response.json",
+    "fixtures/alias-check.response.json",
+    "fixtures/alias-claim-names-principal.request.json",
+    "fixtures/alias-claim-replayed.response.json",
+    "fixtures/alias-claim.request.json",
+    "fixtures/alias-current-none.response.json",
+    "fixtures/alias-current.response.json",
+    "fixtures/alias-lookup-assigned-without-principal.response.json",
+    "fixtures/alias-lookup-assigned.response.json",
+    "fixtures/alias-lookup-available.response.json",
+    "fixtures/binding-subject-mismatch.facts.json",
+    "fixtures/binding-swapped-grants.facts.json",
+    "fixtures/binding.facts.json",
+    "fixtures/domain-grant-failure-keeps-retrying.sequence.json",
+    "fixtures/domain-grant-lifecycle.sequence.json",
+    "fixtures/domain-grant-skips-binding.sequence.json",
+    "fixtures/error-cloud-unavailable.response.json",
+    "fixtures/error-unauthenticated.response.json",
+    "fixtures/error-unknown-status.response.json",
+    "fixtures/ios-client-confidential.registration.json",
+    "fixtures/ios-client-loopback-redirect.registration.json",
+    "fixtures/ios-client-with-secret.registration.json",
+    "fixtures/ios-domain-client.registration.json",
+    "fixtures/ios-matrix-client.registration.json",
+    "fixtures/native-browser-domain-token.facts.json",
+    "fixtures/native-expired.facts.json",
+    "fixtures/native-future-nbf.facts.json",
+    "fixtures/native-ios-domain-token.facts.json",
+    "fixtures/native-ios-matrix-token.facts.json",
+    "fixtures/native-mac-domain-token.facts.json",
+    "fixtures/native-mac-matrix-token.facts.json",
+    "fixtures/native-wider-scope.facts.json",
+    "fixtures/native-with-cookie.facts.json",
+    "fixtures/native-with-origin.facts.json",
+    "fixtures/wallet-available-mismatch.response.json",
+    "fixtures/wallet-history-bad-kind.response.json",
+    "fixtures/wallet-history-last-page.response.json",
+    "fixtures/wallet-history.response.json",
+    "fixtures/wallet-names-principal.response.json",
+    "fixtures/wallet-no-allowance.response.json",
+    "fixtures/wallet.response.json"
+  ],
+  "row": "iPhone plan §9.1 contract a",
+  "providers": [
+    "ID",
+    "DA"
+  ],
+  "consumers": [
+    "iOS"
+  ],
+  "owner_decisions": {
+    "date": "2026-10-05",
+    "O1": "dedicated iOS MAS clients (a Matrix client and an openid-only domain client)",
+    "O2": "callback and association host api.atumplatform.com",
+    "native_app": "the native iPhone app (atum-app c9da67e157095f5037736dfb35587512908bf690) supersedes cloud-first-use/1's A3 'no native phone runtime' for the native app only (README §0)"
+  },
+  "routes": {
+    "native_base": "/api/matrix/v1",
+    "callback": "GET https://api.atumplatform.com/oauth/ios/callback",
+    "association": "GET https://api.atumplatform.com/.well-known/apple-app-site-association",
+    "operations": {
+      "GET /me": [
+        null,
+        "atum.cloud-first-use/1 me.response"
+      ],
+      "POST /assistant": [
+        "{}",
+        "atum.cloud-first-use/1 bootstrap.response"
+      ],
+      "GET /agents": [
+        null,
+        "agents.response"
+      ],
+      "GET /wallet": [
+        null,
+        "wallet.response"
+      ],
+      "GET /wallet/history": [
+        "query: limit, before",
+        "wallet.history.response"
+      ],
+      "GET /aliases/lookup": [
+        "query: handle",
+        "alias.lookup.response"
+      ],
+      "GET /aliases/current": [
+        "query: assistantId?",
+        "alias.current.response"
+      ],
+      "GET /aliases/check": [
+        "query: handle, assistantId?",
+        "alias.check.response"
+      ],
+      "POST /aliases/claim": [
+        "alias.claim.request",
+        "alias.claim.response"
+      ],
+      "GET /store/catalog": [
+        null,
+        "atum.store/1.1 catalog.response"
+      ],
+      "GET /store/entitlements": [
+        null,
+        "atum.store/1.1 entitlements.response"
+      ],
+      "GET /store/purchases": [
+        null,
+        "atum.store/1.1 purchases.response"
+      ],
+      "POST /store/purchases": [
+        "atum.store/1.1 purchase.request",
+        "atum.store/1.1 purchase.result"
+      ],
+      "POST /store/entitlements/{id}/cancel": [
+        "{}",
+        "atum.store/1.1 cancel.result"
+      ]
+    },
+    "errors": "error.response"
+  },
+  "configuration": {
+    "ATUM_MATRIX_IOS_DOMAIN_CLIENT_ID": "the iOS domain client; unset refuses every phone token (the phone's kill switch)",
+    "ATUM_MATRIX_IOS_MATRIX_CLIENT_ID": "the iOS Matrix client; only for the distinctness check",
+    "distinct": "native, introspection, operator, browser domain, browser Matrix, Drive companion and both iOS client IDs all differ, or the routes answer 503"
+  },
+  "placeholders": {
+    "issuer": "https://auth.atum.test/",
+    "ios_matrix_client_id": "01JPHNMXPQ7R8S9T0V2W3X4Y5Z",
+    "ios_domain_client_id": "01JPHNDXPQ7R8S9T0V2W3X4Y5Z",
+    "mac_domain_client_id": "01J00000000000000000000003",
+    "browser_domain_client_id": "01JWEBCXPQ7R8S9T0V2W3X4Y5Z"
+  },
+  "types": {
+    "uuid": {
+      "type": "string",
+      "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    },
+    "epoch_s": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "iso_timestamp": {
+      "type": "string",
+      "min": 20,
+      "max": 40,
+      "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?(Z|[+-][0-9]{2}(:[0-9]{2})?)"
+    },
+    "mas_ulid": {
+      "type": "string",
+      "min": 26,
+      "max": 26,
+      "pattern": "[0-9A-HJKMNP-TV-Z]{26}"
+    },
+    "user_id": {
+      "type": "string",
+      "min": 4,
+      "max": 1024,
+      "pattern": "@[!-9;-~]+:[!-~]+"
+    },
+    "https_url": {
+      "type": "string",
+      "min": 9,
+      "max": 2048,
+      "pattern": "https://[!-~]+"
+    },
+    "micro_protons": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "handle": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9_]{2,31}"
+    },
+    "agent_entry": {
+      "type": "object",
+      "required": {
+        "id": {
+          "ref": "uuid"
+        },
+        "identity_id": {
+          "anyOf": [
+            {
+              "ref": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_name": {
+          "type": "string",
+          "min": 1,
+          "max": 64
+        },
+        "slug": {
+          "anyOf": [
+            {
+              "type": "string",
+              "min": 1,
+              "max": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "avatar": {
+          "type": "string",
+          "min": 0,
+          "max": 16
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "ref": "https_url"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_default": {
+          "type": "boolean"
+        },
+        "lifecycle_revision": {
+          "type": "integer",
+          "min": 1,
+          "max": 9007199254740991
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        },
+        "identity_revision": {
+          "type": "integer",
+          "min": 0,
+          "max": 9007199254740991
+        },
+        "definition_revision": {
+          "type": "integer",
+          "min": 0,
+          "max": 9007199254740991
+        },
+        "principal": {
+          "ref": "uuid"
+        },
+        "matrixUser": {
+          "anyOf": [
+            {
+              "ref": "user_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "optional": {
+        "retired_agents": {
+          "type": "array",
+          "max": 1000,
+          "items": {
+            "type": "object",
+            "required": {
+              "id": {
+                "ref": "uuid"
+              },
+              "status": {
+                "const": "retired"
+              },
+              "principal": {
+                "ref": "uuid"
+              }
+            },
+            "additional": true
+          }
+        }
+      },
+      "additional": true
+    },
+    "error_code": {
+      "enum": [
+        "matrix_400",
+        "matrix_401",
+        "matrix_403",
+        "matrix_404",
+        "matrix_409",
+        "matrix_429",
+        "matrix_503"
+      ]
+    }
+  },
+  "directions": {
+    "configuration": {
+      "description": "MAS client registrations and the association document, as ID and HO deploy them.",
+      "forbidden_fields": [
+        "client_secret",
+        "client_secret_jwt",
+        "secret",
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    },
+    "request_facts": {
+      "description": "What the native authority sees of a request: its headers and its bearer's MAS introspection.",
+      "forbidden_fields": []
+    },
+    "client_facts": {
+      "description": "What the iOS client checks before it trusts the domain grant.",
+      "forbidden_fields": [
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    },
+    "owner_to_platform": {
+      "description": "The phone to DA. The owner is the introspected principal, never a field.",
+      "forbidden_fields": [
+        "owner",
+        "principal",
+        "subject",
+        "issuer",
+        "payer",
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    },
+    "platform_to_owner": {
+      "description": "DA to the phone.",
+      "forbidden_fields": [
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    }
+  },
+  "messages": {
+    "ios.client_registration": {
+      "direction": "configuration",
+      "schema": {
+        "type": "object",
+        "required": {
+          "client_id": {
+            "ref": "mas_ulid"
+          },
+          "client_name": {
+            "type": "string",
+            "min": 1,
+            "max": 64
+          },
+          "client_auth_method": {
+            "const": "none"
+          },
+          "redirect_uris": {
+            "const": [
+              "https://api.atumplatform.com/oauth/ios/callback"
+            ]
+          }
+        }
+      }
+    },
+    "aasa.document": {
+      "direction": "configuration",
+      "schema": {
+        "type": "object",
+        "required": {
+          "applinks": {
+            "type": "object",
+            "required": {
+              "details": {
+                "type": "array",
+                "min": 1,
+                "max": 1,
+                "items": {
+                  "type": "object",
+                  "required": {
+                    "appIDs": {
+                      "const": [
+                        "7D5FC62RXD.com.atum.mobile"
+                      ]
+                    },
+                    "components": {
+                      "const": [
+                        {
+                          "/": "/oauth/ios/callback"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "webcredentials": {
+            "type": "object",
+            "required": {
+              "apps": {
+                "const": [
+                  "7D5FC62RXD.com.atum.mobile"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "native.request_facts": {
+      "direction": "request_facts",
+      "schema": {
+        "type": "object",
+        "required": {
+          "origin": {
+            "type": "null"
+          },
+          "cookie": {
+            "const": false
+          },
+          "xAtumPrincipal": {
+            "const": false
+          },
+          "now": {
+            "ref": "epoch_s"
+          },
+          "introspection": {
+            "type": "object",
+            "required": {
+              "active": {
+                "const": true
+              },
+              "token_type": {
+                "const": "access_token"
+              },
+              "scope": {
+                "const": "openid"
+              },
+              "client_id": {
+                "enum": [
+                  "01J00000000000000000000003",
+                  "01JPHNDXPQ7R8S9T0V2W3X4Y5Z"
+                ]
+              },
+              "sub": {
+                "type": "string",
+                "min": 1,
+                "max": 1024
+              },
+              "exp": {
+                "ref": "epoch_s"
+              },
+              "nbf": {
+                "ref": "epoch_s"
+              }
+            },
+            "optional": {
+              "iss": {
+                "const": "https://auth.atum.test/"
+              }
+            },
+            "additional": true
+          }
+        }
+      }
+    },
+    "binding.facts": {
+      "direction": "client_facts",
+      "schema": {
+        "type": "object",
+        "required": {
+          "matrixClientId": {
+            "ref": "mas_ulid"
+          },
+          "domainClientId": {
+            "ref": "mas_ulid"
+          },
+          "matrixIdToken": {
+            "type": "object",
+            "required": {
+              "iss": {
+                "ref": "https_url"
+              },
+              "sub": {
+                "type": "string",
+                "min": 1,
+                "max": 1024
+              },
+              "aud": {
+                "ref": "mas_ulid"
+              },
+              "nonceMatches": {
+                "const": true
+              }
+            }
+          },
+          "domainIdToken": {
+            "type": "object",
+            "required": {
+              "iss": {
+                "ref": "https_url"
+              },
+              "sub": {
+                "type": "string",
+                "min": 1,
+                "max": 1024
+              },
+              "aud": {
+                "ref": "mas_ulid"
+              },
+              "nonceMatches": {
+                "const": true
+              }
+            }
+          },
+          "me": {
+            "type": "object",
+            "required": {
+              "issuer": {
+                "ref": "https_url"
+              },
+              "subject": {
+                "type": "string",
+                "min": 1,
+                "max": 1024
+              },
+              "principal": {
+                "ref": "uuid"
+              }
+            }
+          }
+        }
+      }
+    },
+    "agents.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "array",
+        "max": 51,
+        "items": {
+          "ref": "agent_entry"
+        }
+      }
+    },
+    "wallet.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "unit": {
+            "const": "micro_proton"
+          },
+          "balances": {
+            "type": "object",
+            "required": {
+              "available": {
+                "ref": "micro_protons"
+              },
+              "paid": {
+                "ref": "micro_protons"
+              },
+              "earned": {
+                "ref": "micro_protons"
+              },
+              "promo": {
+                "ref": "micro_protons"
+              },
+              "held": {
+                "ref": "micro_protons"
+              }
+            }
+          },
+          "allowance": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": {
+                  "kind": {
+                    "enum": [
+                      "founding",
+                      "standard"
+                    ]
+                  },
+                  "state": {
+                    "enum": [
+                      "granted",
+                      "deferred"
+                    ]
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "min": 1,
+                    "max": 9007199254740991
+                  },
+                  "grantedAt": {
+                    "anyOf": [
+                      {
+                        "ref": "iso_timestamp"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "checkoutOpen": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "wallet.history.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "entries": {
+            "type": "array",
+            "max": 100,
+            "items": {
+              "type": "object",
+              "required": {
+                "id": {
+                  "ref": "uuid"
+                },
+                "at": {
+                  "ref": "iso_timestamp"
+                },
+                "kind": {
+                  "enum": [
+                    "usage",
+                    "purchase",
+                    "topup",
+                    "grant",
+                    "sale",
+                    "reversal"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "charged",
+                    "released",
+                    "completed"
+                  ]
+                },
+                "amount": {
+                  "type": "integer",
+                  "min": -9007199254740991,
+                  "max": 9007199254740991
+                },
+                "reference": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "min": 0,
+                      "max": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "closedAt": {
+                  "anyOf": [
+                    {
+                      "ref": "iso_timestamp"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string",
+                "min": 1,
+                "max": 256,
+                "pattern": "[A-Za-z0-9_-]+"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "alias.lookup.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": {
+              "handle": {
+                "anyOf": [
+                  {
+                    "ref": "handle"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "invalid",
+                  "available",
+                  "unavailable"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": {
+              "handle": {
+                "ref": "handle"
+              },
+              "state": {
+                "const": "assigned"
+              },
+              "principal": {
+                "ref": "uuid"
+              },
+              "kind": {
+                "enum": [
+                  "human",
+                  "agent",
+                  "app",
+                  "organization"
+                ]
+              },
+              "generation": {
+                "type": "integer",
+                "min": 1,
+                "max": 9007199254740991
+              },
+              "matrixUser": {
+                "anyOf": [
+                  {
+                    "ref": "user_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "alias.current.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "required": {
+              "handle": {
+                "ref": "handle"
+              },
+              "generation": {
+                "type": "integer",
+                "min": 1,
+                "max": 9007199254740991
+              }
+            }
+          }
+        ]
+      }
+    },
+    "alias.check.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "handle": {
+            "anyOf": [
+              {
+                "ref": "handle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "enum": [
+                  "alias_invalid",
+                  "alias_bot_suffix_required",
+                  "alias_bot_suffix_reserved",
+                  "alias_reserved",
+                  "alias_unavailable"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "alias.claim.request": {
+      "direction": "owner_to_platform",
+      "schema": {
+        "type": "object",
+        "required": {
+          "handle": {
+            "type": "string",
+            "min": 1,
+            "max": 33
+          },
+          "requestId": {
+            "ref": "uuid"
+          }
+        },
+        "optional": {
+          "assistantId": {
+            "ref": "uuid"
+          }
+        }
+      }
+    },
+    "alias.claim.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "handle": {
+            "ref": "handle"
+          },
+          "state": {
+            "const": "assigned"
+          },
+          "principal": {
+            "ref": "uuid"
+          },
+          "generation": {
+            "type": "integer",
+            "min": 1,
+            "max": 9007199254740991
+          }
+        },
+        "optional": {
+          "replayed": {
+            "const": true
+          }
+        }
+      }
+    },
+    "error.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "error": {
+            "ref": "error_code"
+          }
+        },
+        "optional": {
+          "details": {
+            "type": "object",
+            "required": {},
+            "optional": {
+              "reason": {
+                "type": "string",
+                "min": 1,
+                "max": 64,
+                "pattern": "[a-z][a-z0-9_]*"
+              },
+              "launch_error": {
+                "type": "string",
+                "min": 1,
+                "max": 64,
+                "pattern": "[a-z][a-z0-9_]*"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "native.unexpired",
+      "message": "native.request_facts",
+      "op": "le",
+      "left": "now",
+      "right": [
+        "introspection.exp"
+      ],
+      "offset": -1,
+      "required": true
+    },
+    {
+      "id": "native.nbf_within_five_seconds",
+      "message": "native.request_facts",
+      "op": "le",
+      "left": "introspection.nbf",
+      "right": [
+        "now"
+      ],
+      "offset": 5,
+      "required": true
+    },
+    {
+      "id": "binding.same_subject",
+      "message": "binding.facts",
+      "op": "same",
+      "left": "matrixIdToken.sub",
+      "right": "domainIdToken.sub",
+      "required": true
+    },
+    {
+      "id": "binding.same_issuer",
+      "message": "binding.facts",
+      "op": "same",
+      "left": "matrixIdToken.iss",
+      "right": "domainIdToken.iss",
+      "required": true
+    },
+    {
+      "id": "binding.me_subject",
+      "message": "binding.facts",
+      "op": "same",
+      "left": "domainIdToken.sub",
+      "right": "me.subject",
+      "required": true
+    },
+    {
+      "id": "binding.me_issuer",
+      "message": "binding.facts",
+      "op": "same",
+      "left": "domainIdToken.iss",
+      "right": "me.issuer",
+      "required": true
+    },
+    {
+      "id": "binding.matrix_token_audience",
+      "message": "binding.facts",
+      "op": "same",
+      "left": "matrixIdToken.aud",
+      "right": "matrixClientId",
+      "required": true
+    },
+    {
+      "id": "binding.domain_token_audience",
+      "message": "binding.facts",
+      "op": "same",
+      "left": "domainIdToken.aud",
+      "right": "domainClientId",
+      "required": true
+    },
+    {
+      "id": "wallet.available_is_spendable_sum",
+      "message": "wallet.response",
+      "op": "eq",
+      "left": "balances.available",
+      "right": [
+        "balances.paid",
+        "balances.earned",
+        "balances.promo"
+      ],
+      "required": true
+    }
+  ],
+  "state_machines": {
+    "domain_grant": {
+      "states": [
+        "signed_out",
+        "authorizing",
+        "active",
+        "refreshing",
+        "reauth_required",
+        "revoked"
+      ],
+      "initial": [
+        "signed_out"
+      ],
+      "terminal": [
+        "revoked"
+      ],
+      "transitions": [
+        [
+          "signed_out",
+          "authorizing",
+          "start"
+        ],
+        [
+          "authorizing",
+          "active",
+          "granted_and_bound"
+        ],
+        [
+          "authorizing",
+          "signed_out",
+          "cancelled_or_denied"
+        ],
+        [
+          "authorizing",
+          "revoked",
+          "subject_mismatch"
+        ],
+        [
+          "active",
+          "refreshing",
+          "expiring_or_401"
+        ],
+        [
+          "refreshing",
+          "active",
+          "refreshed"
+        ],
+        [
+          "refreshing",
+          "reauth_required",
+          "refresh_refused"
+        ],
+        [
+          "active",
+          "reauth_required",
+          "revoked_elsewhere"
+        ],
+        [
+          "reauth_required",
+          "authorizing",
+          "person_retries"
+        ],
+        [
+          "active",
+          "revoked",
+          "sign_out"
+        ],
+        [
+          "reauth_required",
+          "revoked",
+          "sign_out"
+        ]
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "file": "fixtures/ios-matrix-client.registration.json",
+      "message": "ios.client_registration",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/ios-domain-client.registration.json",
+      "message": "ios.client_registration",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/ios-client-with-secret.registration.json",
+      "message": "ios.client_registration",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/ios-client-loopback-redirect.registration.json",
+      "message": "ios.client_registration",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/ios-client-confidential.registration.json",
+      "message": "ios.client_registration",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/aasa.document.json",
+      "message": "aasa.document",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/aasa-wildcard-path.document.json",
+      "message": "aasa.document",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/aasa-wrong-team.document.json",
+      "message": "aasa.document",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/native-ios-domain-token.facts.json",
+      "message": "native.request_facts",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/native-mac-domain-token.facts.json",
+      "message": "native.request_facts",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/native-ios-matrix-token.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/native-browser-domain-token.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/native-mac-matrix-token.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/native-wider-scope.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/native-with-origin.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "type"
+    },
+    {
+      "file": "fixtures/native-with-cookie.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/native-expired.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "invariant"
+    },
+    {
+      "file": "fixtures/native-future-nbf.facts.json",
+      "message": "native.request_facts",
+      "expect": "reject",
+      "violation": "invariant"
+    },
+    {
+      "file": "fixtures/binding.facts.json",
+      "message": "binding.facts",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/binding-subject-mismatch.facts.json",
+      "message": "binding.facts",
+      "expect": "reject",
+      "violation": "invariant"
+    },
+    {
+      "file": "fixtures/binding-swapped-grants.facts.json",
+      "message": "binding.facts",
+      "expect": "reject",
+      "violation": "invariant"
+    },
+    {
+      "file": "fixtures/agents.response.json",
+      "message": "agents.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/agents-missing-principal.response.json",
+      "message": "agents.response",
+      "expect": "reject",
+      "violation": "missing"
+    },
+    {
+      "file": "fixtures/wallet.response.json",
+      "message": "wallet.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/wallet-no-allowance.response.json",
+      "message": "wallet.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/wallet-available-mismatch.response.json",
+      "message": "wallet.response",
+      "expect": "reject",
+      "violation": "invariant"
+    },
+    {
+      "file": "fixtures/wallet-names-principal.response.json",
+      "message": "wallet.response",
+      "expect": "reject",
+      "violation": "unknown_field"
+    },
+    {
+      "file": "fixtures/wallet-history.response.json",
+      "message": "wallet.history.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/wallet-history-last-page.response.json",
+      "message": "wallet.history.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/wallet-history-bad-kind.response.json",
+      "message": "wallet.history.response",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/alias-lookup-assigned.response.json",
+      "message": "alias.lookup.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/alias-lookup-available.response.json",
+      "message": "alias.lookup.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/alias-lookup-assigned-without-principal.response.json",
+      "message": "alias.lookup.response",
+      "expect": "reject",
+      "violation": "variant"
+    },
+    {
+      "file": "fixtures/alias-current.response.json",
+      "message": "alias.current.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/alias-current-none.response.json",
+      "message": "alias.current.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/alias-check.response.json",
+      "message": "alias.check.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/alias-claim.request.json",
+      "message": "alias.claim.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/alias-claim-names-principal.request.json",
+      "message": "alias.claim.request",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/alias-claim-replayed.response.json",
+      "message": "alias.claim.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-unauthenticated.response.json",
+      "message": "error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-cloud-unavailable.response.json",
+      "message": "error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-unknown-status.response.json",
+      "message": "error.response",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/domain-grant-lifecycle.sequence.json",
+      "machine": "domain_grant",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/domain-grant-failure-keeps-retrying.sequence.json",
+      "machine": "domain_grant",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/domain-grant-skips-binding.sequence.json",
+      "machine": "domain_grant",
+      "expect": "reject",
+      "violation": "transition"
+    }
+  ],
+  "base": {
+    "contract": "atum.mobile-native-api/1",
+    "path": "spec/mobile-native-api/v1",
+    "sha256": "c651192fd0b9042628c47f370b23958437a04d847cf033ed6cd34956e7c32bfd",
+    "rule": "additive admission amendment; base wire and fixtures retained"
+  },
+  "store_excluded_operations": [
+    "POST /store/topups",
+    "GET /store/topups/{id}",
+    "POST /store/tasks",
+    "POST /store/tasks/resolve"
+  ],
+  "amendments": [
+    {
+      "id": "store-admission",
+      "sections": [
+        "§7"
+      ],
+      "change": "Admit only the five Store operations listed here under existing native domain-grant authentication; supersedes the blanket /store/* exclusion. Topups/tasks stay excluded; mobile-purchases/1.1 supplies IAP gates."
+    }
+  ]
+}

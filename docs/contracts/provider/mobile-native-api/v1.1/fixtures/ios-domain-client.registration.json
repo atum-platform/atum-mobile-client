@@ -1,0 +1,8 @@
+{
+  "client_id": "01JPHNDXPQ7R8S9T0V2W3X4Y5Z",
+  "client_name": "Atum for iPhone (account)",
+  "client_auth_method": "none",
+  "redirect_uris": [
+    "https://api.atumplatform.com/oauth/ios/callback"
+  ]
+}

@@ -180,7 +180,9 @@ final class S6SystemUITests: TranscriptUITestCase {
         let ax = launchS6("store.catalog", contentSize: Self.ax5Size)
         XCTAssertTrue(element(ax, "store.catalog").waitForExistence(timeout: 15))
         keepScreenshot("U-S6-7-store-catalog-light-ax5-vi", of: ax)
-        XCTAssertTrue(scrollTo(ax.staticTexts["Miễn phí"], in: ax))
+        // The free item's row is one button whose label ends with its price.
+        XCTAssertTrue(scrollTo(element(ax, "store.item.assistant"), in: ax))
+        XCTAssertTrue(element(ax, "store.item.assistant").label.hasSuffix("Miễn phí"))
         keepScreenshot("U-S6-7-store-catalog-light-ax5-vi-bottom", of: ax)
     }
 
@@ -233,8 +235,10 @@ final class S6SystemUITests: TranscriptUITestCase {
     func testU9StoreOpenPushesItsScriptedRoom() {
         let app = launchS6("store.open-app")
         XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
-        let open = app.buttons["Mở"]
+        // The app row is the button (design review S1), labelled with its action.
+        let open = element(app, "store.open.moon")
         XCTAssertTrue(scrollTo(open, in: app))
+        XCTAssertTrue(open.label.hasSuffix("Mở"))
         open.tap()
         XCTAssertTrue(element(app, "scripted.moon-chat").waitForExistence(timeout: 3))
         app.navigationBars.buttons.firstMatch.tap()

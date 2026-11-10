@@ -331,6 +331,7 @@ final class LiveAppModel {
     @ObservationIgnored private var timeZoneObserver: OwnerTimeZoneChangeObserver?
     private var agentsRead = NativeRead<AgentsResponse>()
     private var appsRead = NativeRead<AppCatalogResponse>()
+    let storeCommerce = LiveStoreCommerce()
     private var storeCatalogRead = NativeRead<StoreCatalogResponse>()
     private var walletRead = NativeRead<WalletResponse>()
     private var routineSnapshots = [NativeID: AgentRoutinesSnapshot]()
@@ -731,6 +732,7 @@ final class LiveAppModel {
             )
             recoverySavedStore.clear(installationID: current.installation.id)
             context = nil
+            storeCommerce.reset()
             domainClient = nil
             firstRunMarkerCoordinator?.reset()
             firstRunMarkerCoordinator = nil
@@ -754,6 +756,7 @@ final class LiveAppModel {
             // person's already-authorized transaction forward from its
             // non-secret journal.
             context = nil
+            storeCommerce.reset()
             domainClient = nil
             assistantLifecycleCapability = nil
             assistantLifecycleStore = nil
@@ -4377,6 +4380,7 @@ final class LiveAppModel {
             startPendingAssistantLifecycleResume()
         } catch {
             LiveAuthDiagnostics.record(phase: "domain_reauthorization", error: error)
+            storeCommerce.reset()
             domainClient = nil
             domainRecoveryState = .reauthenticationRequired
         }
@@ -4674,6 +4678,7 @@ final class LiveAppModel {
         guard case .signedIn = stage else { return }
         let state = MobileDomainRecoveryPolicy.state(for: error)
         if state == .reauthenticationRequired {
+            storeCommerce.reset()
             domainClient = nil
             domainRecoveryState = state
         }
@@ -4755,6 +4760,7 @@ final class LiveAppModel {
             generation: officialAccountsClientGeneration
         ))
         resetFounderState()
+        storeCommerce.reset()
         storeCatalogRead.clear()
         walletRead.clear()
         routineSnapshots.removeAll()
@@ -4802,6 +4808,7 @@ final class LiveAppModel {
             domainClient = makeDomainClient(refresh: refresh, metadata: metadata)
             domainRecoveryState = .available
         } catch {
+            storeCommerce.reset()
             domainClient = nil
             domainRecoveryState = MobileDomainRecoveryPolicy.state(for: error)
             LiveAuthDiagnostics.record(
@@ -6025,6 +6032,14 @@ final class LiveAppModel {
         apply(appsResult, to: &appsRead)
         apply(storeCatalogResult, to: &storeCatalogRead)
         apply(walletResult, to: &walletRead)
+        if self.domainClient === domainClient, let accountID = context?.runtime.ticket.session.userID {
+            let targets = (agentsRead.value?.agents ?? []).filter { $0.status == .active }.map { agent in
+                LiveStoreCommerce.Target(id: agent.id, principal: agent.principal, name: agent.displayName,
+                    roomID: liveMatrix?.rooms.first(where: { agentForRoom($0.roomID)?.id == agent.id })?.roomID)
+            }
+            storeCommerce.configure(account: accountID, client: domainClient, targets: targets)
+        }
+
         if self.domainClient === domainClient,
            assistantLifecycleGeneration == lifecycleGeneration {
             assistantLifecycleCapability = lifecycleResult
@@ -6400,6 +6415,7 @@ final class LiveAppModel {
             $0.canOpen && !$0.isInvitation && !$0.id.hasPrefix("app:")
         }.map(\.id))
         let items = (storeCatalogRead.value?.items ?? [])
+            .filter(\.isVisibleInStore)
             .sorted { left, right in
                 left.sortOrder == right.sortOrder
                     ? left.itemID < right.itemID
@@ -6423,7 +6439,11 @@ final class LiveAppModel {
                                                  locale: Locale.current.identifier)
                     },
                     accent: Self.catalogAccent(item.accent),
-                    art: Self.installedStoreArt[item.itemID]
+                    art: Self.installedStoreArt[item.itemID],
+                    detailDescription: item.description.localized(locale: Self.currentLocale),
+                    tryPrompt: item.tryPrompt.localized(locale: Self.currentLocale),
+                    offer: item.offer, ownership: item.ownership, deliverable: item.deliverable,
+                    needs: item.needs, install: item.install
                 )
             }
         let apps = (appsRead.value?.apps ?? [])
@@ -6482,7 +6502,7 @@ final class LiveAppModel {
             return LiveProductStoreRead(
                 availability: .ready,
                 walletValue: walletRead.value.map {
-                    MicroProtonFormat.string($0.balances.available,
+                    MicroProtonFormat.balance($0.balances.available,
                                              locale: Locale.current.identifier)
                 },
                 items: items,

@@ -238,6 +238,11 @@ struct ScriptedChatHost: View {
                                     UITestProbe.append("ignored \(userID) \(ignored)", to: "panel.txt")
                                     return true
                                 },
+                                // A scripted chat has no homeserver: the report is recorded for the UI probe.
+                                reportPerson: { userID, _ in
+                                    UITestProbe.append("report \(userID)", to: "panel.txt")
+                                    return true
+                                },
                                 setLowPriority: { _, value in infoLowPriority = value },
                                 loadDetails: { _ in scriptedDetails },
                                 moderateMember: { _, userID, action in
@@ -245,7 +250,7 @@ struct ScriptedChatHost: View {
                                     case .remove: scriptedRemoved.insert(userID)
                                     case .ban: scriptedBanned.insert(userID)
                                     case .unban: scriptedBanned.remove(userID)
-                                    case .block, .unblock: return false
+                                    case .block, .unblock, .report: return false
                                     }
                                     UITestProbe.append("\(action.rawValue) \(userID)", to: "panel.txt")
                                     return true
