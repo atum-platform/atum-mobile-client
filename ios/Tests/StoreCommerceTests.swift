@@ -71,9 +71,10 @@ final class StoreCommerceContractTests: XCTestCase {
         let item = try StoreWire.decode(StoreCatalogResponse.self, from: fixture("catalog-pet")).items[0]
         return try StoreAcquireQuote(item: item, assistantID: nil, balance: balance)
     }
-    private func completed(_ attempt: StorePurchaseAttempt) throws -> StorePurchaseResult {
+    private func completed(_ attempt: StorePurchaseAttempt, state: String? = nil) throws -> StorePurchaseResult {
         var value = try JSONSerialization.jsonObject(with: fixture("result-completed")) as! [String: Any]
         var purchase = value["purchase"] as! [String: Any]
+        if let state { purchase["state"] = state }
         purchase["idempotencyKey"] = attempt.idempotencyKey.rawValue
         purchase["offerId"] = attempt.offerID.rawValue; purchase["offerVersion"] = attempt.offerVersion
         value["purchase"] = purchase
@@ -130,6 +131,41 @@ final class StoreCommerceContractTests: XCTestCase {
         guard case .result(.purchased) = answer else { return XCTFail("expected replay") }
         XCTAssertEqual(charged.count, 1); XCTAssertEqual(calls[0], calls[1])
         XCTAssertTrue(try journal.attempts(account: "synthetic-b").isEmpty)
+    }
+    func testReversedAttemptIsRetiredSoTheItemCanBeBoughtAgain() async throws {
+        let journal = Journal(); var calls = [StorePurchaseAttempt]()
+        var reply: (StorePurchaseAttempt) throws -> StorePurchaseResult = { _ in
+            throw NativeDomainClientFailure.transportUnavailable // committed; reply lost
+        }
+        let machine = StoreAcquisition(account: "synthetic-a", journal: journal) { attempt in
+            calls.append(attempt); return try reply(attempt)
+        }
+        let q = try quote()
+        let lost = await machine.confirm(q, online: true)
+        XCTAssertEqual(lost, .uncertain)
+        let saved = try XCTUnwrap(try machine.attempt(itemID: q.item.itemID, assistantID: nil))
+        guard case .purchased(let pending, _) = try completed(saved, state: "delivery_pending"),
+              case .purchased(let done, _) = try completed(saved),
+              case .purchased(let reversed, _) = try completed(saved, state: "reversed") else { return XCTFail("fixture") }
+
+        // Missing, pending and completed history keep the key so Check status
+        // can replay it; a completion is never taken as settled just because
+        // ownership hasn't shown up yet (that could charge twice).
+        try machine.retireReversed(by: [])
+        try machine.retireReversed(by: [pending])
+        try machine.retireReversed(by: [done])
+        XCTAssertNotNil(try machine.attempt(itemID: q.item.itemID, assistantID: nil))
+
+        // History shows it reversed: the attempt is retired, and a new
+        // confirmation mints a new key instead of staying blocked.
+        try machine.retireReversed(by: [reversed])
+        XCTAssertNil(try machine.attempt(itemID: q.item.itemID, assistantID: nil))
+        reply = { try self.completed($0) }
+        let again = await machine.confirm(q, online: true)
+        guard case .result(.purchased) = again else {
+            return XCTFail("expected a new purchase")
+        }
+        XCTAssertEqual(calls.count, 2); XCTAssertNotEqual(calls[0].idempotencyKey, calls[1].idempotencyKey)
     }
     func testOfflineBeforeSendAndJournalFailureDoNotWrite() async throws {
         let journal = Journal(); var calls = 0

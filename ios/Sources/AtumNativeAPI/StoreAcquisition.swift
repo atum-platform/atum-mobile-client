@@ -84,6 +84,18 @@ public enum StoreAcquireState: Equatable, Sendable {
     public func attempt(itemID: String, assistantID: NativeID?) throws -> StorePurchaseAttempt? {
         try journal.attempts(account: account).first { $0.itemID == itemID && $0.assistantID == assistantID }
     }
+    /// Retires saved attempts whose purchase history shows them reversed (same
+    /// offer, version, target and key). A reversed charge is fully explained,
+    /// and without this the item offers no recovery yet refuses every new
+    /// purchase while the attempt waits. Every other state keeps the original
+    /// key: a completed purchase missing from a separately read entitlement
+    /// list may only be lagging, and a new key there could charge twice.
+    public func retireReversed(by purchases: [StorePurchase]) throws {
+        for attempt in try journal.attempts(account: account)
+        where purchases.contains(where: { attempt.matches($0) && $0.state == .reversed }) {
+            try journal.remove(attempt, account: account)
+        }
+    }
     public func confirm(_ quote: StoreAcquireQuote, online: Bool) async -> StoreAcquireState {
         guard !working else { return .working }
         do {

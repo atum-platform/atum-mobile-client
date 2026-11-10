@@ -5,6 +5,12 @@ import XCTest
 /// (`App/Debug/StoreScriptedCommerce.swift`). No client, account or Protons
 /// are involved; the host keeps every write in memory.
 final class StoreCommerceUITests: TranscriptUITestCase {
+
+    /// Long copy can't be an XCUIElementQuery subscript (identifier length cap).
+    @MainActor
+    private func text(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
     private static let ax5Size = "UICTContentSizeCategoryAccessibilityXXXL"
     private static let delivered = "Sản phẩm đã sẵn sàng sử dụng."
     private static let insufficient = "Không đủ Proton để mua mục này."
@@ -34,9 +40,14 @@ final class StoreCommerceUITests: TranscriptUITestCase {
 
         let confirm = element(app, "store.review.confirm")
         confirm.tap()
-        // A second press while the first write works must not send again.
-        if confirm.exists && confirm.isHittable { confirm.tap() }
-        XCTAssertTrue(app.staticTexts[Self.delivered].waitForExistence(timeout: 5))
+        // A second press while the first write works must not send again. The
+        // write may already have finished and removed the button, so press the
+        // same point from one snapshot instead of re-querying it.
+        if let frame = try? confirm.snapshot().frame, !frame.isEmpty {
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        }
+        XCTAssertTrue(text(app, Self.delivered).waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "store.review.confirm").exists)
         keepScreenshot("U-Store-3-success-light-vi", of: app)
         element(app, "store.review.done").tap()
@@ -58,7 +69,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     func testInsufficientBalanceIsPlainWithNoTopUp() {
         let app = launchStore("store.insufficient")
         openItem("pet/gigi", in: app)
-        XCTAssertTrue(app.staticTexts[Self.insufficient].waitForExistence(timeout: 5))
+        XCTAssertTrue(text(app, Self.insufficient).waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "store.detail.balance").exists)
         XCTAssertFalse(element(app, "store.detail.acquire").exists, "no acquire action without the balance")
         assertNoTopUp(app)
@@ -73,14 +84,14 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         XCTAssertTrue(acquire.waitForExistence(timeout: 5))
         acquire.tap()
         element(app, "store.review.confirm").tap()
-        XCTAssertTrue(app.staticTexts[Self.uncertain].waitForExistence(timeout: 5))
+        XCTAssertTrue(text(app, Self.uncertain).waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "store.review.confirm").exists, "an unanswered write must not offer a new purchase")
         let check = element(app, "store.review.check")
         XCTAssertTrue(check.exists)
         keepScreenshot("U-Store-5-uncertain-light-vi", of: app)
 
         check.tap()
-        XCTAssertTrue(app.staticTexts[Self.delivered].waitForExistence(timeout: 5))
+        XCTAssertTrue(text(app, Self.delivered).waitForExistence(timeout: 5))
         element(app, "store.review.done").tap()
         element(app, "store.purchased.entry").tap()
         let records = app.descendants(matching: .any)
@@ -98,7 +109,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         XCTAssertTrue(pet.label.contains(Self.owned))
 
         pet.tap()
-        XCTAssertTrue(app.staticTexts[Self.owned].waitForExistence(timeout: 5))
+        XCTAssertTrue(text(app, Self.owned).waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "store.detail.acquire").exists)
         keepScreenshot("U-Store-6-owned-light-vi", of: app)
         element(app, "store.sheet.close").tap()
@@ -110,7 +121,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         XCTAssertTrue(mai.label.contains(Self.owned))
         XCTAssertTrue(element(app, "store.detail.acquire").waitForExistence(timeout: 3))
         mai.tap()
-        XCTAssertTrue(app.staticTexts[Self.skillOwned].waitForExistence(timeout: 3))
+        XCTAssertTrue(text(app, Self.skillOwned).waitForExistence(timeout: 3))
         XCTAssertFalse(element(app, "store.detail.acquire").exists)
         XCTAssertTrue(element(app, "store.detail.open").exists, "an owned skill opens its assistant's chat")
         keepScreenshot("U-Store-7-skill-owned-light-vi", of: app)
@@ -122,9 +133,13 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         XCTAssertTrue(cancel.waitForExistence(timeout: 5))
         keepScreenshot("U-Store-8-purchased-light-vi", of: app)
         cancel.tap()
-        let confirm = app.buttons["Xác nhận"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 3))
-        confirm.tap()
+        // The dialog's Confirm shares its label with other buttons on screen;
+        // tap the one the dialog put in front.
+        let confirms = app.buttons.matching(NSPredicate(format: "label == %@", "Xác nhận"))
+        XCTAssertTrue(confirms.firstMatch.waitForExistence(timeout: 3))
+        let confirm = confirms.allElementsBoundByIndex.last(where: \.isHittable)
+        XCTAssertNotNil(confirm, "the renewal dialog shows a Confirm")
+        confirm?.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", Self.renewalCancelled))
             .firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "store.renewal.cancel").exists)

@@ -80,6 +80,7 @@ import Observation
             guard generation == token else { return }
             catalog = values.0.items; entitlements = values.1.entitlements
             purchases = values.2.purchases; wallet = values.3
+            try? acquisition?.retireReversed(by: purchases)
             if let account { loadSavedAttempts(account: account) }
             var eligible = Set<NativeID>()
             for target in targets {
@@ -114,12 +115,21 @@ import Observation
         }
     }
 
+    /// Saved attempts that still need Check status. A matching delivery-pending
+    /// purchase does; so does a completed or granted one that the entitlement
+    /// list doesn't show as owned yet (lagging, revoked or lapsed): its key is
+    /// kept, so it must stay recoverable rather than silently block the item.
     var unresolvedAttempts: [StorePurchaseAttempt] {
         savedAttempts.filter { attempt in
-            if let purchase = purchases.first(where: { attempt.matches($0) }) {
-                return purchase.state == .deliveryPending
+            let owned = entitlements.contains {
+                $0.itemID == attempt.itemID && $0.assistantID == attempt.assistantID && $0.isOwned
             }
-            return !entitlements.contains { $0.itemID == attempt.itemID && $0.assistantID == attempt.assistantID && $0.isOwned }
+            guard let purchase = purchases.first(where: { attempt.matches($0) }) else { return !owned }
+            switch purchase.state {
+            case .deliveryPending: return true
+            case .granted, .completed: return !owned
+            case .reversed: return false
+            }
         }
     }
 

@@ -244,3 +244,10 @@ S6 `testU7` (catalog AX5/dark) was not run: it needs the external appearance run
 free-row assertion was updated to the button row label.
 
 - 2026-11-10 (coordinator): the scripted Store assistant constant in `ios/App/Debug/StoreScriptedCommerce.swift` is now `lanAgent`. Its old short name, written after `Self.`, matched the public guard's private-hostname rule (a `.lan` suffix). The guard itself is unchanged.
+
+### Coordinator verification and review fix (2026-11-10)
+
+- Cross-family review (Codex) found one blocking money-path bug: an attempt whose reply was lost stayed journaled after history showed the purchase reversed, so the item offered no recovery yet refused every new purchase. Fix: `StoreAcquisition.retireReversed(by:)`, called on every Store refresh, retires a saved attempt only when history shows that exact purchase reversed. A follow-up review rejected a wider first version (also retiring completed purchases that weren't owned): entitlements are read separately and may lag, and a new key there could charge twice. So a completed or granted attempt without visible ownership keeps its key and is listed in `unresolvedAttempts` with Check status. Test: `testReversedAttemptIsRetiredSoTheItemCanBeBoughtAgain`.
+- UI test fixes only: long copy is matched by label predicate (query identifiers have a length cap), the renewal dialog's Confirm is the hittable one of its label, and the deliberate second Confirm press uses one snapshot so a finished write can't fail the query.
+- Locked runs on the iPhone 17 simulator (iOS 27.0): `swift test --package-path ios -j 2` 0 failures; `-only-testing:AtumMobileUITests/StoreCommerceUITests` 5 of 5 passed.
+- Dev-only follow-up: `scripts/generate-native-store-fixtures.py --check` needs five `*token*.facts.json` upstream fixtures that stay private (`.gitignore`); CI does not run it.
