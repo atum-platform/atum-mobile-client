@@ -696,6 +696,18 @@ public struct AgentsRead: Sendable {
         return snapshot
     }
 
+    /// The assistant's pet (desktop `requestMatrixAgentPet`), read only.
+    public func agentPet(assistantID: NativeID) async throws -> AgentPetSelection {
+        try await read(AgentPetSelection.self, url: try agentURL(assistantID, suffix: "pet"),
+                       maximumResponseBodyBytes: 4_096)
+    }
+
+    /// The assistant's pet shelf and the account's own pets (desktop
+    /// `requestMatrixAgentPetCatalog`), read only.
+    public func agentPetCatalog(assistantID: NativeID) async throws -> AgentPetCatalog {
+        try await read(AgentPetCatalog.self, url: try agentURL(assistantID, suffix: "pets"))
+    }
+
     public func agentRoutines(assistantID: NativeID) async throws -> AgentRoutinesSnapshot {
         let snapshot = try await read(AgentRoutinesSnapshot.self,
                                       url: try agentURL(assistantID, suffix: "routines"),
@@ -1200,7 +1212,7 @@ public struct AgentsRead: Sendable {
 
     private func agentURL(_ id: NativeID, suffix: String) throws -> URL {
         guard ["definition", "avatar", "presentation", "models", "model-choice",
-               "model-destinations", "routines"].contains(suffix),
+               "model-destinations", "routines", "pet", "pets"].contains(suffix),
               let url = URL(string: Self.baseURL.absoluteString + "/agents/" + id.rawValue + "/" + suffix)
         else { throw NativeDomainClientFailure.invalidRequest }
         return url
@@ -1296,7 +1308,7 @@ public struct AgentsRead: Sendable {
         if parts[1] == "home" { return isAgentHomePath(Array(parts.dropFirst(2))) }
         if parts.count == 2 {
             return ["definition", "avatar", "presentation", "models", "model-choice",
-                    "model-destinations", "routines"].contains(parts[1])
+                    "model-destinations", "routines", "pet", "pets"].contains(parts[1])
         }
         return parts.count == 4 && parts[1] == "routines" && parts[3] == "runs"
             && (try? NativeID(parts[2])) != nil

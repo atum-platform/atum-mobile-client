@@ -178,9 +178,9 @@ struct ChatInfoActions {
     var assistantAvatar: AssistantAvatarActions?
     var assistantPresentation: AssistantPresentationActions?
     var assistantRoutines: AssistantRoutineActions?
-    /// Opens the Store, where the card's Pet and Skills rows lead (desktop
-    /// opens the same shelves). Nil in hosts without a Store.
-    var openStore: (() -> Void)?
+    /// Opens the Store on the shelf the card's Pet and Skills rows lead to
+    /// (desktop's `openShelf`). Nil in hosts without a Store.
+    var openStore: ((StoreSectionKind) -> Void)?
     /// "Delete chat" / "Leave group" (`ChatExitPolicy`), confirmed first.
     var exitRoom: ((String, ChatExitAction) -> Void)?
     /// Matrix ignore for a person in this chat's people.
@@ -247,6 +247,8 @@ struct AssistantDefinitionActions {
     /// The platform's own rename, fenced by the same revisions as the other
     /// definition writes. Nil where the host cannot rename.
     var rename: ((AgentDefinitionSnapshot, String) async -> AssistantRenameResult)?
+    /// The card's Pet row value (AS-2). Nil where the host has no pet read.
+    var pet: AssistantPetActions?
 }
 
 enum AssistantRenameResult {
@@ -799,7 +801,7 @@ struct ChatInfoHome: View {
             routines: actions.assistantRoutines,
             loadMatrixThumbnail: loadMatrixThumbnail,
             onMessage: { close() },
-            onOpenStore: actions.openStore.map { openStore in { close(); openStore() } }
+            onOpenStore: actions.openStore.map { openStore in { shelf in close(); openStore(shelf) } }
         )
     }
 

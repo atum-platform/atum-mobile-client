@@ -349,7 +349,9 @@ struct AppRoot: View {
                 setAppShortcutVisibility: { appID, shown in
                     await model.setAppShortcutVisibility(appID: appID, shown: shown)
                 },
-                commerce: model.storeCommerce
+                commerce: model.storeCommerce,
+                shelfRequest: router.storeShelfRequest,
+                onShelfShown: { router.storeShelfShown() }
             )
         } teamSpace: {
             TeamSpaceScreen(
@@ -462,9 +464,9 @@ struct AppRoot: View {
                                       router.dismissAccount()
                                       requestRoomOpen(assistant.roomID)
                                   },
-                                  onOpenStore: {
+                                  onOpenStore: { shelf in
                                       router.dismissAccount()
-                                      router.select(tab: .store)
+                                      router.openStore(shelf: shelf)
                                   }
                               ))
                           })
@@ -724,7 +726,7 @@ struct AppRoot: View {
                     assistantAvatar: model.assistantAvatarActions(roomID: roomID),
                     assistantPresentation: model.assistantPresentationActions(roomID: roomID),
                     assistantRoutines: model.assistantRoutineActions(roomID: roomID),
-                    openStore: { router.select(tab: .store) },
+                    openStore: { router.openStore(shelf: $0) },
                     // The Chief of Staff and "You" offer no Delete chat, Leave or Ignore (lane 2 D5).
                     exitRoom: model.offersPersonalExits(roomID: roomID) ? { roomID, action in
                         model.exitRoom(roomID, action)

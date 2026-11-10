@@ -20,6 +20,10 @@ struct StoreScreen: View {
     /// Acquisition, ownership and recovery. Without it the sheet shows the
     /// item only and offers no action.
     var commerce: LiveStoreCommerce? = nil
+    /// A shelf to scroll to once (an assistant card's Pet or Skills row);
+    /// `onShelfShown` clears the request.
+    var shelfRequest: StoreSectionKind? = nil
+    var onShelfShown: (() -> Void)? = nil
 
     @State private var showsDelayedLoadingMark = false
     @State private var selectedItem: LiveProductStoreItem?
@@ -80,6 +84,35 @@ struct StoreScreen: View {
     }
 
     private var catalog: some View {
+        ScrollViewReader { proxy in
+            catalogList
+                .task(id: ShelfScroll(shelf: shelfRequest, itemCount: store.items.count)) {
+                    guard let shelf = shelfRequest else { return }
+                    if let first = firstItemID(on: shelf) {
+                        withAnimation { proxy.scrollTo(first, anchor: .top) }
+                    }
+                    onShelfShown?()
+                }
+        }
+    }
+
+    private struct ShelfScroll: Equatable {
+        let shelf: StoreSectionKind?
+        let itemCount: Int
+    }
+
+    /// The first row of a shelf as `catalogList` draws it.
+    private func firstItemID(on shelf: StoreSectionKind) -> String? {
+        switch shelf {
+        case .featured: featured.first?.id
+        case .apps: store.apps.first?.id
+        case .assistants: assistants.first?.id
+        case .skills: skills.first?.id
+        case .pets: pets.first?.id
+        }
+    }
+
+    private var catalogList: some View {
         List {
             if showsPurchasedEntry { purchasedSection }
             if !featured.isEmpty { itemSection(.featured, items: featured) }

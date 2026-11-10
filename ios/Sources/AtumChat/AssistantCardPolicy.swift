@@ -49,6 +49,14 @@ public struct AssistantCardCapabilities: Equatable, Sendable {
 }
 
 public enum AssistantCardLayout {
+    /// Desktop's Pet row exists only where there is a Store to choose a pet
+    /// in (`assistant-card.tsx:737-752`, `store = Boolean(snapshot.apps)`).
+    public static func showsPet(storeAvailable: Bool) -> Bool { storeAvailable }
+
+    /// Desktop's Skills row exists only when the assistant has skills
+    /// (`assistant-card.tsx:754-758`, `SkillsRow` returns null at zero).
+    public static func showsSkills(count: Int) -> Bool { count > 0 }
+
     /// The card's row order. `role` is deliberately not a branch: the primary
     /// shows the same rows as every other assistant, and neither has a retire
     /// row on the phone. Callers pass it so that parity is part of the API and
