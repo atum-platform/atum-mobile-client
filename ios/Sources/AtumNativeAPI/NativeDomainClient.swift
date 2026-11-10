@@ -35,7 +35,7 @@ public struct AgentsRead: Sendable {
 /// Main-process-only client for explicit operations on the fixed native domain API. The
 /// refresh coordinator remains the only authority that can expose a bearer;
 /// SwiftUI receives typed domain values and safe failures only.
-@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI {
+@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
     private static let agentLifecycleURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents/lifecycle")!
@@ -49,6 +49,7 @@ public struct AgentsRead: Sendable {
     private static let cloudDisclosureURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/cloud/disclosure")!
     private static let companiesURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/companies")!
     private static let companyCapabilitiesURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/company-capabilities")!
+    private static let privateCosCapabilityURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/cloud/controller/company-private-cos")!
     private static let driveAccountURL = DriveContract.accountURL
 
     typealias Authorization = @MainActor @Sendable (_ forceRefresh: Bool) async throws -> String
@@ -481,6 +482,19 @@ public struct AgentsRead: Sendable {
     private func decodeConversationAnswer<T>(_ data: Data, _ decode: (Data) throws -> T) throws -> T {
         do { return try decode(data) }
         catch { throw CompanyAPIError.invalid }
+    }
+
+    public func companyPrivateCosCapability() async throws -> CompanyPrivateCosCapability {
+        try NativeAPI.decode(CompanyPrivateCosCapability.self, from:
+            try await companyData(url: Self.privateCosCapabilityURL, method: "GET", body: nil, wire: .v1_3))
+    }
+
+    public func companyPrivateCosView(companyID: NativeID) async throws -> CompanyPrivateCosView {
+        let view = try NativeAPI.decode(CompanyPrivateCosView.self, from:
+            try await companyData(url: try companyURL(companyID, suffix: "private-cos"),
+                                  method: "GET", body: nil, wire: .v1_3))
+        guard view.pair.companyPrincipal == companyID else { throw CompanyAPIError.invalid }
+        return view
     }
 
     private func companyData(url: URL, method: String, body: Data?,
@@ -1101,7 +1115,7 @@ public struct AgentsRead: Sendable {
                             Self.walletURL.path, Self.walletHistoryURL.path, Self.aliasLookupURL.path,
                             Self.assistantURL.path, Self.cloudDisclosureURL.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
-                            Self.driveAccountURL.path]
+                            Self.driveAccountURL.path, Self.privateCosCapabilityURL.path]
         let dynamicAgentPath = isAgentPath(url.path)
         let dynamicCompanyPath = isCompanyPath(url.path)
         let dynamicAppPath = isAppPath(url.path)
@@ -1140,7 +1154,7 @@ public struct AgentsRead: Sendable {
             .split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard let first = parts.first, (try? NativeID(first)) != nil else { return false }
         if parts.count == 1 { return true }
-        if parts.count == 2 { return ["accept", "leave", "channels", "conversations"].contains(parts[1]) }
+        if parts.count == 2 { return ["accept", "leave", "channels", "conversations", "private-cos"].contains(parts[1]) }
         // conversations/{id} and conversations/{id}/expand|hidden
         guard parts[1] == "conversations", (try? NativeID(parts[2])) != nil else { return false }
         if parts.count == 3 { return true }

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "profile": "atum.company-private-cos/1.1",
+  "state": "preparing",
+  "pair": {
+    "companyPrincipal": "37700000-0000-4000-8000-000000000001",
+    "memberPrincipal": "37700000-0000-4000-8000-000000000002",
+    "membershipIncarnation": "37700000-0000-4000-8000-000000000003"
+  },
+  "greetingState": "pending",
+  "operationId": "37700000-0000-4000-8000-000000000004"
+}

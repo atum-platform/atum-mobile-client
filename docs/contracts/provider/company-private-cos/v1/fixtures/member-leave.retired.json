@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "pair": {
+    "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+    "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+    "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+  },
+  "homeId": "a6000000-0000-4000-8000-000000000001",
+  "homeGeneration": 1,
+  "retiredAtMs": 1793500000000,
+  "purgeAtMs": 1796092000000,
+  "access": "denied",
+  "restoreOnRejoin": false,
+  "userExport": "none",
+  "financeReceipts": "retained_separately",
+  "state": "retired",
+  "homeState": "retained_pending_purge",
+  "memoryState": "retained_pending_purge",
+  "sessions": "revoked",
+  "schedules": "disabled"
+}

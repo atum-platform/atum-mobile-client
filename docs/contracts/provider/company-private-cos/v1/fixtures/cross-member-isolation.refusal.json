@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "requesterPrincipal": "a2000000-0000-4000-8000-000000000002",
+  "pair": {
+    "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+    "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+    "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+  },
+  "decision": "denied",
+  "code": "pair_mismatch",
+  "homeOpened": false,
+  "modelStarted": false,
+  "grantIssued": false
+}

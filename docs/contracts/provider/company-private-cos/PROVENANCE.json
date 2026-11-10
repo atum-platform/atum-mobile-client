@@ -1,0 +1,7 @@
+{
+  "providerCommit": "7df04652c7c1ce39f757891e01e0d14951db31bb",
+  "source": "spec/company-private-cos",
+  "viewSchema": "packages/protocol/src/company-private-cos.ts",
+  "viewSchemaSHA256": "c74c2434b492cf5554b0e5bd2025926143c84f547ace2987aa6583e9e22cbec5",
+  "viewHandler": "apps/shell/src/lib/company-private-cos.ts"
+}

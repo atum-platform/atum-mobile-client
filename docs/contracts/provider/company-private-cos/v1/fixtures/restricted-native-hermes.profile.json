@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "capability": "company_private_cos",
+  "runtime": "native_hermes",
+  "command": "prompt.submit",
+  "scope": {
+    "pair": {
+      "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+      "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+      "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+    },
+    "authorityEpoch": 7,
+    "contextEpoch": 1,
+    "homeGeneration": 1
+  },
+  "profileDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "funding": {
+    "kind": "company_wallet",
+    "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+    "maxMicroProtons": 500000,
+    "memberPrivateCapMicroProtons": 250000
+  },
+  "sandbox": {
+    "profile": "company_private_cos_restricted",
+    "homeMount": {
+      "kind": "company_private_cos_home",
+      "homeId": "a6000000-0000-4000-8000-000000000001",
+      "mode": "read_write"
+    },
+    "tools": [],
+    "personalMounts": false,
+    "personalTools": false,
+    "personalGrants": false,
+    "shell": false,
+    "network": false,
+    "schedules": false,
+    "backgroundReview": false,
+    "companySourceRetrieval": false
+  }
+}
