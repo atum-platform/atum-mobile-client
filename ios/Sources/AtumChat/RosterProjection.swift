@@ -47,13 +47,19 @@ public enum RosterProjection {
         /// listed by its own `app:<id>` row ID, has no conversation room and
         /// grants no destination or action.
         public var isPresentationOnly: Bool
+        /// The app has a chat (one the person deleted still counts, as on
+        /// desktop). False for a catalog app with no chat yet: its row follows
+        /// every chat, in catalog order, as desktop's
+        /// `apps.filter(entry => !entry.room)` does.
+        public var hasChat: Bool
 
         public init(id: String, rosterOrder: Int, conversationRoomID: String? = nil,
-                    isPresentationOnly: Bool = false) {
+                    isPresentationOnly: Bool = false, hasChat: Bool = true) {
             self.id = id
             self.rosterOrder = rosterOrder
             self.conversationRoomID = conversationRoomID
             self.isPresentationOnly = isPresentationOnly
+            self.hasChat = hasChat
         }
     }
 
@@ -175,24 +181,14 @@ public enum RosterProjection {
                   !room.isLegacyEncrypted, room.kind == .assistant(agentID: assistant.id) else { return nil }
             return (assistant, room)
         }
+        // Desktop `projectMatrixRoster`: the default assistant, then `/agents`
+        // order. A pin never moves an assistant (`roster-model.ts:196-246`).
         let primary = candidates.filter { $0.0.isPrimary }.sorted { $0.0.agentOrder < $1.0.agentOrder }
-        let pinned = candidates.filter { !$0.0.isPrimary && $0.1.isFavourite }.sorted(by: assistantPinOrder)
-        let remaining = candidates.filter { !$0.0.isPrimary && !$0.1.isFavourite }
+        let remaining = candidates.filter { !$0.0.isPrimary }
             .sorted { $0.0.agentOrder < $1.0.agentOrder }
-        return (primary + pinned + remaining).compactMap { assistant, room in
+        return (primary + remaining).compactMap { assistant, room in
             guard used.insert(room.id).inserted else { return nil }
             return Row(id: room.id, roomID: room.id, kind: .assistant(agentID: assistant.id))
-        }
-    }
-
-    private static func assistantPinOrder(_ lhs: (Assistant, Room), _ rhs: (Assistant, Room)) -> Bool {
-        switch (lhs.1.tagOrder, rhs.1.tagOrder) {
-        case let (left?, right?) where left != right: return left < right
-        case (_?, nil): return true
-        case (nil, _?): return false
-        default:
-            if lhs.0.agentOrder != rhs.0.agentOrder { return lhs.0.agentOrder < rhs.0.agentOrder }
-            return lhs.1.id < rhs.1.id
         }
     }
 
@@ -211,29 +207,44 @@ public enum RosterProjection {
         let founder = input.founderRoomID.flatMap { id in candidates.first { $0.id == id } }
         let pinned = candidates.filter { $0.id != founder?.id && $0.isFavourite && $0.membership == .joined }
             .sorted { pinOrder($0, $1, fallbackLeft: 0, fallbackRight: 0) }
-        let ordinary = candidates.filter { room in
-            room.id != founder?.id && !(room.isFavourite && room.membership == .joined) && !isApp(room)
-        }.sorted(by: ordinaryOrder)
         let pinnedIDs = Set(pinned.map(\.id))
-        let appRows = catalog.compactMap { app -> Row? in
+
+        // Desktop `roster-conversations.tsx:948-955`: one `sortConversations`
+        // over the ordinary rooms and each app's chat together, so Moon or
+        // Andy with a fresh message sits among the recent chats. Then the
+        // apps without a chat, then the coming-soon placeholders, each in
+        // catalog order.
+        var appChats = [(room: Room, row: Row)]()
+        var appsWithoutChat = [Row]()
+        var placeholders = [Row]()
+        for app in catalog {
             if app.isPresentationOnly {
                 // A coming-soon app has no conversation. It still owns one
                 // inert row, mapped back by its `app:<id>` presentation ID.
                 let rowID = "app:" + app.id
                 guard let room = roomsByID[rowID], room.kind == .app(appID: app.id),
                       room.membership == .joined, !room.isLegacyEncrypted,
-                      !pinnedIDs.contains(rowID), rowID != founder?.id else { return nil }
-                return Row(id: rowID, roomID: rowID,
-                           kind: .app(appID: app.id, reopensHiddenRoom: false))
+                      !pinnedIDs.contains(rowID), rowID != founder?.id else { continue }
+                placeholders.append(Row(id: rowID, roomID: rowID,
+                                        kind: .app(appID: app.id, reopensHiddenRoom: false)))
+                continue
             }
             // Agent/bot invitations are accepted by the session before roster
             // projection; unlike person invitations they never become rows.
             guard let roomID = app.conversationRoomID, let room = roomsByID[roomID],
                   room.kind == .app(appID: app.id), room.membership == .joined,
-                  !room.isLegacyEncrypted else { return nil }
-            guard !pinnedIDs.contains(room.id), room.id != founder?.id else { return nil }
-            return Row(id: room.id, roomID: room.id,
-                       kind: .app(appID: app.id, reopensHiddenRoom: room.isHiddenOnThisDevice))
+                  !room.isLegacyEncrypted else { continue }
+            guard !pinnedIDs.contains(room.id), room.id != founder?.id else { continue }
+            let row = Row(id: room.id, roomID: room.id,
+                          kind: .app(appID: app.id, reopensHiddenRoom: room.isHiddenOnThisDevice))
+            // A chat deleted on this phone still dates its row, as desktop's
+            // `appBot.hidden` room does; only an app with no chat at all waits
+            // after the chats.
+            if app.hasChat {
+                appChats.append((room, row))
+            } else {
+                appsWithoutChat.append(row)
+            }
         }
         func row(_ room: Room) -> Row {
             switch room.kind {
@@ -243,7 +254,11 @@ public enum RosterProjection {
             case .assistant: preconditionFailure("assistant rooms do not reach chatRows")
             }
         }
-        return ([founder].compactMap { $0 } + pinned + ordinary).map(row) + appRows
+        let ordinary = candidates.filter { room in
+            room.id != founder?.id && !(room.isFavourite && room.membership == .joined) && !isApp(room)
+        }.map { (room: $0, row: row($0)) }
+        let conversations = (ordinary + appChats).sorted { ordinaryOrder($0.room, $1.room) }.map(\.row)
+        return ([founder].compactMap { $0 } + pinned).map(row) + conversations + appsWithoutChat + placeholders
     }
 
     private static func deduplicatedApps(_ apps: [App]) -> [App] {
