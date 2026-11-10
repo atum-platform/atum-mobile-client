@@ -372,6 +372,7 @@ final class LiveAppModel {
         case unread
         case pinned
         case muted
+        case lowPriority
     }
 
     private struct RoomMutationKey: Hashable {
@@ -1384,6 +1385,51 @@ final class LiveAppModel {
         }
     }
 
+    func setRoomLowPriority(_ roomID: String, isLowPriority: Bool) {
+        beginRoomMutation(roomID: roomID, kind: .lowPriority, desired: isLowPriority) { session in
+            await session.setLowPriority(roomID: roomID, isLowPriority: isLowPriority)
+        }
+    }
+
+    /// The side panel's facts for a chat (M2): when it began, the
+    /// Team Spaces you share with the other person, the ignore list, and the
+    /// room's power levels for the Members page. Nil when there's no session.
+    func chatPanelDetails(roomID: String) async -> ChatInfoDetails? {
+        guard let liveMatrix, let read = await liveMatrix.panelDetails(roomID: roomID),
+              self.liveMatrix === liveMatrix else { return nil }
+        let ownUserID = conversation?.ownUserID
+        var details = ChatInfoDetails(
+            startedAt: read.createdAt.map { Date(timeIntervalSince1970: Double($0) / 1_000) },
+            ignoredUserIDs: read.ignoredUserIDs,
+            members: read.members.map {
+                .init(userID: $0.userID, name: $0.displayName, matrixAvatarURI: $0.avatarURL,
+                      power: $0.power, membership: $0.membership)
+            }
+        )
+        if let own = read.ownPower, let kick = read.kickLevel, let ban = read.banLevel {
+            details.moderation = ChatMemberModeration(ownPower: own, kickLevel: kick, banLevel: ban)
+        }
+        // A person chat: the Team Spaces whose rooms you are both joined to.
+        if conversation?.roomID == roomID, conversation?.kind == .person,
+           let peer = read.members.first(where: { $0.userID != ownUserID && $0.membership == .joined }) {
+            var names = [String]()
+            for company in companyWorkspace.companyRooms()
+            where await liveMatrix.isJoined(userID: peer.userID, inAnyOf: company.roomIDs) {
+                names.append(company.name)
+            }
+            guard self.liveMatrix === liveMatrix else { return nil }
+            details.teamSpaces = names
+        }
+        return details
+    }
+
+    /// Remove, ban or unban someone in a group's Members page.
+    func moderateMember(roomID: String, userID: String, action: ChatMemberAction) async -> Bool {
+        guard let liveMatrix else { return false }
+        let succeeded = await liveMatrix.moderate(roomID: roomID, userID: userID, action: action)
+        return succeeded && self.liveMatrix === liveMatrix
+    }
+
     func declineInvitation(_ roomID: String) {
         guard let liveMatrix,
               productRooms().contains(where: { $0.id == roomID && $0.isInvitation }) else { return }
@@ -1575,8 +1621,26 @@ final class LiveAppModel {
             isFounder: room.isFounder,
             founderHandle: room.isFounder ? founderHandle : nil,
             isPrimaryAssistant: assistant?.isDefault ?? false,
-            botHandle: assistantBotHandle
+            botHandle: assistantBotHandle,
+            topic: matrixRoom.topic,
+            isLowPriority: room.isLowPriority,
+            offersLowPriority: company == nil && Self.offersLowPriority(room, founderRoomID: founderRoomID)
         )
+    }
+
+    /// `RosterProjection.offersLowPriority` for one chat-list row.
+    private static func offersLowPriority(_ room: LiveProductRoom, founderRoomID: String?) -> Bool {
+        let kind: RosterProjection.Room.Kind
+        switch room.kind {
+        case .people: kind = .person
+        case .group: kind = .group
+        case .agent: return false
+        }
+        let projected = RosterProjection.Room(id: room.id, kind: kind,
+                                              membership: room.isInvitation ? .invited : .joined,
+                                              isFavourite: room.isPinned, isLowPriority: room.isLowPriority)
+        return RosterProjection.offersLowPriority(roomID: room.id, rooms: [projected],
+                                                  founderRoomID: founderRoomID)
     }
 
     /// What each assistant is for (the one-line title it was given), by agent
@@ -2809,7 +2873,8 @@ final class LiveAppModel {
             conversationOpenedRoom = opened.withRosterState(
                 unreadOverride: kind == .unread ? desired : nil,
                 pinnedOverride: kind == .pinned ? desired : nil,
-                mutedOverride: kind == .muted ? desired : nil
+                mutedOverride: kind == .muted ? desired : nil,
+                lowPriorityOverride: kind == .lowPriority ? desired : nil
             )
         }
         roomMutationQueue.enqueue(for: key) { @MainActor [weak self] in
@@ -5985,6 +6050,9 @@ final class LiveAppModel {
                     ]?.desired,
                     mutedOverride: pendingRoomMutations[
                         RoomMutationKey(roomID: room.id, kind: .muted)
+                    ]?.desired,
+                    lowPriorityOverride: pendingRoomMutations[
+                        RoomMutationKey(roomID: room.id, kind: .lowPriority)
                     ]?.desired
                 )
             }
@@ -6006,6 +6074,8 @@ final class LiveAppModel {
                 room.isFavourite == mutation.desired
             case .muted:
                 room.isMuted == mutation.desired
+            case .lowPriority:
+                room.isLowPriority == mutation.desired
             }
             if mutation.shouldRetire(actualMatches: matches, publicationRevision: revision) {
                 completed.append(key)
@@ -6031,7 +6101,10 @@ final class LiveAppModel {
             ]?.desired ?? live.isFavourite,
             mutedOverride: pendingRoomMutations[
                 RoomMutationKey(roomID: opened.id, kind: .muted)
-            ]?.desired ?? live.isMuted
+            ]?.desired ?? live.isMuted,
+            lowPriorityOverride: pendingRoomMutations[
+                RoomMutationKey(roomID: opened.id, kind: .lowPriority)
+            ]?.desired ?? live.isLowPriority
         )
         if conversation?.roomID == live.roomID {
             conversation?.markedUnreadChanged(live.isMarkedUnread)

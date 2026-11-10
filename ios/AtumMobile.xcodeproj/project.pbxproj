@@ -65,6 +65,7 @@
 		5424CCE97A6C9AC111B63526 /* CompanyWorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDC217316B8ABD288A5390BB /* CompanyWorkspaceModel.swift */; };
 		5545D858641C8AD2CCA1A7CE /* RecoverySheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822B71EFED54C821F414A0AD /* RecoverySheets.swift */; };
 		5652640CB42EC304DBA47862 /* MediaViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15A2BAFBA55DB05022FA6CE0 /* MediaViewer.swift */; };
+		5668844A25E271C81675DC61 /* ChatPanelHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B4C7D2DA2643ECCCF9E9C69 /* ChatPanelHost.swift */; };
 		58C98CA66B20F6364D693193 /* rich-text-notices.json in Resources */ = {isa = PBXBuildFile; fileRef = 16E80A4F8381968AECF596C5 /* rich-text-notices.json */; };
 		5EB134D76B899F90E0D467B5 /* MessageMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F21F01CD5A7DE4E8C71BFFC /* MessageMenu.swift */; };
 		5EC06AAEDB20A87EC841716D /* ComposerDictationCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3553821F25D476C4DB869723 /* ComposerDictationCopy.swift */; };
@@ -172,6 +173,7 @@
 		DE4586D8A4A1098F3187CD00 /* CompanySwitcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B34D10943B247E13747AAF8 /* CompanySwitcherTests.swift */; };
 		DEDFB925322967CD01590E5C /* KitGlyphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 921B6D886A7C47341BA06EA0 /* KitGlyphTests.swift */; };
 		DF761982CECDF074268BF5A7 /* AccountAssistantRosterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960C012E279790C8657A67FD /* AccountAssistantRosterTests.swift */; };
+		E07B18193463CEE2C2500B58 /* ChatPanelUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC664004AF714C51541782F /* ChatPanelUITests.swift */; };
 		E3665AB49BD1951028D9DF2B /* ProbeLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE2D07D34EDD53B2BC9B079 /* ProbeLog.swift */; };
 		E407B377E96207C435E818DB /* SwiftUIMath-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 434D4AEA1F0B23ECF0B0C391 /* SwiftUIMath-LICENSE.txt */; };
 		E7999E30F4D60C7DF47C9ECE /* S1MatrixUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93E1EECC6509DF3CD28B9F13 /* S1MatrixUITests.swift */; };
@@ -317,6 +319,7 @@
 		5773C98F5EB80B08BB493152 /* AppOnboardingCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOnboardingCopyTests.swift; sourceTree = "<group>"; };
 		5A72440409A3D796EF7342BB /* AttachmentPreparerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPreparerTests.swift; sourceTree = "<group>"; };
 		5B11924707D6B263D7C558F9 /* AtumSharedControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumSharedControls.swift; sourceTree = "<group>"; };
+		5B4C7D2DA2643ECCCF9E9C69 /* ChatPanelHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelHost.swift; sourceTree = "<group>"; };
 		5DD77D2B748B43AEA0A1F88A /* Sentry-THIRD_PARTY_NOTICES.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Sentry-THIRD_PARTY_NOTICES.txt"; sourceTree = "<group>"; };
 		5EB56378C2BC54E677F08543 /* AtumKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumKit.swift; sourceTree = "<group>"; };
 		5EDEE7E5C75ED5F661437470 /* AppOnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOnboardingViews.swift; sourceTree = "<group>"; };
@@ -431,6 +434,7 @@
 		FE9832C39E8B526348BAD2F0 /* AccountSettingsStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsStateTests.swift; sourceTree = "<group>"; };
 		FF24603753D3B4F72078B922 /* AttachSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachSheet.swift; sourceTree = "<group>"; };
 		FFAAC357B5A8394814F318E4 /* SessionLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLifecycle.swift; sourceTree = "<group>"; };
+		FFC664004AF714C51541782F /* ChatPanelUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -722,6 +726,7 @@
 				F215437C0382312CF51317D2 /* AtumUITestCase.swift */,
 				839C989D5BB2C48B2389C771 /* ChatInfoUITests.swift */,
 				ADA32EDA94792AE695A460E6 /* ChatKindsUITests.swift */,
+				FFC664004AF714C51541782F /* ChatPanelUITests.swift */,
 				B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */,
 				A3E14C8E07A5220CD1744589 /* GScrollDynamicTypeUITests.swift */,
 				12D964ECFA8E0F284D646944 /* GScrollUITests.swift */,
@@ -861,6 +866,7 @@
 				C7F63C1B58186F8A073F792B /* ChatEnvironment.swift */,
 				75D6ED1A84266C6C7E977FF1 /* ChatFaces.swift */,
 				4D90FAB83643A6D6FE0FB40C /* ChatInfoSheet.swift */,
+				5B4C7D2DA2643ECCCF9E9C69 /* ChatPanelHost.swift */,
 				D3C22E54A80C808CCBC723D7 /* ChatRowView.swift */,
 				8AC86D770CEC88C3D071341B /* ChatScreen.swift */,
 				7FDEBBF9F3B6168F6E70FBC5 /* Composer.swift */,
@@ -1130,6 +1136,7 @@
 				9625EE68D6AF6865416044CC /* AtumUITestCase.swift in Sources */,
 				815DA8D760AB5104D816C7E6 /* ChatInfoUITests.swift in Sources */,
 				75AC2E993A4C3B4443CD8F2C /* ChatKindsUITests.swift in Sources */,
+				E07B18193463CEE2C2500B58 /* ChatPanelUITests.swift in Sources */,
 				C8D3197CAA8F1DBADEB85732 /* ComposerAndMenuUITests.swift in Sources */,
 				1FED11C16F6AAF0A823FA3D5 /* GScrollDynamicTypeUITests.swift in Sources */,
 				F72702E8DB3BA69328FAD75F /* GScrollUITests.swift in Sources */,
@@ -1193,6 +1200,7 @@
 				D93763C7460FBB31966798C8 /* ChatInfoSheet.swift in Sources */,
 				512004AF2A207F6AD879422F /* ChatMediaComposerState.swift in Sources */,
 				1AA6D05769CB4EED3259B8A2 /* ChatMediaPresentation.swift in Sources */,
+				5668844A25E271C81675DC61 /* ChatPanelHost.swift in Sources */,
 				89A0F5EDDC3E9F6210EA7E49 /* ChatRowView.swift in Sources */,
 				F18BB8507585F8EF716E8CE3 /* ChatScreen.swift in Sources */,
 				9BCB093524687915C6D18414 /* CompanyConversationStore.swift in Sources */,

@@ -244,8 +244,11 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertEqual(current.value as? String, "Đang dùng")
     }
 
+    /// A personal group's panel (M2): name, topic and "N members"
+    /// (Members is its own page), the assistant-access line, and Pin and Mute
+    /// as switches that answer at once.
     @MainActor
-    func testGroupInfoShowsMembersAndOptimisticTiles() {
+    func testGroupInfoShowsMembersRowAndOptimisticSwitches() {
         let app = XCUIApplication()
         app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.chatKinds.rawValue)
             + ["-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN",
@@ -260,11 +263,10 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 3), "Info sheet did not appear")
         XCTAssertTrue(app.staticTexts["Nhóm thử"].exists)
         XCTAssertTrue(app.staticTexts["4 thành viên"].exists)
-        XCTAssertTrue(app.staticTexts["Thành viên"].exists)
-        XCTAssertTrue(app.staticTexts["Bạn"].exists)
+        app.swipeUp()
         let assistantAccess = app.descendants(matching: .any)
             .matching(identifier: "info.assistant-access").firstMatch
-        XCTAssertTrue(assistantAccess.exists)
+        XCTAssertTrue(assistantAccess.waitForExistence(timeout: 3))
         XCTAssertTrue(assistantAccess.label.contains("Trợ lý của bạn có thể đọc"))
         XCTAssertTrue(assistantAccess.label.contains("tin nhắn của người khác trong nhóm"))
         XCTAssertTrue(assistantAccess.label.localizedCaseInsensitiveContains("nhà cung cấp mô hình"))
@@ -275,10 +277,17 @@ final class ChatInfoUITests: TranscriptUITestCase {
         let mute = app.descendants(matching: .any).matching(identifier: "info.mute").firstMatch
         XCTAssertTrue(pin.exists)
         XCTAssertTrue(mute.exists)
-        pin.tap()
-        XCTAssertTrue(app.buttons["Bỏ ghim"].waitForExistence(timeout: 2))
-        mute.tap()
-        XCTAssertTrue(app.buttons["Bật thông báo"].waitForExistence(timeout: 2))
+        XCTAssertEqual(pin.value as? String, "0")
+        // Each switch answers at once in the app; the 5 s covers a busy shared
+        // runner (a 24 s accessibility stall was seen on 2026-11-06).
+        pin.switches.firstMatch.exists ? pin.switches.firstMatch.tap() : pin.tap()
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "1"), object: pin)], timeout: 5) == .completed,
+                      "pin is \(String(describing: pin.value)): \(app.debugDescription.prefix(12_000))")
+        mute.switches.firstMatch.exists ? mute.switches.firstMatch.tap() : mute.tap()
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "1"), object: mute)], timeout: 5) == .completed,
+                      "mute is \(String(describing: mute.value)): \(app.debugDescription.prefix(12_000))")
 
         keepScreenshot("s2-chat-info-group-light-vi", of: app)
     }

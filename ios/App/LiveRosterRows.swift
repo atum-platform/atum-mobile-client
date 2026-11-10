@@ -417,6 +417,7 @@ enum LiveRosterRows {
                     isMarkedUnread: room.isMarkedUnread,
                     isPinned: room.isFavourite,
                     isMuted: room.isMuted,
+                    isLowPriority: room.isLowPriority,
                     isFounder: isFounder,
                     claimsConversationType: ConversationRoomType.isClaimed(room.roomType),
                     roomAvatarURL: room.avatarURL

@@ -73,6 +73,12 @@ struct ChatInfoPresentation {
     /// The platform's bot-handle stem when `/agents` advertises one. The phone
     /// has no alias editor yet, so nil is an honest "not visible here".
     let botHandle: String?
+    /// A group's `m.room.topic`, shown under its name.
+    let topic: String?
+    /// The room's `m.lowpriority` tag, and whether this chat offers the switch
+    /// (`RosterProjection.offersLowPriority`).
+    let isLowPriority: Bool
+    let offersLowPriority: Bool
 
     init(roomID: String, title: String, subtitle: String? = nil, kind: Kind,
          avatar: LiveProductAvatar? = nil, matrixAvatarURI: String? = nil,
@@ -83,7 +89,11 @@ struct ChatInfoPresentation {
          pinLimitReached: Bool = false, members: [ChatInfoMember] = [],
          actionFailureToken: UInt64 = 0, company: CompanyChatInfo? = nil,
          isFounder: Bool = false, founderHandle: String? = nil,
-         isPrimaryAssistant: Bool = false, botHandle: String? = nil) {
+         isPrimaryAssistant: Bool = false, botHandle: String? = nil,
+         topic: String? = nil, isLowPriority: Bool = false, offersLowPriority: Bool = false) {
+        self.topic = topic
+        self.isLowPriority = isLowPriority
+        self.offersLowPriority = offersLowPriority
         self.roomID = roomID
         self.title = title
         self.subtitle = subtitle
@@ -126,6 +136,17 @@ struct ChatInfoPresentation {
         }
     }
 
+    /// Which panel this chat gets (`ChatPanelPolicy`).
+    var panelSurface: ChatPanelPolicy.Surface {
+        if company != nil { return .teamSpace }
+        return switch kind {
+        case .assistant: .assistant
+        case .app: .app
+        case .person: .person
+        case .group: .group
+        }
+    }
+
     var assistantAccessCopyKey: ChatCopyKey {
         roomIsEncrypted ? .infoAssistantAccessEncrypted : .infoAssistantAccessPlain
     }
@@ -154,6 +175,38 @@ struct ChatInfoActions {
     var setIgnored: ((String, Bool) async -> Bool)?
     /// The signed-in account is the Founder: the Founder chat is kept.
     var viewerIsFounder = false
+    /// Matrix `m.lowpriority` for a person or group chat.
+    var setLowPriority: ((String, Bool) -> Void)?
+    /// The panel's facts that need a read of their own (the room's start, its
+    /// people's power levels, the Team Spaces you share): read when the panel
+    /// opens, never on the chat's own path. Nil where the host has none.
+    var loadDetails: ((String) async -> ChatInfoDetails?)?
+    /// Remove, ban or unban someone in a group (Matrix kick, ban, unban).
+    var moderateMember: ((String, String, ChatMemberAction) async -> Bool)?
+}
+
+/// What the panel reads when it opens. Every field may be unknown; an unknown
+/// one is left out of the panel, never guessed.
+struct ChatInfoDetails: Equatable {
+    struct Member: Equatable, Identifiable {
+        let userID: String
+        let name: String
+        let matrixAvatarURI: String?
+        let power: Int64
+        let membership: ChatMemberModeration.Membership
+        var id: String { userID }
+    }
+
+    /// When the chat began: its `m.room.create` event's time.
+    var startedAt: Date?
+    /// The Team Spaces whose rooms both of you are joined to, by name.
+    var teamSpaces: [String] = []
+    /// The account's ignore list (`m.ignored_user_list`).
+    var ignoredUserIDs: Set<String> = []
+    /// The room's power levels as they apply to you; nil leaves only Block.
+    var moderation: ChatMemberModeration?
+    /// Everyone the Members page lists with their power: joined, invited and banned.
+    var members: [Member] = []
 }
 
 enum AssistantDefinitionLoadResult {
@@ -249,17 +302,24 @@ struct AssistantPresentationActions {
     let save: (AgentPresentationSnapshot, String?, AgentMark) async -> AssistantPresentationSaveResult
 }
 
-struct ChatInfoSheet: View {
+/// The panel's home page (`ChatPanelHost`): who the chat is with, the chat's
+/// own settings, then its actions. Person and group chats follow the desktop's
+/// conversation info panel; the assistant's home *is* its card; app and
+/// Team Space chats keep their own sections.
+struct ChatInfoHome: View {
     let design: LiveDesign
     let info: ChatInfoPresentation
     let actions: ChatInfoActions
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
+    var details: ChatInfoDetails?
+    let close: () -> Void
+    let open: (ChatPanelPolicy.Page) -> Void
+    /// Reads the panel's details again after a change they show (Block).
+    var reload: () -> Void = {}
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmation: SheetConfirmation?
-    @State private var detent: PresentationDetent = .large
 
     private enum SheetConfirmation: Equatable {
         case leaveCompany
@@ -297,71 +357,91 @@ struct ChatInfoSheet: View {
         return info.members.first { mayIgnore($0) }
     }
 
+    /// A personal chat (a person or a group of people, not a Team Space room):
+    /// the desktop's conversation info layout.
+    private var isPersonal: Bool {
+        guard info.company == nil else { return false }
+        switch info.kind {
+        case .person, .group: return true
+        case .assistant, .app: return false
+        }
+    }
+
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isAssistantInfo {
-                    // The assistant's info sheet *is* the assistant card: one
-                    // screen, every field edited where it stands. No profile
-                    // summary and no "Edit assistant" step.
-                    assistantSection
-                } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            header
-                            actionTiles
-                                .padding(.top, 20)
-                            assistantAccessSection.padding(.top, 24)
-                            if let company = info.company {
-                                companySection(company).padding(.top, 24)
-                            } else if case .group = info.kind {
-                                membersSection.padding(.top, 24)
-                            }
-                            if case .app = info.kind { deleteSection.padding(.top, 24) }
-                            exitSection.padding(.top, 24)
+        Group {
+            if isAssistantInfo {
+                // The assistant's info sheet *is* the assistant card: one
+                // screen, every field edited where it stands. No profile
+                // summary and no "Edit assistant" step.
+                assistantSection
+            } else if isPersonal {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        header
+                        if case .group = info.kind { membersRow.padding(.top, 20) }
+                        if case .person = info.kind, let spaces = details?.teamSpaces, !spaces.isEmpty {
+                            teamSpacesSection(spaces).padding(.top, 24)
                         }
-                        .padding(.top, 24)
-                        .padding(.bottom, 32)
+                        conversationSection.padding(.top, 24)
+                        assistantAccessSection.padding(.top, 24)
+                        exitSection.padding(.top, 24)
                     }
+                    .padding(.top, 24)
+                    .padding(.bottom, 32)
                 }
-            }
-            .background(atum.color(.ground, scheme: scheme).opacity(0.001))
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: {
-                        atum.barIcon(.close)
+                .scrollDismissesKeyboard(.interactively)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        header
+                        actionTiles
+                            .padding(.top, 20)
+                        assistantAccessSection.padding(.top, 24)
+                        if let company = info.company {
+                            companySection(company).padding(.top, 24)
+                        }
+                        if case .app = info.kind { deleteSection.padding(.top, 24) }
+                        exitSection.padding(.top, 24)
                     }
-                    .accessibilityLabel(copy(.dismiss))
+                    .padding(.top, 24)
+                    .padding(.bottom, 32)
                 }
             }
         }
-        .atumDesign(visual: atum)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.visible)
-        .accessibilityIdentifier("info.sheet")
+        .background(atum.color(.ground, scheme: scheme).opacity(0.001))
+        .navigationTitle(panelTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                ChatPanelCloseButton(design: design, close: close)
+            }
+        }
         .confirmationDialog(confirmationTitle, isPresented: isConfirming,
                             titleVisibility: .visible, presenting: confirmation) { confirmation in
             switch confirmation {
             case .leaveCompany:
                 Button(companyCopy.leaveConfirm, role: .destructive) {
                     if let company = info.company { actions.leaveCompany?(company.companyID) }
-                    dismiss()
+                    close()
                 }
             case .deleteApp:
                 Button(copy(.deleteChat), role: .destructive) {
                     actions.deleteAppRoom?(info.roomID)
-                    dismiss()
+                    close()
                 }
             case let .exit(action):
                 Button(exitTitle(action), role: .destructive) {
                     actions.exitRoom?(info.roomID, action)
-                    dismiss()
+                    close()
                 }
             case let .ignore(userID, _):
-                Button(design.text(Self.ignoreKey), role: .destructive) {
-                    Task { _ = await actions.setIgnored?(userID, true) }
+                Button(design.text(Self.blockKey), role: .destructive) {
+                    Task {
+                        _ = await actions.setIgnored?(userID, true)
+                        reload()
+                    }
                 }
             }
             Button(copy(.cancel), role: .cancel) {}
@@ -375,7 +455,7 @@ struct ChatInfoSheet: View {
                 Text(design.text(action == .deleteChat ? "src.matrix.chat-copy.copies.deleteChatBody"
                                                        : "src.matrix.chat-copy.copies.leaveBody"))
             case .ignore:
-                Text(design.text("src.matrix.moderation-copy.copies.notice"))
+                Text(design.text("src.matrix.chat-copy.copies.blockPersonBody"))
             }
         }
         .sensoryFeedback(.error, trigger: info.actionFailureToken)
@@ -383,6 +463,151 @@ struct ChatInfoSheet: View {
             guard old != new else { return }
             AccessibilityNotification.Announcement(copy(.errorGeneric)).post()
         }
+    }
+
+    /// The bar's title: "Conversation info" / "Group info" in a personal chat,
+    /// as on the desktop; none elsewhere (the header names the chat).
+    private var panelTitle: String {
+        guard isPersonal else { return "" }
+        if case .group = info.kind { return design.text(PersonInfoKey.groupInfo) }
+        return design.text(PersonInfoKey.conversationInfo)
+    }
+
+    // MARK: Personal chats (desktop)
+
+    /// "N members" opens the group's Members page inside the panel.
+    private var membersRow: some View {
+        let count: Int = if case let .group(memberCount) = info.kind { memberCount } else { 0 }
+        return Button { open(.members) } label: {
+            HStack(spacing: 12) {
+                Image(atum.symbol(.users))
+                Text(design.text(PersonInfoKey.members, arguments: [.number(Int64(count))]))
+                Spacer()
+                Image(atum.symbol(.chevronRight))
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+            }
+            .foregroundStyle(atum.color(.ink, scheme: scheme))
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+            .background(atum.color(.cell, scheme: scheme),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .accessibilityIdentifier("info.members.open")
+    }
+
+    private func teamSpacesSection(_ spaces: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(design.text(PersonInfoKey.teamSpaces))
+            VStack(spacing: 0) {
+                ForEach(Array(spaces.enumerated()), id: \.offset) { index, name in
+                    HStack(spacing: 12) {
+                        Image(atum.symbol(.briefcase))
+                        Text(verbatim: name)
+                        Spacer()
+                    }
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 48)
+                    if index < spaces.count - 1 { Divider().padding(.leading, 48) }
+                }
+            }
+            .background(atum.color(.cell, scheme: scheme),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("info.team-spaces")
+    }
+
+    /// The conversation's own facts and switches: encryption, when it began,
+    /// pin, mute and (for an ordinary chat) low priority.
+    private var conversationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(design.text(PersonInfoKey.conversation))
+            VStack(spacing: 0) {
+                factRow(glyph: .shield,
+                        text: design.text(info.roomIsEncrypted ? PersonInfoKey.encrypted : PersonInfoKey.notEncrypted),
+                        id: "info.encryption")
+                if let startedAt = details?.startedAt {
+                    Divider().padding(.leading, 48)
+                    factRow(glyph: .clock,
+                            text: design.text(PersonInfoKey.started, arguments: [.text(startedDate(startedAt))]),
+                            id: "info.started")
+                }
+                Divider().padding(.leading, 48)
+                switchRow(glyph: info.isPinned ? .pinFilled : .pin, title: copy(.pin),
+                          isOn: info.isPinned, isEnabled: info.isPinned || !info.pinLimitReached,
+                          id: "info.pin") { actions.setPinned?(info.roomID, $0) }
+                Divider().padding(.leading, 48)
+                switchRow(glyph: info.isMuted ? .bellOff : .bell, title: design.text(PersonInfoKey.muteNotifications),
+                          isOn: info.isMuted, isEnabled: actions.setMuted != nil,
+                          id: "info.mute") { actions.setMuted?(info.roomID, $0) }
+                if info.offersLowPriority, actions.setLowPriority != nil {
+                    Divider().padding(.leading, 48)
+                    switchRow(glyph: .chevronDown, title: design.text(PersonInfoKey.lowPriority),
+                              isOn: info.isLowPriority, isEnabled: true,
+                              id: "info.low-priority") { actions.setLowPriority?(info.roomID, $0) }
+                }
+            }
+            .background(atum.color(.cell, scheme: scheme),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
+            if !info.isPinned, info.pinLimitReached {
+                Text(copy(.pinLimit))
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .padding(.horizontal, 32)
+            }
+        }
+        // A container of its own, so its rows keep their identifiers (on a
+        // plain stack the identifier is handed down and replaces theirs).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("info.conversation")
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(verbatim: text)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(atum.color(.soft, scheme: scheme))
+            .padding(.horizontal, 32)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func factRow(glyph: AtumGlyph, text: String, id: String) -> some View {
+        HStack(spacing: 12) {
+            Image(atum.symbol(glyph))
+            Text(verbatim: text)
+            Spacer()
+        }
+        .foregroundStyle(atum.color(.ink, scheme: scheme))
+        .padding(.horizontal, 16)
+        .frame(minHeight: 48)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(id)
+    }
+
+    private func switchRow(glyph: AtumGlyph, title: String, isOn: Bool, isEnabled: Bool,
+                           id: String, set: @escaping (Bool) -> Void) -> some View {
+        Toggle(isOn: Binding(get: { isOn }, set: { set($0) })) {
+            HStack(spacing: 12) {
+                Image(atum.symbol(glyph))
+                Text(verbatim: title)
+            }
+        }
+        .tint(atum.color(.actionStrong, scheme: scheme))
+        .foregroundStyle(atum.color(.ink, scheme: scheme))
+        .padding(.horizontal, 16)
+        .frame(minHeight: 48)
+        .disabled(!isEnabled)
+        .accessibilityIdentifier(id)
+    }
+
+    private func startedDate(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(date: .long, time: .omitted)
+            .locale(Locale(identifier: design.locale)))
     }
 
     private var header: some View {
@@ -410,6 +635,14 @@ struct ChatInfoSheet: View {
                     .font(.footnote)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
                     .accessibilityIdentifier("chat.info.founder.handle")
+            }
+            if isPersonal, case .group = info.kind, let topic = info.topic, !topic.isEmpty {
+                Text(verbatim: topic)
+                    .font(.subheadline)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                    .accessibilityIdentifier("info.topic")
             }
             if let kindLine {
                 Text(kindLine)
@@ -521,8 +754,8 @@ struct ChatInfoSheet: View {
             avatar: actions.assistantAvatar,
             routines: actions.assistantRoutines,
             loadMatrixThumbnail: loadMatrixThumbnail,
-            onMessage: { dismiss() },
-            onOpenStore: actions.openStore.map { open in { dismiss(); open() } }
+            onMessage: { close() },
+            onOpenStore: actions.openStore.map { openStore in { close(); openStore() } }
         )
     }
 
@@ -540,8 +773,8 @@ struct ChatInfoSheet: View {
         case let .exit(action):
             design.text(action == .deleteChat ? "src.matrix.chat-copy.copies.deleteChatTitle"
                                               : "src.matrix.chat-copy.copies.leaveTitle")
-        case let .ignore(_, name):
-            design.text("src.matrix.chat-copy.copies.memberIgnoreTitle", arguments: [.text(name)])
+        case .ignore:
+            design.text("src.matrix.chat-copy.copies.blockPersonTitle")
         case nil: ""
         }
     }
@@ -627,78 +860,38 @@ struct ChatInfoSheet: View {
         }
     }
 
-    private var membersSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(copy(.members))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(atum.color(.soft, scheme: scheme))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-                .accessibilityAddTraits(.isHeader)
-            LazyVStack(spacing: 0) {
-                ForEach(info.members) { member in
-                    HStack(spacing: 12) {
-                        ChatInfoMemberAvatar(member: member, loadMatrixThumbnail: loadMatrixThumbnail)
-                        Text(verbatim: member.name).font(.body)
-                        Spacer()
-                        if member.isCurrentUser {
-                            Text(copy(.you))
-                                .font(.subheadline)
-                                .foregroundStyle(atum.color(.soft, scheme: scheme))
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 52)
-                    .contentShape(Rectangle())
-                    .contextMenu {
-                        // Desktop: "choose Ignore beside them in a chat's people list".
-                        if mayIgnore(member) {
-                            Button(role: .destructive) {
-                                confirmation = .ignore(userID: member.userID, name: member.name)
-                            } label: {
-                                Label(design.text(Self.ignoreKey), image: atum.symbol(.eyeOff))
-                            }
-                        }
-                    }
-                    .accessibilityActions {
-                        if mayIgnore(member) {
-                            Button(design.text(Self.ignoreKey)) {
-                                confirmation = .ignore(userID: member.userID, name: member.name)
-                            }
-                        }
-                    }
-                    if member.id != info.members.last?.id {
-                        Divider().padding(.leading, 60)
-                    }
-                }
-            }
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 16)
-            .accessibilityIdentifier("info.members")
-        }
-    }
-
-    static let ignoreKey = "src.matrix.moderation-copy.copies.ignore"
+    /// Block and Unblock (Matrix `m.ignored_user_list`), with the desktop's words.
+    static let blockKey = "src.matrix.chat-copy.copies.blockPerson"
+    static let unblockKey = "src.matrix.chat-copy.copies.unblockPerson"
 
     private func exitTitle(_ action: ChatExitAction) -> String {
         design.text(action == .deleteChat ? "src.matrix.chat-copy.copies.deleteChat" : "desktop.dm.group.leave")
     }
 
-    /// Ignore the other person (person chats) and Delete chat / Leave group,
-    /// in one quiet group of danger rows.
+    /// Block the other person (person chats) and Delete chat / Leave group, in
+    /// one quiet group at the end, as on the desktop. Block is undone in place.
     @ViewBuilder private var exitSection: some View {
         if ignorablePeer != nil || exitAction != nil {
             VStack(spacing: 0) {
                 if let peer = ignorablePeer {
-                    dangerRow(glyph: .eyeOff, title: design.text(Self.ignoreKey), id: "info.ignore") {
-                        confirmation = .ignore(userID: peer.userID, name: peer.name)
+                    let blocked = details?.ignoredUserIDs.contains(peer.userID) == true
+                    actionRow(glyph: .eyeOff, title: design.text(blocked ? Self.unblockKey : Self.blockKey),
+                              tone: .ink, id: blocked ? "info.unblock" : "info.block") {
+                        if blocked {
+                            Task {
+                                _ = await actions.setIgnored?(peer.userID, false)
+                                reload()
+                            }
+                        } else {
+                            confirmation = .ignore(userID: peer.userID, name: peer.name)
+                        }
                     }
                     if exitAction != nil { Divider().padding(.leading, 48) }
                 }
                 if let exitAction {
-                    dangerRow(glyph: exitAction == .deleteChat ? .trash : .logOut,
-                              title: exitTitle(exitAction), id: "info.exit." + exitAction.rawValue) {
+                    actionRow(glyph: exitAction == .deleteChat ? .trash : .logOut,
+                              title: exitTitle(exitAction), tone: .danger,
+                              id: "info.exit." + exitAction.rawValue) {
                         confirmation = .exit(exitAction)
                     }
                 }
@@ -709,15 +902,15 @@ struct ChatInfoSheet: View {
         }
     }
 
-    private func dangerRow(glyph: AtumGlyph, title: String, id: String,
+    private func actionRow(glyph: AtumGlyph, title: String, tone: AtumColorRole, id: String,
                            action: @escaping () -> Void) -> some View {
-        Button(role: .destructive, action: action) {
+        Button(role: tone == .danger ? .destructive : nil, action: action) {
             HStack(spacing: 12) {
                 Image(atum.symbol(glyph))
                 Text(verbatim: title)
                 Spacer()
             }
-            .foregroundStyle(atum.color(.danger, scheme: scheme))
+            .foregroundStyle(atum.color(tone, scheme: scheme))
             .padding(.horizontal, 16)
             .frame(minHeight: 52)
             .contentShape(Rectangle())
@@ -750,7 +943,9 @@ struct ChatInfoSheet: View {
         case let .app(verification?): copy(verification == .verified ? .partnerApp : .firstPartyApp)
         case .app(nil): nil
         case .person: nil
-        case let .group(memberCount): copy(.infoMemberCount, [.number(Int64(memberCount))])
+        case let .group(memberCount):
+            // A personal group says its count on the Members row instead.
+            isPersonal ? nil : copy(.infoMemberCount, [.number(Int64(memberCount))])
         }
     }
 
@@ -848,7 +1043,9 @@ struct ChatInfoAvatar: View {
     }
 }
 
-private struct ChatInfoMemberAvatar: View {
+/// A member's face: circles for people and assistants, a squircle for an
+/// app's bot (STYLE.md §5).
+struct ChatInfoMemberAvatar: View {
     let member: ChatInfoMember
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
     @State private var art: AtumAvatarArt?
@@ -866,4 +1063,26 @@ private struct ChatInfoMemberAvatar: View {
                 art = loaded
             }
     }
+}
+
+/// The conversation info panel's words, exported from the desktop's
+/// `person-info-copy.ts`.
+enum PersonInfoKey {
+    private static let prefix = "src.matrix.person-info-copy.copy."
+    static let conversationInfo = prefix + "conversationInfo"
+    static let groupInfo = prefix + "groupInfo"
+    static let showInfo = prefix + "showInfo"
+    static let closeInfo = prefix + "closeInfo"
+    static let teamSpaces = prefix + "teamSpaces"
+    static let conversation = prefix + "conversation"
+    static let encrypted = prefix + "encrypted"
+    static let notEncrypted = prefix + "notEncrypted"
+    static let started = prefix + "started"
+    static let members = prefix + "members"
+    static let muteNotifications = prefix + "muteNotifications"
+    static let lowPriority = prefix + "lowPriority"
+    static let back = prefix + "back"
+    static let loading = prefix + "loading"
+    static let failed = prefix + "failed"
+    static let tryAgain = prefix + "tryAgain"
 }

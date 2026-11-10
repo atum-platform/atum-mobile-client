@@ -23,6 +23,10 @@ struct ScriptedChatHost: View {
     @State private var path: [String]
     @State private var infoPinned = false
     @State private var infoMuted = false
+    @State private var infoLowPriority = false
+    @State private var scriptedIgnored = Set<String>()
+    @State private var scriptedRemoved = Set<String>()
+    @State private var scriptedBanned: Set<String> = [ScriptedCast.anhKhoa]
     @State private var scriptedDefinition: AgentDefinitionSnapshot
     @State private var scriptedModels: ManagedModelSnapshot
     @State private var scriptedModelDestinations: ManagedModelDestinationSnapshot
@@ -204,7 +208,25 @@ struct ScriptedChatHost: View {
                                             return .saved(scriptedRoutines)
                                         },
                                         runs: { id in .value(Self.runs(id)) }
-                                    ) : nil
+                                    ) : nil,
+                                exitRoom: { _, _ in path = [] },
+                                setIgnored: { userID, ignored in
+                                    if ignored { scriptedIgnored.insert(userID) } else { scriptedIgnored.remove(userID) }
+                                    UITestProbe.append("ignored \(userID) \(ignored)", to: "panel.txt")
+                                    return true
+                                },
+                                setLowPriority: { _, value in infoLowPriority = value },
+                                loadDetails: { _ in scriptedDetails },
+                                moderateMember: { _, userID, action in
+                                    switch action {
+                                    case .remove: scriptedRemoved.insert(userID)
+                                    case .ban: scriptedBanned.insert(userID)
+                                    case .unban: scriptedBanned.remove(userID)
+                                    case .block, .unblock: return false
+                                    }
+                                    UITestProbe.append("\(action.rawValue) \(userID)", to: "panel.txt")
+                                    return true
+                                }
                             ),
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,
@@ -309,11 +331,50 @@ struct ScriptedChatHost: View {
             pinLimitReached: !infoPinned && Self.pinsAreFull,
             members: scriptedMembers,
             isPrimaryAssistant: script.context.kind == .assistant,
-            botHandle: script.context.kind == .assistant ? "atum" : nil
+            botHandle: script.context.kind == .assistant ? "atum" : nil,
+            topic: script.context.kind == .group ? "Lên kế hoạch cuối tuần" : nil,
+            isLowPriority: infoLowPriority,
+            offersLowPriority: !infoPinned
+                && (script.context.kind == .person || script.context.kind == .group)
+        )
+    }
+
+    /// The panel's scripted facts (M2): a fixed start date, a shared
+    /// Team Space for the person chat, and a group where I am an admin, one
+    /// moderator outranks the others and one person is banned.
+    private var scriptedDetails: ChatInfoDetails {
+        let powers: [String: Int64] = [ScriptedCast.me: 100, ScriptedCast.huy: 50]
+        var members = scriptedMembers.filter { !scriptedRemoved.contains($0.userID) }.map { member in
+            ChatInfoDetails.Member(userID: member.userID, name: member.name, matrixAvatarURI: nil,
+                                   power: powers[member.userID] ?? 0,
+                                   membership: scriptedBanned.contains(member.userID) ? .banned : .joined)
+        }
+        if script.context.kind == .group {
+            for userID in scriptedBanned where !members.contains(where: { $0.userID == userID }) {
+                members.append(.init(userID: userID, name: script.names[userID] ?? "Anh Khoa",
+                                     matrixAvatarURI: nil, power: 0, membership: .banned))
+            }
+        }
+        return ChatInfoDetails(
+            startedAt: Date(timeIntervalSince1970: 1_791_763_200), // 2026-10-12
+            teamSpaces: script.context.kind == .person ? ["Example Team"] : [],
+            ignoredUserIDs: scriptedIgnored,
+            moderation: script.context.kind == .group
+                ? ChatMemberModeration(ownPower: 100, kickLevel: 50, banLevel: 50) : nil,
+            members: script.context.kind == .group ? members : []
         )
     }
 
     private var scriptedMembers: [ChatInfoMember] {
+        if script.context.kind == .person {
+            // The other person: whoever the script names who isn't me.
+            guard let peer = script.names.keys.sorted().first(where: { $0 != script.context.ownUserID })
+            else { return [] }
+            return [ChatInfoMember(userID: peer, name: script.names[peer] ?? peer, matrixAvatarURI: nil,
+                                   isAssistant: false, isCurrentUser: false),
+                    ChatInfoMember(userID: ScriptedCast.me, name: "Test User", matrixAvatarURI: nil,
+                                   isAssistant: false, isCurrentUser: true)]
+        }
         guard script.context.kind == .group else { return [] }
         let userIDs = [ScriptedCast.me, ScriptedCast.huy, ScriptedCast.lan, ScriptedCast.quan]
         return userIDs.map { userID in
