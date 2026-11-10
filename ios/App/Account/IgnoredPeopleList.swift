@@ -1,3 +1,4 @@
+import AtumChat
 import SwiftUI
 
 /// One person on the Matrix ignore list (`m.ignored_user_list`).
@@ -9,12 +10,10 @@ struct IgnoredPerson: Identifiable, Equatable, Sendable {
     /// Their profile name; else the readable part of their address; else the
     /// word for someone unnamed. Never an opaque allocated ID (desktop
     /// `person-name.ts`, ledger AC8).
+    /// A readable early localpart reads as a name, without an "@": it is not
+    /// a handle, and the directory may give that handle to someone else.
     func shownName(unnamed: String) -> String {
-        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
-        let local = userID.dropFirst().prefix { $0 != ":" }
-        let opaque = local.range(of: #"^(user|agent|app|service|system)-[0-9a-f]{16,}$"#,
-                                 options: .regularExpression) != nil
-        return opaque || local.isEmpty ? unnamed : "@" + local
+        MatrixPersonName.shown(name, userID: userID, unnamed: unnamed)
     }
 }
 

@@ -316,7 +316,7 @@ struct AppRoot: View {
                 teamSpace: model.companyWorkspace.tabBadge(signals: companySignals))
         ) {
             HomeScreen(design: design, router: router,
-                       accountName: accountPresentation.name,
+                       accountName: accountPresentation.name(unnamed: PeopleNameWords.unnamed),
                        accountAvatarURL: accountPresentation.avatarURL,
                        presentation: home,
                        actions: homeActions,

@@ -90,8 +90,12 @@ final class KitGlyphTests: XCTestCase {
 final class IgnoredPersonNameTests: XCTestCase {
     func testNameThenReadableAddressThenTheUnnamedWord() {
         XCTAssertEqual(IgnoredPerson(userID: "@lan:atum.test", name: "Lan").shownName(unnamed: "U"), "Lan")
-        XCTAssertEqual(IgnoredPerson(userID: "@lan:atum.test", name: " ").shownName(unnamed: "U"), "@lan")
+        // A readable early localpart is a name, not a handle (desktop person-name.ts).
+        XCTAssertEqual(IgnoredPerson(userID: "@lan:atum.test", name: " ").shownName(unnamed: "U"), "lan")
         XCTAssertEqual(IgnoredPerson(userID: "@user-0123456789abcdef01:atum.test", name: nil)
             .shownName(unnamed: "U"), "U")
+        // MAS's old fallback name (the opaque localpart) is no name either.
+        XCTAssertEqual(IgnoredPerson(userID: "@user-0123456789abcdef01:atum.test",
+                                     name: "user-0123456789abcdef01").shownName(unnamed: "U"), "U")
     }
 }
