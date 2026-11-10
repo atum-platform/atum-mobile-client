@@ -53,6 +53,13 @@ final class MentionRulesTests: XCTestCase {
         XCTAssertEqual(candidates.last?.name, "Bình")
     }
 
+    func testAnOpaqueAllocatedIDIsNeverOfferedAsAHandle() {
+        let opaque = "@user-0123456789abcdef0123456789abcdef:atum.test"
+        let candidates = MentionRules.candidates(members: [(opaque, "Atum user"), ("@binh:atum.test", "Bình")],
+                                                 ownUserID: "@me:atum.test")
+        XCTAssertEqual(candidates.map(\.handle), [nil, "binh"])
+    }
+
     // MARK: Insert
 
     func testPickReplacesTheTrailingQueryWithTheNameAndASpace() throws {

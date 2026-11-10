@@ -36,6 +36,8 @@ final class LiveDesign {
         glyphs = try decoder.decode(Glyphs.self, from: AtumDesign.data(for: "glyphs.json"))
         eclipse = try decoder.decode(Eclipse.self, from: AtumDesign.data(for: "marks/eclipse.json"))
         locale = Self.selectedLocale(from: copy.locales)
+        PeopleNameWords.configure(unnamed: text("src.matrix.conversation-copy.copies.unnamed"),
+                                  untitledChat: text("desktop.atum.roster.untitledChat"))
     }
 
     func text(_ key: String, arguments: [AtumCopy.Argument] = []) -> String {

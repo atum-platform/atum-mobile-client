@@ -178,8 +178,9 @@ public enum MentionRules {
             } else {
                 name = provisional.localpart
             }
-            result.append(MentionCandidate(userID: member.userID, name: name,
-                                           handle: entry?.handle ?? provisional.localpart))
+            // An opaque allocated localpart is not a handle (desktop person-name.ts).
+            let handle = entry?.handle ?? (MatrixPersonName.isOpaque(member.userID) ? nil : provisional.localpart)
+            result.append(MentionCandidate(userID: member.userID, name: name, handle: handle))
         }
         return result
     }

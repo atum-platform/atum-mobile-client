@@ -37,10 +37,19 @@ struct AccountProfileHeader: View {
     private var editsName: Bool { editable && actions.saveProfileName != nil }
     private var editsPhoto: Bool { editable && actions.saveProfilePhoto != nil }
     private var hasPhoto: Bool { presentation.avatarURL != nil }
-    /// The name the profile holds; empty when it is only the handle, so the
-    /// field shows its placeholder instead of pretending the handle is a name.
-    private var savedName: String {
-        presentation.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    /// The name the profile holds; empty when there is none (or only the
+    /// Matrix ID standing in for one), so the field shows its placeholder
+    /// instead of pretending an ID is a name.
+    private var savedName: String { presentation.profileName ?? "" }
+    /// Desktop's word for someone with no name and no handle ("Atum user").
+    private var unnamed: String { design.text("src.matrix.conversation-copy.copies.unnamed") }
+    private var shownName: String { presentation.name(unnamed: unnamed) }
+    /// The directory @handle under the name. Editing the name shows it while
+    /// one is known, since the field may then be empty; otherwise only when it
+    /// adds something to the name. Never the Matrix ID.
+    private var handleLine: String? {
+        guard showsHandle else { return nil }
+        return editsName ? presentation.publicHandle : presentation.handleLine(unnamed: unnamed)
     }
 
     var body: some View {
@@ -85,8 +94,8 @@ struct AccountProfileHeader: View {
             avatarControl
             VStack(alignment: .leading, spacing: 3) {
                 nameControl
-                if showsHandle, presentation.showsHandle || editsName {
-                    Text(verbatim: presentation.localHandle)
+                if let handleLine {
+                    Text(verbatim: handleLine)
                         .font(.subheadline)
                         .foregroundStyle(editable ? atum.color(.soft, scheme: scheme)
                                                   : atum.kitColor(.ink3, scheme: scheme))
@@ -101,8 +110,7 @@ struct AccountProfileHeader: View {
         } else {
             row
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel([presentation.name,
-                                     showsHandle && presentation.showsHandle ? presentation.localHandle : nil]
+                .accessibilityLabel([shownName, handleLine]
                     .compactMap { $0 }.joined(separator: ", "))
                 .accessibilityAddTraits(.isHeader)
         }
@@ -147,7 +155,7 @@ struct AccountProfileHeader: View {
     }
 
     private var avatarImage: some View {
-        AtumAvatar(kind: .person, name: presentation.name, art: pendingArt ?? art,
+        AtumAvatar(kind: .person, name: shownName, art: pendingArt ?? art,
                    size: avatarSize)
             .opacity(editor.photoStatus == .uploading ? 0.5 : 1)
             .overlay {
@@ -264,7 +272,7 @@ struct AccountProfileHeader: View {
                 }
             }
         } else {
-            Text(verbatim: presentation.name)
+            Text(verbatim: shownName)
                 .font(editable ? .headline : .body.weight(.semibold))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .lineLimit(3)

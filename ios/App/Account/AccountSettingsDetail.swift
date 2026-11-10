@@ -43,6 +43,7 @@ struct AccountSettingsDetail: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var openedAssistant: AccountAssistantSummary?
+    @State private var deletesAccount = false
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
@@ -57,7 +58,11 @@ struct AccountSettingsDetail: View {
                 accountContent
                 protonsContent
                 privacyContent
-                Section { signOutButton }
+                // Desktop: Sign out, then Delete account… beside it, both neutral.
+                Section {
+                    signOutButton
+                    deleteAccountButton
+                }
             case .assistants: assistantsContent
             case .protons: protonsContent
             case .general: generalContent
@@ -81,6 +86,11 @@ struct AccountSettingsDetail: View {
                 card(assistant)
             }
         }
+        .sheet(isPresented: $deletesAccount) {
+            DeleteAccountRequestSheet(design: design, accountID: presentation.matrixUserID) {
+                deletesAccount = false
+            }
+        }
         .accessibilityIdentifier("account.settings." + section.rawValue)
     }
 
@@ -97,12 +107,16 @@ struct AccountSettingsDetail: View {
             header(.profile)
         }
 
-        Section {
-            statusRow(glyph: .userCircle,
-                      title: copy("shared.matrix-alias-copy.copy.title"),
-                      value: presentation.localHandle,
-                      identifier: "account.settings.account.handle")
-                .textSelection(.enabled)
+        // Only the directory's @handle, never the Matrix ID's localpart: with
+        // no handle read yet (plan SV-4) the row is left out.
+        if let handle = presentation.publicHandle {
+            Section {
+                statusRow(glyph: .userCircle,
+                          title: copy("shared.matrix-alias-copy.copy.title"),
+                          value: handle,
+                          identifier: "account.settings.account.handle")
+                    .textSelection(.enabled)
+            }
         }
     }
 
@@ -478,6 +492,28 @@ struct AccountSettingsDetail: View {
         .buttonStyle(.plain)
         .disabled(presentation.signOutInProgress)
         .accessibilityIdentifier("account.sign-out")
+    }
+
+    /// Desktop `MatrixDeleteAccount`: a neutral action that asks first, then
+    /// drafts the deletion request to Atum's privacy mailbox.
+    private var deleteAccountButton: some View {
+        Button { deletesAccount = true } label: {
+            HStack(spacing: 12) {
+                Image(atum.symbol(.trash))
+                    .font(.body)
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .frame(width: 28)
+                    .accessibilityHidden(true)
+                Text(copy("src.matrix.legal-copy.copy.deleteAccountAction"))
+                    .font(.body)
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                Spacer()
+            }
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("account.delete-account")
     }
 
     @ViewBuilder private func assistantRow(_ assistant: AccountAssistantSummary) -> some View {

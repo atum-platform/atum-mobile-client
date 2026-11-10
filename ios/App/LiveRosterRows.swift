@@ -481,10 +481,10 @@ enum LiveRosterRows {
                 continue
             }
             // Stripped invite state may arrive before profiles. Keep the invite
-            // actionable even then; the room ID is the SDK's stable last resort.
+            // actionable even then, under the unnamed words, never the room ID.
             let title = [invite.displayName, invite.inviterDisplayName]
                 .compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) })
-                .first(where: { !$0.isEmpty }) ?? invite.roomID
+                .first(where: { !$0.isEmpty }) ?? PeopleNameWords.room(nil, isDirect: invite.isDirect)
             rows.append(LiveProductRoom(
                 id: invite.roomID,
                 kind: invite.isDirect ? .people : .group,
