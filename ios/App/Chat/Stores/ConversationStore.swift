@@ -323,7 +323,8 @@ final class LiveConversationStore: ConversationStore {
             // Link taps (B17) are the chat screen's: `ChatLinkRouter` puts
             // its `LinkPolicy` gate into the actions the rows read.
             delete: { [weak self] id in self?.delete(id) },
-            edit: { [weak self] id in self?.beginEdit(id) }
+            edit: { [weak self] id in self?.beginEdit(id) },
+            report: { [weak self] id, reason in await self?.report(id, reason: reason) ?? false }
         )
         ProbeLog.mark(.chatOpened, id: LiveFlowLog.fingerprint(info.roomID))
     }
@@ -431,6 +432,53 @@ final class LiveConversationStore: ConversationStore {
     func copy(_ itemID: String) {
         guard let body = core.row(itemID)?.item.body, !body.isEmpty else { return }
         UIPasteboard.general.string = body
+    }
+
+    // MARK: Report (HC-2)
+
+    /// Every assistant and app bot this chat knows: the room's agent or bot,
+    /// the account's agents and the catalog apps' bots (by user ID). Their
+    /// messages and they themselves get no Report (`ReportPolicy`).
+    var nonPersonSenders: Set<String> {
+        agentUserIDs.union(info.knownNames.keys).union(info.catalogBotUserIDs)
+    }
+
+    /// "Báo cáo" on someone else's message: `Room.reportContent` with the
+    /// event's ID and the person's reason, never its text. The row is checked
+    /// again here, so a stale menu never reports my own message or a bot's.
+    func report(_ itemID: String, reason: String?) async -> Bool {
+        guard let item = core.row(itemID)?.item,
+              let request = ReportPolicy.messageRequest(roomID: roomID, item: item, kind: kind,
+                                                        nonPersonSenders: nonPersonSenders, reason: reason) else {
+            return false
+        }
+        return await send(request)
+    }
+
+    /// Report person, from the panel or a group's Members page: the latest
+    /// message they sent here (or, in a person chat with none loaded, the
+    /// chat), as `ReportPolicy.personRequest` decides.
+    func reportPerson(_ userID: String, reason: String?) async -> Bool {
+        guard !nonPersonSenders.contains(userID),
+              let request = ReportPolicy.personRequest(roomID: roomID, userID: userID, ownUserID: ownUserID,
+                                                       kind: kind, items: core.snapshot.rows.map(\.item),
+                                                       reason: reason) else {
+            return false
+        }
+        return await send(request)
+    }
+
+    private func send(_ request: ReportPolicy.Request) async -> Bool {
+        guard !isClosed, let room, request.roomID == roomID else { return false }
+        do {
+            switch request.target {
+            case let .event(eventID): try await room.reportContent(eventId: eventID, reason: request.reason)
+            case .room: try await room.reportRoom(reason: request.reason)
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// The parsed markdown for a row, if its body has not changed since.
