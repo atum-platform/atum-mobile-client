@@ -3,6 +3,31 @@ import XCTest
 @testable import AtumNativeAPI
 
 final class ApplePurchaseContractTests: XCTestCase {
+    @MainActor func testV12AllowlistedCatalogueAndPromoOnlyCredit() throws {
+        let catalog = try NativeAPI.decode(AppleProductsResponse.self,
+            from: ApplePurchaseV12TestData.data("allowlisted-products.response"))
+        XCTAssertEqual(catalog.environment, .sandbox); XCTAssertTrue(catalog.checkoutOpen)
+        XCTAssertEqual(Set(catalog.products.map(\.productId)), ApplePurchaseCoordinator.productIDs)
+        XCTAssertEqual(catalog.products.map(\.paidMicroProtons), [95_000_000_000, 395_000_000_000])
+        XCTAssertEqual(catalog.products.map(\.bonusMicroProtons), [5_000_000_000, 105_000_000_000])
+        let credit = try NativeAPI.decode(AppleTransactionResponse.self,
+            from: ApplePurchaseV12TestData.data("sandbox-credited.response"))
+        XCTAssertEqual(credit.state, .credited); XCTAssertTrue(credit.finish)
+        XCTAssertEqual(credit.credited?.paidMicroProtons, 0)
+        XCTAssertEqual(credit.credited?.bonusMicroProtons, 100_000_000_000)
+        XCTAssertEqual(credit.balances?.paid, 0); XCTAssertEqual(credit.balances?.earned, 0)
+        XCTAssertEqual(credit.balances?.promo, 100_000_000_000)
+        XCTAssertEqual(credit.balances?.available, 100_000_000_000)
+    }
+
+    func testV12CapErrorIsAClosedRefusalWithoutGuessedOutcome() throws {
+        let data = try ApplePurchaseV12TestData.data("sandbox-cap.error")
+        let error = try NativeAPI.decode(ApplePurchaseError.self, from: data)
+        XCTAssertEqual(error.error, .closed); XCTAssertEqual(error.error.status, 403)
+        XCTAssertEqual(error.reason, .sandboxCapExceeded)
+        XCTAssertThrowsError(try NativeAPI.decode(AppleTransactionResponse.self, from: data))
+    }
+
     func testPublicSyntheticValuesRoundTripWithoutClaimingAppleVerification() throws {
         let token = try NativeAPI.decode(AppleAccountTokenResponse.self,
                                         from: ApplePurchaseTestData.data(.accountToken))

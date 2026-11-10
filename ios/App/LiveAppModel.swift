@@ -291,7 +291,7 @@ final class LiveAppModel {
     private(set) var domainRecoveryState = MobileDomainRecoveryState.temporarilyUnavailable
     private(set) var domainReauthenticationInProgress = false
     /// Non-UI purchase owner. API origin remains the client's fixed build origin.
-    /// Sandbox TestFlight integration must supply the approved sandbox origin first.
+    /// The account's catalogue selects Sandbox for allowlisted TestFlight/App Review users.
     @ObservationIgnored lazy var applePurchases = ApplePurchaseCoordinator(
         store: StoreKitPurchaseStore(), environment: .production,
         refreshWallet: { [weak self] in await self?.refreshApplePurchaseWallet() }

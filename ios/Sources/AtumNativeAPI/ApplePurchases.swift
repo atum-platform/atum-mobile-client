@@ -99,6 +99,7 @@ public struct ApplePurchaseError: Error, Decodable, Equatable, Sendable {
     public enum Reason: String, Decodable, Sendable {
         case invalid, checkoutClosed = "checkout_closed", environmentMismatch = "environment_mismatch"
         case invalidSignature = "invalid_signature", wrongBundle = "wrong_bundle", unavailable
+        case sandboxCapExceeded = "sandbox_cap_exceeded"
     }
     private struct Details: Decodable {
         let reason: Reason?
@@ -115,7 +116,7 @@ public struct ApplePurchaseError: Error, Decodable, Equatable, Sendable {
         error = try c.value("error")
         reason = try c.optional("details", as: Details.self)?.reason
         let allowed: [Code: Set<Reason>] = [.invalid: [.invalid], .unauthenticated: [],
-            .closed: [.checkoutClosed], .environmentMismatch: [.environmentMismatch],
+            .closed: [.checkoutClosed, .sandboxCapExceeded], .environmentMismatch: [.environmentMismatch],
             .verification: [.invalidSignature, .wrongBundle], .unavailable: [.unavailable]]
         guard reason.map({ allowed[error]!.contains($0) }) ?? (error == .unauthenticated)
         else { throw ContractViolation.invalidValue }
