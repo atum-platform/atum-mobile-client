@@ -681,12 +681,14 @@ struct AppRoot: View {
                 projectedRooms.append(.init(id: room.id, kind: .person,
                                             membership: room.isInvitation ? .invited : .joined,
                                             latestEventAt: room.latestEventAt,
-                                            isFavourite: room.isPinned))
+                                            isFavourite: room.isPinned,
+                                            isLowPriority: room.isLowPriority))
             case .group:
                 projectedRooms.append(.init(id: room.id, kind: .group,
                                             membership: room.isInvitation ? .invited : .joined,
                                             latestEventAt: room.latestEventAt,
-                                            isFavourite: room.isPinned))
+                                            isFavourite: room.isPinned,
+                                            isLowPriority: room.isLowPriority))
             }
         }
         return RosterSnapshot(rooms: projectedRooms, assistants: assistants, apps: apps,
@@ -724,7 +726,10 @@ struct AppRoot: View {
                         router.popHomeToRoot()
                     },
                     setIgnored: { await model.setIgnored(userID: $0, ignored: $1) },
-                    viewerIsFounder: model.isFounderAccount
+                    viewerIsFounder: model.isFounderAccount,
+                    setLowPriority: { model.setRoomLowPriority($0, isLowPriority: $1) },
+                    loadDetails: { await model.chatPanelDetails(roomID: $0) },
+                    moderateMember: { await model.moderateMember(roomID: $0, userID: $1, action: $2) }
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),

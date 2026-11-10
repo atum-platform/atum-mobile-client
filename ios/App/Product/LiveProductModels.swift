@@ -118,6 +118,8 @@ struct LiveProductRoom: Identifiable, Equatable {
     let isMarkedUnread: Bool
     let isPinned: Bool
     let isMuted: Bool
+    /// The standard `m.lowpriority` tag: an ordinary chat sinks in the list.
+    let isLowPriority: Bool
     let isInvitation: Bool
     let canOpen: Bool
     /// An active agent whose chat room has not reached this phone yet. The row
@@ -154,6 +156,7 @@ struct LiveProductRoom: Identifiable, Equatable {
          assistant: LiveProductAssistantMetadata? = nil,
          unreadCount: Int = 0, notificationCount: Int = 0, highlightCount: Int = 0,
          isMarkedUnread: Bool = false, isPinned: Bool = false, isMuted: Bool = false,
+         isLowPriority: Bool = false,
          isInvitation: Bool = false, canOpen: Bool = true,
          isAwaitingRoom: Bool = false, isAppBotRoom: Bool = false,
          isComingSoon: Bool = false, awaitsStart: Bool = false,
@@ -183,6 +186,7 @@ struct LiveProductRoom: Identifiable, Equatable {
         self.isMarkedUnread = isMarkedUnread
         self.isPinned = isPinned
         self.isMuted = isMuted
+        self.isLowPriority = isLowPriority
         self.isInvitation = isInvitation
         self.canOpen = canOpen
         self.isAwaitingRoom = isAwaitingRoom
@@ -198,7 +202,8 @@ struct LiveProductRoom: Identifiable, Equatable {
                          notificationCountOverride: Int? = nil,
                          highlightCountOverride: Int? = nil,
                          pinnedOverride: Bool? = nil,
-                         mutedOverride: Bool? = nil) -> LiveProductRoom {
+                         mutedOverride: Bool? = nil,
+                         lowPriorityOverride: Bool? = nil) -> LiveProductRoom {
         let marksUnread = unreadOverride ?? isMarkedUnread
         let clearsReadState = unreadOverride == false
         return LiveProductRoom(
@@ -218,6 +223,7 @@ struct LiveProductRoom: Identifiable, Equatable {
             isMarkedUnread: marksUnread,
             isPinned: pinnedOverride ?? isPinned,
             isMuted: mutedOverride ?? isMuted,
+            isLowPriority: lowPriorityOverride ?? isLowPriority,
             isInvitation: isInvitation, canOpen: canOpen,
             isAwaitingRoom: isAwaitingRoom, isAppBotRoom: isAppBotRoom,
             isComingSoon: isComingSoon, awaitsStart: awaitsStart, isFounder: isFounder,

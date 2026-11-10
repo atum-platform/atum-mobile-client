@@ -78,10 +78,15 @@ public enum RosterProjection {
         public var isHiddenOnThisDevice: Bool
         /// Old encrypted assistant/bot rooms are never a viable conversation.
         public var isLegacyEncrypted: Bool
+        /// The standard `m.lowpriority` tag: the chat sinks below every other ordinary chat, by
+        /// recency among themselves (desktop `room-navigation.ts` `sortConversations`).
+        public var isLowPriority: Bool
 
         public init(id: String, kind: Kind, membership: Membership = .joined,
                     latestEventAt: Date? = nil, isFavourite: Bool = false, tagOrder: Int? = nil,
-                    isHiddenOnThisDevice: Bool = false, isLegacyEncrypted: Bool = false) {
+                    isHiddenOnThisDevice: Bool = false, isLegacyEncrypted: Bool = false,
+                    isLowPriority: Bool = false) {
+            self.isLowPriority = isLowPriority
             self.id = id
             self.kind = kind
             self.membership = membership
@@ -208,7 +213,7 @@ public enum RosterProjection {
             .sorted { pinOrder($0, $1, fallbackLeft: 0, fallbackRight: 0) }
         let ordinary = candidates.filter { room in
             room.id != founder?.id && !(room.isFavourite && room.membership == .joined) && !isApp(room)
-        }.sorted(by: recencyOrder)
+        }.sorted(by: ordinaryOrder)
         let pinnedIDs = Set(pinned.map(\.id))
         let appRows = catalog.compactMap { app -> Row? in
             if app.isPresentationOnly {
@@ -261,6 +266,23 @@ public enum RosterProjection {
             if lhs.latestEventAt != rhs.latestEventAt { return (lhs.latestEventAt ?? .distantPast) > (rhs.latestEventAt ?? .distantPast) }
             return fallbackLeft < fallbackRight
         }
+    }
+
+    /// Whether a chat offers Low priority: an ordinary person or group chat in the chat list, where
+    /// the tag orders it. The Founder chat, a pinned chat and assistant, app or invited rooms are
+    /// ordered by their own place, so they don't offer it (desktop `lowPriorityEligible`).
+    public static func offersLowPriority(roomID: String, rooms: [Room], founderRoomID: String?) -> Bool {
+        guard roomID != founderRoomID, let room = uniqueRooms(rooms)[roomID],
+              room.membership == .joined, !room.isFavourite, !room.isHiddenOnThisDevice else { return false }
+        switch room.kind {
+        case .person, .group: return true
+        case .assistant, .app: return false
+        }
+    }
+
+    private static func ordinaryOrder(_ lhs: Room, _ rhs: Room) -> Bool {
+        if lhs.isLowPriority != rhs.isLowPriority { return rhs.isLowPriority }
+        return recencyOrder(lhs, rhs)
     }
 
     private static func recencyOrder(_ lhs: Room, _ rhs: Room) -> Bool {

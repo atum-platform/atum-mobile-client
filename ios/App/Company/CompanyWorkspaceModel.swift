@@ -927,6 +927,18 @@ final class CompanyWorkspaceModel {
     }
     func isConversationRoom(_ roomID: String) -> Bool { conversations.claim(roomID: roomID) != nil }
 
+    /// Each listed company's rooms on this phone (its channels and your
+    /// conversations in it), by company ID: what the panel's "Team Spaces in
+    /// common" reads (desktop `matrixSharedCompanies`).
+    func companyRooms() -> [(companyID: String, name: String, roomIDs: [String])] {
+        (list?.companies ?? []).compactMap { company in
+            let id = company.id.rawValue
+            let rooms = roomDirectory.roomIDs(companyID: id).union(conversations.roomDirectory.roomIDs(companyID: id))
+            guard !rooms.isEmpty else { return nil }
+            return (id, company.displayName, rooms.sorted())
+        }
+    }
+
     func companyName(_ companyID: String) -> String? {
         list?.companies.first(where: { $0.id.rawValue == companyID })?.displayName
     }

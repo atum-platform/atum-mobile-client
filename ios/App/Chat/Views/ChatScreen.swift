@@ -171,7 +171,7 @@ struct ChatScreen: View {
                     if let info {
                         ChatTitleCapsule(info: info, design: design,
                                          loadMatrixThumbnail: loadMatrixThumbnail) {
-                            infoPresented = true
+                            openPanel()
                         }
                     } else {
                         Text(verbatim: store.title)
@@ -195,7 +195,7 @@ struct ChatScreen: View {
                 // own "…" menu below.
                 if info != nil, info?.company == nil, conversationChat == nil {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { infoPresented = true } label: {
+                        Button { openPanel() } label: {
                             AtumVisualSystem(design: design).barIcon(.moreHorizontal)
                         }
                         .accessibilityLabel(ChatCopy.text(design, .infoOpen))
@@ -210,7 +210,7 @@ struct ChatScreen: View {
                 if let company = info?.company {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
-                            Button { infoPresented = true } label: {
+                            Button { openPanel() } label: {
                                 Label { Text(verbatim: CompanyCopy(design: design).membersTitle) } icon: {
                                     Image(AtumVisualSystem(design: design).symbol(.users))
                                 }
@@ -270,11 +270,25 @@ struct ChatScreen: View {
                         .atumDesign(design)
                 }
             }
+            // The chat's side panel: a sheet with a medium and a large height
+            // (M1). Not `.inspector`: attached here, on a screen pushed
+            // inside the app's NavigationStack, it left the whole chat blank on
+            // iPhone (CI 2026-11-06, every scripted chat). The iPad column waits
+            // for an inspector placed outside the stack (M1 follow-up).
             .sheet(isPresented: $infoPresented) {
                 if let info {
-                    ChatInfoSheet(design: design, info: info, actions: infoActions,
-                                  loadMatrixThumbnail: loadMatrixThumbnail)
+                    ChatPanelHost(design: design, info: info, actions: infoActions,
+                                  loadMatrixThumbnail: loadMatrixThumbnail) {
+                        infoPresented = false
+                    }
+                    // No `.id` here: the panel closes on a room change
+                    // (`panelScope`), and `.id` on a view whose body is a
+                    // NavigationStack crashes on iOS 26 (M1 presentation fix).
                 }
+            }
+            .onChange(of: panelScope) { old, new in
+                // A panel never outlives its chat or its account.
+                if !ChatPanelPolicy.staysOpen(from: old, to: new) { infoPresented = false }
             }
             .sheet(item: $appBotPresenter.continueRequest) { request in
                 ContinueOnMacSheet(request: request, design: design) {
@@ -377,6 +391,17 @@ struct ChatScreen: View {
         case .person: .person
         case .group: .group
         }
+    }
+
+    private var panelScope: ChatPanelPolicy.Scope? {
+        info.map { ChatPanelPolicy.Scope(accountID: store.ownUserID, roomID: $0.roomID) }
+    }
+
+    /// Opens the side panel at its home. The composer's keyboard goes down
+    /// first, so it never rides up with the sheet.
+    private func openPanel() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        infoPresented = true
     }
 
     private func refreshToday() {

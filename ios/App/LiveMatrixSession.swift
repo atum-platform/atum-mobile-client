@@ -53,8 +53,33 @@ struct LiveMatrixRoomRow: Equatable, Identifiable, Sendable {
     var legacyAppBotMove: MobileLegacyAppBotMove? = nil
     /// SDK profile records for people lists; room titles never rename members.
     var memberProfiles: [LiveMatrixMemberRow] = []
+    /// The standard `m.lowpriority` tag, from the SDK's room info.
+    var isLowPriority: Bool = false
+    /// The room's `m.room.topic`, from the SDK's room info.
+    var topic: String? = nil
 
     var id: String { roomID }
+}
+
+/// What the chat's side panel reads when it opens (M2), SDK-neutral.
+/// Every field comes from the SDK's local store; none starts a sync.
+struct LiveMatrixPanelDetails: Equatable, Sendable {
+    struct Member: Equatable, Sendable {
+        let userID: String
+        let displayName: String
+        let avatarURL: String?
+        /// A creator's unlimited power (room version 12) reads as `Int64.max`.
+        let power: Int64
+        let membership: ChatMemberModeration.Membership
+    }
+
+    /// The `m.room.create` event's server time, in milliseconds.
+    let createdAt: UInt64?
+    let ownPower: Int64?
+    let kickLevel: Int64?
+    let banLevel: Int64?
+    let members: [Member]
+    let ignoredUserIDs: Set<String>
 }
 
 /// A room this account is invited to. The inviter is carried so the app can
@@ -706,6 +731,113 @@ final class LiveMatrixSession {
         }
     }
 
+    /// Desktop-compatible `m.lowpriority`, with no explicit tag order.
+    func setLowPriority(roomID: String, isLowPriority: Bool) async -> Bool {
+        do {
+            let room = try room(id: roomID)
+            try await room.setIsLowPriority(isLowPriority: isLowPriority, tagOrder: nil)
+            try runtime.requireCurrent()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// The side panel's facts, from the local store: when the room began, its
+    /// power levels as they apply to you, its people with their power (joined,
+    /// invited and banned) and the account's ignore list. A part the store
+    /// can't answer is left unknown.
+    func panelDetails(roomID: String) async -> LiveMatrixPanelDetails? {
+        do {
+            let room = try room(id: roomID)
+            let client = runtime.client
+            let details = await Task.detached(priority: .userInitiated) {
+                await Self.panelDetails(room: room, client: client)
+            }.value
+            try runtime.requireCurrent()
+            return details
+        } catch {
+            return nil
+        }
+    }
+
+    nonisolated private static func panelDetails(room: Room, client: Client) async -> LiveMatrixPanelDetails {
+        async let create = try? await room.stateEvents(eventType: .roomCreate)
+        async let levels = try? await room.getPowerLevels()
+        async let ignored = try? await client.ignoredUsers()
+        var members = [LiveMatrixPanelDetails.Member]()
+        if let iterator = try? await room.membersNoSync() {
+            let maximum = min(Int(iterator.len()), 2_000)
+            while members.count < maximum,
+                  let chunk = iterator.nextChunk(chunkSize: UInt32(min(100, maximum - members.count))),
+                  !chunk.isEmpty {
+                for member in chunk {
+                    let membership: ChatMemberModeration.Membership
+                    switch member.membership {
+                    case .join: membership = .joined
+                    case .invite: membership = .invited
+                    case .ban: membership = .banned
+                    default: continue
+                    }
+                    members.append(.init(userID: member.userId,
+                                         displayName: member.displayName ?? member.userId,
+                                         avatarURL: member.avatarUrl,
+                                         power: Self.power(member.powerLevel),
+                                         membership: membership))
+                }
+            }
+        }
+        let ownUserID = room.ownUserId()
+        let values = await levels?.values()
+        let createdAt = await create?.first(where: { $0.stateKey.isEmpty })?.timestamp
+        return LiveMatrixPanelDetails(
+            createdAt: createdAt,
+            ownPower: members.first(where: { $0.userID == ownUserID })?.power,
+            kickLevel: values?.kick,
+            banLevel: values?.ban,
+            members: members,
+            ignoredUserIDs: Set(await ignored ?? [])
+        )
+    }
+
+    nonisolated private static func power(_ level: PowerLevel) -> Int64 {
+        switch level {
+        case .infinite: .max
+        case let .value(value): value
+        }
+    }
+
+    /// Matrix kick, ban and unban, as the desktop's members sheet sends them
+    /// (no reason).
+    func moderate(roomID: String, userID: String, action: ChatMemberAction) async -> Bool {
+        do {
+            let room = try room(id: roomID)
+            switch action {
+            case .remove: try await room.kickUser(userId: userID, reason: nil)
+            case .ban: try await room.banUser(userId: userID, reason: nil)
+            case .unban: try await room.unbanUser(userId: userID, reason: nil)
+            case .block, .unblock: return false
+            }
+            try runtime.requireCurrent()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Whether someone is joined to any of these rooms that you are joined
+    /// to, from the local store (the Team Spaces you share, desktop
+    /// `matrixSharedCompanies`).
+    func isJoined(userID: String, inAnyOf roomIDs: [String]) async -> Bool {
+        for roomID in roomIDs {
+            guard rooms.contains(where: { $0.roomID == roomID }),
+                  let room = try? room(id: roomID),
+                  let member = try? await room.member(userId: userID) else { continue }
+            if member.membership == .join { return true }
+        }
+        return false
+    }
+
     /// SDK-synchronized joined members. Lazy-loaded room heroes are never a
     /// membership roster; the SDK fetches missing state and owns its cache.
     func members(roomID: String) async -> [LiveMatrixMemberRow]? {
@@ -1338,7 +1470,9 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
                                  isEncrypted: Self.encrypted(info.encryptionState),
                                  appBotHiddenAt: bot.hiddenAt,
                                  legacyAppBotMove: bot.move,
-                                 memberProfiles: members)
+                                 memberProfiles: members,
+                                 isLowPriority: info.isLowPriority,
+                                 topic: info.topic)
     }
 
     /// The other joined member's photo, including named DMs with no heroes.
