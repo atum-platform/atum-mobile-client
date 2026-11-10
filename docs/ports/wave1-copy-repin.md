@@ -8,10 +8,10 @@ That commit adds the copy wave 1 of the iPhone parity plan codes against
 catalog, copy contract, copy inventory and manifest change; every other
 vendored resource is byte-identical.
 
-**The pinned commit must be published unchanged** (same SHA, no rebase or
+**Published:** atum-desktop#10 merged `a74178a` with `c14d74a` unchanged as its second parent, so the pin is reachable from desktop `main`. (Originally: the pinned commit had to be published unchanged (same SHA, no rebase or
 squash) before this lock is valid for anyone else; until then
 `scripts/import-design-exports --verify` passes only against the vendored
-files, and a fresh import needs a local desktop checkout holding that commit.
+files, and a fresh import needs a local desktop checkout holding that commit.)
 
 Workers replacing `// PENDING-COPY:<key>` placeholders: use the keys below.
 Store words live under `src.matrix.mobile-copy.mobileScreensCopy.store.*`
