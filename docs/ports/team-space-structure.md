@@ -126,3 +126,9 @@ and **Activity uses Bell** until the glyph export adds `Bookmark` and `Activity`
 
 See the session log entry in this file's commit and the worker report. Commands are run under the
 heavy-build lock (`TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock …`).
+
+## Session log
+
+- 2026-11-11, wave 2 TS worker: pure policy + tests (commit 1); Team Space screen structure, TS-6/7/8/10
+  (commit 2); channel chrome, TS-9 (commit 3). Verified under the heavy-build lock; results in the
+  worker report and below.

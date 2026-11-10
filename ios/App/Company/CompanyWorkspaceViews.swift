@@ -11,6 +11,13 @@ import SwiftUI
 // A channel pushes the existing chat and Back returns to the list. With no
 // company and no invitation the root is a "Create your company" empty state.
 // Every company mark is a circle (owner ruling 2).
+//
+// Wave 2 (TS-6..TS-10, docs/ports/team-space-structure.md): Chat · Board pages
+// under the header, a "Search {company}" field over channels and DMs, the
+// Saved row once something is saved, the Activity icon beside the "…" company
+// menu (Company overview, Add company, Leave company; entries the phone cannot
+// open yet are not drawn), and the Invite teammates footer once an invite
+// sheet exists.
 
 struct TeamSpacePresentation: Equatable {
     var isLoading: Bool
@@ -29,6 +36,13 @@ struct TeamSpacePresentation: Equatable {
     var appIconCount = 0
     /// Company ID → its logo's MXC URI (`CompanyWorkspaceModel.logoURIs`).
     var logos: [String: String] = [:]
+    /// The company menu's entries for the open company (desktop `menuAllowed`).
+    var menu = CompanyMenuAllowed()
+    /// The viewer's role in the open company, for the overview.
+    var viewerRole: String?
+    /// The company Store answers with something to get (Marketplace page). The
+    /// phone has no company Store read yet, so this stays false.
+    var marketplaceAvailable = false
 }
 
 struct TeamSpaceActions {
@@ -51,6 +65,13 @@ struct TeamSpaceActions {
     var loadMatrixThumbnail: ((String, Int) async -> Data?)?
     /// "You" and the Chief of Staff rows of Direct messages.
     var directMessages = DirectMessagesActions()
+    /// The open company's Activity inbox (TS-7); nil when it could not be read.
+    var loadActivity: ((String) async -> [CompanyActivityRow]?)?
+    /// The account's Saved pointers (TS-6); nil when unreadable.
+    var loadSavedPointers: (() async -> [CompanySavedMessagePointer]?)?
+    var loadSavedRows: (([CompanySavedMessagePointer]) async -> [CompanySavedRow])?
+    /// The invite sheet (TS-11). Nil until it exists, so Invite teammates is not drawn.
+    var invite: ((String) -> Void)?
 }
 
 /// Workplace is a separate mode from Personal Home. It reuses the existing
@@ -64,14 +85,52 @@ struct TeamSpaceScreen: View {
     @State private var joiningID: String?
     @State private var actionFailure = 0
     @State private var confirmsLeave = false
-    @State private var showsMembers = false
     @State private var showsSwitcher = false
     @State private var showsCreate = false
+    @State private var showsOverview = false
+    @State private var showsActivity = false
+    @State private var showsSaved = false
+    /// The page per company (desktop keeps it in the company's space preferences).
+    @State private var pages = [String: CompanySpaceTab]()
+    @State private var query = ""
+    @State private var activity: [CompanyActivityRow]?
+    @State private var activityLoading = false
+    @State private var savedPointers: [CompanySavedMessagePointer] = []
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
     private var copy: CompanyCopy { CompanyCopy(design: design) }
+    private var team: TeamSpaceCopy { TeamSpaceCopy(design: design) }
+    private var locale: Locale { Locale(identifier: design.locale) }
+    private var needle: String? { TeamSpaceSearch.needle(query, locale: locale) }
+
+    private var pageTabs: [CompanySpaceTab] {
+        CompanySpaceTabs.ids(marketplaceAvailable: presentation.marketplaceAvailable)
+    }
+
+    private var page: Binding<CompanySpaceTab> {
+        Binding(
+            get: {
+                CompanySpaceTabs.effective(presentation.workspace.flatMap { pages[$0.id] },
+                                           marketplaceAvailable: presentation.marketplaceAvailable)
+            },
+            set: { tab in
+                guard let id = presentation.workspace?.id else { return }
+                pages[id] = tab
+            })
+    }
+
+    private var sidebarEntries: TeamSpaceSidebarEntries {
+        // Threads and Drafts have no phone projection yet (their desktop records are the
+        // SDK thread list and the per-target `com.atum.draft.v2.*` account data), so they
+        // stay hidden, as the desktop hides a row with nothing to open.
+        TeamSpaceSidebarEntries(threads: 0, saved: savedPointers.count, drafts: 0)
+    }
+
+    private var activityBadge: Badge {
+        CompanyActivityFeed.badge((activity ?? []).map(\.item))
+    }
 
     var body: some View {
         Group {
@@ -85,6 +144,11 @@ struct TeamSpaceScreen: View {
                 )
             } else if presentation.workspace == nil && presentation.invitations.isEmpty {
                 emptyState
+            } else if presentation.workspace != nil, page.wrappedValue == .board {
+                CompanyBoardPage(design: design)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        CompanyPagesBar(design: design, tabs: pageTabs, selection: page)
+                    }
             } else {
                 list
             }
@@ -96,11 +160,40 @@ struct TeamSpaceScreen: View {
         .navigationTitle(design.text("src.matrix.mobile-device-copy.mobileDeviceCopy.teamSpaceTitle"))
         .navigationBarTitleDisplayMode(.large)
         .toolbar { toolbar }
-        .navigationDestination(isPresented: $showsMembers) {
-            CompanyMembersView(design: design,
-                               members: presentation.workspace?.members ?? [],
-                               isLoading: presentation.workspace?.membersLoading ?? false,
-                               loadMatrixThumbnail: actions.loadMatrixThumbnail)
+        .sheet(isPresented: $showsOverview) {
+            if let workspace = presentation.workspace {
+                CompanyOverviewSheet(design: design, workspace: workspace,
+                                     logoURI: presentation.logos[workspace.id],
+                                     viewerRole: presentation.viewerRole, menu: presentation.menu,
+                                     loadMatrixThumbnail: actions.loadMatrixThumbnail,
+                                     leave: { confirmsLeave = true })
+                    .atumDesign(visual: atum)
+            }
+        }
+        .sheet(isPresented: $showsActivity) {
+            TeamSpaceActivitySheet(design: design, rows: activity, isLoading: activityLoading,
+                                   reload: { await reloadActivity() },
+                                   open: { row in
+                                       showsActivity = false
+                                       actions.openRoom(row.item.roomID)
+                                   })
+                .atumDesign(visual: atum)
+        }
+        .sheet(isPresented: $showsSaved) {
+            TeamSpaceSavedSheet(design: design, pointers: savedPointers,
+                                load: { await actions.loadSavedRows?($0) ?? [] },
+                                open: { row in
+                                    showsSaved = false
+                                    actions.openRoom(row.pointer.roomID)
+                                })
+                .atumDesign(visual: atum)
+        }
+        .task(id: presentation.workspace?.id) {
+            query = ""
+            await reloadStructure()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await reloadStructure() } }
         }
         .sheet(isPresented: $showsSwitcher) {
             CompanySwitcherSheet(design: design, presentation: presentation, actions: actions,
@@ -154,12 +247,48 @@ struct TeamSpaceScreen: View {
         let isActive: Bool
     }
 
+    /// Activity and Saved, read again for the open company.
+    private func reloadStructure() async {
+        await reloadSaved()
+        await reloadActivity()
+    }
+
+    private func reloadActivity() async {
+        guard let companyID = presentation.workspace?.id, let load = actions.loadActivity else {
+            activity = nil
+            return
+        }
+        activityLoading = true
+        let rows = await load(companyID)
+        activityLoading = false
+        // A company switch while reading drops the stale answer.
+        guard presentation.workspace?.id == companyID else { return }
+        activity = rows
+    }
+
+    private func reloadSaved() async {
+        guard let load = actions.loadSavedPointers else { return }
+        if let pointers = await load() { savedPointers = pointers }
+    }
+
     // MARK: List
 
     private var list: some View {
         List {
             if let workspace = presentation.workspace {
                 notices(workspace)
+            }
+            if presentation.workspace != nil, sidebarEntries.saved {
+                Section {
+                    if sidebarEntries.saved {
+                        TeamSpaceUtilityRow(design: design, glyph: .star, title: team.savedTitle,
+                                            identifier: "company.saved.entry") { showsSaved = true }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+                .listSectionSeparator(.hidden)
             }
             if !presentation.invitations.isEmpty {
                 Section {
@@ -183,7 +312,9 @@ struct TeamSpaceScreen: View {
                     } else if workspace.channels.isEmpty {
                         note(copy.text(CompanyCopyKey("noChannels")))
                     } else {
-                        ForEach(workspace.channels) { channel in
+                        ForEach(workspace.channels.filter {
+                            TeamSpaceSearch.matches([$0.title], needle: needle, locale: locale)
+                        }) { channel in
                             channelRow(channel)
                                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                 .listRowBackground(Color.clear)
@@ -201,7 +332,22 @@ struct TeamSpaceScreen: View {
                                         directMessages: workspace.directMessages,
                                         actions: actions.conversations,
                                         rowActions: actions.directMessages,
-                                        loadMatrixThumbnail: actions.loadMatrixThumbnail)
+                                        loadMatrixThumbnail: actions.loadMatrixThumbnail,
+                                        needle: needle)
+                if presentation.menu.invite, let invite = actions.invite {
+                    Section {
+                        Button { invite(workspace.id) } label: {
+                            Label { Text(verbatim: team.inviteTeammates) } icon: { Image(atum.symbol(.plus)) }
+                                .foregroundStyle(atum.color(.soft, scheme: scheme))
+                                .frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .accessibilityIdentifier("company.invite.teammates")
+                    }
+                    .listSectionSeparator(.hidden)
+                }
             } else if presentation.canCreate {
                 Section {
                     createCompanyButton
@@ -214,7 +360,17 @@ struct TeamSpaceScreen: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .refreshable { await actions.refresh() }
+        .refreshable {
+            await actions.refresh()
+            await reloadStructure()
+        }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: Text(verbatim: team.sidebarSearch(company: presentation.workspace?.title ?? "")))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if presentation.workspace != nil {
+                CompanyPagesBar(design: design, tabs: pageTabs, selection: page)
+            }
+        }
         .accessibilityIdentifier("company.channels")
     }
 
@@ -313,26 +469,75 @@ struct TeamSpaceScreen: View {
         if let workspace = presentation.workspace {
             // FlowPhone: the company switcher is a leading glass capsule.
             ToolbarItem(placement: .topBarLeading) { header(workspace) }
+            // Desktop: Activity is an icon at the end of the switcher's row, always there
+            // while a company is open (`activity-button.tsx`).
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { showsMembers = true } label: {
-                        Label { Text(verbatim: copy.membersTitle) } icon: {
-                            Image(atum.symbol(.users))
+                Button { showsActivity = true } label: {
+                    atum.barIcon(.bell)
+                        .overlay(alignment: .topTrailing) {
+                            if activityBadge != .none {
+                                HomeBadgeView(design: design, badge: activityBadge, pinned: false)
+                                    .scaleEffect(0.8)
+                                    .offset(x: 8, y: -8)
+                                    .accessibilityIdentifier("company.activity.badge")
+                            }
                         }
-                    }
-                    .accessibilityIdentifier("company.members")
-                    Button(role: .destructive) { confirmsLeave = true } label: {
-                        Label { Text(verbatim: copy.leaveAction) } icon: {
-                            Image(atum.symbol(.logOut))
-                        }
-                    }
-                    .accessibilityIdentifier("company.leave")
-                } label: {
-                    atum.barIcon(.moreHorizontal)
                 }
-                .accessibilityIdentifier("company.menu")
+                .accessibilityLabel(Text(verbatim: team.activityTitle))
+                .accessibilityValue(Text(verbatim: copy.markDescription(activityBadge).joined(separator: ", ")))
+                .accessibilityIdentifier("company.activity.open")
+            }
+            if presentation.menu.inCompany || presentation.menu.exits {
+                ToolbarItem(placement: .topBarTrailing) { companyMenu(workspace) }
             }
         }
+    }
+
+    /// The company menu (desktop `company-menu.tsx`): Company overview, then what
+    /// the viewer may do in the company, then Add company and Leave company. An
+    /// entry the viewer may not use is not drawn. The companies themselves stay
+    /// in the header's switcher sheet, the phone's form of the menu's radio list.
+    private func companyMenu(_ workspace: CompanyWorkspacePresentation) -> some View {
+        let allowed = presentation.menu
+        return Menu {
+            Section {
+                if allowed.overview {
+                    Button { showsOverview = true } label: {
+                        Label { Text(verbatim: team.companyOverview) } icon: { Image(atum.symbol(.briefcase)) }
+                    }
+                    .accessibilityIdentifier("company.overview.open")
+                }
+                if allowed.invite, let invite = actions.invite {
+                    Button { invite(workspace.id) } label: {
+                        Label { Text(verbatim: team.invitePeople) } icon: { Image(atum.symbol(.mail)) }
+                    }
+                    .accessibilityIdentifier("company.invite")
+                }
+                if allowed.settings {
+                    Button { showsOverview = true } label: {
+                        Label { Text(verbatim: team.companySettings) } icon: { Image(atum.symbol(.settings)) }
+                    }
+                    .accessibilityIdentifier("company.settings")
+                }
+            }
+            Section {
+                if allowed.create {
+                    Button { showsCreate = true } label: {
+                        Label { Text(verbatim: team.addCompany) } icon: { Image(atum.symbol(.plus)) }
+                    }
+                    .accessibilityIdentifier("company.add")
+                }
+                if allowed.leave {
+                    Button(role: .destructive) { confirmsLeave = true } label: {
+                        Label { Text(verbatim: copy.leaveAction) } icon: { Image(atum.symbol(.logOut)) }
+                    }
+                    .accessibilityIdentifier("company.leave")
+                }
+            }
+        } label: {
+            atum.barIcon(.moreHorizontal)
+        }
+        .accessibilityIdentifier("company.menu")
     }
 
     /// The current company: its logo (or initial) in a circle, its name and a

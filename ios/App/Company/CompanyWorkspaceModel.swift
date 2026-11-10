@@ -1362,6 +1362,66 @@ final class CompanyWorkspaceModel {
 
     func isLeavePending(companyID: String) -> Bool { leavePending.contains(companyID) }
 
+    // MARK: Wave 2 structure (TS-6..TS-9)
+
+    /// What one Team Space room is called in Activity, Saved and Pinned rows:
+    /// "# channel", the conversation's platform title, "You" or the Chief of
+    /// Staff. Nil for a room no company directory lists (desktop
+    /// `authorizedCompanyActivity`: such a row is never shown).
+    func teamSpaceRoomLabel(roomID: String) -> (companyID: String, name: String)? {
+        guard let copy else { return nil }
+        if let claim = roomDirectory.claim(roomID: roomID) {
+            return (claim.companyID, "# " + copy.channelName(claim.displayName, isDefault: claim.isDefault))
+        }
+        if let claim = conversations.claim(roomID: roomID) { return (claim.companyID, claim.title) }
+        if let company = notesSelfRooms.first(where: { $0.value == roomID })?.key {
+            return (company, DirectMessagesCopy(design: copy.design).you)
+        }
+        if let company = privateCosBindings.views.first(where: { $0.value.binding?.roomId == roomID })?.key {
+            return (company, DirectMessagesCopy(design: copy.design).chiefOfStaff(platformName: privateCosPlatformName))
+        }
+        return nil
+    }
+
+    /// Every room of one company the inbox may show.
+    func teamSpaceRoomIDs(companyID: String) -> Set<String> {
+        roomDirectory.roomIDs(companyID: companyID)
+            .union(conversations.roomDirectory.roomIDs(companyID: companyID))
+            .union(privateCosBindings.views[companyID]?.binding.map { [$0.roomId] } ?? [])
+            .union(notesSelfRooms[companyID].map { [$0] } ?? [])
+    }
+
+    /// The company menu's entries for the open company (desktop `menuAllowed`).
+    /// The phone has no invite sheet (TS-11), wallet (TS-15) or team-admin read
+    /// yet, so those entries are not drawn rather than drawn dead.
+    func menuAllowed(companyID: String?, inviteAvailable: Bool = false) -> CompanyMenuAllowed {
+        let snapshot = companyID.flatMap { snapshotsByCompany[$0] }
+        let me = snapshot?.members.first(where: \.isSelf)
+        return CompanyMenuAllowed.resolve(
+            companySelected: companyID != nil,
+            snapshotLoaded: snapshot != nil,
+            viewerIsAdmin: me?.role == .admin,
+            inviteAvailable: inviteAvailable,
+            teamAdminAvailable: false,
+            walletAvailable: false,
+            canCreate: canCreate,
+            canLeave: companyID.map { !leavePending.contains($0) } ?? false)
+    }
+
+    /// The open company's own role, for the overview header.
+    func viewerRole(companyID: String) -> String? {
+        guard let copy, let me = snapshotsByCompany[companyID]?.members.first(where: \.isSelf) else { return nil }
+        return copy.role(me.role)
+    }
+
+    /// A company channel's platform member count (desktop's capsule count).
+    func channelMemberCount(roomID: String) -> Int? {
+        guard let claim = roomDirectory.claim(roomID: roomID),
+              let entry = channelsByCompany[claim.companyID]?.channels.first(where: { $0.room.roomId == roomID })
+        else { return nil }
+        return Int(entry.memberCount)
+    }
+
     private func companyErrorText(_ key: String, copy: CompanyCopy) -> String {
         switch key {
         case "lastAdmin": copy.lastAdmin

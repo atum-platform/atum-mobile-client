@@ -366,7 +366,11 @@ struct AppRoot: View {
                     switcher: model.companyWorkspace.switcherEntries(signals: companySignals),
                     canCreate: model.companyWorkspace.canCreate,
                     appIconCount: home.appIconCount,
-                    logos: model.companyWorkspace.logoURIs(from: presentation.rooms.rooms)
+                    logos: model.companyWorkspace.logoURIs(from: presentation.rooms.rooms),
+                    menu: model.companyWorkspace.menuAllowed(companyID: model.companyWorkspace.activeCompanyID),
+                    viewerRole: model.companyWorkspace.activeCompanyID.flatMap {
+                        model.companyWorkspace.viewerRole(companyID: $0)
+                    }
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },
@@ -397,7 +401,10 @@ struct AppRoot: View {
                     loadMatrixThumbnail: { uri, side in
                         await model.avatarThumbnail(uri: uri, pixelSide: side)
                     },
-                    directMessages: directMessagesActions
+                    directMessages: directMessagesActions,
+                    loadActivity: { await model.companyActivity(companyID: $0) },
+                    loadSavedPointers: { await model.companySavedPointers() },
+                    loadSavedRows: { await model.companySavedRows($0) }
                 )
             )
             .navigationDestination(for: String.self) { roomID in
