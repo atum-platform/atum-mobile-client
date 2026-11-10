@@ -182,6 +182,11 @@ enum LiveRosterRows {
         var agents: [AgentsResponse.Agent]
         /// Positive platform bindings, before any personal bot/agent choice.
         var privateCosBindings = CompanyPrivateCosBindings()
+        /// Company notes rooms proven by their create content (`CompanyNotesSelf`): plain rows
+        /// only Team Space opens ("You"); Home never lists them.
+        var notesSelfRoomIDs = Set<String>()
+        /// Their title, "You", instead of the SDK's "Empty Room".
+        var notesSelfTitle: String? = nil
         /// `/apps`.
         var apps: [AppDescriptor]
         var rooms: [LiveMatrixRoomRow]
@@ -262,7 +267,9 @@ enum LiveRosterRows {
         let agentSenders = Set(input.agents.compactMap { $0.matrixUser?.rawValue })
         // Agent task rooms and the desktop's notes-to-self rooms are never Chats
         // rows (the notes room has only its owner, so the SDK calls it "Empty Room").
-        let rooms = input.rooms.filter { !MobileRoomTypePolicy.isHiddenFromChats($0.roomType) }
+        let rooms = input.rooms.filter {
+            !MobileRoomTypePolicy.isHiddenFromChats($0.roomType) || input.notesSelfRoomIDs.contains($0.roomID)
+        }
         let invites = input.invites.filter { !MobileRoomTypePolicy.isHiddenFromChats($0.roomType) }
         // A room or invitation that claims the company conversation type is never a bot's or an
         // agent's: the choosers below see only these. The claim still rides on the plain row, so
@@ -383,7 +390,9 @@ enum LiveRosterRows {
                 }()
                 let title = isFounder
                     ? (input.founderName ?? room.displayName)
-                    : room.displayName
+                    : input.notesSelfRoomIDs.contains(room.roomID)
+                        ? (input.notesSelfTitle ?? room.displayName)
+                        : room.displayName
                 let previewContent: RowPreview.Content = if isFounder,
                                                            room.latestPreviewContent == .none,
                                                            let subtitle = input.founderSubtitle {

@@ -3672,6 +3672,136 @@ final class LiveAppModel {
     func refreshCompanyWorkspace() async {
         configureCompanyWorkspaceIfNeeded()
         await companyWorkspace.refresh()
+        await refreshCompanyNotesSelf()
+    }
+
+    // MARK: Company notes to self ("You")
+
+    /// Create content is immutable: each notes-typed room's facts are read once.
+    @ObservationIgnored private var notesSelfCreates = [String: CompanyNotesSelfCreateFacts]()
+    @ObservationIgnored private var notesSelfOpens = [String: Task<String?, Never>]()
+    @ObservationIgnored private var notesSelfRoomSet = Set<String>()
+
+    private func notesSelfCandidates(_ matrix: LiveMatrixSession) async -> [CompanyNotesSelf.Candidate] {
+        var candidates = [CompanyNotesSelf.Candidate]()
+        for row in matrix.rooms where MobileRoomTypePolicy.isNotesSelf(row.roomType) {
+            var facts = notesSelfCreates[row.roomID]
+            if facts == nil {
+                facts = await matrix.notesSelfCreateFacts(roomID: row.roomID)
+                if let facts { notesSelfCreates[row.roomID] = facts }
+            }
+            guard let facts, liveMatrix === matrix else { continue }
+            candidates.append(CompanyNotesSelf.Candidate(
+                roomID: row.roomID, createContentJSON: facts.contentJSON, creatorUserID: facts.sender,
+                createdAtMilliseconds: facts.timestamp, isJoined: true,
+                activeMemberCount: row.memberCount, otherMemberUserIDs: row.memberUserIDs))
+        }
+        return candidates
+    }
+
+    /// Names each listed company's notes room from the rooms this device has synced.
+    private func refreshCompanyNotesSelf() async {
+        guard let matrix = liveMatrix, let owner = context?.runtime.ticket.session.userID else { return }
+        let candidates = await notesSelfCandidates(matrix)
+        guard liveMatrix === matrix else { return }
+        var rooms = [String: String]()
+        for company in companyWorkspace.list?.companies ?? [] {
+            let id = company.id.rawValue
+            if let winner = CompanyNotesSelf.inspect(candidates, ownerUserID: owner, companyID: id).winner {
+                rooms[id] = winner
+            }
+        }
+        companyWorkspace.reconcileNotesSelf(rooms)
+    }
+
+    /// A notes-typed room appeared or went: name the companies' rooms again.
+    private func notesSelfRoomsChanged(_ rooms: [LiveMatrixRoomRow]) {
+        let next = Set(rooms.filter { MobileRoomTypePolicy.isNotesSelf($0.roomType) }.map(\.roomID))
+        guard next != notesSelfRoomSet else { return }
+        notesSelfRoomSet = next
+        Task { @MainActor [weak self] in await self?.refreshCompanyNotesSelf() }
+    }
+
+    /// "You": the company's notes room, made on this device only when no device has one
+    /// (`CompanyNotesSelf.openDecision`). One open per company at a time.
+    func companyNotesSelfRoom(companyID: String) async -> String? {
+        if let running = notesSelfOpens[companyID] { return await running.value }
+        let task = Task { @MainActor [weak self] () -> String? in
+            await self?.resolveCompanyNotesSelf(companyID: companyID)
+        }
+        notesSelfOpens[companyID] = task
+        let room = await task.value
+        notesSelfOpens[companyID] = nil
+        return room
+    }
+
+    private func resolveCompanyNotesSelf(companyID: String) async -> String? {
+        guard CompanyNotesSelf.isCompanyID(companyID), let matrix = liveMatrix,
+              let owner = context?.runtime.ticket.session.userID else { return nil }
+        let eventType = CompanyNotesSelf.accountDataType(companyID: companyID)
+        func inspection() async -> CompanyNotesSelf.Inspection {
+            CompanyNotesSelf.inspect(await notesSelfCandidates(matrix), ownerUserID: owner, companyID: companyID)
+        }
+        var found = await inspection()
+        let pointer: CompanyNotesSelf.PointerRead
+        if found.winner != nil {
+            pointer = .absent
+        } else {
+            do { pointer = CompanyNotesSelf.readPointer(json: try await matrix.freshGlobalAccountData(eventType: eventType)) }
+            catch { return nil }
+        }
+        guard liveMatrix === matrix else { return nil }
+        switch CompanyNotesSelf.openDecision(inspection: found, pointer: pointer,
+                                             initialSyncComplete: matrix.hasCompletedInitialSync) {
+        case let .open(roomID):
+            await repairNotesSelfPointer(matrix, eventType: eventType, roomID: roomID)
+            await refreshCompanyNotesSelf()
+            return roomID
+        case .refuse:
+            return nil
+        case .wait:
+            break
+        case .create:
+            guard let created = try? await matrix.createCompanyNotesSelfRoom(companyID: companyID),
+                  liveMatrix === matrix else { return nil }
+            // The pointer goes up at once so another device that reads it waits instead of creating.
+            if let json = CompanyNotesSelf.pointerJSON(roomID: created) {
+                try? await matrix.writeGlobalAccountData(eventType: eventType, content: json)
+            }
+        }
+        // Wait, bounded, for the room to arrive by sync and prove itself by its create content.
+        for _ in 0..<30 {
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { return nil }
+            guard liveMatrix === matrix else { return nil }
+            found = await inspection()
+            if let winner = found.winner {
+                await refreshCompanyNotesSelf()
+                return winner
+            }
+        }
+        return nil
+    }
+
+    /// A known v1 pointer naming another room is repaired; unknown data is never overwritten.
+    private func repairNotesSelfPointer(_ matrix: LiveMatrixSession, eventType: String, roomID: String) async {
+        guard let raw = try? await matrix.freshGlobalAccountData(eventType: eventType) else { return }
+        switch CompanyNotesSelf.readPointer(json: raw) {
+        case let .known(current) where current == roomID: return
+        case .readonly: return
+        case .absent, .known: break
+        }
+        if let json = CompanyNotesSelf.pointerJSON(roomID: roomID) {
+            try? await matrix.writeGlobalAccountData(eventType: eventType, content: json)
+        }
+    }
+
+    /// Private-CoS and notes rooms keep no personal exits (desktop `private-cos-chrome.tsx`:
+    /// no leave, delete or block; the notes room is the owner's alone).
+    func offersPersonalExits(roomID: String) -> Bool {
+        switch companyWorkspace.roomClassification(roomID) {
+        case .privateCos, .notesSelf: return false
+        case .company, .conversation, .quarantined, .personal, .unknown: return true
+        }
     }
 
     func refreshProduct() async {
@@ -3808,6 +3938,7 @@ final class LiveAppModel {
             self.roomPublicationRevision &+= 1
             self.reconcileRoomMutations(with: rooms, revision: self.roomPublicationRevision)
             self.reconcileFounderBindingFromKnownMarker()
+            self.notesSelfRoomsChanged(rooms)
         }
         matrix.onSessionInvalid = { [weak self, weak matrix] in
             guard let self, let matrix else { return }
@@ -6108,6 +6239,8 @@ final class LiveAppModel {
         let output = LiveRosterRows.rows(LiveRosterRows.Input(
             agents: agentsRead.value?.agents ?? [],
             privateCosBindings: companyWorkspace.privateCosBindings,
+            notesSelfRoomIDs: Set(companyWorkspace.notesSelfRooms.values),
+            notesSelfTitle: companyWorkspace.copy.map { DirectMessagesCopy(design: $0.design).you },
             apps: appsRead.value?.apps ?? [],
             rooms: liveMatrix?.rooms ?? [],
             invites: liveMatrix?.invites ?? [],

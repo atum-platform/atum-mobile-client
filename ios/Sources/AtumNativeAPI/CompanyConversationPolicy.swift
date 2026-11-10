@@ -196,9 +196,13 @@ public struct ConversationRow: Identifiable, Equatable, Sendable {
     public let state: ConversationRowState
     public let roomID: String?
     public let isHidden: Bool
+    /// The other people's member refs, in the platform's order: a DM's face is the first one's
+    /// photo, a group's the first two (desktop `conversationPeople`).
+    public let otherMemberRefs: [String]
 
     public init(id: String, kind: CompanyConversationKind, title: String, participantCount: Int,
-                state: ConversationRowState, roomID: String?, isHidden: Bool) {
+                state: ConversationRowState, roomID: String?, isHidden: Bool,
+                otherMemberRefs: [String] = []) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -206,6 +210,7 @@ public struct ConversationRow: Identifiable, Equatable, Sendable {
         self.state = state
         self.roomID = roomID
         self.isHidden = isHidden
+        self.otherMemberRefs = otherMemberRefs
     }
 
     public var canOpen: Bool { state != .settingUp && roomID != nil }
@@ -246,7 +251,9 @@ public enum ConversationRows {
                             title: title(of: conversation, selfRef: selfRef, fallbackName: fallbackName),
                             participantCount: conversation.participants.count,
                             state: state(of: conversation), roomID: conversation.room.roomId,
-                            isHidden: conversation.hidden)
+                            isHidden: conversation.hidden,
+                            otherMemberRefs: conversation.participants.map(\.memberRef)
+                                .filter { $0 != selfRef })
         }
         return rows.sorted { left, right in
             let leftDate = left.roomID.flatMap { activity[$0] }

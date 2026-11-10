@@ -1,5 +1,6 @@
 @testable import AtumMobile
 import AtumChat
+import AtumNativeAPI
 import CoreGraphics
 import SwiftUI
 import UIKit
@@ -303,5 +304,69 @@ final class RosterAvatarKindTests: XCTestCase {
         XCTAssertEqual(person.kind, .person)
         XCTAssertEqual(AvatarShapePolicy.frame(for: app.kind.avatarKind), .squircle)
         XCTAssertEqual(AvatarShapePolicy.frame(for: person.kind.avatarKind), .circle)
+    }
+
+    // MARK: Assistant marks (HC-1, desktop `at/assistant-avatar.tsx`)
+
+    private let violetStar = AgentMark(shape: .star, color: .violet)
+
+    @MainActor
+    func testAMarkAssistantRowCarriesItsMarkAndAPhotoOrOtherKindDoesNot() {
+        let locale = Locale(identifier: "en")
+        let marked = HomeRow(product: LiveProductRoom(
+            id: "!nova:atum.test", kind: .agent, title: "Nova", avatar: .mark(violetStar),
+            assistant: LiveProductAssistantMetadata(id: "nova", isDefault: false, order: 1)), locale: locale)
+        XCTAssertEqual(marked.kind, .assistant)
+        XCTAssertEqual(marked.mark, violetStar, "`.mark` is no longer dropped on Home")
+        XCTAssertNil(marked.avatarURL)
+
+        let photo = HomeRow(product: LiveProductRoom(
+            id: "!pic:atum.test", kind: .agent, title: "Pic",
+            avatar: .photo(url: URL(string: "https://images.atum.test/pic.jpg")!, fallback: "P"),
+            assistant: LiveProductAssistantMetadata(id: "pic", isDefault: false, order: 2)), locale: locale)
+        XCTAssertNil(photo.mark)
+        XCTAssertNotNil(photo.avatarURL)
+
+        let primary = HomeRow(product: LiveProductRoom(
+            id: "!atum:atum.test", kind: .agent, title: "Atum", avatar: .eclipse,
+            assistant: LiveProductAssistantMetadata(id: "atum", isDefault: true, order: 0)), locale: locale)
+        XCTAssertEqual(primary.kind, .atum)
+        XCTAssertNil(primary.mark, "the main assistant wears the crescent, never a mark")
+        XCTAssertTrue(primary.showsMainAssistantBadge)
+        XCTAssertFalse(marked.showsMainAssistantBadge)
+
+        let app = HomeRow(id: "!moon", kind: .app, name: "Moon", mark: violetStar)
+        XCTAssertNil(app.mark, "an app is a catalog tile, never a mark")
+    }
+
+    @MainActor
+    func testTheMarkSurvivesTheColdLaunchSnapshot() throws {
+        let row = HomeRow(id: "!nova", kind: .assistant, name: "Nova", mark: violetStar)
+        let snapshot = row.snapshotRow
+        XCTAssertEqual(snapshot.mark, .init(shape: "star", color: "violet"))
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(ChatListSnapshot.Room.self, from: data)
+        XCTAssertEqual(HomeRow(snapshot: decoded).mark, violetStar)
+
+        var unknown = snapshot
+        unknown.mark = .init(shape: "blob", color: "violet")
+        XCTAssertNil(HomeRow(snapshot: unknown).mark, "an unknown shape draws the initial")
+
+        let merged = ChatListSnapshot.merged(cached: [HomeRow(id: "!nova", kind: .assistant, name: "Nova").snapshotRow],
+                                             live: [snapshot], liveIsAuthoritative: false)
+        XCTAssertEqual(merged.first?.mark, snapshot.mark, "a live mark reaches a cached row")
+    }
+
+    func testAvatarTreatmentFollowsDesktopOrder() {
+        XCTAssertEqual(AtumAvatar.treatment(kind: .assistant, hasArt: true, mark: violetStar, name: "Nova"),
+                       .image, "a photo wins")
+        XCTAssertEqual(AtumAvatar.treatment(kind: .assistant, hasArt: false, mark: violetStar, name: "Nova"),
+                       .mark(violetStar))
+        XCTAssertEqual(AtumAvatar.treatment(kind: .atum, hasArt: false, mark: violetStar, name: "Atum"),
+                       .crescent)
+        XCTAssertEqual(AtumAvatar.treatment(kind: .assistant, hasArt: false, mark: nil, name: "Nova"),
+                       .monogram("N"))
+        XCTAssertEqual(AtumAvatar.treatment(kind: .app, hasArt: false, mark: violetStar, name: "Moon"),
+                       .monogram("M"))
     }
 }

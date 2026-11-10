@@ -589,13 +589,31 @@ public struct AgentsRead: Sendable {
         return view
     }
 
+    /// Ensure: 200 is a bound v1 view, 202 the v1.1 asynchronous preparing view.
+    public func ensureCompanyPrivateCos(companyID: NativeID,
+                                        request: CompanyPrivateCosEnsureRequest) async throws -> CompanyPrivateCosView {
+        let body: Data
+        do { body = try JSONEncoder().encode(request) }
+        catch { throw CompanyAPIError.invalid }
+        let data = try await companyData(url: try companyURL(companyID, suffix: "private-cos"),
+                                         method: "POST", body: body, wire: .v1_3,
+                                         acceptedStatuses: [200, 202])
+        let view: CompanyPrivateCosView
+        do { view = try NativeAPI.decode(CompanyPrivateCosView.self, from: data) }
+        catch { throw CompanyAPIError.invalid }
+        guard view.pair.companyPrincipal == companyID else { throw CompanyAPIError.invalid }
+        return view
+    }
+
     private func companyData(url: URL, method: String, body: Data?,
-                             wire: CompanyWire = .v1_1) async throws -> Data {
+                             wire: CompanyWire = .v1_1,
+                             acceptedStatuses: Set<Int> = [200]) async throws -> Data {
         do {
             return try await requestData(url: url, method: method, body: body,
                                          acceptsAssistantNameRefusal: false, companyWire: wire,
                                          maximumRequestBodyBytes: 4_096,
-                                         maximumResponseBodyBytes: CompanyWorkspaceWire.maximumBytes)
+                                         maximumResponseBodyBytes: CompanyWorkspaceWire.maximumBytes,
+                                         acceptedStatuses: acceptedStatuses)
         } catch let failure as NativeDomainClientFailure {
             throw CompanyAPIError(failure)
         } catch let refusal as CompanyWireRefusal {
@@ -985,12 +1003,14 @@ public struct AgentsRead: Sendable {
     private func requestData(url: URL, method: String, body: Data?,
                              acceptsAssistantNameRefusal: Bool, companyWire: CompanyWire?,
                              maximumRequestBodyBytes: Int = 262_144,
-                             maximumResponseBodyBytes: Int = 262_144) async throws -> Data {
+                             maximumResponseBodyBytes: Int = 262_144,
+                             acceptedStatuses: Set<Int> = [200]) async throws -> Data {
         try await response(url: url, method: method, body: body,
                            acceptsAssistantNameRefusal: acceptsAssistantNameRefusal,
                            companyWire: companyWire,
                            maximumRequestBodyBytes: maximumRequestBodyBytes,
-                           maximumResponseBodyBytes: maximumResponseBodyBytes).body
+                           maximumResponseBodyBytes: maximumResponseBodyBytes,
+                           acceptedStatuses: acceptedStatuses).body
     }
 
     private func response(url: URL, method: String, body: Data?,
