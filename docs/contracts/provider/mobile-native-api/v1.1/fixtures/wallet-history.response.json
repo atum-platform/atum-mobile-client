@@ -1,0 +1,23 @@
+{
+  "entries": [
+    {
+      "id": "7f1e2d3c-4b5a-4968-8776-655443322110",
+      "at": "2026-10-05T09:12:44.101+00:00",
+      "kind": "usage",
+      "status": "charged",
+      "amount": -1250000,
+      "reference": null,
+      "closedAt": "2026-10-05T09:12:47.900+00:00"
+    },
+    {
+      "id": "6e5d4c3b-2a19-4807-96a5-b4c3d2e1f0a9",
+      "at": "2026-10-04T08:00:00.123456+00:00",
+      "kind": "grant",
+      "status": "completed",
+      "amount": 5000000,
+      "reference": "starter",
+      "closedAt": null
+    }
+  ],
+  "next": "WyIyMDI2LTEwLTA0VDA4OjAwOjAwLjEyMzQ1NiswMDowMCIsIjZlNWQ0YzNiIl0"
+}

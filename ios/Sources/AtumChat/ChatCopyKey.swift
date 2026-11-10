@@ -72,6 +72,15 @@ public enum ChatCopyKey: String, CaseIterable, Sendable {
     case deleteChat = "src.matrix.chat-copy.copies.deleteChat"
     case deleteChatTitle = "src.matrix.chat-copy.copies.deleteChatTitle"
     case deleteBotChatBody = "src.matrix.chat-copy.copies.deleteBotChatBody"
+    // Report (HC-2, App Review 1.2): desktop `message-actions.tsx`,
+    // `report-dialog.tsx`. Report person's own words are `ReportPendingCopy`.
+    case report = "src.matrix.chat-copy.copies.report"
+    case reportTitle = "src.matrix.chat-copy.copies.reportTitle"
+    case reportBody = "src.matrix.chat-copy.copies.reportBody"
+    case reportSent = "src.matrix.chat-copy.copies.reportSent"
+    /// "Add details (optional)": the optional reason's stand-in until
+    /// `ReportPendingCopy.reportReason` is exported.
+    case reportNote = "desktop.dm.group.report.note"
     case pinLimit = "desktop.atum.roster.pinLimit"
     case firstPartyApp = "desktop.atum.roster.badgeFirstParty"
     case partnerApp = "desktop.atum.roster.badgePartner"

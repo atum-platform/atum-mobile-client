@@ -33,6 +33,10 @@ struct S6ScriptedHost: View {
             case .storeCatalog, .storeFirstLoad, .storeEmpty, .storeUnavailable,
                  .storeStale, .storePartial, .storeOpenApp:
                 storeHost
+            case .storeAcquire: StoreCommerceScriptedHost(design: design, mode: .acquire)
+            case .storeInsufficient: StoreCommerceScriptedHost(design: design, mode: .insufficient)
+            case .storeUncertain: StoreCommerceScriptedHost(design: design, mode: .uncertain)
+            case .storeOwned: StoreCommerceScriptedHost(design: design, mode: .owned)
             case .accountDefault, .accountRestore, .recoveryRejected, .recoveryDone,
                  .accountKey, .signOutPlain, .signOutSaveKey, .accountLegal:
                 accountHost

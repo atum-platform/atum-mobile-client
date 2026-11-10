@@ -87,10 +87,12 @@ public struct CompanyPrivateCosView: Decodable, Equatable, Sendable {
     }
 }
 
-/// Both frozen capability advertisements understood by this read-only consumer.
-/// No execution, ensure, spend or stop methods are exposed.
+/// Both frozen capability advertisements understood by this consumer. The only
+/// write is `ensure` (the frozen v1 request); no execution, spend or stop.
 public struct CompanyPrivateCosCapability: Decodable, Equatable, Sendable {
     public let profile: String
+    /// The 1.3 advertisement's frozen `displayName` ("Chief of Staff"); nil for v2.
+    public let displayName: String?
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
@@ -107,6 +109,7 @@ public struct CompanyPrivateCosCapability: Decodable, Equatable, Sendable {
             let restore: Bool = try c.value("retiredIncarnationRestore")
             guard version == 5, wire.value == "2", funding == "atum.company-funding/2.2", !restore
             else { throw ContractViolation.invalidValue }
+            displayName = nil
         } else {
             try c.closed(["schemaVersion", "profile", "capability", "supportedProfiles", "wire", "displayName",
                           "teamDmPosition", "lazyCreation", "fundingKind", "separatePrice", "purgeAfterDays",
@@ -124,6 +127,7 @@ public struct CompanyPrivateCosCapability: Decodable, Equatable, Sendable {
                     "atum.company-private-cos/1.1", "atum.company-private-cos/1.2", "atum.company-private-cos/1.3"],
                   name == "Chief of Staff", roomName == name, position == 2, lazy,
                   funding == "company_wallet", !price else { throw ContractViolation.invalidValue }
+            displayName = name
         }
         let roomType: String = try c.value("roomType")
         let encrypted: Bool = try c.value("roomEncrypted")
@@ -161,6 +165,139 @@ public struct CompanyPrivateCosCapability: Decodable, Equatable, Sendable {
 @MainActor public protocol CompanyPrivateCosAPI: AnyObject {
     func companyPrivateCosCapability() async throws -> CompanyPrivateCosCapability
     func companyPrivateCosView(companyID: NativeID) async throws -> CompanyPrivateCosView
+    /// `POST /companies/{id}/private-cos` (frozen v1 ensure; 200 bound, 202 v1.1 preparing).
+    func ensureCompanyPrivateCos(companyID: NativeID,
+                                 request: CompanyPrivateCosEnsureRequest) async throws -> CompanyPrivateCosView
+}
+
+public extension CompanyPrivateCosAPI {
+    /// A read-only consumer (a test double) has no ensure: it is "not available".
+    func ensureCompanyPrivateCos(companyID: NativeID,
+                                 request: CompanyPrivateCosEnsureRequest) async throws -> CompanyPrivateCosView {
+        throw CompanyAPIError.unavailable
+    }
+}
+
+/// The frozen v1 ensure body (`lazy-first-open.ensure.request.json`). The
+/// request ID is kept across a retry of the same trigger, so a lost answer
+/// replays instead of provisioning twice.
+public struct CompanyPrivateCosEnsureRequest: Encodable, Equatable, Sendable {
+    public enum Trigger: String, Encodable, Sendable {
+        case dmOpen = "dm_open"
+        case firstCompanyVisit = "first_company_visit"
+    }
+    public let schemaVersion = 1
+    public let requestId: NativeID
+    public let action = "ensure"
+    public let trigger: Trigger
+    /// 1.3 only: `en`, `vi`, `ja`, `zh`, `zh-hant`.
+    public let locale: String?
+
+    public init(requestId: NativeID, trigger: Trigger, locale: String? = nil) {
+        self.requestId = requestId
+        self.trigger = trigger
+        self.locale = locale.flatMap { Self.locales.contains($0) ? $0 : nil }
+    }
+
+    public static let locales: Set<String> = ["en", "vi", "ja", "zh", "zh-hant"]
+
+    private enum CodingKeys: String, CodingKey { case schemaVersion, requestId, action, trigger, locale }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(requestId, forKey: .requestId)
+        try c.encode(action, forKey: .action)
+        try c.encode(trigger, forKey: .trigger)
+        try c.encodeIfPresent(locale, forKey: .locale)
+    }
+}
+
+/// What the phone knows about one company's private Chief of Staff, as the
+/// desktop's `private-cos-store.ts` keeps it: the last strict view the platform
+/// served, its availability, and the ensure request a retry replays.
+public struct CompanyPrivateCosState: Equatable, Sendable {
+    public enum Availability: Equatable, Sendable { case preparing, ready, paused, unavailable }
+
+    public var view: CompanyPrivateCosView
+    public var availability: Availability
+    public var loading: Bool
+    public var ensureRequestID: String?
+    public var ensureTrigger: CompanyPrivateCosEnsureRequest.Trigger?
+
+    public init(view: CompanyPrivateCosView, loading: Bool = false) {
+        self.view = view
+        availability = view.state == "ready" && view.binding != nil ? .ready : .preparing
+        self.loading = loading
+    }
+
+    /// A served view replaces the last one; the ensure request stays only for the same pair.
+    public mutating func served(_ next: CompanyPrivateCosView) {
+        if next.pair != view.pair { ensureRequestID = nil; ensureTrigger = nil }
+        view = next
+        availability = next.state == "ready" && next.binding != nil ? .ready : .preparing
+        loading = false
+    }
+
+    /// A read or ensure that failed but did not end the scope.
+    public mutating func failed(_ error: Error) {
+        loading = false
+        availability = CompanyPrivateCosRowProjection.isPause(error) ? .paused : .unavailable
+    }
+
+    public var isUncreated: Bool { view.state == "uncreated" }
+    public var roomID: String? { view.state == "ready" ? view.binding?.roomId : nil }
+}
+
+/// The desktop's discovery state before a strict view is served.
+public enum CompanyPrivateCosDiscovery: Equatable, Sendable {
+    case checking
+    case notAvailable
+}
+
+/// The one honest line a Chief of Staff row shows (desktop
+/// `companyPrivateCosRowStatus`, `team-space/conversation-sections.tsx:118–136`).
+public enum CompanyPrivateCosRowStatus: Equatable, Sendable {
+    case settingUp
+    case ready
+    case paused
+    case notAvailable
+
+    /// Not available and paused offer Retry (the ensure route).
+    public var offersRetry: Bool { self == .notAvailable || self == .paused }
+}
+
+public enum CompanyPrivateCosRowProjection {
+    /// No served view: still asking (setting up) or asked and nothing usable came back.
+    public static func status(state: CompanyPrivateCosState?,
+                              discovery: CompanyPrivateCosDiscovery?) -> CompanyPrivateCosRowStatus {
+        guard let state else { return discovery == .notAvailable ? .notAvailable : .settingUp }
+        if state.loading { return .settingUp }
+        switch state.availability {
+        case .ready: return .ready
+        case .preparing: return .settingUp
+        case .paused: return .paused
+        case .unavailable: return .notAvailable
+        }
+    }
+
+    /// The platform's pause reasons (desktop `private-cos-store.ts`).
+    public static func isPause(_ error: Error) -> Bool {
+        guard case let .refused(_, reason, _)? = error as? CompanyAPIError, let reason else { return false }
+        return ["budget_exhausted", "ai_disabled", "stopped"].contains(reason)
+    }
+
+    /// A refusal that ends the served row: the member, company or wire no longer admits it.
+    public static func endsScope(_ error: Error) -> Bool {
+        if error is CompanyWireRefusal { return true }
+        switch error as? CompanyAPIError {
+        case .refused(.authentication, _, _)?, .refused(.denied, _, _)?, .refused(.missing, _, _)?,
+             .refused(.invalid, _, _)?, .invalid?:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 /// In-memory positive bindings only. An empty or failed read supplies no

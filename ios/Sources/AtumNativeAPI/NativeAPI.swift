@@ -178,6 +178,16 @@ public struct NativeTimestamp: Decodable, Hashable, Sendable {
 }
 
 public enum MicroProtonFormat {
+    /// Desktop wholeProtons: clamp to zero, then floor. Integer division keeps
+    /// large balances exact and never rounds spendable value up.
+    public static func balance(_ amount: Int64, locale: String) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: locale)
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: max(0, amount) / 1_000_000))!
+    }
+
     public static func string(_ amount: Int64, locale: String, showPositiveSign: Bool = false) -> String {
         // All six fractional digits survive; no Double conversion or wallet
         // arithmetic from transaction-history rows.

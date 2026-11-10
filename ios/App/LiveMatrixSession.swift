@@ -191,7 +191,8 @@ final class LiveMatrixSession {
     private(set) var error: LiveMatrixSessionError?
 
     let sharedCollectionsRegistry = SharedCollectionsRegistry()
-    private let runtime: MatrixLiveRuntime
+    /// Internal for the company notes-to-self glue (`CompanyWorkspaceModel.swift`).
+    let runtime: MatrixLiveRuntime
     private var syncService: SyncService?
     private var roomList: RoomList?
     private var roomEntries: RoomListEntriesWithDynamicAdaptersResult?
@@ -817,7 +818,7 @@ final class LiveMatrixSession {
             case .remove: try await room.kickUser(userId: userID, reason: nil)
             case .ban: try await room.banUser(userId: userID, reason: nil)
             case .unban: try await room.unbanUser(userId: userID, reason: nil)
-            case .block, .unblock: return false
+            case .block, .unblock, .report: return false
             }
             try runtime.requireCurrent()
             return true

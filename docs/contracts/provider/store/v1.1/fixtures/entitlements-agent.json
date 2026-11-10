@@ -1,0 +1,19 @@
+{
+  "entitlements": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "itemId": "agent/research",
+      "kind": "agent",
+      "state": "active",
+      "assistantId": "10000000-0000-4000-8000-000000000005",
+      "delivery": "cloud",
+      "grantedAt": "2026-10-06T00:00:00.000Z",
+      "subscription": {
+        "state": "active",
+        "renewAt": "2026-10-13T00:00:00.000Z",
+        "priceMicroProtons": 1000000000,
+        "offerVersion": 1
+      }
+    }
+  ]
+}

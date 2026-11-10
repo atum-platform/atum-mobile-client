@@ -348,11 +348,49 @@ public struct AgentsRead: Sendable {
                                  acceptsAssistantNameRefusal: false)
     }
 
-    /// Reads the server-authored Store listing. This is deliberately a
-    /// read-only display projection: it does not expose purchases,
-    /// entitlements, checkout, or StoreKit authority.
+    /// Only the five native-admitted Store operations; topups/tasks and the
+    /// desktop-only per-purchase status route are intentionally absent.
+    public func storeEntitlements() async throws -> StoreEntitlementsResponse {
+        try await storeRead(StoreEntitlementsResponse.self, path: "entitlements")
+    }
+
+    public func storePurchases() async throws -> StorePurchasesResponse {
+        try await storeRead(StorePurchasesResponse.self, path: "purchases")
+    }
+
+    public func acquireStoreItem(_ attempt: StorePurchaseAttempt) async throws -> StorePurchaseResult {
+        let data = try await storeData(url: Self.baseURL.appendingPathComponent("store/purchases"),
+            method: "POST", body: attempt.body, extraHeaders: [
+                StoreWire.capabilitiesHeader: StoreWire.capabilities,
+                "Idempotency-Key": attempt.idempotencyKey.rawValue
+            ])
+        let result = try StoreWire.decode(StorePurchaseResult.self, from: data)
+        try attempt.validate(result)
+        return result
+    }
+
+    public func cancelStoreSubscription(_ id: NativeID) async throws -> StoreEntitlement {
+        let data = try await storeData(url: Self.baseURL.appendingPathComponent("store/entitlements/" + id.rawValue + "/cancel"),
+            method: "POST", body: Data("{}".utf8), extraHeaders: [StoreWire.capabilitiesHeader: StoreWire.capabilities])
+        let result = try StoreWire.decode(StoreEntitlement.self, from: data)
+        guard result.id == id, result.subscription?.state == .cancelled else { throw NativeDomainClientFailure.invalidResponse }
+        return result
+    }
+
+    private func storeRead<T: Decodable>(_ type: T.Type, path: String) async throws -> T {
+        let data = try await storeData(url: Self.baseURL.appendingPathComponent("store/" + path),
+            method: "GET", body: nil, extraHeaders: [StoreWire.capabilitiesHeader: StoreWire.capabilities])
+        return try StoreWire.decode(type, from: data)
+    }
+
+    private func storeData(url: URL, method: String, body: Data?, extraHeaders: [String: String]) async throws -> Data {
+        try await response(url: url, method: method, body: body,
+            maximumRequestBodyBytes: 4096, maximumResponseBodyBytes: 1_048_576,
+            extraHeaders: extraHeaders).body
+    }
+
     public func storeCatalog() async throws -> StoreCatalogResponse {
-        try await read(StoreCatalogResponse.self, url: Self.storeCatalogURL)
+        try await storeRead(StoreCatalogResponse.self, path: "catalog")
     }
 
     public func wallet() async throws -> WalletResponse {
@@ -551,13 +589,31 @@ public struct AgentsRead: Sendable {
         return view
     }
 
+    /// Ensure: 200 is a bound v1 view, 202 the v1.1 asynchronous preparing view.
+    public func ensureCompanyPrivateCos(companyID: NativeID,
+                                        request: CompanyPrivateCosEnsureRequest) async throws -> CompanyPrivateCosView {
+        let body: Data
+        do { body = try JSONEncoder().encode(request) }
+        catch { throw CompanyAPIError.invalid }
+        let data = try await companyData(url: try companyURL(companyID, suffix: "private-cos"),
+                                         method: "POST", body: body, wire: .v1_3,
+                                         acceptedStatuses: [200, 202])
+        let view: CompanyPrivateCosView
+        do { view = try NativeAPI.decode(CompanyPrivateCosView.self, from: data) }
+        catch { throw CompanyAPIError.invalid }
+        guard view.pair.companyPrincipal == companyID else { throw CompanyAPIError.invalid }
+        return view
+    }
+
     private func companyData(url: URL, method: String, body: Data?,
-                             wire: CompanyWire = .v1_1) async throws -> Data {
+                             wire: CompanyWire = .v1_1,
+                             acceptedStatuses: Set<Int> = [200]) async throws -> Data {
         do {
             return try await requestData(url: url, method: method, body: body,
                                          acceptsAssistantNameRefusal: false, companyWire: wire,
                                          maximumRequestBodyBytes: 4_096,
-                                         maximumResponseBodyBytes: CompanyWorkspaceWire.maximumBytes)
+                                         maximumResponseBodyBytes: CompanyWorkspaceWire.maximumBytes,
+                                         acceptedStatuses: acceptedStatuses)
         } catch let failure as NativeDomainClientFailure {
             throw CompanyAPIError(failure)
         } catch let refusal as CompanyWireRefusal {
@@ -947,12 +1003,14 @@ public struct AgentsRead: Sendable {
     private func requestData(url: URL, method: String, body: Data?,
                              acceptsAssistantNameRefusal: Bool, companyWire: CompanyWire?,
                              maximumRequestBodyBytes: Int = 262_144,
-                             maximumResponseBodyBytes: Int = 262_144) async throws -> Data {
+                             maximumResponseBodyBytes: Int = 262_144,
+                             acceptedStatuses: Set<Int> = [200]) async throws -> Data {
         try await response(url: url, method: method, body: body,
                            acceptsAssistantNameRefusal: acceptsAssistantNameRefusal,
                            companyWire: companyWire,
                            maximumRequestBodyBytes: maximumRequestBodyBytes,
-                           maximumResponseBodyBytes: maximumResponseBodyBytes).body
+                           maximumResponseBodyBytes: maximumResponseBodyBytes,
+                           acceptedStatuses: acceptedStatuses).body
     }
 
     private func response(url: URL, method: String, body: Data?,
@@ -1067,6 +1125,13 @@ public struct AgentsRead: Sendable {
               (0...4_500_000).contains(maximumResponseBodyBytes),
               (method == "GET") == (body == nil),
               extraHeaders.allSatisfy({ name, value in
+                  if url.path.hasPrefix(Self.baseURL.path + "/store/") {
+                      if name == StoreWire.capabilitiesHeader { return value == StoreWire.capabilities }
+                      if name == "Idempotency-Key" {
+                          return url.path == Self.baseURL.path + "/store/purchases" && method == "POST"
+                              && (try? NativeID(value)) != nil
+                      }
+                  }
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
                   }
@@ -1170,10 +1235,17 @@ public struct AgentsRead: Sendable {
                             Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
                             Self.driveAccountURL.path, Self.privateCosCapabilityURL.path]
+        let storeRoot = Self.baseURL.path + "/store/"
+        let storeTail = String(url.path.dropFirst(storeRoot.count))
+        let storeParts = storeTail.split(separator: "/", omittingEmptySubsequences: false)
+        let nativeStorePath = url.path.hasPrefix(storeRoot) && (
+            ["catalog", "entitlements", "purchases"].contains(storeTail)
+            || (storeParts.count == 3 && storeParts[0] == "entitlements" && storeParts[2] == "cancel"
+                && (try? NativeID(String(storeParts[1]))) != nil))
         let dynamicAgentPath = isAgentPath(url.path)
         let dynamicCompanyPath = isCompanyPath(url.path)
         let dynamicAppPath = isAppPath(url.path)
-        guard allowedPaths.contains(url.path) || Self.applePaths.contains(url.path) || dynamicAgentPath || dynamicCompanyPath || dynamicAppPath
+        guard allowedPaths.contains(url.path) || Self.applePaths.contains(url.path) || dynamicAgentPath || dynamicCompanyPath || dynamicAppPath || nativeStorePath
         else { return false }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         let query = components.queryItems ?? []
