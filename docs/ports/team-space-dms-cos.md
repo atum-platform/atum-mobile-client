@@ -68,7 +68,7 @@ Proven notes rooms are let through `LiveRosterRows` (titled "You" instead of the
 | `cd ios && swift test --scratch-path /Volumes/AtumTestFlight/swiftbuild-w1-ts -j 2 --filter "CompanyNotesSelfTests\|CompanyPrivateCosTests\|NativeDomainClientTests\|CompanyConversations\|CompanyWorkspace"` | 140 tests, 0 failures. Includes the new `CompanyNotesSelfTests` (7: keys, earliest-owned winner and quarantine, pointer read, open/create/wait decision, create body, CoS row states, ensure request) and `NativeDomainClientTests.testPrivateCosEnsurePostsTheFrozenBodyAndAcceptsTheAsyncPreparingAnswer`. |
 | `xcodebuild … -scheme AtumMobileStateTests -only-testing:AtumMobileTests/{S2StateTests,ConversationTests,TeamSpaceDailyTests,CompanySwitcherTests} test` (iPhone 17 simulator) | 140 tests, 0 failures. S2StateTests 77, ConversationTests 36, CompanySwitcherTests 18, TeamSpaceDailyTests 9. New: section present with conversations off, row order You → CoS → DMs, CoS not available / Retry / setting up / paused / ready with request-ID replay, first-visit ensure once, notes-room classification and roster title. The existing CoS tests now assert that the row is in Direct messages and not in Channels. |
 | `xcodebuild … -scheme AtumMobile build` (simulator) | BUILD SUCCEEDED |
-| `python3 scripts/public_guard.py --base origin/main --head HEAD` | See the commit; it must PASS before handoff. |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | PASS |
 
 Not exercised: a physical iPhone, a live account, the production homeserver or the platform.
 
