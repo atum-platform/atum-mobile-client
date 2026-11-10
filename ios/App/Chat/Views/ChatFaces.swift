@@ -82,7 +82,8 @@ struct ChatFaceView: View {
     @State private var art: AtumAvatarArt?
 
     var body: some View {
-        AtumAvatar(kind: face.kind, name: face.name, art: art, size: size)
+        AtumAvatar(kind: face.kind, name: face.name, art: art,
+                   mark: face.avatar?.agentMark, size: size)
             .task(id: Request(face: face, size: size)) {
                 art = nil
                 let pixelSide = AtumAvatar.thumbnailPixelSide(for: size)

@@ -1003,11 +1003,14 @@ final class S2StateTests: XCTestCase {
     func testRosterStoreKeepsClassificationAcrossRoomOnlyUpdates() {
         let assistant = RosterProjection.Assistant(id: "assistant", conversationRoomID: "a", agentOrder: 0)
         let app = RosterProjection.App(id: "app", rosterOrder: 0, conversationRoomID: "app-room")
+        // The app's chat sorts with the chats by recency (desktop sortConversations).
+        let newer = Date(timeIntervalSince1970: 2_000)
+        let older = Date(timeIntervalSince1970: 1_000)
         let initial = RosterSnapshot(
             rooms: [
                 .init(id: "a", kind: .assistant(agentID: "assistant")),
-                .init(id: "person", kind: .person),
-                .init(id: "app-room", kind: .app(appID: "app")),
+                .init(id: "person", kind: .person, latestEventAt: newer),
+                .init(id: "app-room", kind: .app(appID: "app"), latestEventAt: older),
             ],
             assistants: [assistant], apps: [app]
         )
@@ -1017,8 +1020,8 @@ final class S2StateTests: XCTestCase {
 
         store.applyRooms([
             .init(id: "a", kind: .assistant(agentID: "assistant")),
-            .init(id: "new-person", kind: .person),
-            .init(id: "app-room", kind: .app(appID: "app")),
+            .init(id: "new-person", kind: .person, latestEventAt: newer),
+            .init(id: "app-room", kind: .app(appID: "app"), latestEventAt: older),
         ])
         XCTAssertEqual(store.snapshot.assistants, [assistant])
         XCTAssertEqual(store.snapshot.apps, [app])
@@ -1218,6 +1221,24 @@ final class S2StateTests: XCTestCase {
         XCTAssertEqual(output.assistants.last?.kind,
                        .assistant(agentID: "!orphan:atum.test"),
                        "the fallback keeps the room under its own ID and after the server's agents")
+    }
+
+    func testHomeOrderMixesBotChatsByRecencyAndPutsAppsWithoutAChatLast() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let person = LiveProductRoom(id: "!alice:atum.test", kind: .people, title: "Alice",
+                                     latestEventAt: now.addingTimeInterval(-600))
+        let moon = LiveProductRoom(id: "!moon:atum.test", kind: .agent, title: "Moon",
+                                   latestEventAt: now, isAppBotRoom: true)
+        let andy = LiveProductRoom(id: "app:andy", kind: .agent, title: "Andy",
+                                   canOpen: true, awaitsStart: true)
+        let quiet = LiveProductRoom(id: "!quiet:atum.test", kind: .group, title: "Quiet")
+
+        let output = RosterProjection.project(
+            AppRoot.rosterSnapshot(from: [andy, person, moon, quiet]).projectionInput)
+
+        XCTAssertEqual(output.chats.map(\.roomID),
+                       ["!moon:atum.test", "!alice:atum.test", "!quiet:atum.test", "app:andy"],
+                       "Moon's fresh message sits above Alice; Andy, with no chat yet, follows every chat")
     }
 
     func testNamelessDirectAndGroupInvitesRemainActionableWithSDKAvatars() throws {

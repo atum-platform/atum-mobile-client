@@ -663,7 +663,8 @@ struct AppRoot: View {
                                             isFavourite: room.isPinned))
                 apps.append(.init(id: appID, rosterOrder: index,
                                   conversationRoomID: room.canOpen ? room.id : nil,
-                                  isPresentationOnly: room.isComingSoon))
+                                  isPresentationOnly: room.isComingSoon,
+                                  hasChat: !room.awaitsStart))
             case .agent:
                 // A room classified as an assistant chat must stay visible even
                 // if `/agents` did not carry its metadata. The fallback keeps
