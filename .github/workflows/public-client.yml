@@ -49,25 +49,80 @@ jobs:
 # Artifact allowlist is empty: no logs, captures, packages or release artifacts uploaded.
 # No shared caches or release/signing authority in public CI.
 
-  # Standard macos-26 currently ships Xcode 26.6. The native project requires Xcode 27
-  # (LastUpgradeCheck 2700); enable only when a standard hosted image includes it.
-  # https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md
-  simulator:
-    if: ${{ false }}
+  app-tests:
+    name: App target and AppTests
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Build simulator without signing
-        run: >-
-          xcodebuild -project ios/AtumMobile.xcodeproj -scheme AtumMobile
-          -sdk iphonesimulator -configuration Debug
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath /tmp/atum-public-derived
-          CODE_SIGNING_ALLOWED=NO build
+      - name: Select a standard hosted iPhone simulator
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          destination=$(python3 - <<'PY'
+          import json
+          import subprocess
+
+          data = json.loads(subprocess.check_output(
+              ['xcrun', 'simctl', 'list', 'devices', 'available', '-j'], text=True
+          ))
+          candidates = [
+              device
+              for devices in data['devices'].values()
+              for device in devices
+              if device['name'].startswith('iPhone') and device.get('isAvailable', True)
+          ]
+          if not candidates:
+              raise SystemExit('standard hosted image has no available iPhone simulator')
+          print(f"platform=iOS Simulator,id={candidates[-1]['udid']}")
+          PY
+          )
+          echo "IOS_DESTINATION=$destination" >> "$GITHUB_ENV"
+      - name: Build app and tests without signing
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/atum-mobile-derived-data
+          SOURCE_PACKAGES: ${{ runner.temp }}/atum-mobile-source-packages
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/AtumMobile.xcodeproj \
+            -scheme AtumMobile \
+            -configuration Debug \
+            -destination "$IOS_DESTINATION" \
+            -destination-timeout 60 \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+            -disableAutomaticPackageResolution \
+            -jobs 2 \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build-for-testing
+      - name: Run AppTests
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/atum-mobile-derived-data
+          SOURCE_PACKAGES: ${{ runner.temp }}/atum-mobile-source-packages
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/AtumMobile.xcodeproj \
+            -scheme AtumMobile \
+            -configuration Debug \
+            -destination "$IOS_DESTINATION" \
+            -destination-timeout 60 \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+            -disableAutomaticPackageResolution \
+            -parallel-testing-enabled NO \
+            -maximum-concurrent-test-simulator-destinations 1 \
+            -only-testing:AtumMobileTests \
+            CODE_SIGNING_ALLOWED=NO \
+            test-without-building
+      - name: Shut down simulator
+        if: always()
+        run: xcrun simctl shutdown all || true
 
   swift:
     runs-on: macos-26
