@@ -744,7 +744,10 @@ struct AppRoot: View {
                     loadDetails: { await model.chatPanelDetails(roomID: $0) },
                     moderateMember: { await model.moderateMember(roomID: $0, userID: $1, action: $2) },
                     assistantTurnStop: model.assistantTurnStopActions(roomID: roomID),
-                    sharedCollections: model.sharedCollectionsOpener(roomID: roomID)
+                    sharedCollections: model.sharedCollectionsOpener(roomID: roomID),
+                    companyChannel: CompanyChannelActions(
+                        loadFacts: { await model.companyChannelFacts(roomID: $0) },
+                        loadPinned: { await model.companyPinnedRows(roomID: $0) })
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),

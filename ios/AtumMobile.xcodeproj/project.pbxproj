@@ -122,6 +122,7 @@
 		58FFF98F5431C75863E264C5 /* CompanySpaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A978118D2881F551EC2169DA /* CompanySpaceViews.swift */; };
 		E4862B548E390F2312D09724 /* CompanySpaceReads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */; };
 		EEB7C9632C3F68FFAC743371 /* CompanySpaceMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */; };
+		03511538884AC9E9CE9DCED0 /* CompanyChannelChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */; };
 		9625EE68D6AF6865416044CC /* AtumUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F215437C0382312CF51317D2 /* AtumUITestCase.swift */; };
 		9697A0A52139F20C0B7AEA2A /* AccountScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10F74306DAF0BF9208C8BB82 /* AccountScreen.swift */; };
 		980202A90D75370EB5875264 /* ComposerDictationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A301DCAB5CF1EE9026EC7F22 /* ComposerDictationTests.swift */; };
@@ -358,6 +359,7 @@
 		A978118D2881F551EC2169DA /* CompanySpaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceViews.swift; sourceTree = "<group>"; };
 		9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceReads.swift; sourceTree = "<group>"; };
 		48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceMatrix.swift; sourceTree = "<group>"; };
+		9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyChannelChrome.swift; sourceTree = "<group>"; };
 		65E57A0A4A6E16379B0A7464 /* AccountSettingsState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsState.swift; sourceTree = "<group>"; };
 		6A9759FFBC6760628756EECA /* IgnoredPeopleList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IgnoredPeopleList.swift; sourceTree = "<group>"; };
 		D1A7E0C1AC2A4DE1A0C0FFEE /* DeleteAccountRequestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountRequestSheet.swift; sourceTree = "<group>"; };
@@ -866,6 +868,7 @@
 				A978118D2881F551EC2169DA /* CompanySpaceViews.swift */,
 				9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */,
 				48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */,
+				9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */,
 				137B4475C399684FFE43891C /* ConversationCopy.swift */,
 				DFC5EC7D6CCCEA5C78BC18A9 /* ConversationPendingCopy.swift */,
 				ADD7F230B5EC24982633DC95 /* ConversationViews.swift */,
@@ -1292,6 +1295,7 @@
 				58FFF98F5431C75863E264C5 /* CompanySpaceViews.swift in Sources */,
 				E4862B548E390F2312D09724 /* CompanySpaceReads.swift in Sources */,
 				EEB7C9632C3F68FFAC743371 /* CompanySpaceMatrix.swift in Sources */,
+				03511538884AC9E9CE9DCED0 /* CompanyChannelChrome.swift in Sources */,
 				EBDEC5DC70E5AE4EA0CF38F3 /* Composer.swift in Sources */,
 				9CAD16F7172E740BDA657FC1 /* ComposerDictation.swift in Sources */,
 				5EC06AAEDB20A87EC841716D /* ComposerDictationCopy.swift in Sources */,

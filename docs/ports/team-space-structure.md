@@ -124,8 +124,17 @@ and **Activity uses Bell** until the glyph export adds `Bookmark` and `Activity`
 
 ## Verification
 
-See the session log entry in this file's commit and the worker report. Commands are run under the
-heavy-build lock (`TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock …`).
+Every command ran under the heavy-build lock (`TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k
+/Volumes/AtumTestFlight/.heavy-build.lock …`), on the full working tree (all three commits).
+
+| Command | Result |
+|---|---|
+| `cd ios && swift test --scratch-path /Volumes/AtumTestFlight/swiftbuild-w2-ts -j 2 --filter "CompanySpacePolicyTests\|CompanyNotesSelfTests\|CompanyPrivateCosTests\|CompanyConversations\|CompanyWorkspace"` | 77 tests, 0 failures |
+| `… swift test … --filter CompanySpacePolicyTests` | 11 tests, 0 failures (tabs, menu, sidebar, search, Saved parse, Activity parse and badge) |
+| `xcodebuild -project ios/AtumMobile.xcodeproj -scheme AtumMobile -sdk iphonesimulator -destination id=<iPhone 17> -derivedDataPath /Volumes/AtumTestFlight/dd-w2-ts -clonedSourcePackagesDirPath /Volumes/AtumTestFlight/spm -jobs 2 ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build` | BUILD SUCCEEDED |
+| `xcodebuild … -scheme AtumMobileStateTests -only-testing:AtumMobileTests/{TeamSpaceStructureTests,TeamSpaceDailyTests,ConversationTests,CompanySwitcherTests,S2StateTests} test` (iPhone 17 simulator) | 144 tests, 0 failures (new TeamSpaceStructureTests: 3) |
+
+Not run: UI tests, simulator screenshots, a live account, a physical iPhone.
 
 ## Session log
 

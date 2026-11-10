@@ -47,6 +47,10 @@ struct CompanyChatInfo: Equatable {
     let membersLoading: Bool
     let leavePending: Bool
     let notice: String
+    /// The platform's member count for the channel (TS-9 capsule and details).
+    var memberCount: Int? = nil
+    /// The company's seeded default channel, whose purpose is the desktop's localized line.
+    var isDefaultChannel = false
 }
 
 struct ChatInfoPresentation {
@@ -168,8 +172,9 @@ struct ChatInfoActions {
     var setPinned: ((String, Bool) -> Void)?
     var setMuted: ((String, Bool) -> Void)?
     var deleteAppRoom: ((String) -> Void)?
-    /// Leaving a company channel leaves the company (the channel's roster is
-    /// the company roster).
+    /// Leave company. No longer offered from a channel (lane 2 D6): on the 1.1
+    /// wire desktop's channel menu has no exit; Leave company lives in the
+    /// company menu. Kept for hosts that still pass it.
     var leaveCompany: ((String) -> Void)?
     var assistantDefinition: AssistantDefinitionActions?
     var assistantModels: AssistantModelActions?
@@ -204,6 +209,8 @@ struct ChatInfoActions {
     var assistantTurnStop: AssistantTurnStopActions?
     /// Opens the Shared section's photos, files and links; nil hides it.
     var sharedCollections: SharedCollectionsOpener?
+    /// A company channel's own reads (intro facts, pinned messages; TS-9).
+    var companyChannel: CompanyChannelActions?
 }
 
 /// What the panel reads when it opens. Every field may be unknown; an unknown
@@ -346,7 +353,6 @@ struct ChatInfoHome: View {
     @State private var reporting: ReportPersonRequest?
 
     private enum SheetConfirmation: Equatable {
-        case leaveCompany
         case deleteApp
         case exit(ChatExitAction)
         case ignore(userID: String, name: String)
@@ -439,7 +445,11 @@ struct ChatInfoHome: View {
                             .padding(.top, 20)
                         assistantAccessSection.padding(.top, 24)
                         if let company = info.company {
-                            companySection(company).padding(.top, 24)
+                            CompanyChannelInfoSection(design: design, info: info, company: company,
+                                                      startedAt: details?.startedAt,
+                                                      actions: actions.companyChannel,
+                                                      loadMatrixThumbnail: loadMatrixThumbnail)
+                                .padding(.top, 24)
                         }
                         if case .app = info.kind { deleteSection.padding(.top, 24) }
                         exitSection.padding(.top, 24)
@@ -460,11 +470,6 @@ struct ChatInfoHome: View {
         .confirmationDialog(confirmationTitle, isPresented: isConfirming,
                             titleVisibility: .visible, presenting: confirmation) { confirmation in
             switch confirmation {
-            case .leaveCompany:
-                Button(companyCopy.leaveConfirm, role: .destructive) {
-                    if let company = info.company { actions.leaveCompany?(company.companyID) }
-                    close()
-                }
             case .deleteApp:
                 Button(copy(.deleteChat), role: .destructive) {
                     actions.deleteAppRoom?(info.roomID)
@@ -486,8 +491,6 @@ struct ChatInfoHome: View {
             Button(copy(.cancel), role: .cancel) {}
         } message: { confirmation in
             switch confirmation {
-            case .leaveCompany:
-                Text(verbatim: companyCopy.leaveMessage)
             case .deleteApp:
                 Text(copy(.deleteBotChatBody, [.text(info.title)]))
             case let .exit(action):
@@ -803,7 +806,6 @@ struct ChatInfoHome: View {
         )
     }
 
-    private var companyCopy: CompanyCopy { CompanyCopy(design: design) }
 
     private var isConfirming: Binding<Bool> {
         Binding(get: { confirmation != nil },
@@ -812,7 +814,6 @@ struct ChatInfoHome: View {
 
     private var confirmationTitle: String {
         switch confirmation {
-        case .leaveCompany: companyCopy.leaveTitle(company: info.company?.companyName ?? "")
         case .deleteApp: copy(.deleteChatTitle)
         case let .exit(action):
             design.text(action == .deleteChat ? "src.matrix.chat-copy.copies.deleteChatTitle"
@@ -820,87 +821,6 @@ struct ChatInfoHome: View {
         case .ignore:
             design.text("src.matrix.chat-copy.copies.blockPersonTitle")
         case nil: ""
-        }
-    }
-
-    @ViewBuilder private func companySection(_ company: CompanyChatInfo) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(verbatim: company.notice)
-                .font(.footnote)
-                .foregroundStyle(atum.color(.muted, scheme: scheme))
-                .padding(.horizontal, 16)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("info.company.notice")
-            Text(companyCopy.membersTitle)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(atum.color(.soft, scheme: scheme))
-                .padding(.horizontal, 16)
-                .accessibilityAddTraits(.isHeader)
-            LazyVStack(spacing: 0) {
-                if company.membersLoading && company.members.isEmpty {
-                    Text(verbatim: companyCopy.text(CompanyCopyKey("loading")))
-                        .font(.footnote)
-                        .foregroundStyle(atum.color(.soft, scheme: scheme))
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(minHeight: 44)
-                }
-                ForEach(company.members) { member in
-                    HStack(spacing: 12) {
-                        Image(atum.symbol(.userCircle))
-                            .foregroundStyle(atum.color(.muted, scheme: scheme))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: member.name).font(.body)
-                            HStack(spacing: 4) {
-                                if let handle = member.handle { Text(verbatim: "@" + handle) }
-                                Text(verbatim: member.role)
-                                if let state = member.state { Text(verbatim: "· " + state) }
-                            }
-                            .font(.footnote)
-                            .foregroundStyle(atum.color(.soft, scheme: scheme))
-                        }
-                        Spacer()
-                        if member.isSelf {
-                            Text(copy(.you))
-                                .font(.subheadline)
-                                .foregroundStyle(atum.color(.soft, scheme: scheme))
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 52)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("info.company.member." + member.id)
-                    if member.id != company.members.last?.id {
-                        Divider().padding(.leading, 52)
-                    }
-                }
-            }
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 16)
-            .accessibilityIdentifier("info.company.members")
-
-            Button(role: .destructive) {
-                guard !company.leavePending else { return }
-                confirmation = .leaveCompany
-            } label: {
-                HStack(spacing: 12) {
-                    Image(atum.symbol(.logOut))
-                    Text(verbatim: company.leavePending
-                         ? companyCopy.leavePending
-                         : companyCopy.leaveAction)
-                    Spacer()
-                }
-                .foregroundStyle(atum.color(.danger, scheme: scheme))
-                .padding(.horizontal, 16)
-                .frame(minHeight: 52)
-                .background(atum.color(.cell, scheme: scheme),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(company.leavePending)
-            .padding(.horizontal, 16)
-            .accessibilityIdentifier("info.company.leave")
         }
     }
 
