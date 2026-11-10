@@ -69,10 +69,19 @@ private struct DriveDirectoryView: View {
 
     @Environment(\.atum) private var atum
     @Environment(\.colorScheme) private var scheme
+    /// Desktop Drive's two places; Recents is where it opens.
+    @State private var destination = DriveDestination.recents
 
     private var copy: DriveCopy { DriveCopy(design: design) }
     private var parentID: String { route?.current.itemID ?? DrivePage.rootParentID }
     private var presentation: DriveDirectoryPresentation { model.directory(parentID: parentID) }
+    private var showsRecents: Bool { route == nil && destination == .recents }
+
+    /// Recents is the root's files newest first; All files keeps folders first
+    /// by name, as the listing arrives.
+    private var shownItems: [DriveItem] {
+        showsRecents ? DriveRecents.order(presentation.items) : presentation.items
+    }
 
     var body: some View {
         Group {
@@ -80,9 +89,11 @@ private struct DriveDirectoryView: View {
                 emptyState
             } else {
                 List {
+                    if route == nil { destinationSection }
                     statusSection
                     if route != nil { breadcrumbSection }
-                    ForEach(presentation.items) { item in row(item) }
+                    if showsRecents { recentTilesSection }
+                    ForEach(shownItems) { item in row(item) }
                 }
                 .listStyle(.plain)
             }
@@ -135,7 +146,20 @@ private struct DriveDirectoryView: View {
             case .unavailable:
                 stateMessage(copy.unavailable, action: copy.retry)
             case .empty:
-                Text(copy.empty).font(.headline)
+                if route == nil {
+                    // The Drive itself, still empty: what it is for.
+                    Image(design.symbol("Folder"))
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundStyle(atum?.color(.muted, scheme: scheme) ?? .secondary)
+                        .accessibilityHidden(true)
+                    Text(copy.emptyRootTitle).font(.headline)
+                    Text(copy.emptyRootBody)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
+                } else {
+                    Text(copy.empty).font(.headline)
+                }
             }
         }
         .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
@@ -150,8 +174,68 @@ private struct DriveDirectoryView: View {
             .buttonBorderShape(.capsule)
     }
 
+    private var destinationSection: some View {
+        Section {
+            Picker(copy.title, selection: $destination) {
+                Text(copy.recents).tag(DriveDestination.recents)
+                Text(copy.allFiles).tag(DriveDestination.all)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityIdentifier("drive.destination")
+        }
+        .listRowSeparator(.hidden)
+    }
+
+    /// Desktop's Recents board: the four newest as large tiles, then the list.
+    private var recentTilesSection: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
+                                GridItem(.flexible(), spacing: 12)],
+                      alignment: .leading, spacing: 14) {
+                ForEach(DriveRecents.tiles(presentation.items)) { item in
+                    Button { openTile(item) } label: {
+                        DriveRecentTile(design: design, item: item)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.busyItemIDs.contains(item.id))
+                }
+            }
+            .padding(.vertical, 6)
+            .accessibilityIdentifier("drive.recents")
+        } header: {
+            Text(copy.recents)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
+                .textCase(nil)
+        }
+        .listRowSeparator(.hidden)
+    }
+
+    private func openTile(_ item: DriveItem) {
+        if item.kind == .folder, let driveID = model.rootDriveID {
+            router.drivePath.append(childRoute(item, driveID: driveID))
+        } else {
+            Task { await model.open(item) }
+        }
+    }
+
     @ViewBuilder private var statusSection: some View {
-        if statusMessage != nil || presentation.isTruncated {
+        if statusMessage == nil,
+           case let .upToDate(at) = DriveStatusLine.decide(connection: model.connection,
+                                                            directory: presentation) {
+            Section {
+                Label {
+                    Text(copy.upToDate(at: at)).font(.footnote)
+                } icon: {
+                    Image(design.symbol("CheckCircle2")).font(.footnote)
+                }
+                .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
+                .accessibilityIdentifier("drive.status")
+                if presentation.isTruncated { truncatedNote }
+            }
+            .listRowSeparator(.hidden)
+        } else if statusMessage != nil || presentation.isTruncated {
             Section {
                 if let message = statusMessage {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -169,13 +253,15 @@ private struct DriveDirectoryView: View {
                     }
                     .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
                 }
-                if presentation.isTruncated {
-                    Text(copy.truncated)
-                        .font(.footnote)
-                        .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
-                }
+                if presentation.isTruncated { truncatedNote }
             }
         }
+    }
+
+    private var truncatedNote: some View {
+        Text(copy.truncated)
+            .font(.footnote)
+            .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
     }
 
     private var statusMessage: String? {
@@ -306,8 +392,7 @@ private struct DriveFileRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(atum?.symbol(item.kind == .folder ? .folder : .fileText)
-                  ?? (item.kind == .folder ? "folder" : "doc.text"))
+            Image(design.symbol(DriveFileFamily.of(item).glyphAlias))
                 .font(.title3)
                 .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
                 .frame(width: 28)
@@ -323,7 +408,8 @@ private struct DriveFileRow: View {
                             countStyle: .file
                         ))
                         if let modifiedAt = item.modifiedAt {
-                            Text(verbatim: modifiedAt.formatted(date: .abbreviated, time: .omitted))
+                            Text(verbatim: DriveTimeFormat.modified(
+                                modifiedAt, now: Date(), locale: Locale(identifier: design.locale)))
                         }
                         if model.keptItemIDs.contains(item.id) {
                             Label(copy.keptOffline,
@@ -353,6 +439,62 @@ private struct DriveFileRow: View {
         .frame(minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityIdentifier("drive.item." + item.id)
+    }
+}
+
+/// One Recents tile, as the desktop's: a large glyph on a quiet plate, the
+/// name, and when it last changed.
+private struct DriveRecentTile: View {
+    let design: LiveDesign
+    let item: DriveItem
+
+    @Environment(\.atum) private var atum
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(design.symbol(DriveFileFamily.of(item).glyphAlias))
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
+                .frame(maxWidth: .infinity, minHeight: 88)
+                .background(atum?.color(.cell, scheme: scheme) ?? Color(uiColor: .secondarySystemBackground),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(atum?.color(.frame, scheme: scheme) ?? .clear, lineWidth: 0.5))
+            Text(verbatim: item.name)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
+                .lineLimit(1)
+            if let modifiedAt = item.modifiedAt {
+                Text(verbatim: DriveTimeFormat.modified(
+                    modifiedAt, now: Date(), locale: Locale(identifier: design.locale)))
+                    .font(.caption)
+                    .foregroundStyle(atum?.color(.muted, scheme: scheme) ?? .secondary)
+                    .lineLimit(1)
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("drive.recent." + item.id)
+    }
+}
+
+extension DriveFileFamily {
+    /// The Phosphor alias for the desktop glyph of the same family
+    /// (`file-glyph.tsx`: FileText, FileSpreadsheet, Presentation, FileImage,
+    /// FileMusic, Movie, FileZip, File).
+    var glyphAlias: String {
+        switch self {
+        case .folder: "Folder"
+        case .document: "FileText"
+        case .spreadsheet: "FileSpreadsheet"
+        case .presentation: "FileTypePpt"
+        case .image: "FileImage"
+        case .audio: "FileMusic"
+        case .video: "Movie"
+        case .archive: "FileZip"
+        case .other: "File"
+        }
     }
 }
 

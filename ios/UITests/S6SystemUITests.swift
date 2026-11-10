@@ -577,9 +577,9 @@ final class S6SystemUITests: TranscriptUITestCase {
         let card = element(app, "account.settings.index.account")
         XCTAssertTrue(card.waitForExistence(timeout: 3), file: file, line: line)
         XCTAssertTrue(card.label.contains("An") && card.label.contains("@an"), file: file, line: line)
-        // The desktop's six pages (Protons and Privacy fold into Account, this
-        // phone into Connections).
-        for page in ["account", "assistants", "connections", "general", "help", "advanced"] {
+        // The desktop's pages less Advanced (desktop-only tools); Protons,
+        // Privacy and this phone fold into Account.
+        for page in ["account", "assistants", "connections", "general", "help"] {
             XCTAssertTrue(scrollSettingsList(to: element(app, "account.settings.index." + page), in: app),
                           "the Settings index has no \(page) row", file: file, line: line)
         }
