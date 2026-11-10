@@ -82,7 +82,7 @@ targets:
         CODE_SIGN_IDENTITY: Apple Development
         CODE_SIGN_ENTITLEMENTS: App/AtumMobile.entitlements
         PROVISIONING_PROFILE_SPECIFIER: Atum Mobile Development
-        TARGETED_DEVICE_FAMILY: '1,2'
+        TARGETED_DEVICE_FAMILY: '1'
         INFOPLIST_KEY_CFBundleDisplayName: Atum
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
@@ -117,7 +117,7 @@ targets:
         PROVISIONING_PROFILE_SPECIFIER: Atum Mobile Notifications Development
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
-        TARGETED_DEVICE_FAMILY: '1,2'
+        TARGETED_DEVICE_FAMILY: '1'
   # XCUITests for the chat revamp (plan §2.10). Simulator only: no device
   # test runner profile (coordinator default C3). Built for testing only, so
   # `xcodebuild build` and device-install.sh never build it.
@@ -136,7 +136,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: AtumMobile
         CODE_SIGN_STYLE: Automatic
-        TARGETED_DEVICE_FAMILY: '1,2'
+        TARGETED_DEVICE_FAMILY: '1'
   AtumMobileTests:
     type: bundle.unit-test
     platform: iOS
@@ -153,7 +153,7 @@ targets:
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/AtumMobile.app/AtumMobile
         BUNDLE_LOADER: $(TEST_HOST)
         CODE_SIGN_STYLE: Automatic
-        TARGETED_DEVICE_FAMILY: '1,2'
+        TARGETED_DEVICE_FAMILY: '1'
 schemes:
   AtumMobile:
     build:
