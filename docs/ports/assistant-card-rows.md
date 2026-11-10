@@ -91,7 +91,15 @@ Where it lives (`src.matrix.agent-home-copy.words.*`): `finding`, `unknownPlace`
 
 ## Verification
 
-See the session's final report for the exact locked commands. Tests added or changed:
+All heavy runs held the shared lock (`TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock …`) on simulator iPhone 17 (939B69F8), 2026-11-11:
+
+- `swift test -j 2 --scratch-path /Volumes/AtumTestFlight/swiftbuild-w2-as`: 588 XCTest tests, 0 failures.
+- `xcodebuild test -scheme AtumMobileStateTests -derivedDataPath /Volumes/AtumTestFlight/dd-w2-as/DerivedData -jobs 2`: 301 tests, 0 failures, TEST SUCCEEDED.
+- `xcodebuild build -scheme AtumMobile` (same derived data): BUILD SUCCEEDED.
+- `scripts/public_guard.py --base main --head HEAD`: PASS.
+- `tests/test_copy_keys_in_pin.py`: the AS-2 keys pass; one failure remains that is already on `main` (`ios/App/Home/HomeScreen.swift` names `desktop.matrixShell.mainAgent`, which the pin does not carry; HC stream).
+
+Tests added or changed:
 
 - `Tests/AgentPetNameTests.swift`: bundled, hidden, none, personal (fresh and deleted), unknown kind, primary stand-in.
 - `Tests/NativeDomainClientTests.swift` `testAgentPetReadsUseOnlyThePetAndShelfRoutes`.
