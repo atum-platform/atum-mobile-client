@@ -14,7 +14,7 @@ final class S2PolicyTests: XCTestCase {
 
     // MARK: RosterProjection
 
-    func testRosterOrdersAssistantsAndChatsAndKeepsAppsAtTheEnd() {
+    func testRosterOrdersAssistantsAndMixesAppChatsWithChatsByRecency() {
         let now = date(11)
         let projection = RosterProjection.project(.init(
             assistants: [
@@ -40,10 +40,107 @@ final class S2PolicyTests: XCTestCase {
             founderRoomID: "founder"
         ))
 
-        XCTAssertEqual(projection.assistants.map(\.roomID), ["assistant-primary", "assistant-2", "assistant-pinned"],
-                       "primary, then pins by tag, then remaining /agents order")
-        XCTAssertEqual(projection.chats.map(\.roomID), ["founder", "pin-old", "pin-new", "recent", "invite", "moon", "andy"])
-        XCTAssertEqual(projection.chats.last?.kind, .app(appID: "andy", reopensHiddenRoom: false))
+        XCTAssertEqual(projection.assistants.map(\.roomID), ["assistant-primary", "assistant-pinned", "assistant-2"],
+                       "primary, then /agents order; a pin never moves an assistant (desktop roster-model)")
+        XCTAssertEqual(projection.chats.map(\.roomID),
+                       ["founder", "pin-old", "pin-new", "moon", "andy", "recent", "invite"],
+                       "Founder, pins, then one recency sort over chats and app chats (desktop sortConversations)")
+        XCTAssertEqual(projection.chats[3].kind, .app(appID: "moon", reopensHiddenRoom: false))
+    }
+
+    func testAppChatsInterleaveWithPeopleAndGroupsByRecency() {
+        let now = date(11)
+        let projection = RosterProjection.project(.init(
+            assistants: [],
+            rooms: [
+                room("alice", .person, at: now.addingTimeInterval(-10)),
+                room("team", .group, at: now.addingTimeInterval(-300)),
+                room("bob", .person, at: now.addingTimeInterval(-900)),
+                room("moon", .app(appID: "moon"), at: now.addingTimeInterval(-60)),
+                room("andy", .app(appID: "andy"), at: now.addingTimeInterval(-600)),
+            ],
+            apps: [.init(id: "moon", rosterOrder: 0, conversationRoomID: "moon"),
+                   .init(id: "andy", rosterOrder: 1, conversationRoomID: "andy")]
+        ))
+        XCTAssertEqual(projection.chats.map(\.roomID), ["alice", "moon", "team", "andy", "bob"],
+                       "a bot with a newer message than a person chat sits above it")
+    }
+
+    func testAppsWithoutAChatFollowEveryChatThenPlaceholdersInCatalogOrder() {
+        let now = date(11)
+        let projection = RosterProjection.project(.init(
+            assistants: [],
+            rooms: [
+                room("old-chat", .person, at: now.addingTimeInterval(-86_400 * 30)),
+                room("quiet", .person),
+                room("app:soon", .app(appID: "soon")),
+                room("app:andy", .app(appID: "andy")),
+                room("app:vneid", .app(appID: "vneid")),
+                room("moon", .app(appID: "moon"), at: now),
+            ],
+            apps: [.init(id: "soon", rosterOrder: 0, isPresentationOnly: true),
+                   .init(id: "vneid", rosterOrder: 1, conversationRoomID: "app:vneid", hasChat: false),
+                   .init(id: "andy", rosterOrder: 2, conversationRoomID: "app:andy", hasChat: false),
+                   .init(id: "moon", rosterOrder: 3, conversationRoomID: "moon")]
+        ))
+        XCTAssertEqual(projection.chats.map(\.roomID),
+                       ["moon", "old-chat", "quiet", "app:vneid", "app:andy", "app:soon"],
+                       "chats by recency, then apps without a chat, then coming-soon placeholders")
+    }
+
+    func testPinnedAppChatSortsWithPinsAndLowPriorityAppChatSinks() {
+        let now = date(11)
+        let projection = RosterProjection.project(.init(
+            assistants: [],
+            rooms: [
+                room("pin-person", .person, at: now.addingTimeInterval(-60), favourite: true),
+                room("moon", .app(appID: "moon"), at: now.addingTimeInterval(-600), favourite: true),
+                room("recent", .person, at: now),
+                .init(id: "andy", kind: .app(appID: "andy"), latestEventAt: now.addingTimeInterval(-1),
+                      isLowPriority: true),
+                .init(id: "muted-group", kind: .group, latestEventAt: now.addingTimeInterval(-2),
+                      isLowPriority: true),
+                room("older", .group, at: now.addingTimeInterval(-3_600)),
+            ],
+            apps: [.init(id: "moon", rosterOrder: 0, conversationRoomID: "moon"),
+                   .init(id: "andy", rosterOrder: 1, conversationRoomID: "andy")]
+        ))
+        XCTAssertEqual(projection.chats.map(\.roomID),
+                       ["pin-person", "moon", "recent", "older", "andy", "muted-group"],
+                       "a pinned app is a pin; low priority sinks an app chat like any other chat")
+    }
+
+    func testDeletedAppChatKeepsItsPlaceByRecency() {
+        let now = date(11)
+        let projection = RosterProjection.project(.init(
+            assistants: [],
+            rooms: [
+                room("recent", .person, at: now),
+                room("hidden-moon", .app(appID: "moon"), at: now.addingTimeInterval(-10), hidden: true),
+                room("older", .person, at: now.addingTimeInterval(-60)),
+            ],
+            apps: [.init(id: "moon", rosterOrder: 0, conversationRoomID: "hidden-moon")]
+        ))
+        XCTAssertEqual(projection.chats.map(\.roomID), ["recent", "hidden-moon", "older"],
+                       "desktop keeps a deleted bot chat on its row (appBot.hidden), so it still dates the row")
+        XCTAssertEqual(projection.chats[1].kind, .app(appID: "moon", reopensHiddenRoom: true))
+    }
+
+    func testPinnedAssistantDoesNotJumpAboveServerOrder() {
+        let projection = RosterProjection.project(.init(
+            assistants: [
+                .init(id: "primary", conversationRoomID: "p", isPrimary: true, agentOrder: 5),
+                .init(id: "first", conversationRoomID: "a", agentOrder: 0),
+                .init(id: "second", conversationRoomID: "b", agentOrder: 1),
+            ],
+            rooms: [
+                room("p", .assistant(agentID: "primary")),
+                room("a", .assistant(agentID: "first")),
+                room("b", .assistant(agentID: "second"), favourite: true, tag: 0),
+            ],
+            apps: []
+        ))
+        XCTAssertEqual(projection.assistants.map(\.roomID), ["p", "a", "b"])
     }
 
     func testRosterUsesAppRowForHiddenRoomAndRejectsDuplicateAndLegacyRows() {
@@ -58,8 +155,9 @@ final class S2PolicyTests: XCTestCase {
                       .init(id: "moon", rosterOrder: 1, conversationRoomID: "old-app")]
         ))
         XCTAssertTrue(output.assistants.isEmpty)
-        XCTAssertEqual(output.chats.map(\.roomID), ["same", "hidden"])
-        XCTAssertEqual(output.chats.last?.kind, .app(appID: "moon", reopensHiddenRoom: true))
+        XCTAssertEqual(output.chats.map(\.roomID), ["hidden", "same"],
+                       "neither has a message, so the app chat and the person chat tie on recency and sort by ID")
+        XCTAssertEqual(output.chats.first?.kind, .app(appID: "moon", reopensHiddenRoom: true))
     }
 
     func testPresentationOnlyCatalogAppsKeepOneInertRowWithoutAConversation() {

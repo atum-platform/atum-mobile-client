@@ -53,6 +53,8 @@ struct HomeRow: Identifiable, Equatable {
     var matrixAvatarURL: String?
     var avatarSHA256: String?
     var avatarCandidates: [LiveProductRemoteArt]
+    /// A named assistant's coloured shape, drawn while it has no photo.
+    var mark: AgentMark?
     var verification: AppVerificationTier?
     var preview: RowPreview.Display
     var latestEventAt: Date?
@@ -79,6 +81,7 @@ struct HomeRow: Identifiable, Equatable {
          avatarURL: URL? = nil, matrixAvatarURL: String? = nil,
          avatarSHA256: String? = nil,
          avatarCandidates: [LiveProductRemoteArt] = [],
+         mark: AgentMark? = nil,
          verification: AppVerificationTier? = nil,
          preview: RowPreview.Display? = nil, latestEventAt: Date? = nil,
          latestWasDeliveryNotice: Bool = false,
@@ -94,6 +97,7 @@ struct HomeRow: Identifiable, Equatable {
         self.matrixAvatarURL = matrixAvatarURL
         self.avatarSHA256 = avatarSHA256
         self.avatarCandidates = avatarCandidates
+        self.mark = kind == .assistant ? mark : nil
         self.verification = verification
         self.preview = preview ?? RowPreview.Display(prefix: .none, value: .empty, sendState: .sent)
         self.latestEventAt = latestEventAt
@@ -110,6 +114,8 @@ struct HomeRow: Identifiable, Equatable {
 
     var badge: Badge { Badge.mark(for: badgeInput) }
     var isInvitation: Bool { kind == .invitation }
+    /// Desktop `MainAgentBadge`: Start chat stars the main assistant only.
+    var showsMainAssistantBadge: Bool { kind == .atum }
 
     /// What `ChatExitPolicy` calls this row.
     var exitRoom: ChatExitPolicy.Room {
@@ -149,6 +155,11 @@ struct HomeRow: Identifiable, Equatable {
                 URL(string: candidate.url).map {
                     LiveProductRemoteArt(url: $0, sha256: candidate.sha256)
                 }
+            },
+            mark: row.mark.flatMap { value in
+                guard let shape = AgentMarkShape(rawValue: value.shape),
+                      let color = AgentMarkColor(rawValue: value.color) else { return nil }
+                return AgentMark(shape: shape, color: color)
             },
             verification: verification,
             preview: row.preview,
@@ -190,6 +201,7 @@ struct HomeRow: Identifiable, Equatable {
             avatarCandidates: avatarCandidates.map {
                 .init(url: $0.url.absoluteString, sha256: $0.sha256)
             },
+            mark: mark.map { .init(shape: $0.shape.rawValue, color: $0.color.rawValue) },
             // A send that was still local when the list settled is not a
             // durable state; never resurrect "sending"/"not sent" on launch.
             preview: RowPreview.Display(prefix: preview.prefix, value: preview.value,
@@ -248,6 +260,7 @@ struct HomeRow: Identifiable, Equatable {
             matrixAvatarURL: room.matrixAvatarURL,
             avatarSHA256: room.avatarSHA256,
             avatarCandidates: room.avatarCandidates,
+            mark: room.avatar?.agentMark,
             verification: verification,
             preview: preview, latestEventAt: room.latestEventAt,
             latestWasDeliveryNotice: room.latestWasDeliveryNotice,
@@ -989,10 +1002,16 @@ private struct HomeStartChatSheet: View {
                         }
                     } label: {
                         HStack(spacing: 12) {
-                            AtumAvatar(kind: row.kind.avatarKind, name: row.name, size: 36)
-                            Text(verbatim: row.name)
-                                .foregroundStyle(atum.color(.ink, scheme: scheme))
-                                .lineLimit(1)
+                            // Home's own face: photos, marks, the crescent,
+                            // the raven and app tiles (desktop `start-chat.tsx`).
+                            HomeAvatar(row: row, size: 36,
+                                       loadMatrixThumbnail: actions.loadMatrixThumbnail)
+                            HStack(spacing: 6) {
+                                Text(verbatim: row.name)
+                                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                                    .lineLimit(1)
+                                if row.showsMainAssistantBadge { mainAssistantBadge }
+                            }
                             Spacer(minLength: 8)
                         }
                         .frame(minHeight: 44)
@@ -1000,6 +1019,26 @@ private struct HomeStartChatSheet: View {
                     .accessibilityIdentifier("home.startChat.row.\(row.id)")
                 }
             }
+        }
+    }
+
+    // PENDING-COPY:desktop.matrixShell.mainAgent — the badge's spoken label.
+    // Until the export carries the key the star is decorative and the name
+    // alone is read.
+    private var mainAssistantLabel: String? {
+        let key = StartChatCopyKey.mainAgent.rawValue
+        return design.copy.contains(key) ? design.text(key) : nil
+    }
+
+    @ViewBuilder private var mainAssistantBadge: some View {
+        let star = Image(atum.symbol(.starFilled))
+            .font(.system(size: 13))
+            .foregroundStyle(atum.kitColor(.ink3, scheme: scheme))
+            .accessibilityIdentifier("home.startChat.mainAssistant")
+        if let label = mainAssistantLabel {
+            star.accessibilityLabel(Text(verbatim: label))
+        } else {
+            star.accessibilityHidden(true)
         }
     }
 
@@ -1955,6 +1994,7 @@ struct HomeAvatar: View {
                 FounderRavenAvatar(size: size, fallbackName: row.name)
             } else {
                 AtumAvatar(kind: row.kind.avatarKind, name: row.name, art: art,
+                           mark: row.mark,
                            placeholder: row.hasAvatarSource ? .neutral : .monogram,
                            size: size)
                     .task(id: request) {
@@ -2525,6 +2565,8 @@ private enum HomeCopyKey: String {
 }
 
 private enum StartChatCopyKey: String {
+    /// PENDING-COPY: not in the export yet (desktop `i18n` `matrixShell.mainAgent`).
+    case mainAgent = "desktop.matrixShell.mainAgent"
     case startTitle = "src.matrix.roster-create-copy.copies.startTitle"
     case startSearch = "src.matrix.roster-create-copy.copies.startSearch"
     case assistants = "src.matrix.roster-create-copy.copies.assistants"
