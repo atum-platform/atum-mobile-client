@@ -7,3 +7,7 @@ The generated `packages/mobile-design-exports/dist` artifact is intentionally ab
 All imports verify canonical repository origin, immutable full commit, exact manifest membership/hashes, five locales, regular-file archive entries and atomic replacement. Private source history/evidence is not imported.
 
 The importer now accepts only `atum-platform/atum-desktop` HTTPS/SSH origins. The retained historical snapshot lock has deliberately not been relabelled as a public commit. Until the coordinator performs the real public producer import, `--verify` rejects that historical repository field and the public workflow must not be dispatched. Unit tests exercise real disposable public-origin commits offline. The final public pin and a fresh mobile byte approval are required before publication.
+
+## iPhone app icon
+
+`ios/App/Assets.xcassets/AppIcon.appiconset/atum-app-icon-1024.png` is the Atum eclipse mark, rendered from `ios/brand/atum-app-icon-ios.svg`. That SVG is the public `atum-platform/atum-desktop` `apps/desktop/assets/icon-mac.svg` with two changes for iOS: the tile is full-bleed and opaque (iOS applies its own corner mask), and the mark is scaled by 1024/832 so it keeps the macOS tile's proportion. It replaces the placeholder square from the initial snapshot. To regenerate it, render the SVG at 1024×1024 and flatten it to an opaque PNG (no alpha channel); App Store Connect rejects an app icon that has transparency.
