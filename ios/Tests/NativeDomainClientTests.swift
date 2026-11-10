@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import AtumNativeAPI
 import AtumPrototype
+import AtumChat
 
 @MainActor final class NativeDomainClientTests: XCTestCase {
     override func tearDown() {
@@ -2691,6 +2692,228 @@ extension NativeDomainClientTests {
             } catch let error as NativeDomainClientFailure {
                 XCTAssertEqual(status, 503); XCTAssertEqual(error, .invalidResponse)
             }
+        }
+    }
+}
+
+// MARK: Live cloud turn Stop
+
+extension NativeDomainClientTests {
+    private var stopRequestID: String { "8e0a2c4e-6b8d-4f0b-8d2f-4a6c8e0b2d79" }
+    private var stopRoomID: String { "!stop-room:atum.test" }
+    private var stopEventID: String { "$stop-question" }
+
+    private func stopRequest() throws -> CloudTurnStop.Request {
+        try CloudTurnStop.Request(requestId: NativeID(stopRequestID), agentPrincipal: NativeID(agentPrincipal),
+                                  roomId: MatrixRoomID(stopRoomID), eventId: MatrixEventID(stopEventID))
+    }
+
+    private func stopReply(_ state: String, eventID: String? = nil) -> Data {
+        Data("""
+        {"agentPrincipal":"\(agentPrincipal)","target":{"kind":"turn","roomId":"\(stopRoomID)",\
+        "eventId":"\(eventID ?? stopEventID)"},"state":"\(state)","stoppedAt":1790672700000}
+        """.utf8)
+    }
+
+    private func stopAgent(answering: Any? = "cloud", status: String = "active",
+                           matrixUser: Bool = true) throws -> AgentsResponse.Agent {
+        var record = agentRecord(matrixUser: matrixUser)
+        if !matrixUser { record["matrixUser"] = NSNull() }
+        record["answering"] = answering
+        record["status"] = status
+        return try NativeAPI.decode(AgentsResponse.Agent.self,
+                                    from: JSONSerialization.data(withJSONObject: record))
+    }
+
+    func testCloudStopExactPOSTUsesBearerAndNoCookies() async throws {
+        let expected = try stopRequest().body()
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://api.atumplatform.com/api/matrix/v1/cloud/stop")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(self.body(of: request), expected)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer stop-domain-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            XCTAssertFalse(request.httpShouldHandleCookies)
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+            return .json(self.stopReply("stopped"))
+        }
+        let result = try await client(TestAuthorization(first: "stop-domain-token")).cloudStop(stopRequest())
+        XCTAssertEqual(result.state, .stopped)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1)
+    }
+
+    func testCloudStopKeepsRequestIDAndBodyAcrossSingle401Refresh() async throws {
+        let authorization = TestAuthorization(first: "stop-old-token", refreshed: "stop-new-token")
+        NativeDomainProtocol.state.handler = { request in
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer stop-old-token" {
+                return .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)])
+            }
+            return .json(self.stopReply("stop_requested"))
+        }
+        let result = try await client(authorization).cloudStop(stopRequest())
+        XCTAssertEqual(result.state, .stopRequested)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+        let sent = NativeDomainProtocol.state.requests
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertEqual(body(of: sent[0]), try stopRequest().body())
+        XCTAssertEqual(body(of: sent[0]), body(of: sent[1]))
+        XCTAssertEqual(sent[1].value(forHTTPHeaderField: "Authorization"), "Bearer stop-new-token")
+    }
+
+    func testCloudStopEnforces4096RequestAnd262144ResponseBudgets() async throws {
+        let value = client(TestAuthorization(first: "stop-budget-token"))
+        // Both IDs fit their contract, but JSON escaping takes the body over
+        // the native write budget. No bearer request may leave the client.
+        let escaped = String(repeating: "\"", count: 1_023)
+        let tooLarge = try CloudTurnStop.Request(
+            requestId: NativeID(stopRequestID), agentPrincipal: NativeID(agentPrincipal),
+            roomId: MatrixRoomID("!" + escaped), eventId: MatrixEventID("$" + escaped)
+        )
+        XCTAssertGreaterThan(try tooLarge.body().count, 4_096)
+        do { _ = try await value.cloudStop(tooLarge); XCTFail("Oversized stop sent") }
+        catch let failure as NativeDomainClientFailure { XCTAssertEqual(failure, .invalidRequest) }
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
+
+        let maximumIDs = try CloudTurnStop.Request(
+            requestId: NativeID(stopRequestID), agentPrincipal: NativeID(agentPrincipal),
+            roomId: MatrixRoomID("!" + String(repeating: "r", count: 1_023)),
+            eventId: MatrixEventID("$" + String(repeating: "e", count: 1_023))
+        )
+        NativeDomainProtocol.state.handler = { _ in .json(Data("{}".utf8)) }
+        do { _ = try await value.cloudStop(maximumIDs); XCTFail("Uncorrelated reply accepted") }
+        catch let failure as NativeDomainClientFailure { XCTAssertEqual(failure, .invalidResponse) }
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1, "Maximum ordinary IDs fit the request budget")
+
+        let valid = stopReply("completed")
+        let atBudget = valid + Data(repeating: 32, count: 262_144 - valid.count)
+        NativeDomainProtocol.state.handler = { _ in .json(atBudget) }
+        let accepted = try await value.cloudStop(stopRequest())
+        XCTAssertEqual(accepted.state, .completed)
+        for reply in [
+            NativeDomainProtocol.Reply(headers: ["Content-Type": "application/json", "Content-Length": "262145"]),
+            .init(chunks: [atBudget, Data([32])]),
+        ] {
+            NativeDomainProtocol.state.handler = { _ in reply }
+            do { _ = try await value.cloudStop(stopRequest()); XCTFail("Oversized response accepted") }
+            catch let failure as NativeDomainClientFailure { XCTAssertEqual(failure, .responseTooLarge) }
+        }
+    }
+
+    func testCloudStopUsesClosedErrorsAndStrictCorrelatedReplies() async throws {
+        let authorization = TestAuthorization(first: "stop-refusal-token")
+        let value = client(authorization)
+        for (status, code) in [(403, "matrix_403"), (404, "matrix_404"), (503, "matrix_503")] {
+            NativeDomainProtocol.state.handler = { _ in
+                .init(status: status, chunks: [Data("{\"error\":\"\(code)\"}".utf8)])
+            }
+            do { _ = try await value.cloudStop(stopRequest()); XCTFail("Refusal accepted") }
+            catch let failure as NativeDomainClientFailure {
+                guard case let .http(http) = failure else { return XCTFail("Expected closed HTTP failure") }
+                XCTAssertEqual(http.response.error.rawValue, code)
+            }
+        }
+        XCTAssertEqual(authorization.refreshCalls, 0, "Only unauthenticated may trigger a refresh")
+        for reply in [
+            NativeDomainProtocol.Reply(status: 403, chunks: [Data(#"{"error":"not_admitted"}"#.utf8)]),
+            .json(stopReply("stopped", eventID: "$another-turn")),
+            .json(stopReply("stopping")),
+            .json(Data("{}".utf8)),
+            .init(headers: ["Content-Type": "text/html"], chunks: [Data("<html>".utf8)]),
+        ] {
+            NativeDomainProtocol.state.handler = { _ in reply }
+            do { _ = try await value.cloudStop(stopRequest()); XCTFail("Unconfirmed response accepted") }
+            catch let failure as NativeDomainClientFailure { XCTAssertEqual(failure, .invalidResponse) }
+        }
+        NativeDomainProtocol.state.handler = { _ in
+            .init(redirect: URL(string: "https://foreign.invalid/stop")!)
+        }
+        do { _ = try await value.cloudStop(stopRequest()); XCTFail("Redirect followed") }
+        catch let failure as NativeDomainClientFailure { XCTAssertEqual(failure, .redirectRefused) }
+        XCTAssertTrue(NativeDomainProtocol.state.requests.allSatisfy { $0.url?.host == "api.atumplatform.com" })
+    }
+
+    func testLiveStopRouteOnlyExistsForAnActiveCloudRoomWithDomainAccess() throws {
+        let cloud = try stopAgent()
+        let route = CloudAssistantTurnStop(agent: cloud, roomID: stopRoomID, routeAvailable: true)
+        XCTAssertEqual(route?.agentPrincipal, cloud.principal)
+        XCTAssertEqual(route?.roomID.rawValue, stopRoomID)
+        let answeringModes: [Any?] = ["local", "future_destination", nil, NSNull(), 42]
+        for answering in answeringModes {
+            XCTAssertNil(CloudAssistantTurnStop(agent: try stopAgent(answering: answering),
+                                                roomID: stopRoomID, routeAvailable: true))
+        }
+        XCTAssertNil(CloudAssistantTurnStop(agent: nil, roomID: stopRoomID, routeAvailable: true))
+        XCTAssertNil(CloudAssistantTurnStop(agent: cloud, roomID: stopRoomID, routeAvailable: false))
+        XCTAssertNil(CloudAssistantTurnStop(agent: cloud, roomID: "invalid", routeAvailable: true))
+        XCTAssertNil(CloudAssistantTurnStop(agent: try stopAgent(status: "retired"),
+                                            roomID: stopRoomID, routeAvailable: true))
+        XCTAssertNil(CloudAssistantTurnStop(agent: try stopAgent(matrixUser: false),
+                                            roomID: stopRoomID, routeAvailable: true))
+    }
+
+    func testLiveStopBridgeDrivesStoppedRequestedAndCompletedPhases() async throws {
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: stopAgent(), roomID: stopRoomID,
+                                                        routeAvailable: true))
+        let value = client(TestAuthorization(first: "stop-live-token"))
+        for (reply, phase) in [("stopped", AssistantTurnStop.Phase.stopped),
+                               ("stop_requested", .stopping), ("completed", .finishing)] {
+            NativeDomainProtocol.state.handler = { _ in .json(self.stopReply(reply)) }
+            var state = AssistantTurnStop()
+            state.observe(.init(unanswered: stopEventID, working: true))
+            let intent = try XCTUnwrap(state.beginStop(newRequestID: stopRequestID))
+            XCTAssertEqual(state.phase, .stopping)
+            state.resolve(await route.stop(intent, using: value), for: intent)
+            XCTAssertEqual(state.phase, phase)
+            if reply == "stop_requested" {
+                XCTAssertNil(state.beginStop(newRequestID: UUID().uuidString.lowercased()))
+                state.observe(.idle)
+                XCTAssertEqual(state.phase, .idle, "The room, not stop_requested, confirms the end")
+            }
+        }
+    }
+
+    func testLiveStopBridgeFailuresRemainHonestAndRetryTheSameRequest() async throws {
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: stopAgent(), roomID: stopRoomID,
+                                                        routeAvailable: true))
+        let value = client(TestAuthorization(first: "stop-live-token"))
+        // Native forbidden/not-admitted, gate off, missing route, transport
+        // loss and an unrelated 200 all leave the running turn unconfirmed.
+        for reply in [
+            NativeDomainProtocol.Reply(status: 403, chunks: [Data(#"{"error":"matrix_403","details":{"reason":"not_admitted"}}"#.utf8)]),
+            .init(status: 503, chunks: [Data(#"{"error":"matrix_503","details":{"reason":"cloud_disabled"}}"#.utf8)]),
+            .init(status: 404, chunks: [Data(#"{"error":"matrix_404"}"#.utf8)]),
+            .init(error: URLError(.notConnectedToInternet)),
+            .json(stopReply("stopped", eventID: "$another-turn")),
+        ] {
+            NativeDomainProtocol.state.reset()
+            NativeDomainProtocol.state.handler = { _ in reply }
+            var state = AssistantTurnStop()
+            state.observe(.init(unanswered: stopEventID, working: true))
+            let first = try XCTUnwrap(state.beginStop(newRequestID: stopRequestID))
+            var unavailable = false
+            state.resolve(await route.stop(first, using: value, onRouteUnavailable: { unavailable = true }),
+                          for: first)
+            XCTAssertEqual(state.phase, .failed)
+            XCTAssertTrue(state.offersStop)
+            XCTAssertTrue(state.isWorking)
+            XCTAssertEqual(unavailable, [403, 404, 503].contains(reply.status))
+            // The live host withdraws a known unavailable action until facts
+            // refresh; after refresh (or transient failure) the same turn may
+            // retry, always with its retained request ID.
+            if unavailable {
+                XCTAssertNil(CloudAssistantTurnStop(agent: try stopAgent(), roomID: stopRoomID,
+                                                    routeAvailable: false))
+            }
+            let retry = try XCTUnwrap(state.beginStop(newRequestID: UUID().uuidString.lowercased()))
+            XCTAssertEqual(retry, first)
+            NativeDomainProtocol.state.handler = { _ in .json(self.stopReply("stopped")) }
+            state.resolve(await route.stop(retry, using: value), for: retry)
+            XCTAssertEqual(state.phase, .stopped)
+            let requests = NativeDomainProtocol.state.requests
+            XCTAssertEqual(requests.count, 2)
+            XCTAssertEqual(body(of: requests[0]), body(of: requests[1]))
         }
     }
 }

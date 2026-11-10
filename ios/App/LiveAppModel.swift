@@ -275,6 +275,9 @@ final class LiveAppModel {
     /// by the next sign-in.
     private var assistantPlacementTask: Task<Void, Never>?
     private var assistantLifecycleCapability: AgentLifecycleCapability?
+    /// A refused cloud Stop is not offered again until product facts refresh.
+    /// Transport loss remains retryable with the state machine's same UUID.
+    private var assistantTurnStopUnavailable = Set<NativeID>()
     private var assistantLifecycleStore: LiveAssistantLifecycleStore?
     @ObservationIgnored private var assistantLifecycleTask: Task<Void, Never>?
     /// Identifies an interactive begin/resume across suspension points. The
@@ -311,6 +314,7 @@ final class LiveAppModel {
             }
             guard replaced else { return }
             applePurchases.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
+            assistantTurnStopUnavailable.removeAll()
             officialAccountsClientGeneration &+= 1
             officialAccountsCadence.activate(nil)
             if let accountID = context?.runtime.ticket.session.userID {
@@ -1777,6 +1781,31 @@ final class LiveAppModel {
                 return await self.readAssistantHomeApplication(roomID: roomID)
             }
         )
+    }
+
+    private func assistantTurnStopRoute(roomID: String) -> CloudAssistantTurnStop? {
+        guard conversation?.roomID == roomID, conversation?.kind == .assistant,
+              liveMatrix?.isReady == true, agentsRead.condition == .fresh,
+              let agent = agentForRoom(roomID) else { return nil }
+        return CloudAssistantTurnStop(agent: agent, roomID: roomID,
+                                      routeAvailable: domainClient != nil
+                                          && !assistantTurnStopUnavailable.contains(agent.principal))
+    }
+
+    func assistantTurnStopActions(roomID: String) -> AssistantTurnStopActions? {
+        guard let client = domainClient, let route = assistantTurnStopRoute(roomID: roomID) else { return nil }
+        let generation = assistantLifecycleGeneration
+        return AssistantTurnStopActions { [weak self] intent in
+            guard let self, self.domainClient === client,
+                  self.assistantLifecycleGeneration == generation,
+                  self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
+            var unavailable = false
+            let result = await route.stop(intent, using: client, onRouteUnavailable: { unavailable = true })
+            guard self.domainClient === client, self.assistantLifecycleGeneration == generation,
+                  self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
+            if unavailable { self.assistantTurnStopUnavailable.insert(route.agentPrincipal) }
+            return result
+        }
     }
 
     func assistantAvatarActions(roomID: String) -> AssistantAvatarActions? {
@@ -5844,6 +5873,7 @@ final class LiveAppModel {
             return
         }
         apply(agentsResult, to: &agentsRead)
+        if case .success = agentsResult { assistantTurnStopUnavailable.removeAll() }
         apply(appsResult, to: &appsRead)
         apply(storeCatalogResult, to: &storeCatalogRead)
         apply(walletResult, to: &walletRead)

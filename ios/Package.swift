@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "AtumDesign", path: ".", exclude: ["StoreKit", "Tests", "App", "AppTests", "Notifications", "UITests", "Sources/AtumPrototype", "Sources/AtumNativeAPI", "Sources/AtumDrive", "Sources/AtumChat", "ExportOptions.plist", "project.yml", "AtumMobile.xcodeproj", "DerivedData", "sdk-baseline.json", "Vendor/AtumKitIcons"],
                 sources: ["Sources/AtumDesign"], resources: [.copy("Vendor/AtumDesign")]),
         .target(name: "AtumPrototype", dependencies: ["AtumDesign", "AtumNativeAPI"], path: "Sources/AtumPrototype", resources: [.copy("Fixtures")]),
-        .target(name: "AtumNativeAPI", path: "Sources/AtumNativeAPI"),
+        .target(name: "AtumNativeAPI", dependencies: ["AtumChat"], path: "Sources/AtumNativeAPI"),
         .target(name: "AtumDrive", dependencies: ["AtumNativeAPI"],
                 path: "Sources/AtumDrive", resources: [.copy("Resources/DriveStageACopy.json")]),
         // Pure chat core of the revamp (plan §2.2): no SDK, no SwiftUI, no UIKit.

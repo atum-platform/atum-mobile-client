@@ -177,6 +177,20 @@ public struct AgentsRead: Sendable {
         catch { return nil }
     }
 
+    /// Stops one cloud turn through the same MAS-authorized, bounded transport
+    /// as the other native calls. Only a strictly correlated 200 is confirmed.
+    public func cloudStop(_ input: CloudTurnStop.Request) async throws -> CloudTurnStop.Response {
+        let body: Data
+        do { body = try input.body() }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let response = try await response(
+            url: Self.baseURL.appendingPathComponent("cloud/stop"), method: "POST", body: body,
+            maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 262_144
+        )
+        do { return try CloudTurnStop.response(response.body, for: input) }
+        catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
     /// First sign-in: the platform creates this account's default assistant and
     /// starter Protons if they are missing. Every step is idempotent, so a
     /// failure is simply retried by the next sign-in. `{disclosureVersion}`
@@ -1153,7 +1167,7 @@ public struct AgentsRead: Sendable {
                             Self.appsURL.path, Self.officialAccountsURL.path,
                             Self.storeCatalogURL.path,
                             Self.walletURL.path, Self.walletHistoryURL.path, Self.aliasLookupURL.path,
-                            Self.assistantURL.path, Self.cloudDisclosureURL.path,
+                            Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
                             Self.driveAccountURL.path, Self.privateCosCapabilityURL.path]
         let dynamicAgentPath = isAgentPath(url.path)

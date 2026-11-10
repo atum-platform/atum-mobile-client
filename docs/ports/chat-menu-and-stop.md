@@ -86,28 +86,94 @@ the text showed twice), its reaction capsule covered the bubble above, and the
   <stopped|stop_requested|completed|failed|failed-then-stopped>`. The scenario is
   `chat.turn-stop` (Atum keeps working and never answers).
 
-**Not live yet: no host supplies the action, so live builds draw no Stop.** What
-is missing:
+**Live wiring (2026-11-10):**
 
-1. `NativeDomainClient` has no call for `/cloud/stop`. Its URL allowlist
-   (`isApprovedURL`) refuses the path, and its transport is private. Adding a
-   second bearer-carrying transport outside the reviewed client was rejected.
-   The owner of that file adds `cloudStop(_ request: CloudTurnStop.Request)`,
-   which allows exactly that path for POST, decodes with
-   `CloudTurnStop.response(_:for:)`, and maps any throw to `.failed`.
-2. `AppRoot.chatHost` builds `ChatInfoActions`. It passes
-   `assistantTurnStop: model.assistantTurnStopActions(roomID:)`, which
-   `LiveAppModel` returns only when the room's agent has `answering == .cloud`.
-   It uses `agent.principal`, the room ID and a fresh lowercase UUID per turn,
-   and the state machine keeps that UUID for retries.
-3. Copy: no exported key yet for a failed stop (desktop `cloud.stopRefused`,
-   "Couldn't stop this reply. It may have already finished.") or for STYLE §11's
-   working placeholder (desktop `copy.ts` `addToRequest`, "Add to your
-   request…"). Until they ship, a failure is the warning haptic and Stop coming
-   back, and the placeholder is unchanged.
-4. Platform reach: Stop only works for owners inside the cloud gate. M1 turns run
-   by a Mac from its own records are out of reach (contract rule 5). Owner
-   decision O4 is still open.
+- `NativeDomainClient.cloudStop` adds exactly `/api/matrix/v1/cloud/stop` to
+  the URL allowlist and sends POST through its existing MAS domain bearer
+  transport. There is no second transport. It retains the native 4,096-byte
+  write and 262,144-byte reply budgets, 15-second request / 30-second resource
+  timeouts, no cookies/cache/URL credentials, redirect refusal, cancellation,
+  closed native error envelope and single 401 refresh. Success is only a
+  correlated 200 decoded by `CloudTurnStop.response`.
+- `CloudAssistantTurnStop` is the tested bridge between the pure chat state
+  machine and the native client. `AtumNativeAPI` depends on the SDK-free
+  `AtumChat` core for the existing intent/result types; the chat core still has
+  no SDK, SwiftUI, UIKit or native transport dependency.
+- `AppRoot.chatHost` passes `LiveAppModel.assistantTurnStopActions(roomID:)`.
+  It returns nil unless this is the currently open assistant chat, the Matrix
+  session is ready, the roster is fresh, an active room-matched agent has a
+  Matrix identity and explicitly says `answering: cloud`, and the domain client
+  exists. Local, missing, malformed and unknown answering facts do not offer
+  Stop. Typing, default-agent identity, model choice and a cloud-creation
+  capability are never used to guess where the selected agent answers.
+- Desktop source checked at `origin/atum-main` revision
+  `ad7ce42dbf5230bb58c3c42829c019bb31ce9eae`:
+  `apps/desktop/src/matrix/cloud-status.tsx:15` (`cloudRoomAgent`) requires the
+  selected assistant's `answering === 'cloud'` and `macRole !== 'answering'`.
+  `apps/desktop/src/matrix/app.tsx:3710` requires joined membership and the
+  cloud bridge; its composer at `:4019` selects `stopCloud`, otherwise the
+  running local turn uses `cancelHermes`. The phone has no Mac executor or
+  `macRole`: its positive routing fact is the selected roster agent's
+  `answering`, and `local` is never sent to the cloud stop route.
+- The action rechecks client identity, account/session generation, open room
+  and cloud routing before sending and after awaiting a reply. A replaced
+  account/session or changed route cannot publish an old stop confirmation.
+- Forbidden/not-admitted (native `matrix_403`), missing route (`matrix_404`)
+  and unavailable/cloud-gate-off (`matrix_503`) resolve to the existing failed
+  state and warning haptic. They also withdraw this agent's action until a
+  successful product roster refresh, so a known unavailable route draws no
+  Stop. The refusal cache is cleared on client replacement. There is no
+  separate Stop-capability discovery endpoint in the current contract; the
+  first refusal remains authoritative, never assumed to mean stopped.
+- Transport loss, cancellation, malformed/noncorrelated replies and other
+  failures also resolve to `.failed`. Retryable failures keep Stop and reuse
+  the state machine's UUID. The composer already creates one lowercase UUID
+  per turn; the live bridge forwards it unchanged, including a 401 retry.
+  `stop_requested` stays stopping until the transcript ends the turn;
+  `completed` claims nothing was stopped. No UI/layout or copy changes.
+
+**Remaining platform/product limits:**
+
+- No production call was made. Live admission of `/cloud/stop` for this account
+  is unverified; the platform still controls the cloud gate and owner allowlist.
+  Turns run by a Mac from its own records remain out of reach (contract rule 5).
+- No exported key yet for a failed stop (desktop `cloud.stopRefused`,
+  "Couldn't stop this reply. It may have already finished.") or for STYLE §11's
+  working placeholder (desktop `copy.ts` `addToRequest`, "Add to your
+  request…"). The existing warning haptic/failure state is retained. No new
+  text was invented.
+
+## Live Stop verification (2026-11-10)
+
+The local Stop checkpoint was rebased onto merged PR #10 before final
+verification. Purchase methods and tests were retained; the Stop transport diff
+remains one new method and one exact allowlist entry.
+
+Seven new native-client tests cover the exact POST/body/MAS bearer/no-cookie
+request, identical request across the sole 401 refresh, request/reply byte
+boundaries, strict replies and closed errors, cloud/local/unknown/missing route
+policy, and the real live bridge driving the existing state machine through
+stopped, stop_requested, completed and failure/idempotent retry. No simulator
+was launched and no production endpoint was called.
+
+Commands (serialized under the shared lock, each build/test capped):
+
+```sh
+TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock timeout 900 swift test --package-path ios -j 2 --scratch-path /Volumes/AtumTestFlight/dd-stop-swift
+TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock timeout 1500 xcodebuild build -jobs 2 -project ios/AtumMobile.xcodeproj -scheme AtumMobile -destination 'generic/platform=iOS Simulator' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES -derivedDataPath /Volumes/AtumTestFlight/dd-stop -clonedSourcePackagesDirPath /Volumes/AtumTestFlight/spm
+PATH=$HOME/.local/bin:$PATH python3 scripts/public_guard.py --base $(git rev-parse origin/main) --head HEAD
+```
+
+- First Swift run: one new fixture error (missing nullable `matrixUser` key).
+  Corrected the fixture to explicit null. The new transport and state-machine
+  integration cases passed that run; final verification follows the correction.
+- Final Swift run (after rebasing onto PR #10): exit 0; 1,193 tests, zero
+  failures (626 native/design, 535 chat, 16 Drive and 16 telemetry). All seven
+  new Stop tests pass.
+- Xcode app build: exit 0; `** BUILD SUCCEEDED **` for the generic arm64
+  iOS Simulator destination. No simulator boot or UI test execution.
+- Public outbound guard: exit 0;
+  `PASS: 1 new commits; raw paths/modes, ancestry, identifiers, secrets and metadata`.
 
 ## Verification (2026-11-10, local, under the shared build lock)
 
