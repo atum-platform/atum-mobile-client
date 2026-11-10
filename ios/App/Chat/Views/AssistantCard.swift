@@ -44,7 +44,8 @@ struct AssistantCardIdentity: Equatable {
     func homeRow(name: String? = nil) -> HomeRow {
         HomeRow(id: roomID, kind: isPrimary ? .atum : .assistant, name: name ?? self.name,
                 avatarURL: avatarPhotoURL, matrixAvatarURL: matrixAvatarURI,
-                avatarSHA256: avatarSHA256, avatarCandidates: avatarCandidates)
+                avatarSHA256: avatarSHA256, avatarCandidates: avatarCandidates,
+                mark: avatar?.agentMark)
     }
 }
 
