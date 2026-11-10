@@ -2,6 +2,12 @@ import AtumDesign
 import AtumNativeAPI
 import SwiftUI
 
+extension AgentHomeSnapshot {
+    /// Mirrors desktop's AGENT_HOMES_CLOUD_ONLY (2026-11-09). Existing Mac
+    /// homes remain readable, but the only offered move is to the cloud.
+    var offeredHomeDestinations: [AgentHomeLocation] { [.cloud] }
+}
+
 struct AssistantHomeValue: Equatable {
     let snapshot: AgentHomeSnapshot
     let destinations: ManagedModelDestinationSnapshot
@@ -470,24 +476,9 @@ private struct AssistantHomeMoveSheet: View {
     }
 
     private func destinations(_ value: AssistantHomeValue) -> [Destination] {
-        var result = [Destination(location: .cloud, name: copy.text(.cloud), status: nil, enabled: true)]
-        let waiting = value.snapshot.waitsForHomeMac
-        let home = value.snapshot.placement.location
-        result += value.snapshot.eligibleDevices.compactMap { device -> Destination? in
-            let location = AgentHomeLocation.mac(device.deviceServiceID)
-            // While the assistant's Mac is not answering the owner waits for it (or moves to the
-            // cloud): no other Mac is offered, and that Mac itself is the one being waited for.
-            if waiting, location != home { return nil }
-            let status: String
-            let enabled: Bool
-            switch device.eligibility {
-            case _ where waiting: status = copy.waitingForMac(device.displayName); enabled = true
-            case .ready: status = copy.text(.available); enabled = true
-            case let .unavailable(reason): status = copy.deviceUnavailable(reason); enabled = false
-            }
-            return Destination(location: location, name: device.displayName, status: status, enabled: enabled)
+        value.snapshot.offeredHomeDestinations.map { location in
+            Destination(location: location, name: copy.text(.cloud), status: nil, enabled: true)
         }
-        return result
     }
 
     private func selectHome(_ home: AgentHomeLocation, value: AssistantHomeValue) {
