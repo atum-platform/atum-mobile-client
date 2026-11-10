@@ -120,6 +120,8 @@ struct ChatComposer: View {
         .onChange(of: store.replyTarget) { _, target in
             if target != nil { focused = true }
         }
+        // HC-4: a starter chip filled the draft.
+        .onChange(of: store.composerFocusRequest) { _, _ in focused = true }
         .onChange(of: store.editTarget) { _, target in
             if target != nil {
                 dictation.cancel()

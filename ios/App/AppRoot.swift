@@ -61,6 +61,8 @@ struct AppRoot: View {
     @State private var reporting = LiveReporting.shared
     @State private var router = Router()
     @State private var rosterStore = RosterStore()
+    /// HC-3: my assistants' typing, for Home's working atom.
+    @State private var assistantActivity = HomeAssistantActivity()
     @State private var openRequestGeneration: UInt64 = 0
     @State private var dismissChatPresentationRequest: UInt64 = 0
     @State private var signInAttempt = SignInAttemptGate()
@@ -333,6 +335,15 @@ struct AppRoot: View {
                 .onChange(of: home) { _, value in
                     model.recordChatListSnapshot(accountID: account.matrixUserID,
                                                  rows: value.rows)
+                }
+                .task(id: HomeAssistantActivityKey(
+                    session: model.liveMatrix.map { ObjectIdentifier($0) },
+                    ready: model.liveMatrix?.isReady == true,
+                    roomIDs: Set(home.rows.filter { $0.kind.isAssistant && $0.canOpen }.map(\.roomID))
+                )) {
+                    assistantActivity.watch(
+                        roomIDs: Set(home.rows.filter { $0.kind.isAssistant && $0.canOpen }.map(\.roomID)),
+                        session: model.liveMatrix)
                 }
                 .navigationDestination(for: String.self) { roomID in
                     chatHost(account, roomID: roomID)
@@ -650,9 +661,16 @@ struct AppRoot: View {
         } else {
             rows = liveRows
         }
+        // HC-3/HC-5: live-only facts (an assistant at work, a group's size)
+        // on top of whichever rows were painted; never cached.
+        let memberCounts = (model.liveMatrix?.rooms ?? []).reduce(into: [String: Int]()) {
+            $0[$1.roomID] = Int(min($1.memberCount, UInt64(Int.max)))
+        }
         return HomePresentation(
             state: state,
-            rows: rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) },
+            rows: HomeRow.applyingLive(rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) },
+                                       workingRoomIDs: assistantActivity.workingRoomIDs,
+                                       memberCounts: memberCounts),
             showsNotificationPrompt: source.notificationPrompt,
             showsDomainReauthentication: model.domainRecoveryState == .reauthenticationRequired,
             domainReauthenticationBusy: model.domainReauthenticationInProgress,

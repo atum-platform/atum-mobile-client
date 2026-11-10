@@ -76,6 +76,12 @@ struct HomeRow: Identifiable, Equatable {
     /// The exact account-marked Founder room. Only this row uses the local
     /// approved raven; every other person keeps the ordinary human avatar.
     var isFounder: Bool
+    /// HC-3: my assistant is at work here right now (`RosterWorking`). Live
+    /// only: never written to the cold-launch snapshot, so no stale atom.
+    var isWorking = false
+    /// A group's joined-and-invited members, for Start chat's "N members"
+    /// caption. Live only, like `isWorking`.
+    var memberCount: Int?
 
     init(id: String, roomID: String? = nil, kind: Kind, name: String,
          avatarURL: URL? = nil, matrixAvatarURL: String? = nil,
@@ -114,6 +120,19 @@ struct HomeRow: Identifiable, Equatable {
 
     var badge: Badge { Badge.mark(for: badgeInput) }
     var isInvitation: Bool { kind == .invitation }
+
+    /// Applies the session's live-only facts to rows that may have come from
+    /// the cached chat list (HC-3, HC-5). Only assistant rows ever work.
+    static func applyingLive(_ rows: [HomeRow], workingRoomIDs: Set<String>,
+                             memberCounts: [String: Int]) -> [HomeRow] {
+        guard !workingRoomIDs.isEmpty || !memberCounts.isEmpty else { return rows }
+        return rows.map { row in
+            var row = row
+            row.isWorking = row.kind.isAssistant && workingRoomIDs.contains(row.roomID)
+            if row.kind == .group { row.memberCount = memberCounts[row.roomID] }
+            return row
+        }
+    }
     /// Desktop `MainAgentBadge`: Start chat stars the main assistant only.
     var showsMainAssistantBadge: Bool { kind == .atum }
 
@@ -779,7 +798,8 @@ struct HomeScreen: View {
     private func rowView(_ row: HomeRow, now: Date) -> some View {
         HomeRowView(design: design, row: row, now: now,
                     loadMatrixThumbnail: actions.loadMatrixThumbnail,
-                    isJoining: joiningRoomID == row.roomID)
+                    isJoining: joiningRoomID == row.roomID,
+                    isSearching: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     private func decoratedRow<Content: View>(_ content: Content, row: HomeRow) -> some View {
@@ -945,6 +965,14 @@ private struct HomeSearchField: View {
     }
 }
 
+/// What Start chat pushes.
+private enum HomeStartChatRoute: Hashable {
+    /// Add friend, with the @name typed in the sheet's search (nil from the
+    /// footer button).
+    case addFriend(String?)
+    case newGroup
+}
+
 private struct HomeStartChatSheet: View {
     let design: LiveDesign
     let rows: [HomeRow]
@@ -952,27 +980,51 @@ private struct HomeStartChatSheet: View {
     let onOpenFounderDraft: () -> Void
     let dismiss: () -> Void
 
-    @State private var query = ""
+    /// A pushed screen (Add friend with the typed @name, New group).
+    @State private var path = [HomeStartChatRoute]()
+    @State private var findingAddress = false
+    @State private var findAddressFailed = false
     @Environment(\.dismiss) private var systemDismiss
     @Environment(\.colorScheme) private var scheme
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
+                // Desktop `start-chat.tsx`: Assistants · People (people, then
+                // groups, then an inline "New group") · Apps.
                 section(.assistants, rows: assistants)
-                section(.people, rows: people)
-                section(.groups, rows: groups)
+                section(.people, rows: people + groups) {
+                    if !isSearching, actions.newGroup != nil { newGroupRow }
+                }
                 section(.apps, rows: apps)
+                if let findable = query.findable, canFindPeople {
+                    Section { findRow(findable) }
+                }
+            }
+            .overlay {
+                if isSearching, pickable.isEmpty, query.findable == nil || !canFindPeople {
+                    ContentUnavailableView {
+                        Text(verbatim: copy(.noMatches))
+                    } description: {
+                        if canFindPeople { Text(verbatim: copy(.noMatchesHint)) }
+                    }
+                    .accessibilityIdentifier("home.startChat.noMatches")
+                }
+            }
+            .navigationDestination(for: HomeStartChatRoute.self) { route in
+                destination(route)
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(atum.color(.ground, scheme: scheme))
             .navigationTitle(copy(.startTitle))
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+            .searchable(text: $queryText, placement: .navigationBarDrawer(displayMode: .always),
                         prompt: Text(verbatim: copy(.startSearch)))
+            // Return picks the first row, else finds the typed @name (desktop).
+            .onSubmit(of: .search) { submitSearch() }
             .safeAreaInset(edge: .bottom, spacing: 0) { creationActions }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -989,7 +1041,15 @@ private struct HomeStartChatSheet: View {
 
     @ViewBuilder
     private func section(_ key: StartChatCopyKey, rows: [HomeRow]) -> some View {
-        if !rows.isEmpty {
+        section(key, rows: rows) { EmptyView() }
+    }
+
+    @ViewBuilder
+    private func section<Extra: View>(_ key: StartChatCopyKey, rows: [HomeRow],
+                                      @ViewBuilder extra: () -> Extra) -> some View {
+        let extra = extra()
+        let hasExtra = !isSearching && key == .people && actions.newGroup != nil
+        if !rows.isEmpty || hasExtra {
             Section(copy(key)) {
                 ForEach(rows) { row in
                     Button {
@@ -1006,19 +1066,152 @@ private struct HomeStartChatSheet: View {
                             // the raven and app tiles (desktop `start-chat.tsx`).
                             HomeAvatar(row: row, size: 36,
                                        loadMatrixThumbnail: actions.loadMatrixThumbnail)
-                            HStack(spacing: 6) {
-                                Text(verbatim: row.name)
-                                    .foregroundStyle(atum.color(.ink, scheme: scheme))
-                                    .lineLimit(1)
-                                if row.showsMainAssistantBadge { mainAssistantBadge }
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(verbatim: row.name)
+                                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                                        .lineLimit(1)
+                                    if row.showsMainAssistantBadge { mainAssistantBadge }
+                                }
+                                if let caption = caption(for: row) {
+                                    Text(verbatim: caption)
+                                        .font(.caption)
+                                        .foregroundStyle(atum.color(.muted, scheme: scheme))
+                                        .lineLimit(1)
+                                }
                             }
                             Spacer(minLength: 8)
                         }
                         .frame(minHeight: 44)
+                        .accessibilityElement(children: .combine)
                     }
+                    .disabled(!row.canOpen && !row.isFounderDraft)
                     .accessibilityIdentifier("home.startChat.row.\(row.id)")
                 }
+                extra
             }
+        }
+    }
+
+    /// Desktop's captions: a group's "N members", and an assistant whose
+    /// chat is still on its way says so ("Getting ready") instead of being
+    /// left out. A person's @handle needs the directory's reverse read
+    /// (plan SV-4), which the phone does not have yet.
+    private func caption(for row: HomeRow) -> String? {
+        if row.kind == .group, let count = row.memberCount {
+            return design.text(StartChatCopyKey.members.rawValue,
+                               arguments: [.number(Int64(max(1, count)))])
+        }
+        if row.kind.isAssistant, row.isWaitingForRoom {
+            let preview = HomePreviewText.text(row.preview, design: design)
+            return preview.isEmpty ? nil : preview
+        }
+        return nil
+    }
+
+    private var newGroupRow: some View {
+        NavigationLink(value: HomeStartChatRoute.newGroup) {
+            HStack(spacing: 12) {
+                Image(atum.symbol(.users))
+                    .font(.body)
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    .frame(width: 36, height: 36)
+                    .background(atum.kitColor(.fillQuiet, scheme: scheme), in: Circle())
+                    .accessibilityHidden(true)
+                Text(verbatim: copy(.newGroup))
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityIdentifier("home.startChat.newGroup")
+    }
+
+    /// "Find @x on Atum": an @name goes to Add friend, already searching; a
+    /// full Matrix address is opened directly, as desktop accepts it quietly.
+    private func findRow(_ findable: String) -> some View {
+        Button { find() } label: {
+            HStack(spacing: 12) {
+                Group {
+                    if findingAddress {
+                        ProgressView()
+                    } else {
+                        Image(atum.symbol(.search))
+                            .font(.body)
+                            .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    }
+                }
+                .frame(width: 36, height: 36)
+                .background(atum.kitColor(.fillQuiet, scheme: scheme), in: Circle())
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: copy(.findOnAtum, [.text(findable)]))
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .lineLimit(1)
+                    if findAddressFailed {
+                        Text(verbatim: copy(.startFailed))
+                            .font(.caption)
+                            .foregroundStyle(atum.color(.danger, scheme: scheme))
+                    }
+                }
+            }
+            .frame(minHeight: 44)
+        }
+        .disabled(findingAddress)
+        .accessibilityIdentifier("home.startChat.find")
+    }
+
+    @ViewBuilder private func destination(_ route: HomeStartChatRoute) -> some View {
+        switch route {
+        case let .addFriend(handle):
+            if let addFriend = actions.addFriend {
+                HomeAddFriendView(design: design, submit: addFriend, discovery: actions.peopleDiscovery,
+                                  initialHandle: handle) { roomID in
+                    close()
+                    actions.openRoom(roomID)
+                }
+            }
+        case .newGroup:
+            if let newGroup = actions.newGroup {
+                HomeNewGroupView(design: design, actions: newGroup) { roomID in
+                    close()
+                    actions.openRoom(roomID)
+                }
+            }
+        }
+    }
+
+    private var canFindPeople: Bool { actions.addFriend != nil }
+    private var isSearching: Bool { query != .empty }
+
+    private func submitSearch() {
+        if let first = pickable.first {
+            close()
+            if first.isFounderDraft { onOpenFounderDraft() } else { actions.openRoom(first.roomID) }
+        } else if query.findable != nil, canFindPeople {
+            find()
+        }
+    }
+
+    private func find() {
+        switch query {
+        case let .handle(handle):
+            path.append(.addFriend(handle))
+        case let .matrixID(userID):
+            guard let discovery = actions.peopleDiscovery, !findingAddress else { return }
+            findingAddress = true
+            findAddressFailed = false
+            Task { @MainActor in
+                let result = await discovery.open(userID)
+                findingAddress = false
+                if case let .openRoom(roomID) = result {
+                    close()
+                    actions.openRoom(roomID)
+                } else {
+                    findAddressFailed = true
+                }
+            }
+        case .empty, .text:
+            break
         }
     }
 
@@ -1043,7 +1236,7 @@ private struct HomeStartChatSheet: View {
     }
 
     @ViewBuilder private var creationActions: some View {
-        if actions.addFriend != nil || actions.newGroup != nil || actions.newAssistant != nil {
+        if actions.addFriend != nil || actions.newAssistant != nil {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     creationActionViews
@@ -1060,30 +1253,6 @@ private struct HomeStartChatSheet: View {
     }
 
     @ViewBuilder private var creationActionViews: some View {
-        if let addFriend = actions.addFriend {
-            NavigationLink {
-                HomeAddFriendView(design: design, submit: addFriend, discovery: actions.peopleDiscovery) { roomID in
-                    close()
-                    actions.openRoom(roomID)
-                }
-            } label: {
-                creationLabel(.addFriend, glyph: .userCircle)
-            }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("home.startChat.addFriend")
-        }
-        if let newGroup = actions.newGroup {
-            NavigationLink {
-                HomeNewGroupView(design: design, actions: newGroup) { roomID in
-                    close()
-                    actions.openRoom(roomID)
-                }
-            } label: {
-                creationLabel(.newGroup, glyph: .users)
-            }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("home.startChat.newGroup")
-        }
         if let newAssistant = actions.newAssistant {
             NavigationLink {
                 HomeNewAssistantView(design: design, actions: newAssistant) { roomID in
@@ -1096,6 +1265,13 @@ private struct HomeStartChatSheet: View {
             .buttonStyle(.bordered)
             .accessibilityIdentifier("home.startChat.newAssistant")
         }
+        if actions.addFriend != nil {
+            NavigationLink(value: HomeStartChatRoute.addFriend(nil)) {
+                creationLabel(.addFriend, glyph: .userCircle)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("home.startChat.addFriend")
+        }
     }
 
     private func creationLabel(_ key: StartChatCopyKey, glyph: AtumGlyph) -> some View {
@@ -1106,13 +1282,24 @@ private struct HomeStartChatSheet: View {
             .frame(minHeight: 44)
     }
 
+    /// The typed text, and what it means (`StartChatQuery`).
+    @State private var queryText = ""
+    private var query: StartChatQuery { StartChatQuery.parse(queryText) }
+
     private var visibleRows: [HomeRow] {
         let locale = Locale(identifier: design.locale)
-        let needle = HomeSearch.normalize(query, locale: locale)
+        let needle = HomeSearch.normalize(queryText, locale: locale)
         return rows.filter { row in
-            !row.isInvitation && row.canOpen
+            // Every assistant is listed, one whose chat is still on its way
+            // too (desktop lists every projected agent); it opens once ready.
+            !row.isInvitation && (row.canOpen || (row.kind.isAssistant && row.isWaitingForRoom))
                 && (needle.isEmpty || HomeSearch.normalize(row.name, locale: locale).contains(needle))
         }
+    }
+
+    /// What Return picks: the first row that opens, in the sheet's order.
+    private var pickable: [HomeRow] {
+        (assistants + people + groups + apps).filter { $0.canOpen || $0.isFounderDraft }
     }
 
     private var assistants: [HomeRow] { visibleRows.filter(\.kind.isAssistant) }
@@ -1120,7 +1307,9 @@ private struct HomeStartChatSheet: View {
     private var groups: [HomeRow] { visibleRows.filter { $0.kind == .group } }
     private var apps: [HomeRow] { visibleRows.filter { $0.kind == .app } }
 
-    private func copy(_ key: StartChatCopyKey) -> String { design.text(key.rawValue) }
+    private func copy(_ key: StartChatCopyKey, _ arguments: [AtumCopy.Argument] = []) -> String {
+        design.text(key.rawValue, arguments: arguments)
+    }
 
     private func close() {
         dismiss()
@@ -1132,6 +1321,9 @@ private struct HomeAddFriendView: View {
     let design: LiveDesign
     let submit: (String) async -> HomeAddFriendResult
     var discovery: HomePeopleDiscoveryActions? = nil
+    /// HC-5: Start chat's "Find @x on Atum" arrives with the @name typed and
+    /// the search already started, as desktop's `onFindPerson(query)`.
+    var initialHandle: String? = nil
     let openRoom: (String) -> Void
 
     private enum Presentation: Equatable {
@@ -1149,6 +1341,7 @@ private struct HomeAddFriendView: View {
     @State private var query = ""
     @State private var presentation: Presentation = .idle
     @State private var request: Task<Void, Never>?
+    @State private var startsWhenFilled = false
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var scheme
 
@@ -1232,11 +1425,24 @@ private struct HomeAddFriendView: View {
             matches = found ?? []
             directoryFailed = found == nil
         }
-        .onAppear { focused = true }
+        .onAppear {
+            if let initialHandle, query.isEmpty {
+                // The search starts once the typed @name has landed (below),
+                // so the edit that puts it there does not cancel it.
+                startsWhenFilled = true
+                query = initialHandle
+            } else {
+                focused = true
+            }
+        }
         .onChange(of: query) { _, _ in
             request?.cancel()
             request = nil
             presentation = .idle
+            if startsWhenFilled {
+                startsWhenFilled = false
+                start()
+            }
         }
         .onDisappear {
             request?.cancel()
@@ -1778,6 +1984,7 @@ private struct HomeRowView: View {
     let now: Date
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
     let isJoining: Bool
+    var isSearching = false
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var scheme
@@ -1905,7 +2112,9 @@ private struct HomeRowView: View {
     }
 
     @ViewBuilder private var timeOrJoining: some View {
-        if isJoining {
+        if isJoining || showsWorking {
+            // Joining, or my assistant at work (HC-3, desktop `RosterWorking`):
+            // Atum's atom in the time's place.
             AtomWait()
                 .frame(width: 14, height: 14)
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -1917,6 +2126,10 @@ private struct HomeRowView: View {
                 .lineLimit(1)
         }
     }
+
+    /// Desktop shows no atom while searching: the list then finds, it does
+    /// not report.
+    private var showsWorking: Bool { row.isWorking && !isSearching }
 
     /// Times are ink-3 whatever the row's state (FlowPhone); the badge and
     /// the name's weight carry unread.
@@ -1956,7 +2169,9 @@ private struct HomeRowView: View {
         }
         if !previewText.isEmpty { parts.append(previewText) }
         if isJoining { parts.append(design.text(HomeCopyKey.loading.rawValue)) }
-        else if !timeText.isEmpty { parts.append(timeText) }
+        else if showsWorking {
+            parts.append(design.text(HomeCopyKey.working.rawValue, arguments: [.text(row.name)]))
+        } else if !timeText.isEmpty { parts.append(timeText) }
         return parts.joined(separator: ", ")
     }
 }
@@ -2562,6 +2777,8 @@ private enum HomeCopyKey: String {
     case allow = "src.matrix.mobile-copy.mobilePhoneCopy.allow"
     case notNow = "src.matrix.mobile-copy.mobilePhoneCopy.notNow"
     case cancel = "src.matrix.chat-copy.copies.cancel"
+    /// HC-3: "Lan is working", spoken in the time's place.
+    case working = "src.matrix.working-copy.copies.working"
 }
 
 private enum StartChatCopyKey: String {
@@ -2580,6 +2797,9 @@ private enum StartChatCopyKey: String {
     case handlePlaceholder = "src.matrix.roster-create-copy.copies.handlePlaceholder"
     case find = "src.matrix.roster-create-copy.copies.find"
     case findOnAtum = "src.matrix.roster-create-copy.copies.findOnAtum"
+    case noMatches = "src.matrix.roster-create-copy.copies.noMatches"
+    case noMatchesHint = "src.matrix.roster-create-copy.copies.noMatchesHint"
+    case members = "src.matrix.roster-create-copy.copies.members"
     case searching = "src.matrix.roster-create-copy.copies.searching"
     case notFound = "src.matrix.roster-create-copy.copies.notFound"
     case noAddress = "src.matrix.roster-create-copy.copies.noAddress"

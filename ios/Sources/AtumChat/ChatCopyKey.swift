@@ -53,6 +53,20 @@ public enum ChatCopyKey: String, CaseIterable, Sendable {
     case done = "desktop.common.done"
     // Empty chat (B2, U10)
     case greeting = "src.matrix.mobile-device-copy.mobileDeviceCopy.uiGreeting"
+    // Empty chat (HC-4): desktop `greeting.tsx` (`matrixShell.greet*`, exported
+    // as the phone's `mobileScreensCopy.greeting.*` with the same words),
+    // `chat-copy.ts` `starters` and `copy.ts` `empty`.
+    case greetingMorning = "src.matrix.mobile-copy.mobileScreensCopy.greeting.morning"
+    case greetingAfternoon = "src.matrix.mobile-copy.mobileScreensCopy.greeting.afternoon"
+    case greetingEvening = "src.matrix.mobile-copy.mobileScreensCopy.greeting.evening"
+    case greetingPrompt = "src.matrix.mobile-copy.mobileScreensCopy.greeting.prompt"
+    case starter0Label = "src.matrix.chat-copy.copies.starters.0.label"
+    case starter0Text = "src.matrix.chat-copy.copies.starters.0.text"
+    case starter1Label = "src.matrix.chat-copy.copies.starters.1.label"
+    case starter1Text = "src.matrix.chat-copy.copies.starters.1.text"
+    case starter2Label = "src.matrix.chat-copy.copies.starters.2.label"
+    case starter2Text = "src.matrix.chat-copy.copies.starters.2.text"
+    case noMessages = "src.matrix.copy.copies.empty"
     // Links (§4.2 item 6)
     case linkHeld = "src.matrix.mobile-copy.mobileChatCopy.linkHeld"
     case dismiss = "src.matrix.chat-copy.copies.dismiss"
