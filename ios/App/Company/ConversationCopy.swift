@@ -89,3 +89,54 @@ struct ConversationCopy {
         return parts.joined(separator: ", ")
     }
 }
+
+/// The Direct messages section's own rows: "You" (personal notes) and the
+/// private Chief of Staff. Words the export already has come from it; the ones
+/// it lacks read their proposed export key first and fall back to the closest
+/// exported word until the copy worker's keys land (port note
+/// `docs/ports/team-space-dms-cos.md`, PENDING-COPY). No literal is shown.
+@MainActor
+struct DirectMessagesCopy {
+    let design: LiveDesign
+
+    /// The key when the pinned export has it, else the fallback key's text.
+    private func pending(_ key: String, fallback: String) -> String {
+        design.copy.contains(key) ? design.text(key) : design.text(fallback)
+    }
+
+    /// "You", the row's name (desktop `team.you`).
+    var you: String { design.text("desktop.dm.you") }
+
+    /// VoiceOver's name for the row (desktop `team.personalNotes`, "Your personal notes").
+    var personalNotes: String {
+        // PENDING-COPY:shared.matrix-team-space-copy.copy.personalNotes
+        pending("shared.matrix-team-space-copy.copy.personalNotes", fallback: "desktop.dm.you")
+    }
+
+    /// "Chief of Staff" (desktop `boardCopy.chiefOfStaff`). Until the key lands, the platform's
+    /// own frozen name from the 1.3 capability, else the export's "Assistant".
+    func chiefOfStaff(platformName: String?) -> String {
+        // PENDING-COPY:shared.matrix-company-board-copy.copy.chiefOfStaff
+        let key = "shared.matrix-company-board-copy.copy.chiefOfStaff"
+        if design.copy.contains(key) { return design.text(key) }
+        if let platformName, !platformName.isEmpty { return platformName }
+        return design.text("shared.matrix-alias-copy.copy.assistant")
+    }
+
+    /// The row's state line (desktop `matrixCompanyPrivateCosRowCopy`, `…PrivateCosCopy.paused`).
+    func line(_ status: CompanyPrivateCosRowStatus) -> String? {
+        switch status {
+        case .ready: return nil
+        // Same words, same meaning: an assistant row still being set up.
+        case .settingUp: return design.text("src.matrix.assistant-card.copy.assistantCardCopies.setupRowWorking")
+        case .paused: return design.text("desktop.atum.awareness.states.paused")
+        case .notAvailable:
+            // PENDING-COPY:shared.matrix-company-private-cos-copy.matrixCompanyPrivateCosRowCopy.notAvailable
+            return pending("shared.matrix-company-private-cos-copy.matrixCompanyPrivateCosRowCopy.notAvailable",
+                           fallback: "src.matrix.assistant-card.copy.assistantCardCopies.setupRowNotReady")
+        }
+    }
+
+    var retry: String { design.text("shared.matrix-company-copy.copy.retry") }
+    var openFailed: String { ConversationCopy(design: design).openFailed }
+}

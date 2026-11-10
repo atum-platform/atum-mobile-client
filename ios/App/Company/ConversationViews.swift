@@ -54,59 +54,92 @@ struct ConversationChatActions {
 
 // MARK: Section
 
-/// The "Direct messages" section of the Workplace list.
+/// The Direct messages section's own rows (desktop `conversation-sections.tsx`).
+struct DirectMessagesActions {
+    /// Open (making it the first time) this company's notes room. False when it did not open.
+    var openNotes: ((String) async -> Bool)?
+    /// Open the Chief of Staff room, asking the platform first when the pair is not ready.
+    var openChiefOfStaff: ((String) async -> Bool)?
+    /// Not available or paused: read again and ask for the pair (the ensure route).
+    var retryChiefOfStaff: ((String) async -> Void)?
+}
+
+/// The "Direct messages" section of the Workplace list: always present for a
+/// loaded company, as on the desktop. "You" (the person's own notes) comes
+/// first, the private Chief of Staff second, then the platform's DMs and
+/// groups, newest first. The conversation rows and "+" exist only while the
+/// conversations family is on.
 struct ConversationSectionView: View {
     let design: LiveDesign
     let companyID: String
-    let section: ConversationSectionPresentation
-    let actions: ConversationListActions
+    let directMessages: DirectMessagesPresentation
+    /// Nil keeps the conversation rows and "+" off whatever the presentation says.
+    let actions: ConversationListActions?
+    let rowActions: DirectMessagesActions
+    let loadMatrixThumbnail: ((String, Int) async -> Data?)?
 
     @State private var showsPicker = false
     @State private var showsHidden: Bool
+    @State private var openingNotes = false
+    @State private var notesFailed = false
+    @State private var openingChief = false
+    @State private var chiefFailed = false
     @Environment(\.colorScheme) private var scheme
 
     /// `initiallyShowsHidden` is for previews and the simulator harness.
-    init(design: LiveDesign, companyID: String, section: ConversationSectionPresentation,
-         actions: ConversationListActions, initiallyShowsHidden: Bool = false) {
+    init(design: LiveDesign, companyID: String, directMessages: DirectMessagesPresentation,
+         actions: ConversationListActions?, rowActions: DirectMessagesActions = DirectMessagesActions(),
+         loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil, initiallyShowsHidden: Bool = false) {
         self.design = design
         self.companyID = companyID
-        self.section = section
+        self.directMessages = directMessages
         self.actions = actions
+        self.rowActions = rowActions
+        self.loadMatrixThumbnail = loadMatrixThumbnail
         _showsHidden = State(initialValue: initiallyShowsHidden)
     }
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
     private var copy: ConversationCopy { ConversationCopy(design: design) }
+    private var dmCopy: DirectMessagesCopy { DirectMessagesCopy(design: design) }
+    /// The conversation rows exist only with both the family on and the actions wired.
+    private var section: ConversationSectionPresentation? { actions == nil ? nil : directMessages.conversations }
+
+    static let faceSize: CGFloat = 28
 
     var body: some View {
         Section {
-            if section.isLoading {
-                note(copy.loading)
-            } else if section.failed {
-                note(copy.failed).accessibilityIdentifier("conversations.failed")
-            } else if section.rows.isEmpty && section.hidden.isEmpty {
-                note(copy.none).accessibilityIdentifier("conversations.none")
+            notesRow
+            if let chief = directMessages.chief {
+                chiefRow(chief)
             }
-            if section.isStale {
-                // The last read failed: these are the last good rows, and nothing can be sent.
-                note(copy.failed).accessibilityIdentifier("conversations.stale")
-            }
-            ForEach(section.rows) { row in
-                rowView(row)
-            }
-            if !section.hidden.isEmpty {
-                hiddenHeader
-                if showsHidden {
-                    ForEach(section.hidden) { row in
-                        rowView(row)
+            if let section, let actions {
+                if section.isLoading && section.rows.isEmpty {
+                    note(copy.loading)
+                } else if section.failed {
+                    note(copy.failed).accessibilityIdentifier("conversations.failed")
+                }
+                if section.isStale {
+                    // The last read failed: these are the last good rows, and nothing can be sent.
+                    note(copy.failed).accessibilityIdentifier("conversations.stale")
+                }
+                ForEach(section.rows) { row in
+                    rowView(row, actions: actions)
+                }
+                if !section.hidden.isEmpty {
+                    hiddenHeader(count: section.hidden.count)
+                    if showsHidden {
+                        ForEach(section.hidden) { row in
+                            rowView(row, actions: actions)
+                        }
                     }
                 }
-            }
-            if let notice = section.notice {
-                Text(verbatim: notice)
-                    .font(.footnote)
-                    .foregroundStyle(atum.color(.danger, scheme: scheme))
-                    .accessibilityIdentifier("conversations.notice")
+                if let notice = section.notice {
+                    Text(verbatim: notice)
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.danger, scheme: scheme))
+                        .accessibilityIdentifier("conversations.notice")
+                }
             }
         } header: {
             HStack {
@@ -117,31 +150,164 @@ struct ConversationSectionView: View {
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("conversations.section")
                 Spacer()
-                Button { showsPicker = true } label: {
-                    Image(atum.symbol(.plus))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(atum.color(.soft, scheme: scheme))
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                if let section {
+                    Button { showsPicker = true } label: {
+                        Image(atum.symbol(.plus))
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(atum.color(.soft, scheme: scheme))
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(section.isStale || section.failed)
+                    .accessibilityLabel(copy.newMessage)
+                    .accessibilityIdentifier("conversations.new")
                 }
-                .buttonStyle(.plain)
-                .disabled(section.isStale || section.failed)
-                .accessibilityLabel(copy.newMessage)
-                .accessibilityIdentifier("conversations.new")
             }
+            .frame(minHeight: 44)
             .padding(.top, 8)
             .padding(.bottom, -6)
         }
         .listSectionSeparator(.hidden)
         .sheet(isPresented: $showsPicker) {
-            ConversationPickerSheet(
-                design: design, mode: .new,
-                people: actions.people(companyID),
-                start: { await actions.start(companyID, $0) },
-                routeToRoom: { actions.routeToRoom(companyID, $0) })
-                .atumDesign(visual: atum)
+            if let actions {
+                ConversationPickerSheet(
+                    design: design, mode: .new,
+                    people: actions.people(companyID),
+                    start: { await actions.start(companyID, $0) },
+                    routeToRoom: { actions.routeToRoom(companyID, $0) })
+                    .atumDesign(visual: atum)
+            }
+        }
+        .onChange(of: companyID) { _, _ in
+            openingNotes = false
+            notesFailed = false
+            openingChief = false
+            chiefFailed = false
         }
     }
+
+    // MARK: You
+
+    /// "You": the person's own face and their notes for this company, the room the
+    /// desktop opens too.
+    private var notesRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button {
+                guard let openNotes = rowActions.openNotes, !openingNotes else { return }
+                openingNotes = true
+                notesFailed = false
+                Task { @MainActor in
+                    let opened = await openNotes(companyID)
+                    openingNotes = false
+                    notesFailed = !opened
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    MatrixFace(kind: .person, name: directMessages.selfName ?? dmCopy.you,
+                               matrixURI: directMessages.selfAvatarURI, size: Self.faceSize,
+                               loadMatrixThumbnail: loadMatrixThumbnail)
+                    Text(verbatim: dmCopy.you)
+                        .font(.body)
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    if openingNotes {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(rowActions.openNotes == nil || openingNotes)
+            if notesFailed {
+                Text(verbatim: dmCopy.openFailed)
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.danger, scheme: scheme))
+                    .accessibilityIdentifier("conversations.notes.error")
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(verbatim: dmCopy.personalNotes))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("conversations.notes")
+    }
+
+    // MARK: Chief of Staff
+
+    private func chiefRow(_ chief: ChiefOfStaffRowPresentation) -> some View {
+        let name = dmCopy.chiefOfStaff(platformName: chief.platformName)
+        let retry = chief.status.offersRetry
+        let line = openingChief && retry ? dmCopy.line(.settingUp) : dmCopy.line(chief.status)
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                guard chief.isActionable, !openingChief else { return }
+                openingChief = true
+                chiefFailed = false
+                Task { @MainActor in
+                    if retry, let retryChief = rowActions.retryChiefOfStaff {
+                        await retryChief(companyID)
+                    } else if let openChief = rowActions.openChiefOfStaff {
+                        chiefFailed = !(await openChief(companyID))
+                    }
+                    openingChief = false
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    // An assistant: a circle, like every face but an app's.
+                    AtumAvatar(kind: .assistant, name: name, size: Self.faceSize)
+                    Text(verbatim: name)
+                        .font(.body.weight(TeamSpaceBadges.isBold(chief.badge) ? .semibold : .regular))
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .lineLimit(1)
+                    if chief.isMuted {
+                        Image(atum.symbol(.bellOff))
+                            .font(.footnote)
+                            .foregroundStyle(atum.color(.muted, scheme: scheme))
+                            .accessibilityHidden(true)
+                    }
+                    Spacer(minLength: 8)
+                    if let line {
+                        Text(verbatim: line)
+                            .font(.footnote)
+                            .foregroundStyle(atum.color(.muted, scheme: scheme))
+                            .lineLimit(1)
+                            .accessibilityIdentifier("conversations.chief.state")
+                    }
+                    if retry && !openingChief {
+                        Text(verbatim: dmCopy.retry)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(atum.color(.ink, scheme: scheme))
+                            .accessibilityIdentifier("conversations.chief.retry")
+                    }
+                    HomeBadgeView(design: design, badge: chief.badge, pinned: false)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!chief.isActionable || openingChief)
+            if chiefFailed {
+                Text(verbatim: dmCopy.openFailed)
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.danger, scheme: scheme))
+                    .accessibilityIdentifier("conversations.chief.error")
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(verbatim: retry ? name + ", " + dmCopy.retry : name))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("conversations.chief")
+    }
+
+    // MARK: Conversations
 
     private func note(_ text: String) -> some View {
         Text(verbatim: text)
@@ -152,7 +318,7 @@ struct ConversationSectionView: View {
             .listRowSeparator(.hidden)
     }
 
-    private var hiddenHeader: some View {
+    private func hiddenHeader(count: Int) -> some View {
         Button { withAnimation(.snappy) { showsHidden.toggle() } } label: {
             HStack(spacing: 6) {
                 Image(atum.symbol(showsHidden ? .chevronDown : .chevronRight))
@@ -160,7 +326,7 @@ struct ConversationSectionView: View {
                     .accessibilityHidden(true)
                 Text(verbatim: copy.hidden)
                     .font(.footnote.weight(.semibold))
-                Text(verbatim: "\(section.hidden.count)")
+                Text(verbatim: "\(count)")
                     .font(.footnote)
                 Spacer()
             }
@@ -173,18 +339,32 @@ struct ConversationSectionView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .accessibilityAddTraits(.isButton)
-        .accessibilityValue(Text(verbatim: showsHidden ? "" : "\(section.hidden.count)"))
+        .accessibilityValue(Text(verbatim: showsHidden ? "" : "\(count)"))
         .accessibilityIdentifier("conversations.hidden")
     }
 
-    private func rowView(_ item: ConversationListRow) -> some View {
+    /// A DM shows the person's photo; a group two overlapping round faces.
+    @ViewBuilder
+    private func face(_ item: ConversationListRow) -> some View {
+        if item.row.kind == .dm {
+            let person = item.faces.first
+            MatrixFace(kind: .person, name: person?.name ?? item.row.title, matrixURI: person?.avatarURI,
+                       size: Self.faceSize, loadMatrixThumbnail: loadMatrixThumbnail)
+        } else {
+            MatrixGroupFace(people: item.faces.map { .init(name: $0.name, matrixURI: $0.avatarURI) },
+                            size: Self.faceSize, ring: atum.color(.ground, scheme: scheme),
+                            loadMatrixThumbnail: loadMatrixThumbnail)
+        }
+    }
+
+    private func rowView(_ item: ConversationListRow, actions: ConversationListActions) -> some View {
         let row = item.row
         return Button {
             guard row.canOpen else { return }
             Task { await actions.open(companyID, item) }
         } label: {
             HStack(spacing: 10) {
-                AtumAvatar(kind: row.kind == .dm ? .person : .group, name: row.title, size: 28)
+                face(item)
                 Text(verbatim: row.title)
                     .font(.body.weight(item.isBold ? .semibold : .regular))
                     .foregroundStyle(atum.color(item.isBold ? .ink : .soft, scheme: scheme))
@@ -222,8 +402,8 @@ struct ConversationSectionView: View {
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) { hideButton(item) }
-        .contextMenu { hideButton(item) }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) { hideButton(item, actions: actions) }
+        .contextMenu { hideButton(item, actions: actions) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(copy.rowLabel(item))
         .accessibilityAddTraits(.isButton)
@@ -238,7 +418,7 @@ struct ConversationSectionView: View {
     /// Hide is the person's own view. A hidden row has no control of its own: opening it
     /// shows it again.
     @ViewBuilder
-    private func hideButton(_ item: ConversationListRow) -> some View {
+    private func hideButton(_ item: ConversationListRow, actions: ConversationListActions) -> some View {
         let row = item.row
         if !row.isHidden {
             Button {

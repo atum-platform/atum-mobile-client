@@ -2032,8 +2032,19 @@ extension S2StateTests {
         var reads = 0
         var hold = false
         var continuation: CheckedContinuation<CompanyPrivateCosView, Error>?
+        var ensureRequests = [CompanyPrivateCosEnsureRequest]()
+        var ensureView: CompanyPrivateCosView?
+        var ensureFailure: Error?
         init(capability: CompanyPrivateCosCapability, view: CompanyPrivateCosView) {
             self.capability = capability; self.view = view
+        }
+        func ensureCompanyPrivateCos(companyID: NativeID,
+                                     request: CompanyPrivateCosEnsureRequest) async throws -> CompanyPrivateCosView {
+            ensureRequests.append(request)
+            if let ensureFailure { throw ensureFailure }
+            guard let ensureView else { throw CompanyAPIError.unavailable }
+            view = ensureView
+            return ensureView
         }
         func companyPrivateCosCapability() async throws -> CompanyPrivateCosCapability {
             if capabilityOff { throw CompanyAPIError.refused(.missing, reason: nil, retryAfter: nil) }
@@ -2110,7 +2121,9 @@ extension S2StateTests {
         XCTAssertEqual(RoomRootDestination.authoritative(roomKind: privateRow.kind,
                                                         classification: model.roomClassification(binding.roomId)), .teamSpace)
         let workspace = try XCTUnwrap(model.workspace(companyID: company))
-        XCTAssertTrue(workspace.channels.contains { $0.roomID == binding.roomId && $0.canOpen })
+        // TS-4: the Chief of Staff is a Direct messages row, never a "#" channel.
+        XCTAssertFalse(workspace.channels.contains { $0.roomID == binding.roomId })
+        XCTAssertEqual(workspace.directMessages.chief?.roomID, binding.roomId)
         XCTAssertTrue(model.isSelected(companyID: company, owning: binding.roomId))
         let signals: CompanyRoomSignals = [binding.roomId: .init(highlights: 1, notifications: 1,
             hasUnreadActivity: true, isMarkedUnread: false, isMuted: false)]
@@ -2154,8 +2167,8 @@ extension S2StateTests {
         XCTAssertTrue(LiveRosterRows.rows(.init(agents: principalOnly,
             privateCosBindings: model.privateCosBindings, apps: [], rooms: [], invites: [],
             pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en")).rows.isEmpty)
-        XCTAssertTrue(model.workspace(companyID: cos.view.pair.companyPrincipal.rawValue)?.channels
-            .contains { $0.roomID == binding.roomId } == true)
+        XCTAssertEqual(model.workspace(companyID: cos.view.pair.companyPrincipal.rawValue)?
+            .directMessages.chief?.roomID, binding.roomId)
     }
 
     @MainActor
@@ -2201,7 +2214,7 @@ extension S2StateTests {
         await model.refresh()
         model.selectCompany(other)
         XCTAssertFalse(model.isSelected(companyID: original, owning: room))
-        XCTAssertFalse(model.workspace(companyID: other)?.channels.contains { $0.roomID == room } == true)
+        XCTAssertNotEqual(model.workspace(companyID: other)?.directMessages.chief?.roomID, room)
         model.selectCompany(original)
         XCTAssertTrue(model.isSelected(companyID: original, owning: room))
         api.list = try companyList([other])
@@ -2220,5 +2233,133 @@ extension S2StateTests {
         cos.continuation?.resume(returning: cos.view)
         await task.value
         XCTAssertTrue(model.privateCosBindings.views.isEmpty)
+    }
+
+    // MARK: TS-2…TS-4 Direct messages
+
+    @MainActor
+    private func privateCosView(_ file: String,
+                                _ edit: (inout [String: Any]) -> Void = { _ in }) throws -> CompanyPrivateCosView {
+        var value = try XCTUnwrap(JSONSerialization.jsonObject(with: privateCosFixture(file)) as? [String: Any])
+        edit(&value)
+        return try NativeAPI.decode(CompanyPrivateCosView.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+
+    @MainActor
+    func testDirectMessagesSectionIsPresentWhileConversationsAreOff() async throws {
+        let (model, _, cos) = try privateCosModel()
+        await model.refresh()
+        let company = cos.view.pair.companyPrincipal.rawValue
+        let workspace = try XCTUnwrap(model.workspace(companyID: company))
+        // No conversations client: the family is off, so no DM rows and no "+", but the section stays.
+        XCTAssertNil(workspace.conversations)
+        XCTAssertEqual(workspace.directMessages.order, [.notes, .chiefOfStaff])
+        XCTAssertEqual(workspace.directMessages.selfName, "Owner")
+        XCTAssertFalse(workspace.channels.contains { $0.id.hasPrefix("private-cos:") })
+    }
+
+    @MainActor
+    func testDirectMessagesOrderIsYouThenChiefThenConversationsNewestFirst() {
+        let rows = ["c1", "c2"].map { id in
+            ConversationListRow(row: ConversationRow(id: id, kind: .dm, title: id, participantCount: 2,
+                                                     state: .ready, roomID: "!" + id + ":hs", isHidden: false))
+        }
+        let section = ConversationSectionPresentation(rows: rows, hidden: [], isLoading: false, failed: false,
+                                                      isStale: false, notice: nil)
+        let chief = ChiefOfStaffRowPresentation(status: .ready, roomID: "!cos:hs", platformName: nil)
+        XCTAssertEqual(DirectMessagesPresentation(chief: chief, conversations: section).order,
+                       [.notes, .chiefOfStaff, .conversation("c1"), .conversation("c2")])
+        XCTAssertEqual(DirectMessagesPresentation(chief: nil, conversations: section).order,
+                       [.notes, .conversation("c1"), .conversation("c2")])
+        XCTAssertEqual(DirectMessagesPresentation().order, [.notes])
+    }
+
+    @MainActor
+    func testChiefOfStaffRowProjectsUncreatedPreparingFailedAndRetryEnsures() async throws {
+        let (model, _, cos) = try privateCosModel()
+        let company = cos.view.pair.companyPrincipal.rawValue
+        // Capability off: asked, nothing usable came back → "Not available yet" with Retry.
+        cos.capabilityOff = true
+        await model.refresh()
+        var chief = try XCTUnwrap(model.chiefOfStaffRow(companyID: company))
+        XCTAssertEqual(chief.status, .notAvailable)
+        XCTAssertTrue(chief.status.offersRetry)
+        XCTAssertNil(chief.roomID)
+
+        // Retry reads again; an uncreated pair is then asked for, as a first visit is (desktop
+        // recheck), and shows as setting up.
+        cos.capabilityOff = false
+        cos.view = try privateCosView("v1-lazy-first-open.uncreated.response.json")
+        cos.ensureView = try privateCosView("v1-lazy-first-open.preparing.response.json")
+        await model.retryPrivateCos(companyID: company)
+        XCTAssertEqual(cos.ensureRequests.map(\.trigger), [.firstCompanyVisit])
+        chief = try XCTUnwrap(model.chiefOfStaffRow(companyID: company))
+        XCTAssertEqual(chief.status, .settingUp)
+        XCTAssertEqual(chief.roomID, cos.ensureView?.binding?.roomId)
+
+        // A paused platform answer keeps the served view and says paused.
+        cos.ensureFailure = CompanyAPIError.refused(.conflict, reason: "budget_exhausted", retryAfter: nil)
+        await model.ensurePrivateCos(companyID: company)
+        XCTAssertEqual(model.chiefOfStaffRow(companyID: company)?.status, .paused)
+        XCTAssertEqual(model.chiefOfStaffRow(companyID: company)?.status.offersRetry, true)
+        // Asking again with the same trigger replays the same request ID.
+        await model.ensurePrivateCos(companyID: company)
+        XCTAssertEqual(cos.ensureRequests.map(\.trigger), [.firstCompanyVisit, .dmOpen, .dmOpen])
+        XCTAssertEqual(cos.ensureRequests[1].requestId, cos.ensureRequests[2].requestId)
+
+        // Ready: the row opens the bound room; a ready pair is never ensured again.
+        cos.ensureFailure = nil
+        cos.view = try privateCosView("v1-lazy-first-open.preparing.response.json") {
+            $0["state"] = "ready"; $0["greetingState"] = "published"
+        }
+        await model.refresh()
+        XCTAssertEqual(model.chiefOfStaffRow(companyID: company)?.status, .ready)
+        let room = await model.privateCosRoomToOpen(companyID: company)
+        XCTAssertEqual(room, cos.view.binding?.roomId)
+        XCTAssertEqual(cos.ensureRequests.count, 3)
+    }
+
+    @MainActor
+    func testFirstVisitEnsuresAnUncreatedPairOnce() async throws {
+        let (model, _, cos) = try privateCosModel()
+        cos.view = try privateCosView("v1-lazy-first-open.uncreated.response.json")
+        cos.ensureView = try privateCosView("v1-lazy-first-open.preparing.response.json")
+        await model.refresh()
+        XCTAssertEqual(cos.ensureRequests.map(\.trigger), [.firstCompanyVisit])
+        cos.view = try privateCosView("v1-lazy-first-open.uncreated.response.json")
+        await model.refresh()
+        XCTAssertEqual(cos.ensureRequests.count, 1, "the first visit asks once per account scope")
+    }
+
+    @MainActor
+    func testNotesSelfRoomIsTeamSpaceOnlyAndTitledYou() async throws {
+        let (model, _, cos) = try privateCosModel()
+        await model.refresh()
+        let company = cos.view.pair.companyPrincipal.rawValue
+        let notes = "!notes:atum.example"
+        model.reconcileNotesSelf([company: notes, "a1000000-0000-4000-8000-00000000dead": "!gone:atum.example"])
+        XCTAssertEqual(model.notesSelfRooms, [company: notes], "only listed companies keep a notes room")
+        XCTAssertEqual(model.roomClassification(notes), .notesSelf(companyID: company))
+        XCTAssertTrue(model.isSelected(companyID: company, owning: notes))
+        XCTAssertEqual(model.workspace(companyID: company)?.directMessages.notesRoomID, notes)
+        XCTAssertEqual(RoomRootDestination.authoritative(roomKind: .group, classification: .notesSelf(companyID: company)),
+                       .teamSpace)
+
+        var room = rosterRoom(notes, userID: "@me:atum.example", latest: 1, roomType: CompanyNotesSelf.roomType)
+        room = LiveMatrixRoomRow(roomID: room.roomID, displayName: "Empty Room", avatarURL: nil, latestText: nil,
+                                 latestPreviewContent: .none, latestSenderID: nil, latestSenderName: nil,
+                                 latestIsOwn: true, latestIsNotice: false, latestSendState: .sent,
+                                 latestTimestamp: 1, unreadCount: 0, notificationCount: 0, highlightCount: 0,
+                                 isMarkedUnread: false, isFavourite: false, isMuted: false, isDirect: false,
+                                 memberUserIDs: [], memberCount: 1, roomType: CompanyNotesSelf.roomType,
+                                 isEncrypted: false)
+        let hidden = LiveRosterRows.rows(.init(agents: [], apps: [], rooms: [room], invites: [], pointers: [:],
+            hiddenRooms: MobileHiddenRoomLedger(), locale: "en")).rows
+        XCTAssertTrue(hidden.isEmpty, "an unproven notes room is never a row")
+        let shown = LiveRosterRows.rows(.init(agents: [], notesSelfRoomIDs: [notes], notesSelfTitle: "You",
+            apps: [], rooms: [room], invites: [], pointers: [:], hiddenRooms: MobileHiddenRoomLedger(),
+            locale: "en")).rows
+        XCTAssertEqual(shown.map(\.id), [notes])
+        XCTAssertEqual(shown.first?.title, "You")
     }
 }

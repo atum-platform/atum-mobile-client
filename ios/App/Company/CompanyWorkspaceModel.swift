@@ -1,6 +1,7 @@
 import AtumChat
 import AtumNativeAPI
 import Foundation
+import MatrixRustSDK
 import Observation
 
 // The phone's Team Space state (B19 S4): one probe, the company list, each
@@ -55,6 +56,55 @@ struct CompanyMemberRow: Identifiable, Equatable {
     let role: String
     let state: String?
     let isSelf: Bool
+    /// The member's photo (`mxc://`), from the platform snapshot.
+    var avatarURI: String? = nil
+    /// Admins' pill is a shade stronger (desktop `RoleBadge`).
+    var isAdmin = false
+}
+
+/// The private Chief of Staff row of Direct messages (desktop
+/// `conversation-sections.tsx:238–275`): never a channel, never a room name.
+struct ChiefOfStaffRowPresentation: Equatable {
+    let status: CompanyPrivateCosRowStatus
+    /// The bound room, once the platform has made one.
+    let roomID: String?
+    /// The platform's frozen display name from the 1.3 capability, until the export has the word.
+    let platformName: String?
+    var badge: Badge = .none
+    var isMuted = false
+
+    /// Ready (or bound) opens; not available and paused ask again; a served pair still
+    /// setting up may be tapped too (it ensures, as on the desktop).
+    var isActionable: Bool { status != .settingUp || isServed }
+    /// A strict view is held (not only discovery).
+    var isServed = false
+}
+
+/// The Direct messages section, present for every loaded company (desktop
+/// `company-workspace.tsx:2996–3030`): "You", then the Chief of Staff, then the
+/// platform's conversations. Only the conversation rows and "+" depend on the
+/// conversations family being on (`conversations`).
+struct DirectMessagesPresentation: Equatable {
+    enum Entry: Equatable {
+        case notes
+        case chiefOfStaff
+        case conversation(String)
+    }
+
+    /// The person's own name and face for "You".
+    var selfName: String?
+    var selfAvatarURI: String?
+    /// The notes room already known for this company, so the row can show as current.
+    var notesRoomID: String?
+    var chief: ChiefOfStaffRowPresentation?
+    /// Nil while the server, the feature or the tenant keeps company DMs off: no rows, no "+".
+    var conversations: ConversationSectionPresentation?
+
+    /// The rows in the order they are drawn (hidden conversations fold away after these).
+    var order: [Entry] {
+        [.notes] + (chief == nil ? [] : [.chiefOfStaff])
+            + (conversations?.rows.map { .conversation($0.id) } ?? [])
+    }
 }
 
 /// The active company's Workplace root: its channel list and header state.
@@ -68,8 +118,10 @@ struct CompanyWorkspacePresentation: Identifiable, Equatable {
     let leavePending: Bool
     let notice: String?
     let error: String?
-    /// Direct messages; nil unless the server, the feature and the tenant all say yes.
+    /// Company DMs and group DMs; nil unless the server, the feature and the tenant all say yes.
     var conversations: ConversationSectionPresentation?
+    /// The whole Direct messages section, which is always there for a loaded company.
+    var directMessages = DirectMessagesPresentation()
 }
 
 /// The Matrix unread state of every company channel room, by room ID. The app
@@ -81,6 +133,8 @@ enum CompanyRoomClassification: Equatable {
     /// A company DM or group DM, believed because the conversation directory lists it.
     case conversation(ConversationRoomClaim)
     case privateCos(companyID: String)
+    /// The person's own notes room for a company ("You"), proven by its create content.
+    case notesSelf(companyID: String)
     /// Claims to be a company conversation and is not listed: shown nowhere.
     case quarantined
     case personal
@@ -118,6 +172,14 @@ final class CompanyWorkspaceModel {
     /// "this Matrix room is a conversation".
     let conversations = CompanyConversationStore()
     private(set) var privateCosBindings = CompanyPrivateCosBindings()
+    /// The last strict view per company and its availability (desktop `$companyPrivateCos`).
+    private(set) var privateCosStates = [String: CompanyPrivateCosState]()
+    /// Before a view is served: still asking, or asked and nothing usable came back.
+    private(set) var privateCosDiscovery = [String: CompanyPrivateCosDiscovery]()
+    /// The 1.3 capability's frozen display name.
+    private(set) var privateCosPlatformName: String?
+    /// Company → the person's notes room for it, from Matrix create content (`CompanyNotesSelf`).
+    private(set) var notesSelfRooms = [String: String]()
 
     /// Set by the root: the production client, the Matrix presence the
     /// convergence asks about, and the existing chat's join.
@@ -167,6 +229,9 @@ final class CompanyWorkspaceModel {
     /// conversation directory lists it with that room id.
     @ObservationIgnored private var conversationTypeClaims = Set<String>()
     @ObservationIgnored private var accountScopeID: String?
+    /// Companies whose first visit already asked the platform to make an uncreated pair.
+    @ObservationIgnored private var privateCosVisited = Set<String>()
+    @ObservationIgnored private var privateCosEnsures = [String: Task<Void, Never>]()
 
     private func client() -> CompanyWorkspaceAPI? { clientProvider() }
 
@@ -251,6 +316,9 @@ final class CompanyWorkspaceModel {
             if let room = view.binding?.roomId { removedRooms.insert(room) }
         }
         privateCosBindings.retain(companies: companies)
+        privateCosStates = privateCosStates.filter { companies.contains($0.key) }
+        privateCosDiscovery = privateCosDiscovery.filter { companies.contains($0.key) }
+        notesSelfRooms = notesSelfRooms.filter { companies.contains($0.key) }
         classificationBase &+= 1
         roomDirectory.retain(companies: companies)
         for companyID in conversations.roomDirectory.companyIDs.subtracting(companies) {
@@ -288,34 +356,138 @@ final class CompanyWorkspaceModel {
 
     /// A positive GET binding is the only private-CoS classification input.
     /// Failures retain prior positive knowledge and retry on every refresh.
+    /// The same reads keep each company's row state (desktop `loadCompanyPrivateCos`):
+    /// a failed read keeps the last view as paused or not available, a refusal that
+    /// ends the scope drops it, and a company never served says not available.
     private func readPrivateCos(companies: [String], scope: UInt64) async {
         guard !companies.isEmpty, let api = privateCosProvider(), let account = accountScopeID else { return }
+        for company in companies where privateCosStates[company] == nil {
+            privateCosDiscovery[company] = .checking
+        }
+        func current() -> Bool { scope == generation && privateCosProvider() === api && accountScopeID == account }
         do {
-            _ = try await api.companyPrivateCosCapability()
-            guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+            let capability = try await api.companyPrivateCosCapability()
+            guard current() else { return }
+            privateCosPlatformName = capability.displayName
             for company in companies {
+                if privateCosStates[company] != nil { privateCosStates[company]?.loading = true }
                 do {
                     let view = try await api.companyPrivateCosView(companyID: NativeID(company))
-                    guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+                    guard current() else { return }
                     guard view.pair.companyPrincipal.rawValue == company,
                           list?.companies.contains(where: { $0.id.rawValue == company }) == true
                     else { throw CompanyAPIError.invalid }
-                    let oldRooms = privateCosBindings.roomIDs
-                    privateCosBindings.apply(view, companyID: company, accountID: account)
-                    knownPersonalRoomIDs.subtract(privateCosBindings.roomIDs)
-                    classificationBase &+= 1
-                    let removed = oldRooms.subtracting(privateCosBindings.roomIDs)
-                    if !removed.isEmpty { onLeft(removed) }
+                    absorbPrivateCos(view, companyID: company, accountID: account)
                     LiveFlowLog.privateCosRead(view.binding == nil ? .unbound : .bound)
                 } catch {
-                    guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+                    guard current() else { return }
+                    privateCosReadFailed(company: company, error: error)
                     LiveFlowLog.privateCosRead(.unclassified)
                 }
             }
         } catch {
-            guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+            guard current() else { return }
+            for company in companies { privateCosReadFailed(company: company, error: error) }
             LiveFlowLog.privateCosRead(.unclassified)
         }
+        // The desktop's first admitted visit: an uncreated pair of the company on screen is
+        // asked for once (`admitCompanyPrivateCosVisit`, trigger `first_company_visit`).
+        if let active = activeCompanyID, companies.contains(active), !privateCosVisited.contains(active),
+           privateCosStates[active]?.isUncreated == true {
+            privateCosVisited.insert(active)
+            await ensurePrivateCos(companyID: active, trigger: .firstCompanyVisit)
+        }
+    }
+
+    private func absorbPrivateCos(_ view: CompanyPrivateCosView, companyID: String, accountID: String) {
+        let oldRooms = privateCosBindings.roomIDs
+        privateCosBindings.apply(view, companyID: companyID, accountID: accountID)
+        knownPersonalRoomIDs.subtract(privateCosBindings.roomIDs)
+        classificationBase &+= 1
+        let removed = oldRooms.subtracting(privateCosBindings.roomIDs)
+        if !removed.isEmpty { onLeft(removed) }
+        if var state = privateCosStates[companyID] {
+            state.served(view)
+            privateCosStates[companyID] = state
+        } else {
+            privateCosStates[companyID] = CompanyPrivateCosState(view: view)
+        }
+        privateCosDiscovery[companyID] = nil
+    }
+
+    private func privateCosReadFailed(company: String, error: Error) {
+        if privateCosStates[company] == nil || CompanyPrivateCosRowProjection.endsScope(error) {
+            privateCosStates[company] = nil
+            privateCosDiscovery[company] = .notAvailable
+        } else {
+            privateCosStates[company]?.failed(error)
+        }
+    }
+
+    /// One ensure per company at a time; a retry of the same trigger replays its request ID
+    /// (desktop `ensureCompanyPrivateCos`). Only a served, not-yet-ready pair is ensured.
+    func ensurePrivateCos(companyID: String,
+                          trigger: CompanyPrivateCosEnsureRequest.Trigger = .dmOpen) async {
+        if let running = privateCosEnsures[companyID] { return await running.value }
+        guard let api = privateCosProvider(), let account = accountScopeID,
+              let id = try? NativeID(companyID), var state = privateCosStates[companyID],
+              state.view.state != "ready" else { return }
+        let requestID = state.ensureTrigger == trigger ? state.ensureRequestID : nil
+        guard let request = try? NativeID(requestID ?? UUID().uuidString.lowercased()) else { return }
+        state.loading = true
+        state.availability = .preparing
+        state.ensureRequestID = request.rawValue
+        state.ensureTrigger = trigger
+        privateCosStates[companyID] = state
+        let locale = copy?.design.locale
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let view = try await api.ensureCompanyPrivateCos(
+                    companyID: id, request: CompanyPrivateCosEnsureRequest(requestId: request, trigger: trigger,
+                                                                          locale: locale))
+                guard self.privateCosProvider() === api, self.accountScopeID == account,
+                      self.list?.companies.contains(where: { $0.id == id }) == true else { return }
+                self.absorbPrivateCos(view, companyID: companyID, accountID: account)
+            } catch {
+                guard self.privateCosProvider() === api, self.accountScopeID == account else { return }
+                self.privateCosReadFailed(company: companyID, error: error)
+            }
+        }
+        privateCosEnsures[companyID] = task
+        await task.value
+        privateCosEnsures[companyID] = nil
+    }
+
+    /// Retry on a not-available or paused row: the desktop's forced recheck
+    /// (`recheckCompanyPrivateCos` with `force`): read again, and ask for an uncreated pair
+    /// as a first visit does.
+    func retryPrivateCos(companyID: String) async {
+        privateCosVisited.remove(companyID)
+        await readPrivateCos(companies: [companyID], scope: generation)
+    }
+
+    /// The room to open for the Chief of Staff row, after asking for a pair that is still
+    /// being set up. Nil while there is no room yet (the row says why).
+    func privateCosRoomToOpen(companyID: String) async -> String? {
+        if let state = privateCosStates[companyID], state.view.state != "ready" {
+            await ensurePrivateCos(companyID: companyID, trigger: .dmOpen)
+        }
+        guard activeCompanyID == companyID else { return nil }
+        return privateCosBindings.views[companyID]?.binding?.roomId
+    }
+
+    // MARK: Notes to self
+
+    /// The app's Matrix pass names each company's notes room (`CompanyNotesSelf.inspect`).
+    /// A room proven to be one is a Team Space room, never Personal.
+    func reconcileNotesSelf(_ rooms: [String: String]) {
+        let companies = Set(list?.companies.map(\.id.rawValue) ?? [])
+        let next = rooms.filter { companies.contains($0.key) }
+        guard next != notesSelfRooms else { return }
+        notesSelfRooms = next
+        knownPersonalRoomIDs.subtract(next.values)
+        classificationBase &+= 1
     }
 
     @discardableResult
@@ -376,6 +548,7 @@ final class CompanyWorkspaceModel {
         phase = .hidden
         privateCosBindings = CompanyPrivateCosBindings()
         privateCosBindings.beginAccount(accountScopeID)
+        clearPrivateCosStates()
         list = nil
         channelsByCompany.removeAll()
         snapshotsByCompany.removeAll()
@@ -420,6 +593,14 @@ final class CompanyWorkspaceModel {
         prefsJournal = CompanyLocalPrefsJournal()
     }
 
+    private func clearPrivateCosStates() {
+        for task in privateCosEnsures.values { task.cancel() }
+        privateCosEnsures.removeAll()
+        privateCosStates.removeAll()
+        privateCosDiscovery.removeAll()
+        privateCosPlatformName = nil
+    }
+
     private func resetAccountState() {
         generation &+= 1
         accountEpoch &+= 1
@@ -431,6 +612,9 @@ final class CompanyWorkspaceModel {
         snapshotsByCompany.removeAll()
         roomDirectory.clear()
         privateCosBindings = CompanyPrivateCosBindings()
+        clearPrivateCosStates()
+        privateCosVisited.removeAll()
+        notesSelfRooms.removeAll()
         conversations.reset()
         conversationTypeClaims.removeAll()
         classificationComplete = false
@@ -469,7 +653,7 @@ final class CompanyWorkspaceModel {
         }
         guard classificationComplete else { return }
         var companyRooms = quarantinedCompanyRoomIDs.union(conversationTypeClaims)
-            .union(privateCosBindings.roomIDs)
+            .union(privateCosBindings.roomIDs).union(notesSelfRooms.values)
         for companyID in roomDirectory.companyIDs {
             companyRooms.formUnion(roomDirectory.roomIDs(companyID: companyID))
         }
@@ -481,6 +665,7 @@ final class CompanyWorkspaceModel {
 
     func roomClassification(_ roomID: String) -> CompanyRoomClassification {
         if let company = privateCosBindings.companyID(owning: roomID) { return .privateCos(companyID: company) }
+        if let company = notesSelfRooms.first(where: { $0.value == roomID })?.key { return .notesSelf(companyID: company) }
         if let claim = roomDirectory.claim(roomID: roomID) { return .company(claim) }
         // Only the platform's directory makes a room a conversation.
         if let claim = conversations.claim(roomID: roomID) { return .conversation(claim) }
@@ -596,7 +781,7 @@ final class CompanyWorkspaceModel {
         switch roomClassification(roomID) {
         case let .company(claim): selectCompany(claim.companyID)
         case let .conversation(claim): selectCompany(claim.companyID)
-        case let .privateCos(companyID): selectCompany(companyID)
+        case let .privateCos(companyID), let .notesSelf(companyID): selectCompany(companyID)
         case .quarantined, .personal, .unknown: break
         }
     }
@@ -822,6 +1007,9 @@ final class CompanyWorkspaceModel {
             .union(conversations.roomDirectory.roomIDs(companyID: companyID))
             .union(privateCosBindings.views[companyID]?.binding.map { [$0.roomId] } ?? [])
         privateCosBindings.retain(companies: Set(privateCosBindings.views.keys).subtracting([companyID]))
+        privateCosStates[companyID] = nil
+        privateCosDiscovery[companyID] = nil
+        notesSelfRooms[companyID] = nil
         classificationBase &+= 1
         leavePending.remove(companyID)
         journal.save(leaveTracker)
@@ -920,7 +1108,7 @@ final class CompanyWorkspaceModel {
         guard activeCompanyID == companyID else { return false }
         switch roomClassification(roomID) {
         case let .conversation(claim): return claim.companyID == companyID
-        case let .privateCos(owner): return owner == companyID
+        case let .privateCos(owner), let .notesSelf(owner): return owner == companyID
         case let .company(claim): return claim.companyID == companyID
         case .quarantined, .personal, .unknown: return false
         }
@@ -951,7 +1139,7 @@ final class CompanyWorkspaceModel {
               let company = list?.companies.first(where: { $0.id == companyIDValue })
         else { return nil }
         let directory = channelsByCompany[companyID]
-        var channels = (directory?.channels ?? [])
+        let channels = (directory?.channels ?? [])
             .sorted { left, right in
                 if left.channel.isDefault != right.channel.isDefault { return left.channel.isDefault }
                 return left.channel.displayName.compare(right.channel.displayName,
@@ -971,15 +1159,9 @@ final class CompanyWorkspaceModel {
                     badge: input.map(Badge.mark(for:)) ?? .none,
                     isMuted: input?.isMuted ?? false)
             }
-        if let binding = privateCosBindings.views[companyID]?.binding {
-            let input = signals[binding.roomId]
-            channels.append(CompanyChannelRow(
-                id: "private-cos:" + binding.scope.pair.membershipIncarnation.rawValue,
-                title: privateCosRoomTitle(binding.roomId) ?? binding.roomId,
-                state: "", roomID: binding.roomId, memberCount: 2, canOpen: true,
-                badge: input.map(Badge.mark(for:)) ?? .none, isMuted: input?.isMuted ?? false))
-        }
         let members = members(companyID: companyID, copy: copy)
+        let conversations = conversationSection(companyID: companyID, signals: signals, activity: activity,
+                                                copy: copy)
         return CompanyWorkspacePresentation(
             id: companyID,
             title: company.displayName,
@@ -992,8 +1174,33 @@ final class CompanyWorkspaceModel {
             error: actionErrorCompany == companyID
                 ? actionError.map { companyErrorText($0, copy: copy) }
                 : nil,
-            conversations: conversationSection(companyID: companyID, signals: signals, activity: activity,
-                                               copy: copy))
+            conversations: conversations,
+            directMessages: directMessages(companyID: companyID, signals: signals, members: members,
+                                           conversations: conversations))
+    }
+
+    private func directMessages(companyID: String, signals: CompanyRoomSignals, members: [CompanyMemberRow],
+                                conversations: ConversationSectionPresentation?) -> DirectMessagesPresentation {
+        let me = members.first(where: \.isSelf)
+        return DirectMessagesPresentation(selfName: me?.name, selfAvatarURI: me?.avatarURI,
+                                          notesRoomID: notesSelfRooms[companyID],
+                                          chief: chiefOfStaffRow(companyID: companyID, signals: signals),
+                                          conversations: conversations)
+    }
+
+    /// Desktop: the row shows its honest state as soon as the company asks; with no
+    /// private-CoS client at all there is no row.
+    func chiefOfStaffRow(companyID: String, signals: CompanyRoomSignals = [:]) -> ChiefOfStaffRowPresentation? {
+        let state = privateCosStates[companyID]
+        let discovery = privateCosDiscovery[companyID]
+        guard state != nil || discovery != nil else { return nil }
+        let roomID = privateCosBindings.views[companyID]?.binding?.roomId
+        let input = roomID.flatMap { signals[$0] }
+        return ChiefOfStaffRowPresentation(
+            status: CompanyPrivateCosRowProjection.status(state: state, discovery: discovery),
+            roomID: roomID, platformName: privateCosPlatformName,
+            badge: input.map(Badge.mark(for:)) ?? .none, isMuted: input?.isMuted ?? false,
+            isServed: state != nil)
     }
 
     private func conversationSection(companyID: String, signals: CompanyRoomSignals,
@@ -1002,7 +1209,22 @@ final class CompanyWorkspaceModel {
                                                   locale: Locale(identifier: copy.design.locale)) else { return nil }
         let notice = conversations.refusal(companyID: companyID)
             .map { ConversationCopy(design: copy.design).refusal($0) }
-        return ConversationSectionPresentation(rows: section.rows, hidden: section.hidden,
+        let people = Dictionary((snapshotsByCompany[companyID]?.members ?? []).map { ($0.memberRef, $0) },
+                                uniquingKeysWith: { first, _ in first })
+        func faced(_ rows: [ConversationListRow]) -> [ConversationListRow] {
+            rows.map { item in
+                var item = item
+                item.faces = item.row.otherMemberRefs.prefix(2).map { ref in
+                    let member = people[ref]
+                    return ConversationFace(
+                        name: member?.displayName ?? member?.handle.map { "@" + $0 }
+                            ?? copy.text(CompanyCopyKey("someone")),
+                        avatarURI: member?.avatarUri)
+                }
+                return item
+            }
+        }
+        return ConversationSectionPresentation(rows: faced(section.rows), hidden: faced(section.hidden),
                                                isLoading: section.isLoading, failed: section.failed,
                                                isStale: section.isStale, notice: notice)
     }
@@ -1053,12 +1275,13 @@ final class CompanyWorkspaceModel {
         roomDirectory.roomIDs(companyID: companyID)
             .union(conversations.roomDirectory.roomIDs(companyID: companyID))
             .union(privateCosBindings.views[companyID]?.binding.map { [$0.roomId] } ?? [])
+            .union(notesSelfRooms[companyID].map { [$0] } ?? [])
             .compactMap { signals[$0] }
     }
 
     /// A company channel or a conversation the directory lists.
     private func isTeamSpaceRoom(_ roomID: String) -> Bool {
-        privateCosBindings.roomIDs.contains(roomID)
+        privateCosBindings.roomIDs.contains(roomID) || notesSelfRooms.values.contains(roomID)
             || roomDirectory.isCompanyChannel(roomID) || conversations.claim(roomID: roomID) != nil
     }
 
@@ -1123,7 +1346,9 @@ final class CompanyWorkspaceModel {
                     handle: member.handle,
                     role: copy.role(member.role),
                     state: copy.memberState(member.state),
-                    isSelf: member.isSelf)
+                    isSelf: member.isSelf,
+                    avatarURI: member.avatarUri,
+                    isAdmin: member.role == .admin)
             }
             .sorted { left, right in
                 if left.isSelf != right.isSelf { return left.isSelf }
@@ -1149,4 +1374,85 @@ final class CompanyWorkspaceModel {
         default: copy.text(CompanyCopyKey("unavailable"))
         }
     }
+}
+
+// MARK: Notes to self, Matrix side
+
+/// The immutable facts of one notes-typed room's `m.room.create`.
+struct CompanyNotesSelfCreateFacts: Equatable {
+    let contentJSON: String
+    let sender: String
+    let timestamp: Int64?
+}
+
+extension LiveMatrixSession {
+    /// The cached create event of a room (the room list already asks for it).
+    func notesSelfCreateFacts(roomID: String) async -> CompanyNotesSelfCreateFacts? {
+        guard let room = try? room(id: roomID),
+              let create = (try? await room.stateEvents(eventType: .roomCreate))?.first(where: { $0.stateKey.isEmpty })
+        else { return nil }
+        return CompanyNotesSelfCreateFacts(contentJSON: create.contentJson, sender: create.sender,
+                                           timestamp: create.timestamp.flatMap { Int64(exactly: $0) })
+    }
+
+    /// One server read of global account data when a room can carry it (the pinned SDK's
+    /// one-shot bridge), else the client's synced copy.
+    func freshGlobalAccountData(eventType: String) async throws -> String? {
+        try runtime.requireCurrent()
+        if let anchor = rooms.first {
+            return try await room(id: anchor.roomID).fetchGlobalAccountDataRaw(eventType: eventType)
+        }
+        return try await runtime.client.accountData(eventType: eventType)
+    }
+
+    func writeGlobalAccountData(eventType: String, content: String) async throws {
+        try runtime.requireCurrent()
+        try await runtime.client.setAccountData(eventType: eventType, content: content)
+        try runtime.requireCurrent()
+    }
+
+    /// `POST /_matrix/client/v3/createRoom` with the desktop's typed create content. The
+    /// pinned SDK's `CreateRoomParameters` has no `creation_content`, so this one request goes
+    /// to the session's own homeserver with the session's bearer (HTTPS only, no cookies, no
+    /// redirects followed). Callers make it only after `CompanyNotesSelf.openDecision` says
+    /// `.create`.
+    func createCompanyNotesSelfRoom(companyID: String) async throws -> String {
+        try runtime.requireCurrent()
+        guard let body = CompanyNotesSelf.createRoomBody(companyID: companyID) else {
+            throw CompanyNotesSelfFailure.invalid
+        }
+        let session = try runtime.client.session()
+        guard var components = URLComponents(string: session.homeserverUrl), components.scheme == "https",
+              components.host?.isEmpty == false else { throw CompanyNotesSelfFailure.invalid }
+        components.path = (components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path)
+            + "/_matrix/client/v3/createRoom"
+        guard let url = components.url else { throw CompanyNotesSelfFailure.invalid }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer " + session.accessToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        let transport = URLSession(configuration: configuration, delegate: CompanyNotesSelfNoRedirect(),
+                                   delegateQueue: nil)
+        defer { transport.finishTasksAndInvalidate() }
+        let (data, response) = try await transport.data(for: request)
+        try runtime.requireCurrent()
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              let roomID = CompanyNotesSelf.createdRoomID(responseJSON: data) else {
+            throw CompanyNotesSelfFailure.refused
+        }
+        return roomID
+    }
+}
+
+enum CompanyNotesSelfFailure: Error { case invalid, refused }
+
+private final class CompanyNotesSelfNoRedirect: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async
+        -> URLRequest? { nil }
 }
