@@ -96,6 +96,7 @@ public enum ScriptedScenarios {
         case .chatMediaAnswers: return chat(ScriptedChats.chatMediaAnswers(env))
         case .chatActions: return chat(ScriptedChats.chatActions(env))
         case .chatKinds: return chat(ScriptedChats.chatKinds(env))
+        case .chatTurnStop: return chat(ScriptedChats.chatTurnStop(env))
         }
     }
 

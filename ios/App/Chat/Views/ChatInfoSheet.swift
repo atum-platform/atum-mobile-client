@@ -183,6 +183,10 @@ struct ChatInfoActions {
     var loadDetails: ((String) async -> ChatInfoDetails?)?
     /// Remove, ban or unban someone in a group (Matrix kick, ban, unban).
     var moderateMember: ((String, String, ChatMemberAction) async -> Bool)?
+    /// Stop for my assistant's turn in progress (review C1). Nil in every
+    /// host that cannot reach the platform's stop route, and then the
+    /// composer offers no Stop at all (never a dead button).
+    var assistantTurnStop: AssistantTurnStopActions?
 }
 
 /// What the panel reads when it opens. Every field may be unknown; an unknown

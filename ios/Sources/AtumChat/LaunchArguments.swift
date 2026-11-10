@@ -10,6 +10,11 @@ public struct AtumLaunchArguments: Equatable, Sendable {
     public static let scriptedMediaRefusalFlag = "-AtumScriptedMediaRefusal"
     public static let scriptedMissingAccentFlag = "-AtumScriptedMissingAccent"
     public static let scriptedSlowFileDownloadFlag = "-AtumScriptedSlowFileDownload"
+    /// `-AtumScriptedTurnStop <answer>` gives a scripted assistant chat a
+    /// stop route that answers `stopped`, `stop_requested`, `completed` or
+    /// `failed`; `failed-then-stopped` fails once, then stops. Without it a
+    /// scripted chat, like a live one without the route, offers no Stop.
+    public static let scriptedTurnStopFlag = "-AtumScriptedTurnStop"
 
     public var disablesAnimations: Bool
     public var scriptedScenario: ScriptedScenario?
@@ -71,4 +76,7 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     case chatActions = "chat.actions"
     /// S1: every B19 kind, image boxes and file rows.
     case chatKinds = "chat.kinds"
+    /// Review C1: my assistant keeps working on what I send and never
+    /// answers, for the composer's working state and Stop.
+    case chatTurnStop = "chat.turn-stop"
 }
