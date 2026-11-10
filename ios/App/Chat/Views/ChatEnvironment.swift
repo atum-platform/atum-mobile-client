@@ -58,6 +58,10 @@ extension EnvironmentValues {
     /// Joined members by user ID, for per-sender and reader faces. Empty
     /// until the cached member read lands.
     @Entry var chatMembers: [String: ChatInfoMember] = [:]
+    /// Every assistant and app bot this chat knows (the room's agent, the
+    /// account's agents, the catalog bots, members marked so): their
+    /// messages get no Report. Nil (a host that cannot tell) offers none.
+    @Entry var chatNonPersonSenders: Set<String>? = nil
     /// The chat's Matrix media thumbnail loader (`LiveMatrixSession`).
     @Entry var chatLoadMatrixThumbnail: ((String, Int) async -> Data?)? = nil
     /// The start of today (B14): day dividers relabel when it changes.

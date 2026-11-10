@@ -13,6 +13,22 @@ final class ChatCopyContractTests: XCTestCase {
         }
     }
 
+    /// HC-2: a report word the export does not carry yet reads its exported
+    /// stand-in; once the copy worker's key is pinned it must resolve itself.
+    func testEveryPendingReportKeyResolvesOrFallsBackInEveryLocale() throws {
+        let copy = try AtumCopy()
+        for locale in ["en", "vi", "ja", "zh", "zh-Hant"] {
+            for key in ReportPendingCopy.allCases {
+                if copy.contains(key.rawValue) {
+                    XCTAssertNoThrow(try copy.text(key.rawValue, locale: locale), "\(locale) \(key.rawValue)")
+                } else {
+                    XCTAssertNoThrow(try copy.text(key.fallback.rawValue, locale: locale),
+                                     "\(locale) \(key.fallback.rawValue)")
+                }
+            }
+        }
+    }
+
     private func arguments(for key: ChatCopyKey) -> [AtumCopy.Argument] {
         switch key {
         case .seenBy, .newMessages, .mediaPhotoNumber, .mediaRemovePhoto,

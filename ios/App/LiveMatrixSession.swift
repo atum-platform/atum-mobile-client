@@ -817,7 +817,7 @@ final class LiveMatrixSession {
             case .remove: try await room.kickUser(userId: userID, reason: nil)
             case .ban: try await room.banUser(userId: userID, reason: nil)
             case .unban: try await room.unbanUser(userId: userID, reason: nil)
-            case .block, .unblock: return false
+            case .block, .unblock, .report: return false
             }
             try runtime.requireCurrent()
             return true

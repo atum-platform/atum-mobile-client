@@ -241,6 +241,7 @@ struct ChatScreen: View {
             .environment(\.chatRoomAvatar, avatar)
             .environment(\.chatRoomFace, roomFace)
             .environment(\.chatMembers, members)
+            .environment(\.chatNonPersonSenders, Self.nonPersonSenders(store.nonPersonSenders, members: members))
             .environment(\.chatLoadMatrixThumbnail, loadMatrixThumbnail)
             .environment(\.appBotPresentation, appBot)
             .environment(\.appBotPresenter, appBotPresenter)
@@ -279,7 +280,7 @@ struct ChatScreen: View {
             // for an inspector placed outside the stack (M1 follow-up).
             .sheet(isPresented: $infoPresented) {
                 if let info {
-                    ChatPanelHost(design: design, info: info, actions: infoActions,
+                    ChatPanelHost(design: design, info: info, actions: panelActions,
                                   loadMatrixThumbnail: loadMatrixThumbnail) {
                         infoPresented = false
                     }
@@ -384,6 +385,24 @@ struct ChatScreen: View {
         }
         .accessibilityLabel(copy.menu)
         .accessibilityIdentifier("chat.conversation.menu")
+    }
+
+    /// The panel's actions, with Report person from this chat's store (it
+    /// knows the messages the person can be reported by) unless the host
+    /// gave its own.
+    private var panelActions: ChatInfoActions {
+        var actions = infoActions
+        if actions.reportPerson == nil {
+            let store = store
+            actions.reportPerson = { userID, reason in await store.reportPerson(userID, reason: reason) }
+        }
+        return actions
+    }
+
+    /// Who gets no Report in this chat: the store's assistants and app bots,
+    /// and every member the panel marks as one.
+    static func nonPersonSenders(_ known: Set<String>, members: [String: ChatInfoMember]) -> Set<String> {
+        known.union(members.values.filter { $0.isAssistant || $0.isApp }.map(\.userID))
     }
 
     static func avatarKind(_ kind: RoomKind) -> AtumAvatarKind {

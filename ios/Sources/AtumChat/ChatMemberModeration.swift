@@ -1,12 +1,13 @@
 import Foundation
 
 /// What can be done about one person in a group's Members page, as on the desktop's members sheet
-/// (`conversation-controls.tsx` `MemberAction`): block (Matrix ignore), remove (kick),
-/// ban and unban. Remove, ban and unban follow the room's power levels as the Matrix
+/// (`conversation-controls.tsx` `MemberAction`): block (Matrix ignore), report (a person only,
+/// `ReportPolicy.mayReportPerson`), remove (kick), ban and unban. Remove, ban and unban follow the room's power levels as the Matrix
 /// authorization rules check them, so the phone never offers an action the server would refuse.
 public enum ChatMemberAction: String, Hashable, Sendable, CaseIterable {
     case block
     case unblock
+    case report
     case remove
     case ban
     case unban
@@ -48,14 +49,25 @@ public struct ChatMemberModeration: Equatable, Sendable {
     }
 
     /// The actions for one member, in the desktop's order. `mayBlock` is `ChatExitPolicy.mayIgnore`
-    /// for this chat; `isBlocked` is whether the account already ignores them.
+    /// for this chat; `isBlocked` is whether the account already ignores them; `mayReport` is
+    /// `ReportPolicy.mayReportPerson`.
     public func actions(targetPower: Int64, membership: Membership, isSelf: Bool,
-                        mayBlock: Bool, isBlocked: Bool) -> [ChatMemberAction] {
-        var actions = [ChatMemberAction]()
-        if mayBlock, !isSelf { actions.append(isBlocked ? .unblock : .block) }
+                        mayBlock: Bool, isBlocked: Bool, mayReport: Bool = false) -> [ChatMemberAction] {
+        var actions = ChatMemberModeration.personalActions(isSelf: isSelf, mayBlock: mayBlock, isBlocked: isBlocked,
+                                                           mayReport: mayReport)
         if mayRemove(targetPower: targetPower, membership: membership, isSelf: isSelf) { actions.append(.remove) }
         if mayBan(targetPower: targetPower, membership: membership, isSelf: isSelf) { actions.append(.ban) }
         if mayUnban(targetPower: targetPower, membership: membership, isSelf: isSelf) { actions.append(.unban) }
+        return actions
+    }
+
+    /// Block or Unblock, then Report: what a member row offers without the room's power levels.
+    public static func personalActions(isSelf: Bool, mayBlock: Bool, isBlocked: Bool,
+                                       mayReport: Bool) -> [ChatMemberAction] {
+        guard !isSelf else { return [] }
+        var actions = [ChatMemberAction]()
+        if mayBlock { actions.append(isBlocked ? .unblock : .block) }
+        if mayReport { actions.append(.report) }
         return actions
     }
 }
