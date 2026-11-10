@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.company-private-cos",
+  "version": "1.1",
+  "providerCommit": "7df04652c7c1ce39f757891e01e0d14951db31bb",
+  "packSHA256": "107d39e43b04325b9aa81fe4d7981f321f60ab44a810833f21ebc14baccac0ff",
+  "fixtures": [
+    {
+      "file": "ensure-accepted.response.json",
+      "message": "ensure.accepted.response",
+      "expect": "accept",
+      "sha256": "dffe1ade222dfad3bf16418f4769f5e21b2cd314d4313fc6b9b4531a2cdf8076"
+    },
+    {
+      "file": "ensure-unversioned.response.json",
+      "message": "ensure.accepted.response",
+      "expect": "reject",
+      "violation": "missing",
+      "sha256": "c257617b51b1b62148df7c7ee3d6ac5bb601ab4ba87e212c1295af07ca23ba3e"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "state": "preparing",
+  "pair": {
+    "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+    "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+    "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+  },
+  "greetingState": "pending",
+  "binding": {
+    "scope": {
+      "pair": {
+        "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+        "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+        "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+      },
+      "authorityEpoch": 7,
+      "contextEpoch": 1,
+      "homeGeneration": 1
+    },
+    "agentPrincipal": "a4000000-0000-4000-8000-000000000001",
+    "agentUserId": "@private_cos_a:atum.example",
+    "executorId": "a5000000-0000-4000-8000-000000000001",
+    "homeId": "a6000000-0000-4000-8000-000000000001",
+    "roomId": "!private-cos-a:atum.example",
+    "storeGeneration": 1,
+    "profileDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

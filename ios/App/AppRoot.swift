@@ -22,13 +22,13 @@ enum RoomRootDestination: Equatable {
         // platform's conversation directory decides before the kind does, and a
         // room that only claims the type opens nowhere.
         switch classification {
-        case .conversation: return .teamSpace
+        case .conversation, .privateCos: return .teamSpace
         case .quarantined: return nil
         case .company, .personal, .unknown: break
         }
         guard roomKind == .group else { return .personal }
         return switch classification {
-        case .company, .conversation: .teamSpace
+        case .company, .conversation, .privateCos: .teamSpace
         case .personal: .personal
         case .quarantined, .unknown: nil
         }
@@ -370,7 +370,14 @@ struct AppRoot: View {
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },
                     selectCompany: { model.companyWorkspace.selectCompany($0) },
-                    openRoom: { routeFromRootDestination($0) },
+                    openRoom: { roomID in
+                        if case let .privateCos(companyID) = model.companyWorkspace.roomClassification(roomID) {
+                            guard model.companyWorkspace.activeCompanyID == companyID else { return }
+                            requestRoomOpen(roomID, requiringCompany: companyID)
+                        } else {
+                            routeFromRootDestination(roomID)
+                        }
+                    },
                     acceptInvitation: { invitationID in
                         guard let roomID = await model.companyWorkspace.accept(
                             invitationID: invitationID
@@ -597,7 +604,7 @@ struct AppRoot: View {
                 // A conversation (or a room that claims to be one) is never a Home row,
                 // whatever its member count says.
                 switch model.companyWorkspace.roomClassification(room.id) {
-                case .conversation, .quarantined: return false
+                case .conversation, .privateCos, .quarantined: return false
                 case .company, .personal, .unknown:
                     guard room.kind == .group else { return true }
                     return model.companyWorkspace.roomClassification(room.id) == .personal
@@ -605,20 +612,21 @@ struct AppRoot: View {
             }
         let locale = Locale(identifier: design.locale)
         let liveRows = ordered.map { HomeRow(product: $0, locale: locale) }
+        let cached = model.cachedChatList.filter { !model.isPrivateCosHomeRow($0) }
         let rows: [HomeRow]
         if model.chatListIsAuthoritative {
             // All three sources settled: the live projection is the truth,
             // including a genuinely empty list. The one exception is a
             // delivery-outcome notice at the head of a chat: its warning was
             // suppressed, so keep the last real message the cache holds.
-            rows = ChatListSnapshot.authoritative(cached: model.cachedChatList,
+            rows = ChatListSnapshot.authoritative(cached: cached,
                                                   live: liveRows.map(\.snapshotRow))
                 .map { HomeRow(snapshot: $0) }
         } else if model.hasCachedChatList {
             // Cold launch or a partial refresh: paint the last complete list
             // with its photos and real previews, and let live counts and
             // newer messages move in place.
-            rows = ChatListSnapshot.merged(cached: model.cachedChatList,
+            rows = ChatListSnapshot.merged(cached: cached,
                                            live: liveRows.map(\.snapshotRow),
                                            liveIsAuthoritative: false)
                 .map { HomeRow(snapshot: $0) }
@@ -632,7 +640,7 @@ struct AppRoot: View {
         }
         return HomePresentation(
             state: state,
-            rows: rows,
+            rows: rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) },
             showsNotificationPrompt: source.notificationPrompt,
             showsDomainReauthentication: model.domainRecoveryState == .reauthenticationRequired,
             domainReauthenticationBusy: model.domainReauthenticationInProgress,

@@ -59,6 +59,10 @@ public struct ChatListSnapshot: Codable, Equatable, Sendable {
         public var isComingSoon: Bool
         public var awaitsStart: Bool
         public var isFounder: Bool
+        /// Display identity from /agents, for matching a positive platform binding
+        /// while that catalog is unavailable. Never authority for opening a room.
+        public var assistantPrincipal: String?
+        public var assistantMatrixUserID: String?
 
         public init(id: String, roomID: String, kind: Kind, name: String,
                     verification: Verification? = nil,
@@ -73,7 +77,8 @@ public struct ChatListSnapshot: Codable, Equatable, Sendable {
                     isPinned: Bool = false, isMuted: Bool = false,
                     canOpen: Bool = true, isWaitingForRoom: Bool = false,
                     isComingSoon: Bool = false, awaitsStart: Bool = false,
-                    isFounder: Bool = false) {
+                    isFounder: Bool = false, assistantPrincipal: String? = nil,
+                    assistantMatrixUserID: String? = nil) {
             self.id = id
             self.roomID = roomID
             self.kind = kind
@@ -97,6 +102,8 @@ public struct ChatListSnapshot: Codable, Equatable, Sendable {
             self.isComingSoon = isComingSoon
             self.awaitsStart = awaitsStart
             self.isFounder = isFounder
+            self.assistantPrincipal = assistantPrincipal
+            self.assistantMatrixUserID = assistantMatrixUserID
         }
 
         /// True when the row already has a photo/logo to draw. A row with one

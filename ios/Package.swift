@@ -26,6 +26,7 @@ let package = Package(
                                 .copy("Fixtures/agent-home-v2.5"),
                                 .copy("Fixtures/live-platform-2026-10-28"),
                                 .copy("Fixtures/company-workspace-v1.1"),
+                                .copy("Fixtures/company-private-cos"),
                                 .copy("Fixtures/company-workspace-v1.5"),
                                 .copy("Fixtures/company-workspace-v1.3-capabilities"),
                                 .copy("Fixtures/mobile-drive-v1"),

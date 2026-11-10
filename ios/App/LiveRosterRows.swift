@@ -180,6 +180,8 @@ enum LiveRosterRows {
     struct Input {
         /// `/agents`, every status; only active agents are listed.
         var agents: [AgentsResponse.Agent]
+        /// Positive platform bindings, before any personal bot/agent choice.
+        var privateCosBindings = CompanyPrivateCosBindings()
         /// `/apps`.
         var apps: [AppDescriptor]
         var rooms: [LiveMatrixRoomRow]
@@ -221,6 +223,21 @@ enum LiveRosterRows {
         let agentDuplicatePlainRoomCounts: [String: Int]
     }
 
+    /// Applied after cache merging too, so a cached joined/invited row cannot
+    /// re-enter Home while catalog or Matrix reads are still settling.
+    static func isPrivateCosHomeRow(_ room: ChatListSnapshot.Room,
+                                    agents: [AgentsResponse.Agent],
+                                    bindings: CompanyPrivateCosBindings) -> Bool {
+        if bindings.roomIDs.contains(room.roomID) || bindings.roomIDs.contains(room.id) { return true }
+        if let principal = room.assistantPrincipal, bindings.agentPrincipals.contains(principal) { return true }
+        if let user = room.assistantMatrixUserID, bindings.agentUserIDs.contains(user) { return true }
+        return agents.contains { agent in
+            room.id == "agent:" + agent.id.rawValue
+                && (bindings.agentPrincipals.contains(agent.principal.rawValue)
+                    || bindings.agentUserIDs.contains(agent.matrixUser?.rawValue ?? ""))
+        }
+    }
+
     static func rows(_ input: Input) -> Output {
         struct IndexedAgent {
             let value: AgentsResponse.Agent
@@ -234,7 +251,10 @@ enum LiveRosterRows {
             }
         }
         let agents = input.agents.enumerated().compactMap { order, agent in
-            agent.status == .active ? IndexedAgent(value: agent, order: order) : nil
+            agent.status == .active
+                && !input.privateCosBindings.agentPrincipals.contains(agent.principal.rawValue)
+                && !input.privateCosBindings.agentUserIDs.contains(agent.matrixUser?.rawValue ?? "")
+                ? IndexedAgent(value: agent, order: order) : nil
         }
         // Every agent, not only an active one, is an agent sender for the
         // invitation guard below: a retired agent's lingering task-room invite
@@ -247,8 +267,10 @@ enum LiveRosterRows {
         // A room or invitation that claims the company conversation type is never a bot's or an
         // agent's: the choosers below see only these. The claim still rides on the plain row, so
         // Home leaves it out and only the directory can open it.
-        let botAndAgentRooms = rooms.filter { !ConversationTypeGuard.excludedFromBotAndAgent(roomType: $0.roomType) }
-        let botAndAgentInvites = invites.filter { !ConversationTypeGuard.excludedFromBotAndAgent(roomType: $0.roomType) }
+        let botAndAgentRooms = rooms.filter { !input.privateCosBindings.roomIDs.contains($0.roomID)
+            && !ConversationTypeGuard.excludedFromBotAndAgent(roomType: $0.roomType) }
+        let botAndAgentInvites = invites.filter { !input.privateCosBindings.roomIDs.contains($0.roomID)
+            && !ConversationTypeGuard.excludedFromBotAndAgent(roomType: $0.roomType) }
         let catalogApps = input.apps
             .sorted { left, right in
                 left.rosterOrder == right.rosterOrder
@@ -298,12 +320,14 @@ enum LiveRosterRows {
             // the same account-scoped ledger as other phone-hidden rooms. A
             // newer message reveals it again; trust is never inferred from
             // the hidden state.
-            if input.hiddenRooms.isHidden(roomID: room.roomID,
+            if !input.privateCosBindings.roomIDs.contains(room.roomID),
+               input.hiddenRooms.isHidden(roomID: room.roomID,
                                           latestTimestamp: room.latestTimestamp) {
                 continue
             }
             // A conversation-type room stays a plain row (carrying its claim), whoever is in it.
-            if ConversationTypeGuard.excludedFromBotAndAgent(roomType: room.roomType) {
+            if input.privateCosBindings.roomIDs.contains(room.roomID)
+                || ConversationTypeGuard.excludedFromBotAndAgent(roomType: room.roomType) {
                 classified.append((room, nil))
                 continue
             }
@@ -440,7 +464,8 @@ enum LiveRosterRows {
         for invite in invites {
             // An agent's or bot's invitation to a conversation-type room is not theirs to hide:
             // it stays a plain, flagged row that Home leaves out.
-            if let inviter = invite.inviterID,
+            if !input.privateCosBindings.roomIDs.contains(invite.roomID),
+               let inviter = invite.inviterID,
                !ConversationTypeGuard.excludedFromBotAndAgent(roomType: invite.roomType),
                agentSenders.contains(inviter) || catalogBots.contains(inviter) {
                 continue

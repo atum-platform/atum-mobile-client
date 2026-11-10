@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "runId": "a8000000-0000-4000-8000-000000000001",
+  "pair": {
+    "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+    "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+    "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+  },
+  "fundingKind": "personal_wallet",
+  "walletCompanyPrincipal": "a2000000-0000-4000-8000-000000000001",
+  "pricing": "private_cos_surcharge",
+  "separatePrice": true,
+  "reservedMicroProtons": 250000,
+  "companyDailyCapMicroProtons": 5000000,
+  "memberPrivateCapMicroProtons": 1000000,
+  "memberWalletDebited": true,
+  "personalFallback": true
+}

@@ -261,6 +261,61 @@ import AtumPrototype
         ], options: .sortedKeys)
     }
 
+    func testPrivateCosUsesOnlyExactAuthenticatedReadRoutesAndRefreshes401() async throws {
+        let directory = try XCTUnwrap(Bundle.module.url(forResource: "company-private-cos", withExtension: nil))
+        let capability = try Data(contentsOf: directory.appendingPathComponent("v1.3-capability.response.json"))
+        let view = try Data(contentsOf: directory.appendingPathComponent("v1-lazy-first-open.preparing.response.json"))
+        let company = try NativeID("a1000000-0000-4000-8000-000000000001")
+        var calls = 0
+        NativeDomainProtocol.state.handler = { request in
+            calls += 1
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Atum-Company-Wire"), "1.3")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            XCTAssertTrue((self.body(of: request) ?? Data()).isEmpty)
+            if calls == 1 { return .init(status: 401, chunks: [Data("{\"error\":\"matrix_401\"}".utf8)]) }
+            return .json(request.url?.path.hasSuffix("/controller/company-private-cos") == true ? capability : view)
+        }
+        let auth = TestAuthorization(first: "synthetic-old", refreshed: "synthetic-new")
+        let api = client(auth)
+        _ = try await api.companyPrivateCosCapability()
+        let binding = try await api.companyPrivateCosView(companyID: company)
+        XCTAssertEqual(binding.binding?.roomId,
+                       "!private-cos-a:atum.example")
+        XCTAssertEqual(auth.refreshCalls, 1)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.map { $0.url?.path }, [
+            "/api/matrix/v1/cloud/controller/company-private-cos",
+            "/api/matrix/v1/cloud/controller/company-private-cos",
+            "/api/matrix/v1/companies/" + company.rawValue + "/private-cos",
+        ])
+        XCTAssertEqual(NativeDomainProtocol.state.requests.prefix(2).map {
+            $0.value(forHTTPHeaderField: "Authorization")
+        }, ["Bearer synthetic-old", "Bearer synthetic-new"])
+    }
+
+    func testPrivateCosRefusesWrongCompanyForbiddenAbsentAndOversizeWithoutRetry() async throws {
+        let directory = try XCTUnwrap(Bundle.module.url(forResource: "company-private-cos", withExtension: nil))
+        let view = try Data(contentsOf: directory.appendingPathComponent("v1-lazy-first-open.preparing.response.json"))
+        let company = try NativeID("a1000000-0000-4000-8000-000000000002")
+        let api = client(TestAuthorization(first: "synthetic-token"))
+        NativeDomainProtocol.state.handler = { _ in .json(view) }
+        do { _ = try await api.companyPrivateCosView(companyID: company); XCTFail("wrong company admitted") }
+        catch { }
+        for status in [403, 404, 503] {
+            NativeDomainProtocol.state.reset()
+            NativeDomainProtocol.state.handler = { _ in
+                .init(status: status, chunks: [Data("{\"schemaVersion\":1,\"error\":{\"code\":\"denied\"}}".utf8)])
+            }
+            do { _ = try await api.companyPrivateCosView(companyID: company); XCTFail("refusal admitted") }
+            catch { }
+            XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1)
+        }
+        NativeDomainProtocol.state.reset()
+        NativeDomainProtocol.state.handler = { _ in .json(Data(repeating: 32, count: 262_145)) }
+        do { _ = try await api.companyPrivateCosView(companyID: company); XCTFail("unbounded view admitted") }
+        catch { }
+    }
+
     func testOfficialAccountsUsesTheOneExactNativeRoute() async throws {
         let founder = "@synthetic-user-0017:example.invalid"
         let response = Data("""

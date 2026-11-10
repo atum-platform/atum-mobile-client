@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "runId": "a8000000-0000-4000-8000-000000000001",
+  "taskId": "a8000000-0000-4000-8000-000000000002",
+  "pair": {
+    "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+    "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+    "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+  },
+  "executorId": "a5000000-0000-4000-8000-000000000001",
+  "contextEpoch": 1,
+  "homeGeneration": 1,
+  "authorityEpoch": 7,
+  "reservationId": "a8000000-0000-4000-8000-000000000003",
+  "reservedMicroProtons": 250000,
+  "settledMicroProtons": 190000,
+  "state": "settled",
+  "verifiedEventId": "$private-cos-owner-message",
+  "homeCommitId": "a8000000-0000-4000-8000-000000000004",
+  "outboxTransactionId": "a8000000-0000-4000-8000-000000000005",
+  "publishedEventId": "$private-cos-answer",
+  "sourceLinks": []
+}

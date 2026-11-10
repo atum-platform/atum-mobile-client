@@ -1977,3 +1977,209 @@ private actor ShortcutStateReadGate {
 private final class ShortcutRefreshEpoch {
     var value: UInt64 = 1
 }
+
+extension S2StateTests {
+    private func privateCosFixture(_ name: String) throws -> Data {
+        let ios = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        return try Data(contentsOf: ios.appendingPathComponent("Tests/Fixtures/company-private-cos/" + name))
+    }
+
+    @MainActor
+    private final class PrivateCosAPIStub: CompanyPrivateCosAPI {
+        var capability: CompanyPrivateCosCapability
+        var view: CompanyPrivateCosView
+        var failure: Error?
+        var capabilityOff = false
+        var reads = 0
+        var hold = false
+        var continuation: CheckedContinuation<CompanyPrivateCosView, Error>?
+        init(capability: CompanyPrivateCosCapability, view: CompanyPrivateCosView) {
+            self.capability = capability; self.view = view
+        }
+        func companyPrivateCosCapability() async throws -> CompanyPrivateCosCapability {
+            if capabilityOff { throw CompanyAPIError.refused(.missing, reason: nil, retryAfter: nil) }
+            return capability
+        }
+        func companyPrivateCosView(companyID: NativeID) async throws -> CompanyPrivateCosView {
+            reads += 1
+            if hold { return try await withCheckedThrowingContinuation { continuation = $0 } }
+            if let failure { throw failure }
+            return view
+        }
+    }
+
+    @MainActor
+    private func privateCosModel() throws -> (CompanyWorkspaceModel, CompanyAPIStub, PrivateCosAPIStub) {
+        let view = try NativeAPI.decode(CompanyPrivateCosView.self, from:
+            privateCosFixture("v1-lazy-first-open.preparing.response.json"))
+        let capability = try NativeAPI.decode(CompanyPrivateCosCapability.self, from:
+            privateCosFixture("v1.3-capability.response.json"))
+        let company = view.pair.companyPrincipal.rawValue
+        let channel = "a7000000-0000-4000-8000-000000000001"
+        let api = CompanyAPIStub(list: try companyList([company]), directories: [
+            company: try companyDirectory(companyID: company, channelID: channel, roomID: "!general:atum.example")
+        ], snapshots: [company: try companySnapshot(companyID: company, channelID: channel)])
+        let cos = PrivateCosAPIStub(capability: capability, view: view)
+        let model = CompanyWorkspaceModel()
+        model.copy = CompanyCopy(design: try LiveDesign())
+        model.clientProvider = { api }
+        model.privateCosProvider = { cos }
+        model.privateCosRoomTitle = { _ in "Synthetic private conversation" }
+        model.beginAccountScope("synthetic-private-cos-" + UUID().uuidString)
+        return (model, api, cos)
+    }
+
+    @MainActor
+    func testPrivateCosBoundJoinedRoomIsCompanyReachableBeforePersonalAgentSelection() async throws {
+        let (model, _, cos) = try privateCosModel()
+        await model.refresh()
+        let binding = try XCTUnwrap(cos.view.binding)
+        let company = cos.view.pair.companyPrincipal.rawValue
+        let privateAgentID = "a8000000-0000-4000-8000-000000000001"
+        let personalAgentID = "a8000000-0000-4000-8000-000000000002"
+        let agents = try decodeAgents([
+            agentJSON(id: privateAgentID, name: "Synthetic private assistant", matrixUser: binding.agentUserId),
+            agentJSON(id: personalAgentID, name: "Chief of Staff", matrixUser: "@personal:atum.example")
+        ])
+        let app = try decodeMoon(appID: "a9000000-0000-4000-8000-000000000001", botID: "@app-moon:atum.example")
+        let rooms = [
+            rosterRoom(binding.roomId, userID: binding.agentUserId, latest: 1),
+            rosterRoom("!personal:atum.example", userID: "@personal:atum.example", latest: 2),
+            rosterRoom("!founder:atum.example", userID: "@founder:atum.example", latest: 3),
+            rosterRoom("!app:atum.example", userID: "@app-moon:atum.example", latest: 4)
+        ]
+        let baseline = LiveRosterRows.rows(.init(agents: agents, apps: [app], rooms: rooms,
+            invites: [], pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en",
+            founderRoomID: "!founder:atum.example", founderUserID: "@founder:atum.example", founderName: "Founder")).rows
+        let output = LiveRosterRows.rows(.init(agents: agents, privateCosBindings: model.privateCosBindings,
+            apps: [app], rooms: rooms, invites: [], pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en",
+            founderRoomID: "!founder:atum.example", founderUserID: "@founder:atum.example", founderName: "Founder"))
+        let home = output.rows.filter {
+            !LiveRosterRows.isPrivateCosHomeRow(HomeRow(product: $0, locale: Locale(identifier: "en")).snapshotRow,
+                                               agents: agents, bindings: model.privateCosBindings)
+        }
+        XCTAssertFalse(home.contains { $0.id == binding.roomId || $0.id == "agent:" + privateAgentID })
+        XCTAssertEqual(home.first { $0.id == "!personal:atum.example" }?.title, "Chief of Staff")
+        for id in ["!founder:atum.example", "!app:atum.example"] {
+            XCTAssertEqual(output.rows.first { $0.id == id }, baseline.first { $0.id == id })
+        }
+        XCTAssertNil(output.agentChoices["agent:" + privateAgentID])
+        let privateRow = try XCTUnwrap(output.rows.first { $0.id == binding.roomId })
+        XCTAssertTrue(privateRow.canOpen)
+        XCTAssertNil(privateRow.assistant)
+        XCTAssertEqual(model.roomClassification(binding.roomId), .privateCos(companyID: company))
+        XCTAssertEqual(RoomRootDestination.authoritative(roomKind: privateRow.kind,
+                                                        classification: model.roomClassification(binding.roomId)), .teamSpace)
+        let workspace = try XCTUnwrap(model.workspace(companyID: company))
+        XCTAssertTrue(workspace.channels.contains { $0.roomID == binding.roomId && $0.canOpen })
+        XCTAssertTrue(model.isSelected(companyID: company, owning: binding.roomId))
+        let signals: CompanyRoomSignals = [binding.roomId: .init(highlights: 1, notifications: 1,
+            hasUnreadActivity: true, isMarkedUnread: false, isMuted: false)]
+        XCTAssertNotEqual(model.companyBadge(companyID: company, signals: signals), .none)
+    }
+
+    @MainActor
+    func testPrivateCosInvitesCachedRowsAndAwaitingAgentStayOffHome() async throws {
+        let (model, _, cos) = try privateCosModel()
+        await model.refresh()
+        let binding = try XCTUnwrap(cos.view.binding)
+        let agentID = "a8000000-0000-4000-8000-000000000001"
+        let agents = try decodeAgents([agentJSON(id: agentID, name: "Chief of Staff", matrixUser: binding.agentUserId)])
+        let invite = LiveMatrixInvite(roomID: binding.roomId, inviterID: binding.agentUserId,
+                                      displayName: "Synthetic private conversation", isEncrypted: false, isDirect: true)
+        let output = LiveRosterRows.rows(.init(agents: agents, privateCosBindings: model.privateCosBindings,
+            apps: [], rooms: [], invites: [invite], pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en"))
+        XCTAssertEqual(output.rows.map(\.id), [binding.roomId])
+        XCTAssertTrue(output.rows[0].isInvitation, "company entry must still be able to accept the invitation")
+        let cached = [
+            HomeRow(product: output.rows[0], locale: Locale(identifier: "en")).snapshotRow,
+            ChatListSnapshot.Room(id: binding.roomId, roomID: binding.roomId, kind: .person, name: "cached"),
+            ChatListSnapshot.Room(id: "agent:" + agentID, roomID: "agent:" + agentID, kind: .assistant, name: "cached waiting"),
+            ChatListSnapshot.Room(id: "!personal:atum.example", roomID: "!personal:atum.example", kind: .assistant, name: "Chief of Staff")
+        ]
+        let offlineWaiting = ChatListSnapshot.Room(id: "agent:" + agentID, roomID: "agent:" + agentID,
+            kind: .assistant, name: "cached waiting", assistantPrincipal: binding.agentPrincipal.rawValue,
+            assistantMatrixUserID: binding.agentUserId)
+        XCTAssertTrue(LiveRosterRows.isPrivateCosHomeRow(offlineWaiting, agents: [],
+                                                        bindings: model.privateCosBindings))
+        let merged = ChatListSnapshot.merged(cached: cached, live: [], liveIsAuthoritative: false)
+        XCTAssertEqual(merged.filter { !LiveRosterRows.isPrivateCosHomeRow($0, agents: agents,
+            bindings: model.privateCosBindings) }.map(\.roomID), ["!personal:atum.example"])
+        let waiting = LiveRosterRows.rows(.init(agents: agents, privateCosBindings: model.privateCosBindings,
+            apps: [], rooms: [], invites: [], pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en"))
+        XCTAssertTrue(waiting.rows.isEmpty)
+        var noMatrixIdentity = agentJSON(id: agentID, name: "Synthetic private assistant", matrixUser: binding.agentUserId)
+        noMatrixIdentity["matrixUser"] = NSNull()
+        noMatrixIdentity["principal"] = binding.agentPrincipal.rawValue
+        let principalOnly = try decodeAgents([noMatrixIdentity])
+        XCTAssertTrue(LiveRosterRows.rows(.init(agents: principalOnly,
+            privateCosBindings: model.privateCosBindings, apps: [], rooms: [], invites: [],
+            pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en")).rows.isEmpty)
+        XCTAssertTrue(model.workspace(companyID: cos.view.pair.companyPrincipal.rawValue)?.channels
+            .contains { $0.roomID == binding.roomId } == true)
+    }
+
+    @MainActor
+    func testPrivateCosUnavailableForbiddenAndCapabilityOffLeaveUnclassifiedHomeUnchangedAndRetry() async throws {
+        for failure in [CompanyAPIError.refused(.denied, reason: nil, retryAfter: nil), CompanyAPIError.refused(.missing, reason: nil, retryAfter: nil), CompanyAPIError.refused(.unavailable, reason: nil, retryAfter: nil)] {
+            let (model, _, cos) = try privateCosModel()
+            cos.failure = failure
+            await model.refresh()
+            XCTAssertTrue(model.privateCosBindings.roomIDs.isEmpty)
+            let room = rosterRoom(cos.view.binding!.roomId, userID: cos.view.binding!.agentUserId, latest: 1)
+            let input = LiveRosterRows.Input(agents: [], privateCosBindings: model.privateCosBindings,
+                apps: [], rooms: [room], invites: [], pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en")
+            let rows = LiveRosterRows.rows(input).rows
+            XCTAssertEqual(rows.map(\.id), [room.roomID])
+            XCTAssertFalse(LiveRosterRows.isPrivateCosHomeRow(HomeRow(product: rows[0], locale: Locale(identifier: "en")).snapshotRow,
+                agents: [], bindings: model.privateCosBindings))
+            cos.failure = nil
+            await model.refresh()
+            XCTAssertEqual(cos.reads, 2)
+            XCTAssertEqual(model.privateCosBindings.roomIDs, [room.roomID])
+            cos.failure = failure
+            await model.refresh()
+            XCTAssertEqual(model.privateCosBindings.roomIDs, [room.roomID], "failed reads don't demote positive bindings")
+        }
+        let (off, _, cos) = try privateCosModel()
+        cos.capabilityOff = true
+        await off.refresh()
+        XCTAssertTrue(off.privateCosBindings.roomIDs.isEmpty)
+        XCTAssertEqual(cos.reads, 0)
+        cos.capabilityOff = false
+        await off.refresh()
+        XCTAssertFalse(off.privateCosBindings.roomIDs.isEmpty)
+    }
+
+    @MainActor
+    func testPrivateCosCompanyReplacementAccountSwitchAndLateReadClearScope() async throws {
+        let (model, api, cos) = try privateCosModel()
+        await model.refresh()
+        let room = cos.view.binding!.roomId
+        let other = "a1000000-0000-4000-8000-000000000002"
+        let original = cos.view.pair.companyPrincipal.rawValue
+        api.list = try companyList([original, other])
+        await model.refresh()
+        model.selectCompany(other)
+        XCTAssertFalse(model.isSelected(companyID: original, owning: room))
+        XCTAssertFalse(model.workspace(companyID: other)?.channels.contains { $0.roomID == room } == true)
+        model.selectCompany(original)
+        XCTAssertTrue(model.isSelected(companyID: original, owning: room))
+        api.list = try companyList([other])
+        await model.refresh()
+        XCTAssertNil(model.privateCosBindings.companyID(owning: room))
+        XCTAssertNotEqual(model.roomClassification(room), .privateCos(companyID: other))
+        api.list = try companyList([cos.view.pair.companyPrincipal.rawValue])
+        await model.refresh()
+        XCTAssertTrue(model.privateCosBindings.roomIDs.contains(room))
+        model.beginAccountScope("synthetic-next-account")
+        XCTAssertTrue(model.privateCosBindings.views.isEmpty)
+        cos.hold = true
+        let task = Task { await model.refresh() }
+        while cos.continuation == nil { await Task.yield() }
+        model.beginAccountScope("synthetic-third-account")
+        cos.continuation?.resume(returning: cos.view)
+        await task.value
+        XCTAssertTrue(model.privateCosBindings.views.isEmpty)
+    }
+}

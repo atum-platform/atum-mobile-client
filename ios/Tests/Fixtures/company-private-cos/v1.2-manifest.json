@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.company-private-cos",
+  "version": "1.2",
+  "providerCommit": "7df04652c7c1ce39f757891e01e0d14951db31bb",
+  "packSHA256": "bb2ba35a2569f5d851233399f3eee5f742952f782964eba17a43947c523661a4",
+  "fixtures": []
+}

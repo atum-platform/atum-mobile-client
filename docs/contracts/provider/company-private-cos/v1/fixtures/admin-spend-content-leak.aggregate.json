@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+  "localDate": "2026-11-01",
+  "totals": [
+    {
+      "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+      "category": "private_cos",
+      "reservedMicroProtons": 250000,
+      "settledMicroProtons": 190000,
+      "runCount": 1,
+      "prompt": "private text"
+    }
+  ]
+}

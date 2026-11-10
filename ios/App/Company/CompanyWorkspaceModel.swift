@@ -80,6 +80,7 @@ enum CompanyRoomClassification: Equatable {
     case company(CompanyRoomClaim)
     /// A company DM or group DM, believed because the conversation directory lists it.
     case conversation(ConversationRoomClaim)
+    case privateCos(companyID: String)
     /// Claims to be a company conversation and is not listed: shown nowhere.
     case quarantined
     case personal
@@ -116,12 +117,16 @@ final class CompanyWorkspaceModel {
     /// Company DMs and group DMs (wire 1.5). The directory it keeps is the only authority for
     /// "this Matrix room is a conversation".
     let conversations = CompanyConversationStore()
+    private(set) var privateCosBindings = CompanyPrivateCosBindings()
 
     /// Set by the root: the production client, the Matrix presence the
     /// convergence asks about, and the existing chat's join.
     @ObservationIgnored var clientProvider: () -> CompanyWorkspaceAPI? = { nil }
-    /// The same client's 1.3 discovery and 1.5 conversation calls; nil keeps
-    /// Direct messages off.
+    /// Read-only private-CoS discovery and views, using the same account client.
+    @ObservationIgnored var privateCosProvider: () -> CompanyPrivateCosAPI? = { nil }
+    /// Existing Matrix room content, never a new untranslated label.
+    @ObservationIgnored var privateCosRoomTitle: (String) -> String? = { _ in nil }
+    /// The same client's 1.3 discovery and 1.5 conversation calls; nil keeps Direct messages off.
     @ObservationIgnored var conversationsProvider: () -> CompanyConversationsAPI? = { nil }
     @ObservationIgnored var presence: (String) -> CompanyRoomPresence = { _ in .unknown }
     @ObservationIgnored var join: (String) async -> Bool = { _ in false }
@@ -225,13 +230,15 @@ final class CompanyWorkspaceModel {
         // The members are read first: a conversation's title needs to know who "me" is.
         let conversationsRead = await conversations.read(companyID: companyID)
         guard scope == generation, self.client() === client else { return }
+        await readPrivateCos(companies: [companyID], scope: scope)
+        guard scope == generation, self.client() === client else { return }
         if wasComplete, directory != nil, conversationsRead { setClassificationComplete(true) }
     }
 
     private func applyList(_ value: CompanyList, client: CompanyWorkspaceAPI, scope: UInt64) async {
         list = value
         prunePrefs(value)
-        phase = .probing
+        if phase != .ready { phase = .probing }
         let companies = Set(value.companies.map(\.id.rawValue))
         let removedCompanies = roomDirectory.companyIDs.subtracting(companies)
         var removedRooms = Set<String>()
@@ -240,6 +247,11 @@ final class CompanyWorkspaceModel {
             removedRooms.formUnion(rooms)
             quarantinedCompanyRoomIDs.formUnion(rooms)
         }
+        for (company, view) in privateCosBindings.views where !companies.contains(company) {
+            if let room = view.binding?.roomId { removedRooms.insert(room) }
+        }
+        privateCosBindings.retain(companies: companies)
+        classificationBase &+= 1
         roomDirectory.retain(companies: companies)
         for companyID in conversations.roomDirectory.companyIDs.subtracting(companies) {
             removedRooms.formUnion(conversations.roomDirectory.roomIDs(companyID: companyID))
@@ -266,9 +278,44 @@ final class CompanyWorkspaceModel {
             if !(await conversations.read(companyID: company.id.rawValue)) { directoriesComplete = false }
         }
         guard scope == generation, self.client() === client, phase != .hidden else { return }
+        // Publish company access before any positive binding removes a Home row.
         phase = .ready
+        await readPrivateCos(companies: value.companies.map { $0.id.rawValue }, scope: scope)
+        guard scope == generation, self.client() === client, phase != .hidden else { return }
         setClassificationComplete(directoriesComplete)
         await resumePendingLeaveIfNeeded(client: client, scope: scope)
+    }
+
+    /// A positive GET binding is the only private-CoS classification input.
+    /// Failures retain prior positive knowledge and retry on every refresh.
+    private func readPrivateCos(companies: [String], scope: UInt64) async {
+        guard !companies.isEmpty, let api = privateCosProvider(), let account = accountScopeID else { return }
+        do {
+            _ = try await api.companyPrivateCosCapability()
+            guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+            for company in companies {
+                do {
+                    let view = try await api.companyPrivateCosView(companyID: NativeID(company))
+                    guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+                    guard view.pair.companyPrincipal.rawValue == company,
+                          list?.companies.contains(where: { $0.id.rawValue == company }) == true
+                    else { throw CompanyAPIError.invalid }
+                    let oldRooms = privateCosBindings.roomIDs
+                    privateCosBindings.apply(view, companyID: company, accountID: account)
+                    knownPersonalRoomIDs.subtract(privateCosBindings.roomIDs)
+                    classificationBase &+= 1
+                    let removed = oldRooms.subtracting(privateCosBindings.roomIDs)
+                    if !removed.isEmpty { onLeft(removed) }
+                    LiveFlowLog.privateCosRead(view.binding == nil ? .unbound : .bound)
+                } catch {
+                    guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+                    LiveFlowLog.privateCosRead(.unclassified)
+                }
+            }
+        } catch {
+            guard scope == generation, privateCosProvider() === api, accountScopeID == account else { return }
+            LiveFlowLog.privateCosRead(.unclassified)
+        }
     }
 
     @discardableResult
@@ -327,6 +374,8 @@ final class CompanyWorkspaceModel {
     private func hideForDowngrade() {
         generation &+= 1
         phase = .hidden
+        privateCosBindings = CompanyPrivateCosBindings()
+        privateCosBindings.beginAccount(accountScopeID)
         list = nil
         channelsByCompany.removeAll()
         snapshotsByCompany.removeAll()
@@ -349,6 +398,7 @@ final class CompanyWorkspaceModel {
         guard accountScopeID != accountID else { return }
         resetAccountState()
         accountScopeID = accountID
+        privateCosBindings.beginAccount(accountID)
         journal = CompanyLeaveJournal(
             key: "atum.company-leave.v1." + LiveFlowLog.fingerprint(accountID)
         )
@@ -380,6 +430,7 @@ final class CompanyWorkspaceModel {
         channelsByCompany.removeAll()
         snapshotsByCompany.removeAll()
         roomDirectory.clear()
+        privateCosBindings = CompanyPrivateCosBindings()
         conversations.reset()
         conversationTypeClaims.removeAll()
         classificationComplete = false
@@ -418,6 +469,7 @@ final class CompanyWorkspaceModel {
         }
         guard classificationComplete else { return }
         var companyRooms = quarantinedCompanyRoomIDs.union(conversationTypeClaims)
+            .union(privateCosBindings.roomIDs)
         for companyID in roomDirectory.companyIDs {
             companyRooms.formUnion(roomDirectory.roomIDs(companyID: companyID))
         }
@@ -428,6 +480,7 @@ final class CompanyWorkspaceModel {
     }
 
     func roomClassification(_ roomID: String) -> CompanyRoomClassification {
+        if let company = privateCosBindings.companyID(owning: roomID) { return .privateCos(companyID: company) }
         if let claim = roomDirectory.claim(roomID: roomID) { return .company(claim) }
         // Only the platform's directory makes a room a conversation.
         if let claim = conversations.claim(roomID: roomID) { return .conversation(claim) }
@@ -543,6 +596,7 @@ final class CompanyWorkspaceModel {
         switch roomClassification(roomID) {
         case let .company(claim): selectCompany(claim.companyID)
         case let .conversation(claim): selectCompany(claim.companyID)
+        case let .privateCos(companyID): selectCompany(companyID)
         case .quarantined, .personal, .unknown: break
         }
     }
@@ -766,6 +820,9 @@ final class CompanyWorkspaceModel {
     private func finishLeave(companyID: String) {
         let rooms = roomDirectory.roomIDs(companyID: companyID)
             .union(conversations.roomDirectory.roomIDs(companyID: companyID))
+            .union(privateCosBindings.views[companyID]?.binding.map { [$0.roomId] } ?? [])
+        privateCosBindings.retain(companies: Set(privateCosBindings.views.keys).subtracting([companyID]))
+        classificationBase &+= 1
         leavePending.remove(companyID)
         journal.save(leaveTracker)
         noticeCompanies.remove(companyID)
@@ -816,7 +873,8 @@ final class CompanyWorkspaceModel {
     /// company, conversation and room. Its transcript, composer, header, badges and notifications
     /// are all closed; it is only kept out of Personal.
     func isQuarantinedConversation(_ roomID: String) -> Bool {
-        conversationTypeClaims.contains(roomID) && conversations.claim(roomID: roomID) == nil
+        !privateCosBindings.roomIDs.contains(roomID)
+            && conversationTypeClaims.contains(roomID) && conversations.claim(roomID: roomID) == nil
             && !roomDirectory.isCompanyChannel(roomID)
     }
 
@@ -862,6 +920,7 @@ final class CompanyWorkspaceModel {
         guard activeCompanyID == companyID else { return false }
         switch roomClassification(roomID) {
         case let .conversation(claim): return claim.companyID == companyID
+        case let .privateCos(owner): return owner == companyID
         case let .company(claim): return claim.companyID == companyID
         case .quarantined, .personal, .unknown: return false
         }
@@ -880,7 +939,7 @@ final class CompanyWorkspaceModel {
               let company = list?.companies.first(where: { $0.id == companyIDValue })
         else { return nil }
         let directory = channelsByCompany[companyID]
-        let channels = (directory?.channels ?? [])
+        var channels = (directory?.channels ?? [])
             .sorted { left, right in
                 if left.channel.isDefault != right.channel.isDefault { return left.channel.isDefault }
                 return left.channel.displayName.compare(right.channel.displayName,
@@ -900,6 +959,14 @@ final class CompanyWorkspaceModel {
                     badge: input.map(Badge.mark(for:)) ?? .none,
                     isMuted: input?.isMuted ?? false)
             }
+        if let binding = privateCosBindings.views[companyID]?.binding {
+            let input = signals[binding.roomId]
+            channels.append(CompanyChannelRow(
+                id: "private-cos:" + binding.scope.pair.membershipIncarnation.rawValue,
+                title: privateCosRoomTitle(binding.roomId) ?? binding.roomId,
+                state: "", roomID: binding.roomId, memberCount: 2, canOpen: true,
+                badge: input.map(Badge.mark(for:)) ?? .none, isMuted: input?.isMuted ?? false))
+        }
         let members = members(companyID: companyID, copy: copy)
         return CompanyWorkspacePresentation(
             id: companyID,
@@ -973,12 +1040,14 @@ final class CompanyWorkspaceModel {
         // (hidden ones too: the room list does not know the hidden flag).
         roomDirectory.roomIDs(companyID: companyID)
             .union(conversations.roomDirectory.roomIDs(companyID: companyID))
+            .union(privateCosBindings.views[companyID]?.binding.map { [$0.roomId] } ?? [])
             .compactMap { signals[$0] }
     }
 
     /// A company channel or a conversation the directory lists.
     private func isTeamSpaceRoom(_ roomID: String) -> Bool {
-        roomDirectory.isCompanyChannel(roomID) || conversations.claim(roomID: roomID) != nil
+        privateCosBindings.roomIDs.contains(roomID)
+            || roomDirectory.isCompanyChannel(roomID) || conversations.claim(roomID: roomID) != nil
     }
 
     func companyBadge(companyID: String, signals: CompanyRoomSignals) -> Badge {

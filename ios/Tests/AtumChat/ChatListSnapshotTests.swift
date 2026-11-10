@@ -53,6 +53,25 @@ final class ChatListSnapshotTests: XCTestCase {
         XCTAssertEqual(loaded.schemaVersion, ChatListSnapshot.schemaVersion)
     }
 
+    func testOptionalAssistantIdentitySurvivesDiskAndLegacyRowsStillDecode() throws {
+        var waiting = row("agent:synthetic", kind: .assistant)
+        waiting.assistantPrincipal = "a4000000-0000-4000-8000-000000000001"
+        waiting.assistantMatrixUserID = "@private_cos_a:atum.example"
+        try store.save(accountID: "synthetic-account", rooms: [waiting])
+        XCTAssertEqual(store.load(accountID: "synthetic-account")?.rooms, [waiting])
+        // Synthesized optional keys preserve old cache format compatibility.
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: store.fileURL)) as? [String: Any])
+        var rows = json["rooms"] as! [[String: Any]]
+        rows[0].removeValue(forKey: "assistantPrincipal")
+        rows[0].removeValue(forKey: "assistantMatrixUserID")
+        json["rooms"] = rows
+        try JSONSerialization.data(withJSONObject: json).write(to: store.fileURL)
+        let legacy = try XCTUnwrap(store.load(accountID: "synthetic-account")?.rooms.first)
+        XCTAssertNil(legacy.assistantPrincipal)
+        XCTAssertNil(legacy.assistantMatrixUserID)
+        XCTAssertEqual(legacy.id, waiting.id)
+    }
+
     func testSnapshotIsAccountScoped() throws {
         try store.save(accountID: "@other:atum.test", rooms: [row("a")])
         XCTAssertNil(store.load(accountID: "@owner:atum.test"),

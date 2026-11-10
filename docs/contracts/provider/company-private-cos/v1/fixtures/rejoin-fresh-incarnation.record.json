@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "previous": {
+    "pair": {
+      "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+      "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+      "membershipIncarnation": "a3000000-0000-4000-8000-000000000001"
+    },
+    "homeId": "a6000000-0000-4000-8000-000000000001",
+    "homeGeneration": 1,
+    "state": "retired",
+    "access": "denied",
+    "roomBinding": "tombstoned"
+  },
+  "current": {
+    "pair": {
+      "companyPrincipal": "a1000000-0000-4000-8000-000000000001",
+      "memberPrincipal": "a2000000-0000-4000-8000-000000000001",
+      "membershipIncarnation": "a3000000-0000-4000-8000-000000000002"
+    },
+    "state": "uncreated",
+    "greetingState": "pending"
+  },
+  "restoration": "forbidden",
+  "schedulesResume": false
+}

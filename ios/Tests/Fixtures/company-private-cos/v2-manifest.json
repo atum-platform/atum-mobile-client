@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.company-private-cos",
+  "version": 2,
+  "providerCommit": "7df04652c7c1ce39f757891e01e0d14951db31bb",
+  "packSHA256": "9b6b5f29b684ae907ac9e823e00d7cc79d7b0f2ea530c671655c4aefa0b705bb",
+  "fixtures": [
+    {
+      "file": "capability.json",
+      "message": "capability",
+      "expect": "accept",
+      "sha256": "1645244a165d1185f472d689b00277df89878ea6a59eb25eb03559bc213a4ee6"
+    }
+  ]
+}

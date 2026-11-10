@@ -182,6 +182,11 @@ enum LiveFlowLog {
     private static let timelineLog = Logger(subsystem: "com.atum.mobile", category: "timeline")
     private static let creationLog = Logger(subsystem: "com.atum.mobile", category: "creation")
 
+    enum PrivateCosReadOutcome: String { case bound, unbound, unclassified }
+    static func privateCosRead(_ outcome: PrivateCosReadOutcome) {
+        rosterLog.info("private_cos_read outcome=\(outcome.rawValue, privacy: .public)")
+    }
+
     /// 0.20 sign-in and resume stages that used to involve recovery.
     enum SessionStage: String {
         case signInRecovery = "sign_in_recovery"

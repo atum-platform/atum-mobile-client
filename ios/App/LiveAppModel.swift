@@ -3419,6 +3419,11 @@ final class LiveAppModel {
         guard !companyConfigured else { return }
         companyConfigured = true
         companyWorkspace.clientProvider = { [weak self] in self?.domainClient }
+        companyWorkspace.privateCosProvider = { [weak self] in self?.domainClient }
+        companyWorkspace.privateCosRoomTitle = { [weak self] roomID in
+            self?.liveMatrix?.rooms.first(where: { $0.roomID == roomID })?.displayName
+                ?? self?.liveMatrix?.invites.first(where: { $0.roomID == roomID })?.displayName
+        }
         companyWorkspace.conversationsProvider = { [weak self] in self?.domainClient }
         companyWorkspace.presence = { [weak self] roomID in
             guard let self, let matrix = self.liveMatrix else { return .unknown }
@@ -5883,6 +5888,11 @@ final class LiveAppModel {
         }
     }
 
+    func isPrivateCosHomeRow(_ room: ChatListSnapshot.Room) -> Bool {
+        LiveRosterRows.isPrivateCosHomeRow(room, agents: agentsRead.value?.agents ?? [],
+                                           bindings: companyWorkspace.privateCosBindings)
+    }
+
     var hasCachedChatList: Bool { !cachedChatList.isEmpty }
 
     /// True once the room list and both catalog reads are fresh. Until then
@@ -5910,7 +5920,14 @@ final class LiveAppModel {
     /// paints photos and real previews instead of letters.
     func recordChatListSnapshot(accountID: String, rows: [HomeRow]) {
         guard chatListIsAuthoritative, !rows.isEmpty else { return }
-        let snapshot = rows.map(\.snapshotRow)
+        let snapshot = rows.map { row in
+            var snapshot = row.snapshotRow
+            if let agent = agentsRead.value?.agents.first(where: { "agent:" + $0.id.rawValue == row.id }) {
+                snapshot.assistantPrincipal = agent.principal.rawValue
+                snapshot.assistantMatrixUserID = agent.matrixUser?.rawValue
+            }
+            return snapshot
+        }
         guard snapshot != cachedChatList else { return }
         cachedChatList = snapshot
         try? chatListSnapshots.save(accountID: accountID, rooms: snapshot)
@@ -5934,6 +5951,7 @@ final class LiveAppModel {
     private func productRooms() -> [LiveProductRoom] {
         let output = LiveRosterRows.rows(LiveRosterRows.Input(
             agents: agentsRead.value?.agents ?? [],
+            privateCosBindings: companyWorkspace.privateCosBindings,
             apps: appsRead.value?.apps ?? [],
             rooms: liveMatrix?.rooms ?? [],
             invites: liveMatrix?.invites ?? [],
