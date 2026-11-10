@@ -35,7 +35,7 @@ public struct AgentsRead: Sendable {
 /// Main-process-only client for explicit operations on the fixed native domain API. The
 /// refresh coordinator remains the only authority that can expose a bearer;
 /// SwiftUI receives typed domain values and safe failures only.
-@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI {
+@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, ApplePurchasesAPI {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
     private static let agentLifecycleURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents/lifecycle")!
@@ -81,6 +81,46 @@ public struct AgentsRead: Sendable {
         authorization = testAuthorization
         authenticationFailureObserver = onAuthenticationFailure
         self.protocolClasses = protocolClasses
+    }
+
+    private static let applePaths = ["products", "account-token", "transactions"].map {
+        "/api/matrix/v1/store/apple/" + $0
+    }
+
+    public func appleProducts() async throws -> AppleProductsResponse {
+        try await appleRequest(AppleProductsResponse.self, operation: "products", body: nil)
+    }
+
+    public func appleAccountToken() async throws -> AppleAccountTokenResponse {
+        try await appleRequest(AppleAccountTokenResponse.self, operation: "account-token", body: nil)
+    }
+
+    public func appleTransaction(_ input: AppleTransactionRequest) async throws -> AppleTransactionResponse {
+        try await appleRequest(AppleTransactionResponse.self, operation: "transactions",
+                               body: JSONEncoder().encode(input))
+    }
+
+    private func appleRequest<T: Decodable>(_ type: T.Type, operation: String, body: Data?) async throws -> T {
+        let url = Self.baseURL.appendingPathComponent("store/apple/" + operation)
+        guard Self.applePaths.contains(url.path), (operation == "transactions") == (body != nil)
+        else { throw NativeDomainClientFailure.invalidRequest }
+        for forceRefresh in [false, true] {
+            let token = try await authorize(forceRefresh: forceRefresh)
+            try requireActiveTask()
+            let result = try await perform(url: url, token: token, method: body == nil ? "GET" : "POST",
+                                           body: body, maximumRequestBodyBytes: 16_512,
+                                           maximumResponseBodyBytes: 65_536)
+            try requireActiveTask()
+            if (200..<300).contains(result.status) { return try decode(type, data: result.body) }
+            let failure = try decode(ApplePurchaseError.self, data: result.body)
+            guard result.status == failure.error.status else { throw NativeDomainClientFailure.invalidResponse }
+            if failure.error == .unauthenticated && !forceRefresh { continue }
+            if failure.error == .unauthenticated {
+                authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused)
+            }
+            throw failure
+        }
+        throw NativeDomainClientFailure.authenticationRefused
     }
 
     public func agents() async throws -> AgentsResponse {
@@ -1119,7 +1159,7 @@ public struct AgentsRead: Sendable {
         let dynamicAgentPath = isAgentPath(url.path)
         let dynamicCompanyPath = isCompanyPath(url.path)
         let dynamicAppPath = isAppPath(url.path)
-        guard allowedPaths.contains(url.path) || dynamicAgentPath || dynamicCompanyPath || dynamicAppPath
+        guard allowedPaths.contains(url.path) || Self.applePaths.contains(url.path) || dynamicAgentPath || dynamicCompanyPath || dynamicAppPath
         else { return false }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         let query = components.queryItems ?? []

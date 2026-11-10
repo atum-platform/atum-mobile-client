@@ -1,0 +1,99 @@
+{
+  "identifier": "00000000-0000-4000-8000-000000000010",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "95000",
+      "familyShareable": false,
+      "internalID": "1000000001",
+      "localizations": [
+        {
+          "description": "95,000 paid + 5,000 bonus Protons",
+          "displayName": "100k Protons",
+          "locale": "en_US"
+        },
+        {
+          "description": "StoreKit test",
+          "displayName": "100k Protons",
+          "locale": "vi"
+        }
+      ],
+      "productID": "com.atum.mobile.protons.100k",
+      "referenceName": "Synthetic 100k",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "395000",
+      "familyShareable": false,
+      "internalID": "1000000002",
+      "localizations": [
+        {
+          "description": "395,000 paid + 105,000 bonus Protons",
+          "displayName": "500k Protons",
+          "locale": "en_US"
+        },
+        {
+          "description": "StoreKit test",
+          "displayName": "500k Protons",
+          "locale": "vi"
+        }
+      ],
+      "productID": "com.atum.mobile.protons.500k",
+      "referenceName": "Synthetic 500k",
+      "type": "Consumable"
+    }
+  ],
+  "settings": {
+    "_askToBuyEnabled": false,
+    "_failTransactionsEnabled": false,
+    "_locale": "vi_VN",
+    "_storefront": "VNM",
+    "_storeKitErrors": [
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Load Products"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Purchase"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Verification"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "App Store Sync"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Subscription Status"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "App Transaction"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Manage Subscriptions"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Refund Request"
+      }
+    ]
+  },
+  "subscriptionGroups": [],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

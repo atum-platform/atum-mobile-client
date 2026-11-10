@@ -34,6 +34,10 @@ jobs:
         run: |
           python3 scripts/generate-native-push-fixtures.py --check
           python3 -m unittest discover -s tests -p test_native_push_projection.py
+      - name: Verify public Apple purchase contract text
+        run: |
+          python3 scripts/verify-native-purchase-contract.py
+          python3 -m unittest discover -s tests -p test_native_purchase_contract.py
       - name: Parse and resolve the client package
         working-directory: ios
         run: |
@@ -88,3 +92,5 @@ jobs:
       - run: python3 -m unittest discover -s tests -p test_native_push_projection.py -v
       - run: python3 scripts/import-design-exports --verify
       - run: python3 scripts/generate-native-push-fixtures.py --check
+      - run: python3 -m unittest discover -s tests -p test_native_purchase_contract.py -v
+      - run: python3 scripts/verify-native-purchase-contract.py
