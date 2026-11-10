@@ -1,0 +1,361 @@
+{
+  "schemaVersion": 1,
+  "contractId": "atum.store",
+  "version": "1.1",
+  "providerCommit": "7df04652c7c1ce39f757891e01e0d14951db31bb",
+  "packSHA256": "77b3dc62b8b7ab3a9332c0a8c0eb493df1035dabb76eff2b21764629dc8707f0",
+  "fixtures": [
+    {
+      "file": "catalog-pet.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "d71931573b936fa56106f2ee46303a31709a1aaa930b977beaceffc5449479fe"
+    },
+    {
+      "file": "catalog-empty.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "0343639fac1511a32a4c9a92c7655a6e9f9ad3a600fc6f30b5bdad6806160a97"
+    },
+    {
+      "file": "catalog-null-offer.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "c1dd59991259a1052eade6b523384cb85e0428847b1851610c8c7750a7211d74"
+    },
+    {
+      "file": "catalog-monthly-agent.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "95861fcd5cbc4bdd3edd3108e73ab7ed1cae2894dd233ec972b1c4cf67f75b55"
+    },
+    {
+      "file": "catalog-hub-delivery-rejected.json",
+      "message": "catalog.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "b4e2e39f9825c1d418b16006b674ab0b0033ee3af96460ecbc8161eb6a6f5852"
+    },
+    {
+      "file": "catalog-one-bad-row.json",
+      "message": "catalog.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "b684759b961c80f87178336abe62c2cc0ba4d9396b184cab83c4feb5790b26bc"
+    },
+    {
+      "file": "entitlements-pet.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "f86a029927964a27c65e6b9da444b72778365f9f473f9489071f74096e0e4dba"
+    },
+    {
+      "file": "entitlements-skill.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "e4baa6bd7ae048e806a1ac74a27ddfc286fcb286f4544a0576c46def59e413b4"
+    },
+    {
+      "file": "entitlements-agent.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "89a1ee4cfa49966e94f119a746536246921ceffae2449542592bca797cacc017"
+    },
+    {
+      "file": "entitlements-gift-stopgap.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "f3d33979b80d2300a2d84f6fd1650ea720f4c5d52ee1c090daaa4dfbead8da7a"
+    },
+    {
+      "file": "entitlements-empty.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "bf4c9d400d535d1f34feec33bd2cb7e2d18b033634b9e778a5e2aafd80e2cd4e"
+    },
+    {
+      "file": "entitlements-pet-assistant-rejected.json",
+      "message": "entitlements.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "faaa0230629bb2fec8ed475bea74d7a9c0d2f594faea199eee376b42d1aee223"
+    },
+    {
+      "file": "entitlements-hub-delivery-rejected.json",
+      "message": "entitlements.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "ca5177b14598a76de8beb388e531341ee3bb7d10d6872848d05c459ae30a7fc6"
+    },
+    {
+      "file": "entitlements-one-bad-row.json",
+      "message": "entitlements.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "fe4972b2f448c0fd814230408ffe67408c16e40a2f5e42baa0b41dec8b812678"
+    },
+    {
+      "file": "entitlements-skill-without-assistant.json",
+      "message": "entitlements.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "5e2ca9c36c7dc074c3b33639c016d7393bbc137ef55a46b63826a95c04b4c63b"
+    },
+    {
+      "file": "entitlements-agent-without-subscription.json",
+      "message": "entitlements.response",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "c64f1245ec016dff8349ae7bfc6e3ee9ff608d558fb716189e4b0ba290c95c2c"
+    },
+    {
+      "file": "purchases-completed.json",
+      "message": "purchases.response",
+      "expect": "accept",
+      "sha256": "ee921db6f1109077f345334c391b2e0a5257aad4f915c4db252fd69cd6367e5d"
+    },
+    {
+      "file": "purchases-empty.json",
+      "message": "purchases.response",
+      "expect": "accept",
+      "sha256": "f4a5eb6f49546bde3f7c76e8f25ee49927c2005db4db5a1684925dc55529e447"
+    },
+    {
+      "file": "purchases-negative-amount.json",
+      "message": "purchases.response",
+      "expect": "reject",
+      "violation": "bound",
+      "sha256": "2f64853843924c13163c5326785b12ed0f507bf75cab1a38bc46a02d3808684c"
+    },
+    {
+      "file": "purchase-pet.json",
+      "message": "purchase.request",
+      "expect": "accept",
+      "sha256": "46fa1d1f1a524a74ce9d8027696dafeec23daf67d13440b6321cd17ed65e9a55"
+    },
+    {
+      "file": "purchase-agent.json",
+      "message": "purchase.request",
+      "expect": "accept",
+      "sha256": "273973cb0faff1108122aee10271ddb90bd4c389e358376c20af29911ef0d072"
+    },
+    {
+      "file": "purchase-client-names-principal.json",
+      "message": "purchase.request",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "6d892d6a6316d02e10ed22877206e86c46d524d085f193bfa7a3872f786b97da"
+    },
+    {
+      "file": "purchase-client-names-payer.json",
+      "message": "purchase.request",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "fe5a2762de0dbd34b751c4a26459eae66223bf8547e0fdbce9e328896d41f77f"
+    },
+    {
+      "file": "purchase-client-names-priceMicroProtons.json",
+      "message": "purchase.request",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "sha256": "8e35c7434745f9d1384a9cb6963190fd23bd77dcefe51a1a77a83af02b1e5153"
+    },
+    {
+      "file": "purchase-version-zero.json",
+      "message": "purchase.request",
+      "expect": "reject",
+      "violation": "bound",
+      "sha256": "8068c4a04522790000b3b9614833765c26c83aa791b2b21f8faaa41b4f8162fc"
+    },
+    {
+      "file": "purchase-consent-false.json",
+      "message": "purchase.request",
+      "expect": "reject",
+      "violation": "const",
+      "sha256": "10685c1d3150b4d7fdaf960b3fa268b5bc4e83bf2ca2963036448adc7a0f8daf"
+    },
+    {
+      "file": "result-completed.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "4a934a67b91c1ab8bac8dc6168d256cf180ac84dea964e6aa27f7f725ddd6a6c"
+    },
+    {
+      "file": "result-pending.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "9312992232a57d2ea262601c067b013fddd4b8cde2a041bdc3e5c8f3bbf17d6f"
+    },
+    {
+      "file": "result-reversed.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "c9b5a95084cda7bb3000b6390921e3ecf1b4c9c4d620be4549af57c90477ea38"
+    },
+    {
+      "file": "result-already-owned.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "4e5a094f50e0e3d4cecf640fbed0363057bdc9fecc5a196c16305e230ea819de"
+    },
+    {
+      "file": "result-offer-changed.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "9af435b1c86683c39d0ad93bce906979ea0bb2e173edcb39564437a4c5605bd6"
+    },
+    {
+      "file": "result-refused-insufficient_protons.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "f8d145a297076b97416845e7f15d00c13e338601dd1315a7643ca547b5a27e38"
+    },
+    {
+      "file": "result-refused-offer_unavailable.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "cda6b4628ae8842af4daeef0bf51d771caf973c0b6a809a1c97715cce1f07461"
+    },
+    {
+      "file": "result-refused-feature_unavailable.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "9c9ab155ee2125b5e505a7f783eb03ed4d8d5f027f907a6eb972e48101ac8eb0"
+    },
+    {
+      "file": "result-refused-pet_credit_reserved.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "b97fe702631c45326c3f57421cc9f6783cd219e2368270cf657fc934bdbddae0"
+    },
+    {
+      "file": "result-refused-forbidden.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "04fdbaef877873300ea70c93a56f36a1fd92b7aad9af71e55c3a3e7b0cc35ef8"
+    },
+    {
+      "file": "result-unknown-refusal.json",
+      "message": "purchase.result",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "721d8ebb958fc265bc5addf562153e69c4ae8d7eb795649e15503b849ba3b6c4"
+    },
+    {
+      "file": "result-completed-no-entitlement.json",
+      "message": "purchase.result",
+      "expect": "reject",
+      "violation": "variant",
+      "sha256": "f31346410437e4428854e6b699d5e4c3928e6e31005a04454dd6cb5cd9d72871"
+    },
+    {
+      "file": "result-wrong-item.json",
+      "message": "purchase.result",
+      "expect": "reject",
+      "violation": "invariant",
+      "sha256": "131a281aabc7ffcc934ca8e0a7aed06bfb9324b271fd571f6fd3496738fd89b7"
+    },
+    {
+      "file": "result-wrong-assistant.json",
+      "message": "purchase.result",
+      "expect": "reject",
+      "violation": "invariant",
+      "sha256": "2051f666d0964bf3e64e5a208d71ea3d2d4b40738bc6436a9ce6cc9c957b862c"
+    },
+    {
+      "file": "cancel-agent.json",
+      "message": "cancel.result",
+      "expect": "accept",
+      "sha256": "bd3d00cb7e2d68bda61ae7bd4b31665eeae313994e267976576279b5c4258b72"
+    },
+    {
+      "file": "v11-catalog-gift-owned.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "7f95fa2ee8869655dcfeeb87703ecbe0861bc89130c04247f0d61b26d22d60fd"
+    },
+    {
+      "file": "v11-catalog-visiting.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "037f5742905e020050f10fa6608c1a335b4c166ad50c552cf1cfe89d84fc6960"
+    },
+    {
+      "file": "v11-catalog-unavailable.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "e851175c1edff6bcc40cb3dad4777ae83fee742a507ea94d1ad83ac33cda2ce4"
+    },
+    {
+      "file": "v11-catalog-hub-skill.json",
+      "message": "catalog.response",
+      "expect": "accept",
+      "sha256": "0bbebecd453c9ecde44ca6b54c5c9fd654ef98870d619b10de5f4ca606bebf83"
+    },
+    {
+      "file": "v11-entitlement-purchase.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "de5eb960faa67e62a55e5d287561a11e8a910b8297c93dde3841cee37b1a45c5"
+    },
+    {
+      "file": "v11-entitlement-gift.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "f3d33979b80d2300a2d84f6fd1650ea720f4c5d52ee1c090daaa4dfbead8da7a"
+    },
+    {
+      "file": "v11-entitlement-compensation.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "90dfcf2d1805fc26c31f9bdad09f747b96001d5f6b30f6a34e236b8565641271"
+    },
+    {
+      "file": "v11-entitlement-promo.json",
+      "message": "entitlements.response",
+      "expect": "accept",
+      "sha256": "55dc036d88f1f67780aaee43d36a4ccd4c87149e6a38d196cf7ef26e1a508a9f"
+    },
+    {
+      "file": "v11-result-gift-owned.json",
+      "message": "purchase.result",
+      "expect": "accept",
+      "sha256": "a4b2188fc613fb79f93a374072e99835f7163bbe5c41bcea791ca177c321bb91"
+    },
+    {
+      "file": "v11-cancel-source-purchase.json",
+      "message": "cancel.result",
+      "expect": "accept",
+      "sha256": "90fc5d4ab2812b21195da9a6c39180719991a7fe733271de26a182a2b08cd13b"
+    },
+    {
+      "file": "v11-source-unknown.json",
+      "message": "entitlements.response",
+      "expect": "reject",
+      "violation": "variant",
+      "legacy_expect": "accept",
+      "sha256": "407403ecd8dd94d26bdc5548fac74eb6bc5ae77cb6e457f299434947fc735bd2"
+    },
+    {
+      "file": "v11-ownership-visit-as-owned.json",
+      "message": "catalog.response",
+      "expect": "reject",
+      "violation": "variant",
+      "legacy_expect": "accept",
+      "sha256": "b71ed9ed8737c9827a7dd77891853e9808ba36e80a023eaf2af8b5d87f94546a"
+    },
+    {
+      "file": "v11-requires-public-leak.json",
+      "message": "catalog.response",
+      "expect": "reject",
+      "violation": "forbidden_field",
+      "legacy_expect": "accept",
+      "sha256": "f3b25c6264c45a3f5fb97012e8c8e833139e8ebdb9c3bb4dbb16e7e3e09f3150"
+    }
+  ],
+  "admissionPins": {
+    "store/v1.1": "77b3dc62b8b7ab3a9332c0a8c0eb493df1035dabb76eff2b21764629dc8707f0",
+    "mobile-native-api/v1.1": "aa7c9df2c736bbb0e34ccfcba4de5b5e26a4048bd3b7857c866479dbc11432ef",
+    "mobile-purchases/v1.1": "6342cbb5d7b1046e93e253ffaa5a5b0895521b630fa1d4a9964676e53814a9bb"
+  }
+}

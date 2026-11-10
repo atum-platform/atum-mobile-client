@@ -348,11 +348,49 @@ public struct AgentsRead: Sendable {
                                  acceptsAssistantNameRefusal: false)
     }
 
-    /// Reads the server-authored Store listing. This is deliberately a
-    /// read-only display projection: it does not expose purchases,
-    /// entitlements, checkout, or StoreKit authority.
+    /// Only the five native-admitted Store operations; topups/tasks and the
+    /// desktop-only per-purchase status route are intentionally absent.
+    public func storeEntitlements() async throws -> StoreEntitlementsResponse {
+        try await storeRead(StoreEntitlementsResponse.self, path: "entitlements")
+    }
+
+    public func storePurchases() async throws -> StorePurchasesResponse {
+        try await storeRead(StorePurchasesResponse.self, path: "purchases")
+    }
+
+    public func acquireStoreItem(_ attempt: StorePurchaseAttempt) async throws -> StorePurchaseResult {
+        let data = try await storeData(url: Self.baseURL.appendingPathComponent("store/purchases"),
+            method: "POST", body: attempt.body, extraHeaders: [
+                StoreWire.capabilitiesHeader: StoreWire.capabilities,
+                "Idempotency-Key": attempt.idempotencyKey.rawValue
+            ])
+        let result = try StoreWire.decode(StorePurchaseResult.self, from: data)
+        try attempt.validate(result)
+        return result
+    }
+
+    public func cancelStoreSubscription(_ id: NativeID) async throws -> StoreEntitlement {
+        let data = try await storeData(url: Self.baseURL.appendingPathComponent("store/entitlements/" + id.rawValue + "/cancel"),
+            method: "POST", body: Data("{}".utf8), extraHeaders: [StoreWire.capabilitiesHeader: StoreWire.capabilities])
+        let result = try StoreWire.decode(StoreEntitlement.self, from: data)
+        guard result.id == id, result.subscription?.state == .cancelled else { throw NativeDomainClientFailure.invalidResponse }
+        return result
+    }
+
+    private func storeRead<T: Decodable>(_ type: T.Type, path: String) async throws -> T {
+        let data = try await storeData(url: Self.baseURL.appendingPathComponent("store/" + path),
+            method: "GET", body: nil, extraHeaders: [StoreWire.capabilitiesHeader: StoreWire.capabilities])
+        return try StoreWire.decode(type, from: data)
+    }
+
+    private func storeData(url: URL, method: String, body: Data?, extraHeaders: [String: String]) async throws -> Data {
+        try await response(url: url, method: method, body: body,
+            maximumRequestBodyBytes: 4096, maximumResponseBodyBytes: 1_048_576,
+            extraHeaders: extraHeaders).body
+    }
+
     public func storeCatalog() async throws -> StoreCatalogResponse {
-        try await read(StoreCatalogResponse.self, url: Self.storeCatalogURL)
+        try await storeRead(StoreCatalogResponse.self, path: "catalog")
     }
 
     public func wallet() async throws -> WalletResponse {
@@ -1067,6 +1105,13 @@ public struct AgentsRead: Sendable {
               (0...4_500_000).contains(maximumResponseBodyBytes),
               (method == "GET") == (body == nil),
               extraHeaders.allSatisfy({ name, value in
+                  if url.path.hasPrefix(Self.baseURL.path + "/store/") {
+                      if name == StoreWire.capabilitiesHeader { return value == StoreWire.capabilities }
+                      if name == "Idempotency-Key" {
+                          return url.path == Self.baseURL.path + "/store/purchases" && method == "POST"
+                              && (try? NativeID(value)) != nil
+                      }
+                  }
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
                   }
@@ -1170,10 +1215,17 @@ public struct AgentsRead: Sendable {
                             Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
                             Self.driveAccountURL.path, Self.privateCosCapabilityURL.path]
+        let storeRoot = Self.baseURL.path + "/store/"
+        let storeTail = String(url.path.dropFirst(storeRoot.count))
+        let storeParts = storeTail.split(separator: "/", omittingEmptySubsequences: false)
+        let nativeStorePath = url.path.hasPrefix(storeRoot) && (
+            ["catalog", "entitlements", "purchases"].contains(storeTail)
+            || (storeParts.count == 3 && storeParts[0] == "entitlements" && storeParts[2] == "cancel"
+                && (try? NativeID(String(storeParts[1]))) != nil))
         let dynamicAgentPath = isAgentPath(url.path)
         let dynamicCompanyPath = isCompanyPath(url.path)
         let dynamicAppPath = isAppPath(url.path)
-        guard allowedPaths.contains(url.path) || Self.applePaths.contains(url.path) || dynamicAgentPath || dynamicCompanyPath || dynamicAppPath
+        guard allowedPaths.contains(url.path) || Self.applePaths.contains(url.path) || dynamicAgentPath || dynamicCompanyPath || dynamicAppPath || nativeStorePath
         else { return false }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         let query = components.queryItems ?? []

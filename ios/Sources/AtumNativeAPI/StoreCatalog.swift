@@ -1,14 +1,12 @@
 import Foundation
 
-/// Read-only Store listing projection for the native domain API. It contains
-/// display metadata only: an offer is not purchase authority, an entitlement,
-/// or a StoreKit product.
+/// Store listing projection for the native domain API. Offers are immutable
+/// confirmation inputs; only a typed purchase result establishes acquisition.
 public struct StoreCatalogResponse: Decodable, Equatable, Sendable {
     public let items: [StoreCatalogItem]
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
-        try c.closed(["items"])
         items = try c.value("items")
         guard items.count <= 1_000 else { throw ContractViolation.invalidValue }
 
@@ -20,9 +18,8 @@ public struct StoreCatalogResponse: Decodable, Equatable, Sendable {
 }
 
 /// A bounded, server-authored Store card. Additional top-level item fields are
-/// deliberately ignored: the public Store contract evolves with optional
-/// display projections (for example ownership), none of which may become
-/// native purchase or launch authority merely by being present.
+/// deliberately ignored. Known Store 1.1 ownership/install fields are validated;
+/// they never become purchase or launch authority merely by being present.
 public struct StoreCatalogItem: Decodable, Equatable, Identifiable, Sendable {
     public enum Kind: String, Decodable, Sendable { case skill, agent, pet }
 
@@ -36,6 +33,11 @@ public struct StoreCatalogItem: Decodable, Equatable, Identifiable, Sendable {
     public let featured: Bool
     public let sortOrder: Int64
     public let offer: StoreCatalogOffer?
+    public let ownership: StoreOwnership?
+    public let deliverable: Bool?
+    public let install: StoreHubInstall?
+    public let tryPrompt: StoreLocalizedCopy
+    public let needs: [String]
 
     public var id: String { itemID }
 
@@ -51,8 +53,8 @@ public struct StoreCatalogItem: Decodable, Equatable, Identifiable, Sendable {
 
         // Validate required, currently unrendered contract fields before
         // discarding them. This preserves a single strict listing boundary.
-        _ = try c.value("tryPrompt", as: StoreLocalizedCopy.self)
-        let needs = try c.value("needs", as: [String].self)
+        tryPrompt = try c.value("tryPrompt")
+        needs = try c.value("needs", as: [String].self)
         guard needs.count <= 20 else { throw ContractViolation.invalidValue }
         for need in needs { try storeText(need, maximum: 128) }
 
@@ -62,6 +64,10 @@ public struct StoreCatalogItem: Decodable, Equatable, Identifiable, Sendable {
         featured = try c.value("featured")
         sortOrder = try c.integer("sortOrder")
         offer = try c.nullable("offer")
+        ownership = try c.optional("ownership")
+        deliverable = try c.optional("deliverable")
+        install = try c.optional("install")
+        guard install == nil || (kind == .skill && offer == nil) else { throw ContractViolation.invariant }
     }
 }
 
@@ -90,8 +96,8 @@ public struct StoreLocalizedCopy: Decodable, Equatable, Sendable {
     }
 }
 
-/// Offer display metadata only. The native client neither forms a purchase
-/// request nor derives prices, capabilities, or entitlements from this value.
+/// Immutable offer metadata. The request echoes ID/version, never a client price;
+/// the server resolves price, ownership and delivery on every acquisition.
 public struct StoreCatalogOffer: Decodable, Equatable, Sendable {
     public enum Scope: String, Decodable, Sendable { case account, agent }
     public enum BillingInterval: String, Decodable, Sendable { case oneTime = "one_time", month }
@@ -107,6 +113,7 @@ public struct StoreCatalogOffer: Decodable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
+        try c.closed(["id", "version", "priceMicroProtons", "renewalPriceMicroProtons", "scope", "billingInterval", "delivery"])
         id = try c.string("id", minimum: 36, maximum: 36,
             pattern: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}").lowercased()
         version = try c.integer("version", minimum: 1)
@@ -129,7 +136,7 @@ public struct StoreCatalogOffer: Decodable, Equatable, Sendable {
 
 /// Matches the public Store validator: text is scalar-bounded and rejects the
 /// disallowed C0 controls without stripping server-authored display text.
-private func storeText(_ value: String, maximum: Int) throws {
+func storeText(_ value: String, maximum: Int) throws {
     // `store-contract` validates JavaScript string length, which is UTF-16
     // code units rather than Swift Character count.
     guard !value.isEmpty, value.utf16.count <= maximum else {

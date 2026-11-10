@@ -9,6 +9,7 @@ struct AccountScreen: View {
     let presentation: AccountPresentation
     let actions: AccountActions
     var store: LiveProductStoreRead
+    var storeCommerce: LiveStoreCommerce?
     var refreshStore: @MainActor () async -> Void
     var openStoreRoom: (String) -> Void
     var setAppShortcutVisibility: (@MainActor (String, Bool) async -> Bool)?
@@ -46,6 +47,7 @@ struct AccountScreen: View {
          presentation: AccountPresentation,
          actions: AccountActions,
          store: LiveProductStoreRead = .unavailable,
+         storeCommerce: LiveStoreCommerce? = nil,
          refreshStore: @escaping @MainActor () async -> Void = {},
          openStoreRoom: @escaping (String) -> Void = { _ in },
          setAppShortcutVisibility: (@MainActor (String, Bool) async -> Bool)? = nil,
@@ -65,6 +67,7 @@ struct AccountScreen: View {
         self.presentation = presentation
         self.actions = actions
         self.store = store
+        self.storeCommerce = storeCommerce
         self.refreshStore = refreshStore
         self.openStoreRoom = openStoreRoom
         self.setAppShortcutVisibility = setAppShortcutVisibility
@@ -186,7 +189,8 @@ struct AccountScreen: View {
                             showsStore = false
                             openStoreRoom(roomID)
                         },
-                        setAppShortcutVisibility: setAppShortcutVisibility)
+                        setAppShortcutVisibility: setAppShortcutVisibility,
+                        commerce: storeCommerce)
         }
         .sheet(isPresented: $founderDraftPresented) {
             if let draft = founderDraft {
