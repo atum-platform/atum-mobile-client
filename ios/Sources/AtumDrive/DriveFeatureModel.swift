@@ -57,13 +57,18 @@ public struct DriveDirectoryPresentation: Equatable {
     public var items = [DriveItem]()
     public var condition = DriveDirectoryCondition.loading
     public var isTruncated = false
+    /// When this listing last came from the server in this session; a cached
+    /// page shown before the network answers keeps the previous time.
+    public var refreshedAt: Date?
 
     public init(items: [DriveItem] = [],
                 condition: DriveDirectoryCondition = .loading,
-                isTruncated: Bool = false) {
+                isTruncated: Bool = false,
+                refreshedAt: Date? = nil) {
         self.items = items
         self.condition = condition
         self.isTruncated = isTruncated
+        self.refreshedAt = refreshedAt
     }
 }
 
@@ -115,6 +120,8 @@ public final class DriveFeatureModel {
     public private(set) var lastExitReason: DriveExitReason?
     public var preview: DrivePreview?
     public var notice: DriveNotice?
+    /// The clock a fresh listing is stamped with (tests pin it).
+    @ObservationIgnored public var now: () -> Date = Date.init
 
     @ObservationIgnored private var accountID: String?
     @ObservationIgnored private var resumeAccess: Access?
@@ -453,7 +460,8 @@ public final class DriveFeatureModel {
                 return $0.name.localizedStandardCompare($1.name) == .orderedAscending
             },
             condition: condition,
-            isTruncated: page.isTruncated
+            isTruncated: page.isTruncated,
+            refreshedAt: condition == .fresh ? now() : directories[page.parentID]?.refreshedAt
         )
     }
 
