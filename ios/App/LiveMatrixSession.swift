@@ -191,7 +191,8 @@ final class LiveMatrixSession {
     private(set) var error: LiveMatrixSessionError?
 
     let sharedCollectionsRegistry = SharedCollectionsRegistry()
-    private let runtime: MatrixLiveRuntime
+    /// Internal for the company notes-to-self glue (`CompanyWorkspaceModel.swift`).
+    let runtime: MatrixLiveRuntime
     private var syncService: SyncService?
     private var roomList: RoomList?
     private var roomEntries: RoomListEntriesWithDynamicAdaptersResult?

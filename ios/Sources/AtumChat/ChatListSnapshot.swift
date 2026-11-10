@@ -35,6 +35,18 @@ public struct ChatListSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    /// A named assistant's shape mark, by its `/agents` raw values. An
+    /// unknown value from a newer platform simply draws the initial.
+    public struct Mark: Codable, Equatable, Hashable, Sendable {
+        public var shape: String
+        public var color: String
+
+        public init(shape: String, color: String) {
+            self.shape = shape
+            self.color = color
+        }
+    }
+
     public struct Room: Codable, Equatable, Sendable {
         public var id: String
         public var roomID: String
@@ -45,6 +57,8 @@ public struct ChatListSnapshot: Codable, Equatable, Sendable {
         public var matrixAvatarURL: String?
         public var avatarSHA256: String?
         public var avatarCandidates: [AvatarCandidate]
+        /// Absent in snapshots written before the mark was kept.
+        public var mark: Mark?
         public var preview: RowPreview.Display
         public var latestEventAt: Date?
         public var latestWasDeliveryNotice: Bool
@@ -69,6 +83,7 @@ public struct ChatListSnapshot: Codable, Equatable, Sendable {
                     avatarURL: String? = nil, matrixAvatarURL: String? = nil,
                     avatarSHA256: String? = nil,
                     avatarCandidates: [AvatarCandidate] = [],
+                    mark: Mark? = nil,
                     preview: RowPreview.Display = .init(prefix: .none, value: .empty, sendState: .sent),
                     latestEventAt: Date? = nil,
                     latestWasDeliveryNotice: Bool = false,
@@ -88,6 +103,7 @@ public struct ChatListSnapshot: Codable, Equatable, Sendable {
             self.matrixAvatarURL = matrixAvatarURL
             self.avatarSHA256 = avatarSHA256
             self.avatarCandidates = avatarCandidates
+            self.mark = mark
             self.preview = preview
             self.latestEventAt = latestEventAt
             self.latestWasDeliveryNotice = latestWasDeliveryNotice
@@ -155,6 +171,7 @@ public extension ChatListSnapshot {
             if let value = liveRow.matrixAvatarURL { row.matrixAvatarURL = value }
             if let value = liveRow.avatarSHA256 { row.avatarSHA256 = value }
             if !liveRow.avatarCandidates.isEmpty { row.avatarCandidates = liveRow.avatarCandidates }
+            if let value = liveRow.mark { row.mark = value }
             if let value = liveRow.verification { row.verification = value }
             row.latestWasDeliveryNotice = liveRow.latestWasDeliveryNotice
             if liveRow.hasSemanticPreview { row.preview = liveRow.preview }

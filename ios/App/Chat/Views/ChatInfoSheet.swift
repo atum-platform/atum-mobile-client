@@ -1057,7 +1057,8 @@ struct ChatInfoAvatar: View {
             if info.isFounder {
                 FounderRavenAvatar(size: size, fallbackName: info.title)
             } else {
-                AtumAvatar(kind: info.avatarKind, name: info.title, art: art, size: size)
+                AtumAvatar(kind: info.avatarKind, name: info.title, art: art,
+                           mark: info.avatar?.agentMark, size: size)
                     .task(id: Request(avatar: info.avatar, matrixURI: info.matrixAvatarURI,
                                       sha256: info.avatarSHA256,
                                       candidates: info.avatarCandidates, size: size)) {

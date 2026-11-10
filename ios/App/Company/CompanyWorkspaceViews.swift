@@ -7,9 +7,10 @@ import SwiftUI
 // company header that always opens the switcher sheet (every company with its
 // mark and a check on the current one, invitations, "Create company"),
 // invitations on top, then "Channels" with unread and mention marks and a mute
-// action. A channel pushes the existing chat and Back returns to the list. With
-// no company and no invitation the root is a "Create your company" empty state.
-// Channel creation, invites and removal stay on the desktop.
+// action, then "Direct messages" (You, the Chief of Staff, the company's DMs).
+// A channel pushes the existing chat and Back returns to the list. With no
+// company and no invitation the root is a "Create your company" empty state.
+// Every company mark is a circle (owner ruling 2).
 
 struct TeamSpacePresentation: Equatable {
     var isLoading: Bool
@@ -46,8 +47,10 @@ struct TeamSpaceActions {
     var setAppIconBadge: ((Int) async -> Void)?
     /// Direct messages; nil keeps the section off whatever the presentation says.
     var conversations: ConversationListActions?
-    /// Authenticated Matrix media, for company logos.
+    /// Authenticated Matrix media, for company logos and people's photos.
     var loadMatrixThumbnail: ((String, Int) async -> Data?)?
+    /// "You" and the Chief of Staff rows of Direct messages.
+    var directMessages = DirectMessagesActions()
 }
 
 /// Workplace is a separate mode from Personal Home. It reuses the existing
@@ -96,7 +99,8 @@ struct TeamSpaceScreen: View {
         .navigationDestination(isPresented: $showsMembers) {
             CompanyMembersView(design: design,
                                members: presentation.workspace?.members ?? [],
-                               isLoading: presentation.workspace?.membersLoading ?? false)
+                               isLoading: presentation.workspace?.membersLoading ?? false,
+                               loadMatrixThumbnail: actions.loadMatrixThumbnail)
         }
         .sheet(isPresented: $showsSwitcher) {
             CompanySwitcherSheet(design: design, presentation: presentation, actions: actions,
@@ -190,12 +194,14 @@ struct TeamSpaceScreen: View {
                     sectionHeader(copy.channelsTitle, id: "company.section")
                 }
                 .listSectionSeparator(.hidden)
-                // Direct messages exist only while the server, the feature and the
-                // tenant all say so; otherwise there is no section and no request.
-                if let section = workspace.conversations, let conversationActions = actions.conversations {
-                    ConversationSectionView(design: design, companyID: workspace.id,
-                                            section: section, actions: conversationActions)
-                }
+                // Direct messages is always there for a loaded company (desktop
+                // `company-workspace.tsx:2996`): You and the Chief of Staff come first;
+                // only the conversation rows and "+" wait for the conversations family.
+                ConversationSectionView(design: design, companyID: workspace.id,
+                                        directMessages: workspace.directMessages,
+                                        actions: actions.conversations,
+                                        rowActions: actions.directMessages,
+                                        loadMatrixThumbnail: actions.loadMatrixThumbnail)
             } else if presentation.canCreate {
                 Section {
                     createCompanyButton
@@ -329,7 +335,7 @@ struct TeamSpaceScreen: View {
         }
     }
 
-    /// The current company: its initial in the shared squircle, its name and a
+    /// The current company: its logo (or initial) in a circle, its name and a
     /// chevron. It is always the switcher (one company or many), and a mark
     /// beside it says another company has something waiting.
     /// The tile in the bar's 44 pt glass capsule (FlowPhone › Team draws it at
@@ -750,6 +756,7 @@ struct CompanyMembersView: View {
     let design: LiveDesign
     let members: [CompanyMemberRow]
     let isLoading: Bool
+    var loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil
 
     @Environment(\.colorScheme) private var scheme
 
@@ -765,18 +772,20 @@ struct CompanyMembersView: View {
             } else {
                 ForEach(members) { member in
                     HStack(spacing: 12) {
-                        Image(atum.symbol(.userCircle))
-                            .font(.title3)
-                            .foregroundStyle(atum.color(.muted, scheme: scheme))
+                        MatrixFace(kind: .person, name: member.name, matrixURI: member.avatarURI, size: 36,
+                                   loadMatrixThumbnail: loadMatrixThumbnail)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: member.name)
-                                .font(.body)
-                                .foregroundStyle(atum.color(.ink, scheme: scheme))
+                            HStack(spacing: 6) {
+                                Text(verbatim: member.name)
+                                    .font(.body)
+                                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                                    .lineLimit(1)
+                                CompanyRolePill(design: design, role: member.role, isAdmin: member.isAdmin)
+                            }
                             HStack(spacing: 6) {
                                 if let handle = member.handle {
                                     Text(verbatim: "@" + handle)
                                 }
-                                Text(verbatim: member.role)
                                 if let state = member.state {
                                     Text(verbatim: "· " + state)
                                 }
@@ -802,7 +811,29 @@ struct CompanyMembersView: View {
     }
 }
 
-/// FlowPhone › Team: the company's app tile, its name in subheadline semibold
+/// A member's role as a pill (desktop `RoleBadge`): admins a shade stronger.
+struct CompanyRolePill: View {
+    let design: LiveDesign
+    let role: String
+    let isAdmin: Bool
+
+    @Environment(\.colorScheme) private var scheme
+    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+
+    var body: some View {
+        Text(verbatim: role)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(atum.color(isAdmin ? .ink : .soft, scheme: scheme))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(atum.color(isAdmin ? .actionQuiet : .cell, scheme: scheme)))
+            .overlay(Capsule().strokeBorder(atum.color(.frame, scheme: scheme), lineWidth: 0.5))
+            .lineLimit(1)
+            .fixedSize()
+    }
+}
+
+/// FlowPhone › Team: the company's logo circle, its name in subheadline semibold
 /// and the up/down caret, plus a mark when another company has something
 /// waiting; drawn inside the bar's glass capsule.
 private struct CompanyHeaderLabel: View {

@@ -37,6 +37,9 @@ struct AtumAvatar: View {
     let kind: AtumAvatarKind
     let name: String
     let art: AtumAvatarArt?
+    /// A named assistant's coloured shape, drawn when it has no photo
+    /// (desktop `at/assistant-avatar.tsx`: photo, brand, mark, initial).
+    let mark: AgentMark?
     let placeholder: Placeholder
     private let baseSize: CGFloat
     @ScaledMetric private var scaledSize: CGFloat
@@ -45,10 +48,11 @@ struct AtumAvatar: View {
     @Environment(\.colorScheme) private var scheme
 
     init(kind: AtumAvatarKind, name: String, art: AtumAvatarArt? = nil,
-         placeholder: Placeholder = .monogram, size: CGFloat) {
+         mark: AgentMark? = nil, placeholder: Placeholder = .monogram, size: CGFloat) {
         self.kind = kind
         self.name = name
         self.art = art
+        self.mark = mark
         self.placeholder = placeholder
         baseSize = size
         _scaledSize = ScaledMetric(wrappedValue: size, relativeTo: .body)
@@ -100,9 +104,32 @@ struct AtumAvatar: View {
         Int((pointSize * 3).rounded(.up))
     }
 
+    /// What the face draws, in desktop's order: the photo, Atum's crescent,
+    /// an assistant's mark, then the initial. An app never wears a mark.
+    enum Treatment: Equatable {
+        case image
+        case crescent
+        case mark(AgentMark)
+        case monogram(String)
+    }
+
+    static func treatment(kind: AtumAvatarKind, hasArt: Bool, mark: AgentMark?,
+                          name: String) -> Treatment {
+        switch AvatarFacePolicy.face(hasImage: hasArt, name: name) {
+        case .image: return .image
+        case let .monogram(value):
+            if kind == .atum { return .crescent }
+            if let mark, kind != .app { return .mark(mark) }
+            return .monogram(value)
+        }
+    }
+
+    /// The mark's side over the face's (desktop: `size-[62%]` in a roster row).
+    static let markScale: CGFloat = 0.62
+
     @ViewBuilder
     private func face(kit: AtumKit) -> some View {
-        switch AvatarFacePolicy.face(hasImage: art != nil, name: name) {
+        switch Self.treatment(kind: kind, hasArt: art != nil, mark: mark, name: name) {
         case .image:
             ZStack {
                 // A cut-out disc leaves its corners transparent; its own
@@ -113,19 +140,25 @@ struct AtumAvatar: View {
                     .scaledToFill()
                     .frame(width: size, height: size)
             }
+        case .crescent:
+            AtumCrescentFace(size: size)
+        case let .mark(mark):
+            ZStack {
+                kit.color(.fillQuiet, scheme: scheme)
+                AssistantMarkGlyphShape(shape: mark.shape)
+                    .fill(AssistantMarkPalette.color(mark.color, scheme: scheme))
+                    .frame(width: size * Self.markScale, height: size * Self.markScale)
+            }
+            .accessibilityIdentifier("avatar.mark")
         case let .monogram(value):
-            if kind == .atum {
-                AtumCrescentFace(size: size)
-            } else {
-                ZStack {
-                    kit.monogram(scheme: scheme)
-                    Text(verbatim: value)
-                        .font(.system(size: size * Self.monogramScale, weight: .semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .foregroundStyle(.white)
-                        .accessibilityIdentifier("avatar.monogram")
-                }
+            ZStack {
+                kit.monogram(scheme: scheme)
+                Text(verbatim: value)
+                    .font(.system(size: size * Self.monogramScale, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .foregroundStyle(.white)
+                    .accessibilityIdentifier("avatar.monogram")
             }
         }
     }

@@ -15,9 +15,17 @@ struct ConversationListRow: Identifiable, Equatable {
     let row: ConversationRow
     /// Unread and mention mark from the Matrix room, by Home's `Badge` rule.
     var badge: Badge = .none
+    /// The other people's faces: one for a DM, the first two for a group.
+    var faces: [ConversationFace] = []
 
     var id: String { row.id }
     var isBold: Bool { TeamSpaceBadges.isBold(badge) }
+}
+
+/// A teammate's face on a conversation row: their snapshot name and photo.
+struct ConversationFace: Equatable {
+    let name: String
+    let avatarURI: String?
 }
 
 /// What the Workplace list shows for a company's conversations. Absent when
