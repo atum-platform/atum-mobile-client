@@ -2941,3 +2941,82 @@ extension NativeDomainClientTests {
         }
     }
 }
+
+// MARK: Native Store admission (no payment or desktop execution routes)
+extension NativeDomainClientTests {
+    private func storePack(_ name: String) throws -> Data {
+        let base = try XCTUnwrap(Bundle.module.url(forResource: "store-v1.1", withExtension: nil))
+        return try Data(contentsOf: base.appendingPathComponent(name + ".json"))
+    }
+
+    func testStoreAcquisitionSendsExactIntentHeaderAndReplays401WithSameID() async throws {
+        let item = try StoreWire.decode(StoreCatalogResponse.self, from: storePack("catalog-pet")).items[0]
+        let attempt = try StorePurchaseAttempt(item: item, assistantID: nil,
+            idempotencyKey: NativeID("10000000-0000-4000-8000-000000000004"))
+        let result = try storePack("result-completed")
+        NativeDomainProtocol.state.handler = { request in
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer first" {
+                return .init(status: 401, chunks: [Data("{\"error\":\"matrix_401\"}".utf8)])
+            }
+            return .json(result)
+        }
+        let value = try await client(TestAuthorization(first: "first", refreshed: "second")).acquireStoreItem(attempt)
+        guard case .purchased = value else { return XCTFail("expected acquisition") }
+        let requests = NativeDomainProtocol.state.requests
+        XCTAssertEqual(requests.count, 2)
+        for request in requests {
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/matrix/v1/store/purchases")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Atum-Store-Capabilities"), "store.ownership.1")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), attempt.idempotencyKey.rawValue)
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-Atum-Desktop-Version"))
+            let data = try XCTUnwrap(body(of: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(Set(object.keys), ["offerId", "offerVersion", "idempotencyKey"])
+            XCTAssertEqual(data, try attempt.body)
+        }
+    }
+
+    func testStoreReadsAndCancellationUseOnlyAdmittedPaths() async throws {
+        let inventory = try storePack("entitlements-agent")
+        let history = try storePack("purchases-completed")
+        let cancel = try storePack("cancel-agent")
+        NativeDomainProtocol.state.handler = { request in
+            if request.url!.path.hasSuffix("/cancel") { return .json(cancel) }
+            return .json(request.url!.path.hasSuffix("/entitlements") ? inventory : history)
+        }
+        let api = client(TestAuthorization(first: "token"))
+        let owned = try await api.storeEntitlements()
+        XCTAssertEqual(owned.entitlements.count, 1)
+        _ = try await api.storePurchases()
+        let answer = try await api.cancelStoreSubscription(owned.entitlements[0].id)
+        XCTAssertEqual(answer.subscription?.state, .cancelled)
+        let requests = NativeDomainProtocol.state.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "GET", "POST"])
+        XCTAssertEqual(try body(of: XCTUnwrap(requests.last)), Data("{}".utf8))
+        for request in requests {
+            XCTAssertNil(request.value(forHTTPHeaderField: "Idempotency-Key"))
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Atum-Store-Capabilities"), "store.ownership.1")
+        }
+    }
+
+    func testStoreMismatchAndProtectedMetadataFailClosed() async throws {
+        let item = try StoreWire.decode(StoreCatalogResponse.self, from: storePack("catalog-pet")).items[0]
+        let attempt = try StorePurchaseAttempt(item: item, assistantID: nil,
+            idempotencyKey: NativeID("10000000-0000-4000-8000-999999999999"))
+        let response = try storePack("result-completed")
+        NativeDomainProtocol.state.handler = { _ in .json(response) }
+        do {
+            _ = try await client(TestAuthorization(first: "token")).acquireStoreItem(attempt)
+            XCTFail("a different operation cannot complete this intent")
+        } catch {}
+        var catalog = try JSONSerialization.jsonObject(with: storePack("catalog-pet")) as! [String: Any]
+        catalog["future"] = ["protectedBody": "synthetic-protected-text"]
+        let poisoned = try JSONSerialization.data(withJSONObject: catalog)
+        NativeDomainProtocol.state.handler = { _ in .json(poisoned) }
+        do {
+            _ = try await client(TestAuthorization(first: "token")).storeCatalog()
+            XCTFail("protected metadata must not reach UI")
+        } catch {}
+    }
+}

@@ -269,10 +269,19 @@ struct LiveProductStoreItem: Identifiable, Equatable {
     /// Installed art selected only by the exported item-ID inventory, decoded
     /// once before this presentation reaches a row.
     let art: LiveProductStoreArt?
+    let detailDescription: String
+    let tryPrompt: String
+    let offer: StoreCatalogOffer?
+    let ownership: StoreOwnership?
+    let deliverable: Bool?
+    let needs: [String]
+    let install: StoreHubInstall?
 
     init(id: String, kind: LiveProductStoreItemKind, title: String, summary: String,
          glyph: String, featured: Bool, price: String?, accent: Color? = nil,
-         art: LiveProductStoreArt? = nil) {
+         art: LiveProductStoreArt? = nil, detailDescription: String? = nil, tryPrompt: String = "",
+         offer: StoreCatalogOffer? = nil, ownership: StoreOwnership? = nil, deliverable: Bool? = nil,
+         needs: [String] = [], install: StoreHubInstall? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -282,6 +291,10 @@ struct LiveProductStoreItem: Identifiable, Equatable {
         self.price = price
         self.accent = accent
         self.art = art
+        self.detailDescription = detailDescription ?? summary
+        self.tryPrompt = tryPrompt
+        self.offer = offer; self.ownership = ownership; self.deliverable = deliverable
+        self.needs = needs; self.install = install
     }
 }
 
@@ -333,9 +346,8 @@ struct LiveProductStoreApp: Identifiable, Equatable {
     }
 }
 
-/// Read-only native projection of the same server-authored Store and Apps
-/// catalogs used by desktop. Purchase and StoreKit authority remain outside
-/// this presentation value until their dedicated mobile contracts are wired.
+/// Server-authored Store and Apps read projection. Store acquisition state and
+/// confirmed commands live in LiveStoreCommerce; card metadata is never authority.
 struct LiveProductStoreRead: Equatable {
     let availability: LiveProductAvailability
     let walletValue: String?

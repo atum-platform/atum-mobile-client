@@ -1,0 +1,21 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "7D5FC62RXD.com.atum.mobile"
+        ],
+        "components": [
+          {
+            "/": "/oauth/ios/callback"
+          }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "ABCDE12345.com.atum.mobile"
+    ]
+  }
+}

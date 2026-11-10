@@ -1,0 +1,12 @@
+{
+  "unit": "micro_proton",
+  "balances": {
+    "available": 25000000,
+    "paid": 20000000,
+    "earned": 0,
+    "promo": 5000000,
+    "held": 0
+  },
+  "allowance": null,
+  "checkoutOpen": false
+}

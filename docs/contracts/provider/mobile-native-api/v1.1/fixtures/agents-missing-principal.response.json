@@ -1,0 +1,17 @@
+[
+  {
+    "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+    "identity_id": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0",
+    "display_name": "Atum",
+    "slug": "atum",
+    "avatar": "",
+    "avatar_url": null,
+    "is_default": true,
+    "lifecycle_revision": 1,
+    "status": "active",
+    "identity_revision": 1,
+    "definition_revision": 3,
+    "matrixUser": "@agent-0123456789abcdef0123:atum.test",
+    "retired_agents": []
+  }
+]

@@ -1,0 +1,16 @@
+{
+  "origin": null,
+  "cookie": false,
+  "xAtumPrincipal": false,
+  "now": 1791200000,
+  "introspection": {
+    "active": true,
+    "token_type": "access_token",
+    "scope": "openid urn:matrix:org.matrix.msc2967.client:api:*",
+    "client_id": "01J00000000000000000000001",
+    "sub": "01JZZZZZZZZZZZZZZZZZZZZZZA",
+    "exp": 1791200300,
+    "nbf": 1791199990,
+    "iat": 1791199990
+  }
+}
