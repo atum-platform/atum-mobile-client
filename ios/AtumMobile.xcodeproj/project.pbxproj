@@ -36,6 +36,7 @@
 		2B892CD831237CDD5BEE7ED6 /* AtomMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F90A897EA9F722D94BEB953 /* AtomMark.swift */; };
 		2F08C2E9AB8ED449C146B953 /* AtumVisualSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E574CAA6873D7ED17908C6A /* AtumVisualSystem.swift */; };
 		2FDD125FC2AA57A582073044 /* AtumNativeAPI in Frameworks */ = {isa = PBXBuildFile; productRef = D8C6BF6671CF0D572F7C02E5 /* AtumNativeAPI */; };
+		30E9A2996EE40C1BE148E7C7 /* LiveSharedCollections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09F5B420669B97B6AEBF12B3 /* LiveSharedCollections.swift */; };
 		3192CAD9B247382ECE6AFA9F /* AtumNativeAPI in Frameworks */ = {isa = PBXBuildFile; productRef = E3A146A2089669930C6F69E1 /* AtumNativeAPI */; };
 		31A80BCA4AAACDDB81FC728D /* RoomMutationQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = C480F6BF5F3FD3F7C99CABC4 /* RoomMutationQueue.swift */; };
 		32DC8BBDE8D1F57DFB957F3C /* MASWebAuthPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FE0A337D7F9A239000E290 /* MASWebAuthPresenter.swift */; };
@@ -77,6 +78,7 @@
 		65CCD6C57981869C01537BC3 /* HomeShellUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B6B1F163B1FF44576CFFB31 /* HomeShellUITests.swift */; };
 		66546A467178B82CF4FC958E /* TypingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A08EB46B4D56CFB88F999BF /* TypingController.swift */; };
 		677F98BB35AA084EACBC729B /* DayDividerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B08434CB5411234C8A9C99 /* DayDividerRow.swift */; };
+		687C54AD09A246F9A915D372 /* SDKSharedCollectionsSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9943A530575418E8227D393 /* SDKSharedCollectionsSource.swift */; };
 		697CD2D4DF9FDFDA78F15B96 /* SettingsUITestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D26C608FD170FBBE592D8437 /* SettingsUITestSupport.swift */; };
 		6DDC7222D59F800598DBBB8D /* AppRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F22D7ED106BEA5B648BDE0 /* AppRoot.swift */; };
 		6EC5157A6E8EDA029E3B8674 /* MathFonts-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = C849D6466FA13E610FFFFE1B /* MathFonts-OFL.txt */; };
@@ -257,6 +259,7 @@
 		023052D06543345DF0DC9F77 /* MatrixLiveRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixLiveRuntime.swift; sourceTree = "<group>"; };
 		035FA77E13156782F1C8641D /* ScriptedLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptedLaunch.swift; sourceTree = "<group>"; };
 		047AEB418B8DD1F993C3DDD7 /* AppBotPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBotPresentation.swift; sourceTree = "<group>"; };
+		09F5B420669B97B6AEBF12B3 /* LiveSharedCollections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSharedCollections.swift; sourceTree = "<group>"; };
 		0B34D10943B247E13747AAF8 /* CompanySwitcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySwitcherTests.swift; sourceTree = "<group>"; };
 		0CEDFF380E705A45A33EF920 /* AtumMobile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AtumMobile.entitlements; sourceTree = "<group>"; };
 		10F74306DAF0BF9208C8BB82 /* AccountScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountScreen.swift; sourceTree = "<group>"; };
@@ -405,6 +408,7 @@
 		D2FE0A337D7F9A239000E290 /* MASWebAuthPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MASWebAuthPresenter.swift; sourceTree = "<group>"; };
 		D3C22E54A80C808CCBC723D7 /* ChatRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRowView.swift; sourceTree = "<group>"; };
 		D3EF7CD06DC3D8BEC5C0054B /* EmptyChatGreeting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyChatGreeting.swift; sourceTree = "<group>"; };
+		D9943A530575418E8227D393 /* SDKSharedCollectionsSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDKSharedCollectionsSource.swift; sourceTree = "<group>"; };
 		DA1B5B7722A21CCE0A6CB3EF /* S6AuthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S6AuthViews.swift; sourceTree = "<group>"; };
 		DAB2C7BB62CE7DE3694EE525 /* S6ScriptedHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S6ScriptedHost.swift; sourceTree = "<group>"; };
 		DBBC58A9DE9B4D88CEA7004C /* MatrixRustSDK-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "MatrixRustSDK-LICENSE.txt"; sourceTree = "<group>"; };
@@ -491,6 +495,15 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		07D6A8BBA6E3B889C45EA600 /* SharedCollections */ = {
+			isa = PBXGroup;
+			children = (
+				09F5B420669B97B6AEBF12B3 /* LiveSharedCollections.swift */,
+				D9943A530575418E8227D393 /* SDKSharedCollectionsSource.swift */,
+			);
+			path = SharedCollections;
+			sourceTree = "<group>";
+		};
 		08670D0E3DB9150100076701 /* Media */ = {
 			isa = PBXGroup;
 			children = (
@@ -537,6 +550,7 @@
 				96C132C300E528E45BF97650 /* Dictation */,
 				08670D0E3DB9150100076701 /* Media */,
 				3790A2024D758CE3F1732883 /* SDK */,
+				07D6A8BBA6E3B889C45EA600 /* SharedCollections */,
 				D57D8FCBA0C6A3EBD89A9621 /* Stores */,
 				EE11CFD4DBD87F0FD1850D0B /* Views */,
 			);
@@ -1239,6 +1253,7 @@
 				539C6229A0FD734258D70CD0 /* LiveProductModels.swift in Sources */,
 				21EF3F77E989BD727A6D49BE /* LiveReporting.swift in Sources */,
 				B15C2E7D990B421063B3B19F /* LiveRosterRows.swift in Sources */,
+				30E9A2996EE40C1BE148E7C7 /* LiveSharedCollections.swift in Sources */,
 				1033EE57CCEC6D33975BE267 /* LoadingEarlierRow.swift in Sources */,
 				32DC8BBDE8D1F57DFB957F3C /* MASWebAuthPresenter.swift in Sources */,
 				AE7D9EF90761D538DE094614 /* MatrixAvatarThumbnailCache.swift in Sources */,
@@ -1268,6 +1283,7 @@
 				C9BACD4F0326BE550F6E2F2B /* S6AuthViews.swift in Sources */,
 				445A157653B8FF38DFAE3CC6 /* S6ScriptedHost.swift in Sources */,
 				209F6023083F9EF7BCC9BB9A /* S6SystemGallery.swift in Sources */,
+				687C54AD09A246F9A915D372 /* SDKSharedCollectionsSource.swift in Sources */,
 				1AD41E78A49825E6CBA2DD01 /* SDKTimelineSource.swift in Sources */,
 				B7A3C1B1F746DAB67FA4B3C6 /* SDKValueMapping.swift in Sources */,
 				FDF1C5ADB4D91BFBC6612F31 /* SafariView.swift in Sources */,
