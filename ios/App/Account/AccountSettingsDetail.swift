@@ -147,6 +147,11 @@ struct AccountSettingsDetail: View {
         }
     }
 
+    @Environment(\.protonTopUp) private var protonTopUp
+    /// With the in-app top-up, the footer says how payment works (export
+    /// `purchaseHelp`) instead of the pre-StoreKit placeholder.
+    private var topUpAvailable: Bool { protonTopUp != nil }
+
     @ViewBuilder private var protonsContent: some View {
         Section {
             if let value = store.walletValue {
@@ -166,6 +171,14 @@ struct AccountSettingsDetail: View {
                           value: storeStatus,
                           identifier: "account.settings.protons.balance")
             }
+            // ST-5 (lane 4 W2): the one Proton top-up entry, as desktop's
+            // Settings › Protons "Top up". Absent without a top-up context.
+            ProtonTopUpEntry(design: design) { present in
+                settingsRow(glyph: .plus,
+                            title: copy(ProtonTopUpCopyKey.topUp),
+                            identifier: "account.settings.protons.topUp",
+                            action: present)
+            }
             settingsRow(glyph: .compass,
                         title: copy("src.matrix.mobile-device-copy.mobileDeviceCopy.uiStore"),
                         indicator: .push,
@@ -174,7 +187,7 @@ struct AccountSettingsDetail: View {
         } header: {
             Text(copy("desktop.atum.protons.title"))
         } footer: {
-            footer(text(.noStoreKitPurchase))
+            footer(topUpAvailable ? copy(ProtonTopUpCopyKey.help) : text(.noStoreKitPurchase))
         }
     }
 

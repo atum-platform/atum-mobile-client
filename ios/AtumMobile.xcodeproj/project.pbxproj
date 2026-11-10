@@ -166,6 +166,7 @@
 		C342FA7561CB2949BE0755B9 /* MatrixRustSDK in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 2B3F6FA27D944DF0213C44E5 /* MatrixRustSDK */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		C4223CCACDE62C631FBF3AB9 /* ReadMarkerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A684F45254C2720AB08B5FEB /* ReadMarkerRow.swift */; };
 		C475E35DE3168E0E18519B28 /* LiveStoreCommerce.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAD038C5408C865A1BFF776 /* LiveStoreCommerce.swift */; };
+		FB893F585DE89579DF61C421 /* ProtonTopUp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F1AFE4766B3EBA9712D765 /* ProtonTopUp.swift */; };
 		C8D3197CAA8F1DBADEB85732 /* ComposerAndMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */; };
 		C9BACD4F0326BE550F6E2F2B /* S6AuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1B5B7722A21CCE0A6CB3EF /* S6AuthViews.swift */; };
 		CC9C1E925E30B858DCA45EE1 /* S2StateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5F8419BC1E29292FC4AC30 /* S2StateTests.swift */; };
@@ -458,6 +459,7 @@
 		F90ADDFF1492498ACF57D2DE /* AppBotViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBotViews.swift; sourceTree = "<group>"; };
 		FA9CF77D2146CFDE23D44C79 /* LiveAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAppModel.swift; sourceTree = "<group>"; };
 		FAAD038C5408C865A1BFF776 /* LiveStoreCommerce.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStoreCommerce.swift; sourceTree = "<group>"; };
+		19F1AFE4766B3EBA9712D765 /* ProtonTopUp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtonTopUp.swift; sourceTree = "<group>"; };
 		FB5F8419BC1E29292FC4AC30 /* S2StateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S2StateTests.swift; sourceTree = "<group>"; };
 		FC53C31588CE85624FA04E61 /* WorkingLineRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkingLineRow.swift; sourceTree = "<group>"; };
 		FD05607A6FC90C3571381C82 /* ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ios; path = .; sourceTree = SOURCE_ROOT; };
@@ -764,6 +766,7 @@
 			isa = PBXGroup;
 			children = (
 				FAAD038C5408C865A1BFF776 /* LiveStoreCommerce.swift */,
+				19F1AFE4766B3EBA9712D765 /* ProtonTopUp.swift */,
 				7A6F51B6A4D7227C854AF430 /* StoreScreen.swift */,
 				966848268479DA43E1D47693 /* StoreCommercePresentation.swift */,
 				B28180A152E6D68D2EE0A428 /* StorePurchasedScreen.swift */,
@@ -1305,6 +1308,7 @@
 				39624D702857D6C0AB71116A /* SharedCollectionsCopy.swift in Sources */,
 				5F6FE1AEEDBBFFF683763F54 /* SharedCollectionsScope.swift in Sources */,
 				C475E35DE3168E0E18519B28 /* LiveStoreCommerce.swift in Sources */,
+				FB893F585DE89579DF61C421 /* ProtonTopUp.swift in Sources */,
 				1033EE57CCEC6D33975BE267 /* LoadingEarlierRow.swift in Sources */,
 				32DC8BBDE8D1F57DFB957F3C /* MASWebAuthPresenter.swift in Sources */,
 				AE7D9EF90761D538DE094614 /* MatrixAvatarThumbnailCache.swift in Sources */,

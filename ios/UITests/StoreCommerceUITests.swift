@@ -16,6 +16,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     private static let insufficient = "Không đủ Proton để mua mục này."
     private static let uncertain = "Cửa hàng chưa trả lời nên chưa biết Proton của bạn đã bị trừ hay chưa. Bấm Kiểm tra trạng thái trước khi mua lại: nếu đã thành công bạn sẽ thấy ngay, nếu chưa thì bạn không bị trừ."
     private static let owned = "Đã sở hữu"
+    private static let topUpComplete = "Proton của bạn đã sẵn sàng."
     private static let skillOwned = "Trợ lý này đã có kỹ năng."
     private static let renewalCancelled = "Đã hủy gia hạn. Quyền truy cập còn đến ngày hiển thị."
 
@@ -25,7 +26,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         openItem("pet/gigi", in: app)
         let acquire = element(app, "store.detail.acquire")
         XCTAssertTrue(acquire.waitForExistence(timeout: 5))
-        XCTAssertEqual(acquire.label, "Mua · 90 Proton")
+        XCTAssertEqual(acquire.label, "Nhận · 90 Proton")
         XCTAssertTrue(element(app, "store.detail.balance").exists, "the fresh balance sits under the price")
         assertNoTopUp(app)
         keepScreenshot("U-Store-1-detail-light-vi", of: app)
@@ -66,14 +67,56 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     }
 
     @MainActor
-    func testInsufficientBalanceIsPlainWithNoTopUp() {
+    /// Short of Protons (lane 4 D14): the item offers the in-app top-up; a
+    /// credited pack returns with Continue to the item, which can now be got.
+    func testInsufficientBalanceTopsUpThenContinuesToTheItem() {
         let app = launchStore("store.insufficient")
         openItem("pet/gigi", in: app)
         XCTAssertTrue(text(app, Self.insufficient).waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "store.detail.balance").exists)
         XCTAssertFalse(element(app, "store.detail.acquire").exists, "no acquire action without the balance")
-        assertNoTopUp(app)
+        let topUp = element(app, "topup.entry")
+        XCTAssertTrue(topUp.waitForExistence(timeout: 3))
+        XCTAssertEqual(topUp.label, "Nạp Proton")
         keepScreenshot("U-Store-4-insufficient-light-vi", of: app)
+
+        topUp.tap()
+        XCTAssertTrue(element(app, "topup.sheet").waitForExistence(timeout: 5))
+        let buy = element(app, "topup.buy.com.atum.mobile.protons.100k")
+        XCTAssertTrue(buy.waitForExistence(timeout: 5))
+        assertNoEconomicMath(app)
+        buy.tap()
+        XCTAssertTrue(text(app, Self.topUpComplete).waitForExistence(timeout: 8))
+        let finish = element(app, "topup.finish")
+        XCTAssertTrue(finish.waitForExistence(timeout: 3))
+        XCTAssertEqual(finish.label, "Tiếp tục")
+        keepScreenshot("U-Store-12-topup-credited-light-vi", of: app)
+        finish.tap()
+        XCTAssertTrue(element(app, "store.detail.acquire").waitForExistence(timeout: 8),
+                      "after a top-up the item can be got")
+    }
+
+    /// The Store balance opens the Proton pack sheet: each pack's total and
+    /// StoreKit price only (owner ruling 1). Also the App Store Connect IAP
+    /// review screenshot (`U-Store-13-pack-sheet-*`).
+    @MainActor
+    func testStoreBalanceOpensThePackSheet() {
+        for (language, locale) in [("vi", "vi_VN"), ("en", "en_US")] {
+            let app = launchStore("store.acquire", language: language, locale: locale)
+            XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
+            let balance = element(app, "store.balance")
+            XCTAssertTrue(balance.waitForExistence(timeout: 8))
+            balance.tap()
+            XCTAssertTrue(element(app, "topup.sheet").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "topup.buy.com.atum.mobile.protons.100k").waitForExistence(timeout: 5))
+            XCTAssertTrue(element(app, "topup.buy.com.atum.mobile.protons.500k").exists)
+            XCTAssertTrue(element(app, "topup.restore").exists)
+            assertNoEconomicMath(app)
+            keepScreenshot("U-Store-13-pack-sheet-medium-light-\(language)", of: app)
+            app.swipeUp()
+            keepScreenshot("U-Store-13-pack-sheet-large-light-\(language)", of: app)
+            app.terminate()
+        }
     }
 
     @MainActor
@@ -165,10 +208,11 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     // MARK: Helpers
 
     @MainActor
-    private func launchStore(_ name: String, contentSize: String = "UICTContentSizeCategoryL") -> XCUIApplication {
+    private func launchStore(_ name: String, contentSize: String = "UICTContentSizeCategoryL",
+                             language: String = "vi", locale: String = "vi_VN") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [AtumLaunchArguments.noAnimationsFlag, AtumLaunchArguments.scriptedFlag, name,
-                               "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN",
+                               "-AppleLanguages", "(\(language))", "-AppleLocale", locale,
                                "-UIPreferredContentSizeCategoryName", contentSize]
         app.launch()
         return app
@@ -185,7 +229,16 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         XCTAssertTrue(element(app, "store.sheet").waitForExistence(timeout: 3))
     }
 
-    /// Guideline 3.1.1: nothing in the Store points to buying Protons.
+    /// Owner ruling 1: the pack sheet never shows a paid/bonus split or a rate.
+    @MainActor
+    private func assertNoEconomicMath(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let value = visibleTexts(app).joined(separator: " ").lowercased()
+        for banned in ["bonus", "thưởng", "tặng", "save ", "tiết kiệm", "/ proton", "mỗi proton", "per proton", "vnd"] {
+            XCTAssertFalse(value.contains(banned), "pack sheet shows \(banned)", file: file, line: line)
+        }
+    }
+
+    /// Where Protons are enough, the item itself offers no top-up.
     @MainActor
     private func assertNoTopUp(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let value = visibleTexts(app).joined(separator: " ").lowercased()
