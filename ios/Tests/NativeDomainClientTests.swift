@@ -294,6 +294,30 @@ import AtumChat
         }, ["Bearer synthetic-old", "Bearer synthetic-new"])
     }
 
+    func testPrivateCosEnsurePostsTheFrozenBodyAndAcceptsTheAsyncPreparingAnswer() async throws {
+        let directory = try XCTUnwrap(Bundle.module.url(forResource: "company-private-cos", withExtension: nil))
+        let accepted = try Data(contentsOf: directory.appendingPathComponent("v1.1-ensure-accepted.response.json"))
+        let company = try NativeID("37700000-0000-4000-8000-000000000001")
+        let requestID = try NativeID("a7000000-0000-4000-8000-000000000001")
+        var sent: Data?
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Atum-Company-Wire"), "1.3")
+            sent = self.body(of: request)
+            return .init(status: 202, chunks: [accepted])
+        }
+        let api = client(TestAuthorization(first: "synthetic-old", refreshed: "synthetic-new"))
+        let view = try await api.ensureCompanyPrivateCos(
+            companyID: company, request: CompanyPrivateCosEnsureRequest(requestId: requestID, trigger: .dmOpen))
+        XCTAssertEqual(view.state, "preparing")
+        XCTAssertNil(view.binding)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.map { $0.url?.path },
+                       ["/api/matrix/v1/companies/" + company.rawValue + "/private-cos"])
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent)) as? [String: AnyHashable])
+        XCTAssertEqual(body, ["schemaVersion": 1, "requestId": requestID.rawValue, "action": "ensure",
+                              "trigger": "dm_open"])
+    }
+
     func testPrivateCosRefusesWrongCompanyForbiddenAbsentAndOversizeWithoutRetry() async throws {
         let directory = try XCTUnwrap(Bundle.module.url(forResource: "company-private-cos", withExtension: nil))
         let view = try Data(contentsOf: directory.appendingPathComponent("v1-lazy-first-open.preparing.response.json"))
