@@ -94,3 +94,19 @@ Each fallback is read only until the export carries its key. The fallbacks are t
 | `…phoneSettingsCopy.shareCrashReports`, `shareCrashReportsHelp`, `shareUsageData`, `shareUsageDataHelp`, `reportingFooter` | (unchanged phone wording) | Help. Phone-only, still owed. |
 
 The Drive empty-root body reuses `matrixDriveCopy.comingSoonHelp`. Desktop's `emptyRoot.body` says to drop files into the Mac's Drive folder, which the phone cannot do. A phone key (for example `mobilePhoneCopy.drive.emptyRootBody`) would be more precise.
+
+## Verification
+
+All runs were under the shared heavy-build lock, with `-j 2` / `-jobs 2`, on the iPhone 17 simulator.
+
+- `swift test --filter 'DriveBrowsingTests|DriveFeatureModelTests|DriveStageACopyTests|DriveStageATests'`: AtumDriveTests ran 22 tests and all passed. These include the 5 new `DriveBrowsingTests` and the new refresh-stamp test.
+- `xcodebuild -scheme AtumMobileStateTests test`: 305 AppTests passed. `AccountSettingsStateTests` has new tests for page mapping, Account order, capability status, Email support, the balance line, the stale export title, five-locale fallbacks, the Drive place words and the Drive glyph aliases.
+- UI tests (`test-without-building`):
+  - `S6SystemUITests/testU15LegalLicencesAndInAppSafari` passed.
+  - `KitBoardCaptureUITests`: 3 tests ran and passed. `testSettingsPagesAndAppearanceSwitch` was not discovered by the runner, even when run alone.
+  - `S6SystemUITests/testU10AccountDefaultAndVariants` failed on its first assertion. The profile card label has no "@an" handle line. That path (index card, `AccountProfileHeader`, `AccountModels`, `S6ScriptedHost`) is unchanged by this branch, so it looks like a wave 1 (AC-1) expectation, not an AC-3 regression. This was not re-run on main to confirm.
+
+Not checked:
+- A physical iPhone.
+- Dark mode, ja/zh and AX sizes on the new pages.
+- The Drive screen in the simulator. There is no scripted Drive host yet (D12).

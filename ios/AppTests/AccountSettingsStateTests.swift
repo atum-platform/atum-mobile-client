@@ -1,6 +1,7 @@
 @testable import AtumMobile
 import AtumChat
 import AtumDesign
+import AtumDrive
 import XCTest
 
 final class AccountSettingsStateTests: XCTestCase {
@@ -78,22 +79,78 @@ final class AccountSettingsStateTests: XCTestCase {
         ), .confirmation)
     }
 
-    /// The index draws the desktop's six pages in its order; the three folded
-    /// destinations are sections of those pages and still exist as ids.
+    /// The index draws the desktop's pages in its order, less Advanced (its
+    /// tools are desktop-only); the folded destinations still exist as ids.
     func testGroupsDrawTheDesktopPagesInReadingOrder() {
         let state = AccountSettingsState(accountID: "@an:atum.invalid")
-        XCTAssertEqual(state.groups.map(\.rawValue), ["you", "app", "support"])
+        XCTAssertEqual(state.groups.map(\.rawValue), ["you", "app"])
         let pages = state.groups.flatMap(\.sections)
         XCTAssertEqual(pages.map(\.rawValue),
-                       ["account", "assistants", "connections", "general", "help", "advanced"])
+                       ["account", "assistants", "connections", "general", "help"])
         XCTAssertEqual(Set(pages).count, pages.count, "a page appears once")
         XCTAssertTrue(Set(pages).isSubset(of: Set(state.sections)))
-        XCTAssertEqual(Set(state.sections).subtracting(pages), [.protons, .devices, .privacy])
+        XCTAssertEqual(Set(state.sections).subtracting(pages),
+                       [.protons, .devices, .privacy, .advanced])
+    }
+
+    /// Every id opens a page the index draws (desktop `settingsPageOf`).
+    func testEveryDestinationOpensADrawnPage() {
+        let pages = Set(AccountSettingsGroupID.allCases.flatMap(\.sections))
+        for section in AccountSettingsSectionID.allCases {
+            XCTAssertTrue(pages.contains(section.page), section.rawValue)
+        }
+        XCTAssertEqual(AccountSettingsSectionID.protons.page, .account)
+        XCTAssertEqual(AccountSettingsSectionID.privacy.page, .account)
+        XCTAssertEqual(AccountSettingsSectionID.devices.page, .account)
+        XCTAssertEqual(AccountSettingsSectionID.advanced.page, .help)
+        XCTAssertEqual(AccountSettingsSectionID.connections.page, .connections)
+    }
+
+    /// Desktop `AccountPane` + `PrivacyPane`: the recovery key goes last unless
+    /// messages must be restored first.
+    func testAccountPageFollowsTheDesktopSectionOrder() {
+        XCTAssertEqual(AccountPageSection.order(restoresFirst: false),
+                       [.howAtumAnswers, .devices, .chats, .memory, .activity, .ignored, .recovery])
+        XCTAssertEqual(AccountPageSection.order(restoresFirst: true),
+                       [.howAtumAnswers, .recovery, .devices, .chats, .memory, .activity, .ignored])
+    }
+
+    /// An available capability no longer reads "Not available" (audit D3).
+    func testCapabilityStatusSaysNothingOnceLive() {
+        XCTAssertEqual(AccountSettingsCapabilityStatus(.unknown), .loading)
+        XCTAssertEqual(AccountSettingsCapabilityStatus(.unavailable), .notAvailableYet)
+        XCTAssertEqual(AccountSettingsCapabilityStatus(.available), .live)
+    }
+
+    func testEmailSupportDraftsToTheSupportMailbox() throws {
+        let url = try XCTUnwrap(AccountSupportMail.url(subject: "Atum support"))
+        XCTAssertEqual(url.scheme, "mailto")
+        XCTAssertEqual(url.absoluteString, "mailto:support@atumplatform.com?subject=Atum%20support")
+    }
+
+    func testTheBalanceLineCarriesOnlyTheTotal() {
+        XCTAssertEqual(AccountSettingsText.protonsLeft.fallback(locale: "en")
+            .replacingOccurrences(of: "%1$@", with: "1,240"),
+                       "1,240 left · used for Atum’s built-in models and the Store")
+        for locale in Self.locales {
+            XCTAssertTrue(AccountSettingsText.protonsLeft.fallback(locale: locale).contains("%1$@"), locale)
+        }
+    }
+
+    /// The pinned export still says "What Atum knows"; the desktop renamed it
+    /// "Connections" (`1043f1b48d7`). The stale export must not win.
+    func testAStaleExportedTitleDoesNotWin() {
+        XCTAssertEqual(AccountSettingsText.destinationConnections.resolved(locale: "en") { _ in
+            "What Atum knows"
+        }, "Connections")
+        XCTAssertEqual(AccountSettingsText.destinationPrivacy.resolved(locale: "en") { _ in
+            "exported"
+        }, "exported")
     }
 
     func testApprovedVietnameseAndEnglishSectionFallbacks() {
-        XCTAssertEqual(AccountSettingsText.destinationConnections.fallback(locale: "vi"), "Atum biết gì")
-        XCTAssertEqual(AccountSettingsText.destinationConnections.fallback(locale: "en"), "What Atum knows")
+        XCTAssertEqual(AccountSettingsText.destinationConnections.fallback(locale: "vi"), "Kết nối")
+        XCTAssertEqual(AccountSettingsText.destinationConnections.fallback(locale: "en"), "Connections")
         XCTAssertEqual(AccountSettingsText.destinationPrivacy.fallback(locale: "vi"), "Riêng tư & bảo mật")
         XCTAssertEqual(AccountSettingsText.destinationPrivacy.fallback(locale: "en"), "Privacy & security")
         XCTAssertEqual(AccountSettingsText.destinationHelp.fallback(locale: "zh-Hant"), "說明")
@@ -124,19 +181,19 @@ final class AccountSettingsStateTests: XCTestCase {
     /// wording (atum-app `matrix-settings-revamp-copy.ts`), which the plan lists.
     private static let destinationTitles: [String: [AccountSettingsSectionID: String]] = [
         "en": [.account: "Account", .assistants: "Assistants", .protons: "Protons",
-               .general: "General", .connections: "What Atum knows", .devices: "This iPhone",
+               .general: "General", .connections: "Connections", .devices: "This iPhone",
                .privacy: "Privacy & security", .help: "Help", .advanced: "Advanced"],
         "vi": [.account: "Tài khoản", .assistants: "Trợ lý", .protons: "Proton",
-               .general: "Chung", .connections: "Atum biết gì", .devices: "iPhone này",
+               .general: "Chung", .connections: "Kết nối", .devices: "iPhone này",
                .privacy: "Riêng tư & bảo mật", .help: "Trợ giúp", .advanced: "Nâng cao"],
         "ja": [.account: "アカウント", .assistants: "アシスタント", .protons: "Proton",
-               .general: "一般", .connections: "Atum が知っていること", .devices: "この iPhone",
+               .general: "一般", .connections: "接続", .devices: "この iPhone",
                .privacy: "プライバシーと安全", .help: "ヘルプ", .advanced: "詳細"],
         "zh": [.account: "账户", .assistants: "助手", .protons: "Proton",
-               .general: "通用", .connections: "Atum 了解的内容", .devices: "这台 iPhone",
+               .general: "通用", .connections: "连接", .devices: "这台 iPhone",
                .privacy: "隐私与安全", .help: "帮助", .advanced: "高级"],
         "zh-Hant": [.account: "帳戶", .assistants: "助理", .protons: "Proton",
-                    .general: "一般", .connections: "Atum 了解的內容", .devices: "這台 iPhone",
+                    .general: "一般", .connections: "連接", .devices: "這台 iPhone",
                     .privacy: "隱私與安全", .help: "說明", .advanced: "進階"],
     ]
 
@@ -186,27 +243,22 @@ final class AccountSettingsStateTests: XCTestCase {
     }
 
     func testAKeyTheExportCarriesWinsOverThePhonesFallback() {
-        let text = AccountSettingsText.onYourMac
+        let text = AccountSettingsText.thisIPhone
         XCTAssertEqual(text.resolved(locale: "ja") { key in
-            key == "shared.matrix-settings-revamp-copy.phoneSettingsCopy.onYourMac" ? "exported" : nil
+            key == "shared.matrix-settings-revamp-copy.phoneSettingsCopy.thisIPhone" ? "exported" : nil
         }, "exported")
-        XCTAssertEqual(text.resolved(locale: "ja") { _ in nil }, "お使いの Mac で")
+        XCTAssertEqual(text.resolved(locale: "ja") { _ in nil }, "この iPhone")
     }
 
-    func testEveryPhoneKeyReadsInTheLocalesTheReviewNamed() {
-        // These were Vietnamese and English only (or English in ja and zh).
-        let named: [AccountSettingsText] = [
-            .onYourMac, .macAccessHelp, .nameRequired, .assistantPrepared, .destinationAdvanced,
-            .thisIPhone, .thisIPad, .manageOnMac, .macAccess,
-            .groupYou, .groupApp, .groupSupport,
-            .assistantsLead, .assistantReady, .assistantPreparing, .openAssistant,
-        ]
-        for key in named {
+    func testEveryFallbackReadsInAllFiveLocales() {
+        // Seventeen of these used to read English in ja, zh and zh-Hant (audit D8).
+        let brands: Set<AccountSettingsText> = [.groupApp, .google]
+        for key in AccountSettingsText.allCases {
             let english = key.fallback(locale: "en")
             for locale in Self.locales {
                 XCTAssertFalse(key.fallback(locale: locale).isEmpty, "\(key.rawValue) \(locale)")
             }
-            for locale in ["ja", "zh", "zh-Hant"] where key != .groupApp {
+            for locale in ["ja", "zh", "zh-Hant"] where !brands.contains(key) {
                 XCTAssertNotEqual(key.fallback(locale: locale), english,
                                   "\(key.rawValue) still reads English in \(locale)")
             }
@@ -217,7 +269,7 @@ final class AccountSettingsStateTests: XCTestCase {
 
     func testReportingSwitchesReadInAllFiveLocales() {
         let keys: [AccountSettingsText] = [
-            .reportingData, .shareCrashReports, .shareCrashReportsHelp,
+            .shareCrashReports, .shareCrashReportsHelp,
             .shareUsageData, .shareUsageDataHelp, .reportingFooter,
         ]
         for key in keys {
@@ -244,12 +296,10 @@ final class AccountSettingsStateTests: XCTestCase {
 
     func testTheGroupsAreNamedForAssistiveTechnologyInEveryLocale() {
         let state = AccountSettingsState(accountID: "@an:atum.invalid")
-        XCTAssertEqual(state.groups.map(\.accessibilityName),
-                       [.groupYou, .groupApp, .groupSupport])
+        XCTAssertEqual(state.groups.map(\.accessibilityName), [.groupYou, .groupApp])
         XCTAssertEqual(AccountSettingsText.groupYou.fallback(locale: "vi"), "Bạn")
-        XCTAssertEqual(AccountSettingsText.groupSupport.fallback(locale: "en"), "Help and advanced")
-        XCTAssertEqual(AccountSettingsText.groupSupport.exportKey,
-                       "shared.matrix-settings-revamp-copy.copies.groups.support")
+        XCTAssertEqual(AccountSettingsText.groupApp.exportKey,
+                       "shared.matrix-settings-revamp-copy.copies.groups.app")
     }
 
     func testEveryExportKeyThePagesReadExistsInAllFiveLocales() throws {
@@ -268,11 +318,48 @@ final class AccountSettingsStateTests: XCTestCase {
             "desktop.atum.account.photoUploading", "desktop.atum.account.photoTooLarge",
             "desktop.atum.account.photoFailed",
             "src.matrix.assistant-card.copy.assistantCardCopies.photoError",
+            // AC-3 pages.
+            "desktop.atum.protons.title", "desktop.common.loading",
+            "desktop.atum.settings.textSize", "desktop.atum.settings.about",
+            "src.matrix.settings-copy.copy.display", "src.matrix.settings-copy.copy.notifications",
+            "src.matrix.settings-copy.copy.improve", "src.matrix.settings-copy.copy.encryptedMessages",
+            "src.matrix.model-picker-copy.COPY.subscriptions",
+            "src.matrix.security-copy.copies.devicesTitle",
+            "src.matrix.moderation-copy.copies.ignoredPeople",
+            "src.matrix.moderation-copy.copies.ignoredHow",
+            "src.matrix.founder.founder-copy.FOUNDER_COPY.contactTitle",
+            "src.matrix.founder.founder-copy.FOUNDER_COPY.name",
+            "src.matrix.founder.founder-copy.FOUNDER_COPY.emailSupport",
+            "src.matrix.founder.founder-copy.FOUNDER_COPY.emailSubject",
+            "src.matrix.legal-copy.copy.legal",
+            "src.matrix.mobile-device-copy.mobileDeviceCopy.uiStore",
+            // AC-4 Drive.
+            "src.matrix.drive-copy.matrixDriveCopy.emptyRoot.title",
+            "src.matrix.drive-copy.matrixDriveCopy.comingSoonHelp",
+            "src.matrix.drive-copy.matrixDriveCopy.status.ready",
+            "src.matrix.drive-copy.matrixDriveCopy.empty",
         ]
         for locale in Self.locales {
             for key in keys {
                 XCTAssertFalse(try copy.text(key, locale: locale).isEmpty, "\(key) in \(locale)")
             }
+        }
+    }
+
+    @MainActor
+    func testDrivePlacesReadTheDesktopsWordsInAllFiveLocales() {
+        for locale in Self.locales {
+            let normalized = AccountSettingsText.normalizedLocale(locale)
+            XCTAssertNotNil(DriveCopy.recentsFallback[normalized], locale)
+            XCTAssertNotNil(DriveCopy.allFilesFallback[normalized], locale)
+        }
+        XCTAssertEqual(DriveCopy.recentsFallback["vi"], "Gần đây")
+        XCTAssertEqual(DriveCopy.allFilesFallback["zh-hant"], "所有檔案")
+    }
+
+    func testEveryDriveFamilyHasAPhosphorGlyph() {
+        for family in DriveFileFamily.allCases {
+            XCTAssertNotNil(PhosphorSymbols.aliases[family.glyphAlias], family.rawValue)
         }
     }
 }

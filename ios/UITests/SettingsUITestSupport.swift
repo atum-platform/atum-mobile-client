@@ -23,13 +23,13 @@ extension TranscriptUITestCase {
         return target.exists && target.isHittable
     }
 
-    /// The desktop's six pages hold the three folded destinations: Protons
-    /// and Privacy are sections of Account, this phone is a section of
-    /// Connections. Each maps to its page and a row that starts its section.
+    /// The phone's five pages hold the folded destinations: Protons, Privacy
+    /// and this phone are sections of Account, and Advanced (desktop-only
+    /// tools) opens Help. Each maps to its page and a row in its section.
     static let foldedPages: [String: (page: String, anchor: String)] = [
         "protons": ("account", "account.settings.protons.balance"),
         "privacy": ("account", "account.settings.privacy.devices.current"),
-        "devices": ("connections", "account.settings.devices.current"),
+        "devices": ("account", "account.settings.privacy.devices.current"),
     ]
 
     /// Taps a page's row on the Settings index and waits for the page; a

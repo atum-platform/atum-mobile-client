@@ -23,7 +23,11 @@ struct AccountScreen: View {
     var usageDataEnabled: Bool
     var setUsageDataEnabled: @MainActor (Bool) -> Void
     var founderContactAvailable: Bool
-    var founderContactTitle: String
+    /// Kept for the app root's call site. Help now titles the section
+    /// "Contact us" and the row "Founder" from the export, as the desktop does.
+    var founderContactTitle: String?
+    /// Account › How Atum answers › Top up (plan v2 ST-5 slot). Nil: no button.
+    var openTopUp: (() -> Void)?
     /// The Founder draft, when the roster offers one: Contact us opens it and makes nothing;
     /// its first message makes the room.
     var founderDraft: FounderDraftActions?
@@ -58,7 +62,8 @@ struct AccountScreen: View {
          usageDataEnabled: Bool = true,
          setUsageDataEnabled: @escaping @MainActor (Bool) -> Void = { _ in },
          founderContactAvailable: Bool = false,
-         founderContactTitle: String = "Contact us",
+         founderContactTitle: String? = nil,
+         openTopUp: (() -> Void)? = nil,
          founderDraft: FounderDraftActions? = nil,
          contactFounder: @escaping @MainActor () async -> String? = { nil },
          openFounderRoom: @escaping (String) -> Void = { _ in },
@@ -79,6 +84,7 @@ struct AccountScreen: View {
         self.setUsageDataEnabled = setUsageDataEnabled
         self.founderContactAvailable = founderContactAvailable
         self.founderContactTitle = founderContactTitle
+        self.openTopUp = openTopUp
         self.founderDraft = founderDraft
         self.contactFounder = contactFounder
         self.openFounderRoom = openFounderRoom
@@ -156,8 +162,8 @@ struct AccountScreen: View {
                     restoreMessages: { recoverySheet = .restore },
                     beginSignOut: beginSignOut,
                     notificationTapped: { Task { await notificationTapped() } },
+                    openTopUp: openTopUp,
                     founderContactAvailable: founderContactAvailable,
-                    founderContactTitle: founderContactTitle,
                     founderDraftAvailable: founderDraft != nil,
                     openFounderDraft: { founderDraftPresented = true },
                     contactFounder: contactFounder,
@@ -282,7 +288,7 @@ struct AccountScreen: View {
         case .assistants: .sparkles
         case .protons: .compass
         case .general: .settings
-        // "What Atum knows" (FlowPhone2): an eye, not a link.
+        // Connections: an eye, as on the desktop's Settings board.
         case .connections: .eye
         case .devices: .deviceMobile
         case .privacy: .shield
