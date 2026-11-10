@@ -112,10 +112,17 @@
 		921B6069E1C8EB254F1FEBF0 /* ConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0FC555340582E84414D171 /* ConversationTests.swift */; };
 		9307BF51515A02F5AB755E84 /* TimeLabelRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B4B772D94436D22F34482A /* TimeLabelRow.swift */; };
 		932350441E74DCDDEF01498B /* TeamSpaceDailyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E12532A687A3AD0B73DE494 /* TeamSpaceDailyTests.swift */; };
+		918F401EF6F1B5F1A836B61D /* TeamSpaceStructureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D0DE1D0D4132D5A5E9B10D /* TeamSpaceStructureTests.swift */; };
 		93832330B2B256E36B524D10 /* AppBotNoticeProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AB21F5CFF8004E21E6065F /* AppBotNoticeProjection.swift */; };
 		93E1B89C89129390C23F9A63 /* TranscriptUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3680C4853A6454B341ABC067 /* TranscriptUITests.swift */; };
 		93F9E550C1EF155FED22E640 /* FirstRunCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6E94B50888B8A7A9DB23EB /* FirstRunCards.swift */; };
 		94B141630A5C19F5646A0136 /* CompanyWorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 647EAA4C4F8860728B7FE09B /* CompanyWorkspaceViews.swift */; };
+		E27319D8D48889689C291439 /* TeamSpacePendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F6614A6EB16B2D06489CDC /* TeamSpacePendingCopy.swift */; };
+		11B70B0B1D9D1EEA82825373 /* TeamSpaceCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A22E078427C31742F08C637 /* TeamSpaceCopy.swift */; };
+		58FFF98F5431C75863E264C5 /* CompanySpaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A978118D2881F551EC2169DA /* CompanySpaceViews.swift */; };
+		E4862B548E390F2312D09724 /* CompanySpaceReads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */; };
+		EEB7C9632C3F68FFAC743371 /* CompanySpaceMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */; };
+		03511538884AC9E9CE9DCED0 /* CompanyChannelChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */; };
 		9625EE68D6AF6865416044CC /* AtumUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F215437C0382312CF51317D2 /* AtumUITestCase.swift */; };
 		9697A0A52139F20C0B7AEA2A /* AccountScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10F74306DAF0BF9208C8BB82 /* AccountScreen.swift */; };
 		980202A90D75370EB5875264 /* ComposerDictationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A301DCAB5CF1EE9026EC7F22 /* ComposerDictationTests.swift */; };
@@ -347,6 +354,12 @@
 		5EDEE7E5C75ED5F661437470 /* AppOnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOnboardingViews.swift; sourceTree = "<group>"; };
 		635EDAC779946482EC51EB28 /* TimelineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineController.swift; sourceTree = "<group>"; };
 		647EAA4C4F8860728B7FE09B /* CompanyWorkspaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyWorkspaceViews.swift; sourceTree = "<group>"; };
+		15F6614A6EB16B2D06489CDC /* TeamSpacePendingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpacePendingCopy.swift; sourceTree = "<group>"; };
+		2A22E078427C31742F08C637 /* TeamSpaceCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceCopy.swift; sourceTree = "<group>"; };
+		A978118D2881F551EC2169DA /* CompanySpaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceViews.swift; sourceTree = "<group>"; };
+		9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceReads.swift; sourceTree = "<group>"; };
+		48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceMatrix.swift; sourceTree = "<group>"; };
+		9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyChannelChrome.swift; sourceTree = "<group>"; };
 		65E57A0A4A6E16379B0A7464 /* AccountSettingsState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsState.swift; sourceTree = "<group>"; };
 		6A9759FFBC6760628756EECA /* IgnoredPeopleList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IgnoredPeopleList.swift; sourceTree = "<group>"; };
 		D1A7E0C1AC2A4DE1A0C0FFEE /* DeleteAccountRequestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteAccountRequestSheet.swift; sourceTree = "<group>"; };
@@ -395,6 +408,7 @@
 		99F22D7ED106BEA5B648BDE0 /* AppRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRoot.swift; sourceTree = "<group>"; };
 		9C2D9DF99EFDD46B2622E0F9 /* AvatarArtTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarArtTests.swift; sourceTree = "<group>"; };
 		9E12532A687A3AD0B73DE494 /* TeamSpaceDailyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceDailyTests.swift; sourceTree = "<group>"; };
+		76D0DE1D0D4132D5A5E9B10D /* TeamSpaceStructureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceStructureTests.swift; sourceTree = "<group>"; };
 		9FD917529F420AC1D926B526 /* ReactionChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionChips.swift; sourceTree = "<group>"; };
 		A097B829D58A185C0CB1C433 /* DriveScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveScreen.swift; sourceTree = "<group>"; };
 		A2E304229026117B7D508A16 /* QuoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuoteView.swift; sourceTree = "<group>"; };
@@ -746,6 +760,7 @@
 				97350188135A9E0758288628 /* S6PresentationTests.swift */,
 				26138880ED8079C3211A11FB /* StoreCommercePresentationTests.swift */,
 				9E12532A687A3AD0B73DE494 /* TeamSpaceDailyTests.swift */,
+				76D0DE1D0D4132D5A5E9B10D /* TeamSpaceStructureTests.swift */,
 			);
 			path = AppTests;
 			sourceTree = "<group>";
@@ -848,6 +863,12 @@
 				F802940C864EB823935C92C5 /* CompanyLogo.swift */,
 				CDC217316B8ABD288A5390BB /* CompanyWorkspaceModel.swift */,
 				647EAA4C4F8860728B7FE09B /* CompanyWorkspaceViews.swift */,
+				15F6614A6EB16B2D06489CDC /* TeamSpacePendingCopy.swift */,
+				2A22E078427C31742F08C637 /* TeamSpaceCopy.swift */,
+				A978118D2881F551EC2169DA /* CompanySpaceViews.swift */,
+				9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */,
+				48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */,
+				9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */,
 				137B4475C399684FFE43891C /* ConversationCopy.swift */,
 				DFC5EC7D6CCCEA5C78BC18A9 /* ConversationPendingCopy.swift */,
 				ADD7F230B5EC24982633DC95 /* ConversationViews.swift */,
@@ -1184,6 +1205,7 @@
 				0C03ED6A288C93514F0A8AE3 /* S6PresentationTests.swift in Sources */,
 				EA60EC404747631960E961DA /* StoreCommercePresentationTests.swift in Sources */,
 				932350441E74DCDDEF01498B /* TeamSpaceDailyTests.swift in Sources */,
+				918F401EF6F1B5F1A836B61D /* TeamSpaceStructureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1268,6 +1290,12 @@
 				FF01DEF113A4327D55782296 /* CompanyLogo.swift in Sources */,
 				5424CCE97A6C9AC111B63526 /* CompanyWorkspaceModel.swift in Sources */,
 				94B141630A5C19F5646A0136 /* CompanyWorkspaceViews.swift in Sources */,
+				E27319D8D48889689C291439 /* TeamSpacePendingCopy.swift in Sources */,
+				11B70B0B1D9D1EEA82825373 /* TeamSpaceCopy.swift in Sources */,
+				58FFF98F5431C75863E264C5 /* CompanySpaceViews.swift in Sources */,
+				E4862B548E390F2312D09724 /* CompanySpaceReads.swift in Sources */,
+				EEB7C9632C3F68FFAC743371 /* CompanySpaceMatrix.swift in Sources */,
+				03511538884AC9E9CE9DCED0 /* CompanyChannelChrome.swift in Sources */,
 				EBDEC5DC70E5AE4EA0CF38F3 /* Composer.swift in Sources */,
 				9CAD16F7172E740BDA657FC1 /* ComposerDictation.swift in Sources */,
 				5EC06AAEDB20A87EC841716D /* ComposerDictationCopy.swift in Sources */,

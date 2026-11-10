@@ -368,7 +368,11 @@ struct AppRoot: View {
                     switcher: model.companyWorkspace.switcherEntries(signals: companySignals),
                     canCreate: model.companyWorkspace.canCreate,
                     appIconCount: home.appIconCount,
-                    logos: model.companyWorkspace.logoURIs(from: presentation.rooms.rooms)
+                    logos: model.companyWorkspace.logoURIs(from: presentation.rooms.rooms),
+                    menu: model.companyWorkspace.menuAllowed(companyID: model.companyWorkspace.activeCompanyID),
+                    viewerRole: model.companyWorkspace.activeCompanyID.flatMap {
+                        model.companyWorkspace.viewerRole(companyID: $0)
+                    }
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },
@@ -399,7 +403,10 @@ struct AppRoot: View {
                     loadMatrixThumbnail: { uri, side in
                         await model.avatarThumbnail(uri: uri, pixelSide: side)
                     },
-                    directMessages: directMessagesActions
+                    directMessages: directMessagesActions,
+                    loadActivity: { await model.companyActivity(companyID: $0) },
+                    loadSavedPointers: { await model.companySavedPointers() },
+                    loadSavedRows: { await model.companySavedRows($0) }
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -739,7 +746,10 @@ struct AppRoot: View {
                     loadDetails: { await model.chatPanelDetails(roomID: $0) },
                     moderateMember: { await model.moderateMember(roomID: $0, userID: $1, action: $2) },
                     assistantTurnStop: model.assistantTurnStopActions(roomID: roomID),
-                    sharedCollections: model.sharedCollectionsOpener(roomID: roomID)
+                    sharedCollections: model.sharedCollectionsOpener(roomID: roomID),
+                    companyChannel: CompanyChannelActions(
+                        loadFacts: { await model.companyChannelFacts(roomID: $0) },
+                        loadPinned: { await model.companyPinnedRows(roomID: $0) })
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),

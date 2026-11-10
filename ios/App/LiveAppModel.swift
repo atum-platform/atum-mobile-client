@@ -3678,11 +3678,14 @@ final class LiveAppModel {
         return CompanyChatInfo(
             companyID: claim.companyID,
             companyName: companyWorkspace.companyName(claim.companyID) ?? claim.displayName,
-            channelName: claim.displayName,
+            channelName: companyWorkspace.copy?.channelName(claim.displayName, isDefault: claim.isDefault)
+                ?? claim.displayName,
             members: companyWorkspace.members(companyID: claim.companyID),
             membersLoading: companyWorkspace.membersLoading.contains(claim.companyID),
             leavePending: companyWorkspace.isLeavePending(companyID: claim.companyID),
-            notice: companyWorkspace.copy?.notEncrypted ?? "")
+            notice: companyWorkspace.copy?.notEncrypted ?? "",
+            memberCount: companyWorkspace.channelMemberCount(roomID: roomID),
+            isDefaultChannel: claim.isDefault)
     }
 
     func refreshCompanyWorkspace() async {
