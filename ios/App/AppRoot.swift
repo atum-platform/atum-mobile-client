@@ -730,7 +730,8 @@ struct AppRoot: View {
                     setLowPriority: { model.setRoomLowPriority($0, isLowPriority: $1) },
                     loadDetails: { await model.chatPanelDetails(roomID: $0) },
                     moderateMember: { await model.moderateMember(roomID: $0, userID: $1, action: $2) },
-                    assistantTurnStop: model.assistantTurnStopActions(roomID: roomID)
+                    assistantTurnStop: model.assistantTurnStopActions(roomID: roomID),
+                    sharedCollections: model.sharedCollectionsOpener(roomID: roomID)
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),

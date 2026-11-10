@@ -61,7 +61,7 @@ final class LiveSharedCollections {
     let roomID: String
     let sections: [SharedCollectionSection: SharedCollectionsModel]
     private weak var session: LiveMatrixSession?
-    private var closed = false
+    private(set) var closed = false
     private var epoch: UInt64 = 0
     private var thumbnails: [String: Data] = [:]
     private var thumbnailOrder: [String] = []

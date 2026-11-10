@@ -32,6 +32,9 @@ Foundation parses accepted URLs and LinkPolicy gates every open.
 
 ## UI hand-off
 
+The phone UI built on this hand-off is described in
+[`shared-collections-ui.md`](shared-collections-ui.md).
+
 On the main actor, call
 `session.openSharedCollections(roomID:context:knownNames:catalogBotUserIDs:languageCode:)`.
 Supply the same room context used by the transcript. This works for person,

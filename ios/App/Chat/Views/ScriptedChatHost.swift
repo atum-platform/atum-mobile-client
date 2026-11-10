@@ -251,7 +251,8 @@ struct ScriptedChatHost: View {
                                     return true
                                 },
                                 assistantTurnStop: script.context.kind == .assistant
-                                    ? Self.scriptedTurnStop : nil
+                                    ? Self.scriptedTurnStop : nil,
+                                sharedCollections: ScriptedSharedCollectionsScope.opener()
                             ),
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,
