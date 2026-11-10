@@ -11,7 +11,7 @@ let package = Package(
                .library(name: "AtumChat", targets: ["AtumChat"]),
                .library(name: "AtumTelemetry", targets: ["AtumTelemetry"])],
     targets: [
-        .target(name: "AtumDesign", path: ".", exclude: ["Tests", "App", "AppTests", "Notifications", "UITests", "Sources/AtumPrototype", "Sources/AtumNativeAPI", "Sources/AtumDrive", "Sources/AtumChat", "ExportOptions.plist", "project.yml", "AtumMobile.xcodeproj", "DerivedData", "sdk-baseline.json", "Vendor/AtumKitIcons"],
+        .target(name: "AtumDesign", path: ".", exclude: ["StoreKit", "Tests", "App", "AppTests", "Notifications", "UITests", "Sources/AtumPrototype", "Sources/AtumNativeAPI", "Sources/AtumDrive", "Sources/AtumChat", "ExportOptions.plist", "project.yml", "AtumMobile.xcodeproj", "DerivedData", "sdk-baseline.json", "Vendor/AtumKitIcons"],
                 sources: ["Sources/AtumDesign"], resources: [.copy("Vendor/AtumDesign")]),
         .target(name: "AtumPrototype", dependencies: ["AtumDesign", "AtumNativeAPI"], path: "Sources/AtumPrototype", resources: [.copy("Fixtures")]),
         .target(name: "AtumNativeAPI", path: "Sources/AtumNativeAPI"),

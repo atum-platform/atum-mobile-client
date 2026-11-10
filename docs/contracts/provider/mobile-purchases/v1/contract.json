@@ -1,0 +1,615 @@
+{
+  "contract_id": "atum.mobile-purchases",
+  "version": 1,
+  "status": "frozen",
+  "pack_files": [
+    "README.md",
+    "contract.json",
+    "fixtures/account-token.response.json",
+    "fixtures/error-environment-mismatch.response.json",
+    "fixtures/error-guessed-outcome.response.json",
+    "fixtures/error-invalid-signature.response.json",
+    "fixtures/notification.request.json",
+    "fixtures/products-closed.response.json",
+    "fixtures/products-open.response.json",
+    "fixtures/products-wrong-product-id.response.json",
+    "fixtures/transaction-credited-twice.sequence.json",
+    "fixtures/transaction-credited.response.json",
+    "fixtures/transaction-names-principal.request.json",
+    "fixtures/transaction-needs-support.response.json",
+    "fixtures/transaction-orphan-credited.sequence.json",
+    "fixtures/transaction-refund-and-reversal.sequence.json",
+    "fixtures/transaction-replayed.response.json",
+    "fixtures/transaction-sandbox-to-production.facts.json",
+    "fixtures/transaction-support-resolved.sequence.json",
+    "fixtures/transaction-without-account-token.facts.json",
+    "fixtures/transaction-without-finish.response.json",
+    "fixtures/transaction-wrong-bundle.facts.json",
+    "fixtures/transaction-xcode-server.facts.json",
+    "fixtures/transaction-xcode-to-sandbox.facts.json",
+    "fixtures/transaction.facts.json",
+    "fixtures/transaction.request.json"
+  ],
+  "row": "iPhone plan §9.1 contract d1 (§9.4)",
+  "providers": [
+    "CM"
+  ],
+  "consumers": [
+    "iOS"
+  ],
+  "pins": {
+    "bundle_id": "com.atum.mobile",
+    "app_apple_id": 6819235537,
+    "team_id": "7D5FC62RXD",
+    "claw_back": "PR #459 (feat/store-refunds, migration 0190), unmerged and moving; no head is pinned. Last read 2026-10-05T14:42Z at 45933e0d03a512c4ad07821929e890c24233f5a8"
+  },
+  "routes": {
+    "native_base": "/api/matrix/v1",
+    "operations": {
+      "GET /store/apple/products": [
+        null,
+        "apple.products.response"
+      ],
+      "GET /store/apple/account-token": [
+        null,
+        "apple.account_token.response"
+      ],
+      "POST /store/apple/transactions": [
+        "apple.transaction.request",
+        "apple.transaction.response"
+      ]
+    },
+    "notifications": [
+      "POST /api/payments/apple/notifications",
+      "apple.notification.request"
+    ],
+    "errors": "apple.error.response"
+  },
+  "types": {
+    "uuid": {
+      "type": "string",
+      "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    },
+    "timestamp_ms": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "micro_protons": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "jws": {
+      "type": "string",
+      "min": 5,
+      "max": 16384,
+      "pattern": "[A-Za-z0-9_-]+[.][A-Za-z0-9_-]+[.][A-Za-z0-9_-]+"
+    },
+    "server_environment": {
+      "enum": [
+        "production",
+        "sandbox"
+      ]
+    },
+    "apple_environment": {
+      "enum": [
+        "Production",
+        "Sandbox",
+        "Xcode",
+        "LocalTesting"
+      ]
+    },
+    "apple_server_environment": {
+      "enum": [
+        "Production",
+        "Sandbox"
+      ]
+    },
+    "product_id": {
+      "type": "string",
+      "min": 25,
+      "max": 80,
+      "pattern": "com[.]atum[.]mobile[.]protons[.][a-z0-9_]{1,40}"
+    },
+    "transaction_id": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "[0-9]+"
+    },
+    "balances": {
+      "type": "object",
+      "required": {
+        "available": {
+          "ref": "micro_protons"
+        },
+        "paid": {
+          "ref": "micro_protons"
+        },
+        "earned": {
+          "ref": "micro_protons"
+        },
+        "promo": {
+          "ref": "micro_protons"
+        },
+        "held": {
+          "ref": "micro_protons"
+        }
+      }
+    }
+  },
+  "directions": {
+    "owner_to_platform": {
+      "description": "The app to CM's routes, with the domain grant. The owner is introspected.",
+      "forbidden_fields": [
+        "owner",
+        "principal",
+        "payer",
+        "appAccountToken",
+        "environment",
+        "credited",
+        "balances",
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    },
+    "platform_to_owner": {
+      "description": "CM's routes to the app.",
+      "forbidden_fields": [
+        "signedTransaction",
+        "signedPayload",
+        "jws",
+        "accessToken",
+        "refreshToken",
+        "token",
+        "credential",
+        "password",
+        "leaseToken",
+        "recoveryKey"
+      ]
+    },
+    "apple_to_platform": {
+      "description": "App Store Server Notifications V2. Apple signs the payload.",
+      "forbidden_fields": []
+    },
+    "verification_facts": {
+      "description": "What the server checks in a verified, decoded transaction, against its own environment.",
+      "forbidden_fields": []
+    }
+  },
+  "messages": {
+    "apple.products.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "catalogVersion": {
+            "type": "integer",
+            "min": 1,
+            "max": 9007199254740991
+          },
+          "environment": {
+            "ref": "server_environment"
+          },
+          "checkoutOpen": {
+            "type": "boolean"
+          },
+          "products": {
+            "type": "array",
+            "max": 20,
+            "items": {
+              "type": "object",
+              "required": {
+                "productId": {
+                  "ref": "product_id"
+                },
+                "packId": {
+                  "type": "string",
+                  "min": 1,
+                  "max": 40,
+                  "pattern": "[a-z0-9_]+"
+                },
+                "paidMicroProtons": {
+                  "type": "integer",
+                  "min": 1,
+                  "max": 9007199254740991
+                },
+                "bonusMicroProtons": {
+                  "ref": "micro_protons"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apple.account_token.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "appAccountToken": {
+            "ref": "uuid"
+          }
+        }
+      }
+    },
+    "apple.transaction.request": {
+      "direction": "owner_to_platform",
+      "schema": {
+        "type": "object",
+        "required": {
+          "signedTransaction": {
+            "ref": "jws"
+          }
+        }
+      }
+    },
+    "apple.transaction.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "transactionId": {
+            "ref": "transaction_id"
+          },
+          "state": {
+            "enum": [
+              "credited",
+              "already_credited",
+              "credited_to_other_account",
+              "revoked",
+              "needs_support"
+            ]
+          },
+          "finish": {
+            "type": "boolean"
+          },
+          "credited": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": {
+                  "paidMicroProtons": {
+                    "ref": "micro_protons"
+                  },
+                  "bonusMicroProtons": {
+                    "ref": "micro_protons"
+                  }
+                }
+              }
+            ]
+          },
+          "balances": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "ref": "balances"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "apple.notification.request": {
+      "direction": "apple_to_platform",
+      "schema": {
+        "type": "object",
+        "required": {
+          "signedPayload": {
+            "ref": "jws"
+          }
+        }
+      }
+    },
+    "apple.transaction.facts": {
+      "direction": "verification_facts",
+      "schema": {
+        "type": "object",
+        "required": {
+          "serverEnvironment": {
+            "ref": "apple_server_environment"
+          },
+          "chainVerified": {
+            "const": true
+          },
+          "transaction": {
+            "type": "object",
+            "required": {
+              "bundleId": {
+                "const": "com.atum.mobile"
+              },
+              "appAppleId": {
+                "const": 6819235537
+              },
+              "environment": {
+                "ref": "apple_environment"
+              },
+              "type": {
+                "const": "Consumable"
+              },
+              "productId": {
+                "ref": "product_id"
+              },
+              "transactionId": {
+                "ref": "transaction_id"
+              },
+              "originalTransactionId": {
+                "ref": "transaction_id"
+              },
+              "appAccountToken": {
+                "ref": "uuid"
+              },
+              "purchaseDate": {
+                "ref": "timestamp_ms"
+              },
+              "quantity": {
+                "const": 1
+              }
+            },
+            "optional": {
+              "revocationDate": {
+                "ref": "timestamp_ms"
+              },
+              "revocationReason": {
+                "type": "integer",
+                "min": 0,
+                "max": 1
+              }
+            },
+            "additional": true
+          }
+        }
+      }
+    },
+    "apple.error.response": {
+      "direction": "platform_to_owner",
+      "schema": {
+        "type": "object",
+        "required": {
+          "error": {
+            "enum": [
+              "matrix_400",
+              "matrix_401",
+              "matrix_403",
+              "matrix_409",
+              "matrix_422",
+              "matrix_503"
+            ]
+          }
+        },
+        "optional": {
+          "details": {
+            "type": "object",
+            "required": {},
+            "optional": {
+              "reason": {
+                "enum": [
+                  "invalid",
+                  "checkout_closed",
+                  "environment_mismatch",
+                  "invalid_signature",
+                  "wrong_bundle",
+                  "unavailable"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "facts.environment_is_the_servers",
+      "message": "apple.transaction.facts",
+      "op": "same",
+      "left": "transaction.environment",
+      "right": "serverEnvironment",
+      "required": true
+    }
+  ],
+  "state_machines": {
+    "apple_transaction": {
+      "states": [
+        "received",
+        "credited",
+        "revoked",
+        "needs_support",
+        "orphaned"
+      ],
+      "initial": [
+        "received"
+      ],
+      "terminal": [
+        "orphaned"
+      ],
+      "transitions": [
+        [
+          "received",
+          "credited",
+          "verified_and_credited"
+        ],
+        [
+          "received",
+          "revoked",
+          "revocation_seen_before_credit"
+        ],
+        [
+          "received",
+          "needs_support",
+          "purchase_check_failed"
+        ],
+        [
+          "received",
+          "orphaned",
+          "token_tombstoned"
+        ],
+        [
+          "credited",
+          "revoked",
+          "refund_clawed_back"
+        ],
+        [
+          "revoked",
+          "credited",
+          "refund_reversed"
+        ],
+        [
+          "needs_support",
+          "credited",
+          "support_credited_to_token_owner"
+        ],
+        [
+          "needs_support",
+          "revoked",
+          "refund_seen"
+        ]
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "file": "fixtures/products-open.response.json",
+      "message": "apple.products.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/products-closed.response.json",
+      "message": "apple.products.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/products-wrong-product-id.response.json",
+      "message": "apple.products.response",
+      "expect": "reject",
+      "violation": "pattern"
+    },
+    {
+      "file": "fixtures/account-token.response.json",
+      "message": "apple.account_token.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction.request.json",
+      "message": "apple.transaction.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction-names-principal.request.json",
+      "message": "apple.transaction.request",
+      "expect": "reject",
+      "violation": "forbidden_field"
+    },
+    {
+      "file": "fixtures/transaction-credited.response.json",
+      "message": "apple.transaction.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction-replayed.response.json",
+      "message": "apple.transaction.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction-needs-support.response.json",
+      "message": "apple.transaction.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction-without-finish.response.json",
+      "message": "apple.transaction.response",
+      "expect": "reject",
+      "violation": "missing"
+    },
+    {
+      "file": "fixtures/notification.request.json",
+      "message": "apple.notification.request",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction.facts.json",
+      "message": "apple.transaction.facts",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction-wrong-bundle.facts.json",
+      "message": "apple.transaction.facts",
+      "expect": "reject",
+      "violation": "const"
+    },
+    {
+      "file": "fixtures/transaction-sandbox-to-production.facts.json",
+      "message": "apple.transaction.facts",
+      "expect": "reject",
+      "violation": "invariant"
+    },
+    {
+      "file": "fixtures/transaction-xcode-to-sandbox.facts.json",
+      "message": "apple.transaction.facts",
+      "expect": "reject",
+      "violation": "invariant"
+    },
+    {
+      "file": "fixtures/transaction-xcode-server.facts.json",
+      "message": "apple.transaction.facts",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/transaction-without-account-token.facts.json",
+      "message": "apple.transaction.facts",
+      "expect": "reject",
+      "violation": "missing"
+    },
+    {
+      "file": "fixtures/error-environment-mismatch.response.json",
+      "message": "apple.error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-invalid-signature.response.json",
+      "message": "apple.error.response",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/error-guessed-outcome.response.json",
+      "message": "apple.error.response",
+      "expect": "reject",
+      "violation": "enum"
+    },
+    {
+      "file": "fixtures/transaction-refund-and-reversal.sequence.json",
+      "machine": "apple_transaction",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction-credited-twice.sequence.json",
+      "machine": "apple_transaction",
+      "expect": "reject",
+      "violation": "transition"
+    },
+    {
+      "file": "fixtures/transaction-support-resolved.sequence.json",
+      "machine": "apple_transaction",
+      "expect": "accept"
+    },
+    {
+      "file": "fixtures/transaction-orphan-credited.sequence.json",
+      "machine": "apple_transaction",
+      "expect": "reject",
+      "violation": "transition"
+    }
+  ]
+}

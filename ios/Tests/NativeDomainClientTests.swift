@@ -2638,3 +2638,59 @@ extension NativeDomainClientTests {
         }
     }
 }
+
+// MARK: Apple purchases (frozen d1)
+
+extension NativeDomainClientTests {
+    func testApplePurchaseRoutesUseSameMASBearerAndExactRequestShape() async throws {
+        let products = try ApplePurchaseTestData.data(.productsOpen)
+        let token = try ApplePurchaseTestData.data(.accountToken)
+        let transaction = try ApplePurchaseTestData.data(.transactionCredited)
+        NativeDomainProtocol.state.handler = { request in
+            switch request.url!.path {
+            case "/api/matrix/v1/store/apple/products": return .json(products)
+            case "/api/matrix/v1/store/apple/account-token": return .json(token)
+            case "/api/matrix/v1/store/apple/transactions": return .init(status: 201, chunks: [transaction])
+            default: return .init(status: 404)
+            }
+        }
+        let client = client(TestAuthorization(first: "synthetic-mas-bearer"))
+        _ = try await client.appleProducts()
+        _ = try await client.appleAccountToken()
+        _ = try await client.appleTransaction(.init(signedTransaction: "synthetic.payload.signature"))
+        let requests = NativeDomainProtocol.state.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "GET", "POST"])
+        for request in requests {
+            XCTAssertEqual(request.url?.host, "api.atumplatform.com")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic-mas-bearer")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+        }
+        let object = try JSONSerialization.jsonObject(with: XCTUnwrap(body(of: requests[2]))) as! [String: String]
+        XCTAssertEqual(object, ["signedTransaction": "synthetic.payload.signature"])
+    }
+
+    func testApple401RefreshAndClosed422CodesAndStatusMismatch() async throws {
+        let transaction = try ApplePurchaseTestData.data(.transactionReplayed)
+        NativeDomainProtocol.state.handler = { request in
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer old" {
+                return .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)])
+            }
+            return .json(transaction)
+        }
+        let authorization = TestAuthorization(first: "old", refreshed: "new")
+        _ = try await client(authorization).appleTransaction(.init(signedTransaction: "a.b.c"))
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
+        let invalidSignature = try ApplePurchaseTestData.data(.errorInvalidSignature)
+        for status in [422, 503] {
+            NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [invalidSignature]) }
+            do {
+                _ = try await client(TestAuthorization(first: "valid")).appleTransaction(.init(signedTransaction: "a.b.c"))
+                XCTFail("An error must not become a transaction acknowledgement")
+            } catch let error as ApplePurchaseError {
+                XCTAssertEqual(status, 422); XCTAssertEqual(error.reason, .invalidSignature)
+            } catch let error as NativeDomainClientFailure {
+                XCTAssertEqual(status, 503); XCTAssertEqual(error, .invalidResponse)
+            }
+        }
+    }
+}

@@ -260,7 +260,13 @@ final class LiveAppModel {
     private let copyCatalog = try? AtumCopy()
     private var clients: MASPublicClients?
     private var metadata: MASMetadata?
-    private var context: Context?
+    private var context: Context? {
+        didSet {
+            if oldValue?.runtime.ticket.session.userID != context?.runtime.ticket.session.userID {
+                applePurchases.bind(accountID: nil, api: nil)
+            }
+        }
+    }
     private var bootstrapTask: Task<Void, Never>?
     private var productTask: Task<Void, Never>?
     /// One placement request per sign-in product start (owner decision
@@ -281,6 +287,20 @@ final class LiveAppModel {
     private var isRefreshingProduct = false
     private(set) var domainRecoveryState = MobileDomainRecoveryState.temporarilyUnavailable
     private(set) var domainReauthenticationInProgress = false
+    /// Non-UI purchase owner. API origin remains the client's fixed build origin.
+    /// Sandbox TestFlight integration must supply the approved sandbox origin first.
+    @ObservationIgnored lazy var applePurchases = ApplePurchaseCoordinator(
+        store: StoreKitPurchaseStore(), environment: .production,
+        refreshWallet: { [weak self] in await self?.refreshApplePurchaseWallet() }
+    )
+
+    private func refreshApplePurchaseWallet() async {
+        guard let client = domainClient else { return }
+        let result = await readWallet(using: client)
+        guard domainClient === client else { return }
+        apply(result, to: &walletRead)
+    }
+
     private var domainClient: NativeDomainClient? {
         didSet {
             let replaced: Bool
@@ -290,6 +310,7 @@ final class LiveAppModel {
             default: replaced = true
             }
             guard replaced else { return }
+            applePurchases.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
             officialAccountsClientGeneration &+= 1
             officialAccountsCadence.activate(nil)
             if let accountID = context?.runtime.ticket.session.userID {
@@ -672,6 +693,12 @@ final class LiveAppModel {
             return false
         }
         signOutInProgress = true
+        applePurchases.bind(accountID: nil, api: nil)
+        defer {
+            if let domainClient, let accountID = context?.runtime.ticket.session.userID {
+                applePurchases.bind(accountID: accountID, api: domainClient)
+            }
+        }
         await withdrawDrive(current, reason: .signOut)
         invalidateAppAccount()
         closeConversation()
@@ -3264,6 +3291,7 @@ final class LiveAppModel {
     /// Follows the app's scene phase through `LiveScenePhaseRelay`, so the
     /// root view's body never depends on it. Idempotent.
     func observeScenePhase() {
+        applePurchases.start()
         guard scenePhaseToken == nil else { return }
         scenePhaseToken = LiveScenePhaseRelay.shared.observe { [weak self] phase in
             switch phase {
@@ -3296,6 +3324,7 @@ final class LiveAppModel {
     /// and wakes the queues on the same phase change, while the session is
     /// current.
     func sceneBecameActive() {
+        Task { [weak self] in await self?.applePurchases.replayUnfinished() }
         isSceneActive = true
         startSessionKeepAlive()
         if returningFromBackground {
