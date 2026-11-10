@@ -29,6 +29,29 @@ final class ChatCopyContractTests: XCTestCase {
         }
     }
 
+    /// HC-3/HC-5: Home's working words and Start chat's find, no-match and
+    /// member-count words resolve in every pinned locale.
+    func testHomeWave2KeysResolveInEveryPinnedLocale() throws {
+        let copy = try AtumCopy()
+        let keys: [(String, [AtumCopy.Argument])] = [
+            ("src.matrix.working-copy.copies.working", [.text("Lan")]),
+            ("src.matrix.roster-create-copy.copies.findOnAtum", [.text("lan")]),
+            ("src.matrix.roster-create-copy.copies.noMatches", []),
+            ("src.matrix.roster-create-copy.copies.noMatchesHint", []),
+            ("src.matrix.roster-create-copy.copies.members", [.number(1)]),
+            ("src.matrix.roster-create-copy.copies.members", [.number(4)]),
+        ]
+        for locale in ["en", "vi", "ja", "zh", "zh-Hant"] {
+            for (key, arguments) in keys {
+                XCTAssertNoThrow(try copy.text(key, locale: locale, arguments: arguments), "\(locale) \(key)")
+            }
+        }
+        XCTAssertEqual(try copy.text("src.matrix.roster-create-copy.copies.members", locale: "en",
+                                     arguments: [.number(1)]), "1 member")
+        XCTAssertEqual(try copy.text("src.matrix.working-copy.copies.working", locale: "en",
+                                     arguments: [.text("Lan")]), "Lan is working")
+    }
+
     private func arguments(for key: ChatCopyKey) -> [AtumCopy.Argument] {
         switch key {
         case .seenBy, .newMessages, .mediaPhotoNumber, .mediaRemovePhoto,

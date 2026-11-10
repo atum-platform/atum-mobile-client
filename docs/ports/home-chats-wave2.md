@@ -46,6 +46,16 @@ Desktop `m/start-chat.tsx:100-347`. The phone `HomeStartChatSheet`:
 - `ios/AtumMobile.xcodeproj/project.pbxproj`: two file references (`HomeAssistantActivity.swift`, `HomeChatsWave2StateTests.swift`), added by hand. `xcodegen generate` reorders about 100 unrelated lines with the installed version.
 - `ios/App/Chat/Views/Composer.swift`: one `.onChange(of: store.composerFocusRequest)` line. The composer area is otherwise untouched, so ST-5's chat top-up entry merges cleanly.
 
+## Verification
+
+All heavy runs used the shared lock (`lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`) on the iPhone 17 simulator (939B69F8), 2026-11-11:
+
+- `swift test -j 2` (whole package): AtumChatTests 591, AtumDesignTests 677, AtumDriveTests 16, AtumTelemetryTests 16. 0 failures. New: `HomeChatsWave2Tests` (9), `ChatCopyContractTests.testHomeWave2KeysResolveInEveryPinnedLocale`.
+- `xcodebuild … -scheme AtumMobileStateTests -only-testing:AtumMobileTests test`: 302 tests, 0 failures. New: `HomeChatsWave2StateTests` (5). This includes the app build.
+- Selected UITests (`-scheme AtumMobile`): `HomeShellUITests.testStartChatFindsATypedHandleOnAtum` (new), `testAddFriendFormNormalizesHandleAndShowsDirectoryResult` and `TranscriptUITests.testU10EmptyChatShowsTheGreeting` passed. `testPlusOpens…` and `testNewGroup…` failed on the first run because the inline New group row sat below the medium detent. They now scroll to it; see the rerun note below. `S1MatrixUITests.testEmptyChat` cannot run here: its setUp needs the matrix runner's appearance host ("no simulator appearance runner beside the matrix").
+- Simulator captures (scripted hosts): empty assistant chat in en light, en dark and vi, and Home with `-AtumDebugWorking` in en light and vi dark. Kept outside the repo in `/Volumes/AtumTestFlight/swiftbuild-w2-hc/logs/shot-*.png`.
+- `scripts/public_guard.py --base origin/main --head HEAD`: PASS.
+
 ## Not done, gated, or unverified
 
 - **Person @handle captions** in Start chat (and on Home rows): the phone has only forward alias lookup (`aliasLookup(handle:)`). Showing a known person's handle needs the reverse read in plan SV-4. Server-gated.

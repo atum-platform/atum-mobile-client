@@ -202,16 +202,60 @@ final class HomeShellUITests: TranscriptUITestCase {
         create.tap()
         XCTAssertTrue(app.staticTexts["Bắt đầu trò chuyện"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons.matching(identifier: "home.startChat.addFriend").firstMatch.exists)
-        XCTAssertTrue(app.buttons.matching(identifier: "home.startChat.newGroup").firstMatch.exists)
         XCTAssertTrue(app.buttons.matching(identifier: "home.startChat.newAssistant").firstMatch.exists)
+        // HC-5: New group is the People section's last row, as on desktop.
+        XCTAssertTrue(revealStartChatNewGroup(app).exists, "no inline New group row")
 
+        // Any row still in view after the scroll opens its conversation.
         let existing = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH 'home.startChat.row.'")
-        ).firstMatch
-        XCTAssertTrue(existing.exists, "Start chat has no existing conversation")
-        existing.tap()
+        ).allElementsBoundByIndex.first { $0.isHittable && $0.isEnabled }
+        XCTAssertNotNil(existing, "Start chat has no existing conversation")
+        existing?.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home.scripted.destination"]
             .waitForExistence(timeout: 3))
+    }
+
+    /// HC-5: Start chat's "New group" is an inline row at the end of People
+    /// (desktop `start-chat.tsx`), so a long list scrolls it into view.
+    @MainActor
+    private func revealStartChatNewGroup(_ app: XCUIApplication) -> XCUIElement {
+        let newGroup = app.buttons.matching(identifier: "home.startChat.newGroup").firstMatch
+        let sheet = app.descendants(matching: .any).matching(identifier: "home.startChat").firstMatch
+        _ = sheet.waitForExistence(timeout: 3)
+        for _ in 0..<6 where !(newGroup.exists && newGroup.isHittable) {
+            app.swipeUp(velocity: .slow)
+        }
+        return newGroup
+    }
+
+    /// HC-5: a typed @name offers "Find @x on Atum", which opens Add friend
+    /// already searching; a name with no match says so.
+    @MainActor
+    func testStartChatFindsATypedHandleOnAtum() {
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+            + ["-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN",
+               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launch()
+
+        let create = app.buttons.matching(identifier: "home.create").firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 15), boundedHierarchy(app))
+        create.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        search.tap()
+        search.typeText("Zzz Không ai")
+        XCTAssertTrue(app.descendants(matching: .any)["home.startChat.noMatches"].waitForExistence(timeout: 3),
+                      "no no-match state")
+        search.buttons.firstMatch.tap()
+        search.typeText("@LAN_ANH")
+        let find = app.buttons.matching(identifier: "home.startChat.find").firstMatch
+        XCTAssertTrue(find.waitForExistence(timeout: 3), "no Find on Atum row")
+        XCTAssertTrue(find.label.contains("@lan_anh"), find.label)
+        find.tap()
+        XCTAssertTrue(app.staticTexts["Không có ai trên Atum tên là @lan_anh."]
+            .waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -251,8 +295,8 @@ final class HomeShellUITests: TranscriptUITestCase {
         let create = app.buttons.matching(identifier: "home.create").firstMatch
         XCTAssertTrue(create.waitForExistence(timeout: 15), boundedHierarchy(app))
         create.tap()
-        let newGroup = app.buttons.matching(identifier: "home.startChat.newGroup").firstMatch
-        XCTAssertTrue(newGroup.waitForExistence(timeout: 3))
+        let newGroup = revealStartChatNewGroup(app)
+        XCTAssertTrue(newGroup.exists, "no inline New group row")
         newGroup.tap()
 
         let name = app.textFields.matching(identifier: "home.newGroup.name").firstMatch
