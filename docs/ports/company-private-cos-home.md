@@ -146,3 +146,13 @@ those deployment/account facts. The phone does not gain the desktop's marker,
 room-power or membership-policy verification: this change relies on the exact
 authenticated platform binding for roster classification and the existing
 Matrix opener for access.
+
+## Coordinator verification (2026-11-10)
+
+- `swift test --package-path ios -j 2` (under the shared build lock): 505 + 31 new tests, 0 failures.
+- `xcodebuild test -scheme AtumMobileStateTests -only-testing:AtumMobileTests/S2StateTests` on the
+  iPhone 17 simulator (iOS 27.0): 71 tests, 0 failures, after fixing one fixture. The new projection
+  test's app bot used the `atum.example` homeserver, which the app catalog rejects; it now uses
+  `atumplatform.com` like the other fixtures.
+- Still unverified: production admission of the phone's bearer on the private-CoS view route, and
+  opening the CoS from Team Space on a live account.

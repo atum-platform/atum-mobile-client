@@ -2041,12 +2041,12 @@ extension S2StateTests {
             agentJSON(id: privateAgentID, name: "Synthetic private assistant", matrixUser: binding.agentUserId),
             agentJSON(id: personalAgentID, name: "Chief of Staff", matrixUser: "@personal:atum.example")
         ])
-        let app = try decodeMoon(appID: "a9000000-0000-4000-8000-000000000001", botID: "@app-moon:atum.example")
+        let app = try decodeMoon(appID: "a9000000-0000-4000-8000-000000000001", botID: "@app-moon:atumplatform.com")
         let rooms = [
             rosterRoom(binding.roomId, userID: binding.agentUserId, latest: 1),
             rosterRoom("!personal:atum.example", userID: "@personal:atum.example", latest: 2),
             rosterRoom("!founder:atum.example", userID: "@founder:atum.example", latest: 3),
-            rosterRoom("!app:atum.example", userID: "@app-moon:atum.example", latest: 4)
+            rosterRoom("!app:atum.example", userID: "@app-moon:atumplatform.com", latest: 4)
         ]
         let baseline = LiveRosterRows.rows(.init(agents: agents, apps: [app], rooms: rooms,
             invites: [], pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "en",
