@@ -3126,6 +3126,23 @@ final class LiveAppModel {
         conversationOpenedRoom = nil
     }
 
+    /// The chat info sheet's Shared section (`SharedCollectionsSection`):
+    /// each call opens a new data-layer scope on the current session, with
+    /// the transcript's room context, names and language. The section closes it.
+    func sharedCollectionsOpener(roomID: String) -> SharedCollectionsOpener? {
+        guard conversation?.roomID == roomID else { return nil }
+        return { [weak self] in
+            guard let self, let session = self.liveMatrix, let current = self.context,
+                  let info = self.conversationInfo(roomID: roomID, title: "",
+                                                   ownUserID: current.runtime.ticket.session.userID)
+            else { throw SharedCollectionFailure.unavailable }
+            return try await session.openSharedCollections(roomID: roomID, context: info.context,
+                                                           knownNames: info.knownNames,
+                                                           catalogBotUserIDs: info.catalogBotUserIDs,
+                                                           languageCode: info.languageCode)
+        }
+    }
+
     private func openConversation(roomID: String, row: LiveProductRoom) {
         // A conversation is named for the other people, from the platform's record, never
         // from the Matrix room name.

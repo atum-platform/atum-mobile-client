@@ -20,6 +20,9 @@ struct ChatPanelHost: View {
     @State private var height: PresentationDetent
     @State private var details: ChatInfoDetails?
     @State private var detailsGeneration = 0
+    /// The Shared section's scope, owned here so its See all pages share it
+    /// and it closes with the panel (`SharedCollectionsController`).
+    @State private var shared = SharedCollectionsController()
 
     init(design: LiveDesign, info: ChatInfoPresentation, actions: ChatInfoActions,
          loadMatrixThumbnail: ((String, Int) async -> Data?)?, close: @escaping () -> Void) {
@@ -38,15 +41,19 @@ struct ChatPanelHost: View {
             ChatInfoHome(design: design, info: info, actions: actions,
                          loadMatrixThumbnail: loadMatrixThumbnail, details: details,
                          close: close, open: { path.append($0) },
-                         reload: { detailsGeneration &+= 1 })
+                         reload: { detailsGeneration &+= 1 },
+                         sharedCollections: actions.sharedCollections == nil ? nil : shared)
                 .navigationDestination(for: ChatPanelPolicy.Page.self) { page in
                     switch page {
                     case .members:
                         ChatMembersPage(design: design, info: info, actions: actions,
                                         details: details, loadMatrixThumbnail: loadMatrixThumbnail,
                                         close: close, reload: { detailsGeneration &+= 1 })
-                    case .shared, .appPage:
-                        // M3 and M5 pages; nothing pushes them yet.
+                    case let .shared(section):
+                        SharedCollectionPage(design: design, info: info, controller: shared,
+                                             section: section.collection, close: close)
+                    case .appPage:
+                        // M5; nothing pushes it yet.
                         EmptyView()
                     }
                 }

@@ -190,6 +190,7 @@ final class LiveMatrixSession {
     private(set) var isLoadingRooms = false
     private(set) var error: LiveMatrixSessionError?
 
+    let sharedCollectionsRegistry = SharedCollectionsRegistry()
     private let runtime: MatrixLiveRuntime
     private var syncService: SyncService?
     private var roomList: RoomList?
@@ -1089,6 +1090,7 @@ final class LiveMatrixSession {
     }
 
     private func discardLiveResources() async {
+        sharedCollectionsRegistry.closeAll()
         roomListener?.deactivate()
         roomEntriesStream?.cancel()
         roomLoadingStream?.cancel()

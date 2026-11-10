@@ -187,6 +187,8 @@ struct ChatInfoActions {
     /// host that cannot reach the platform's stop route, and then the
     /// composer offers no Stop at all (never a dead button).
     var assistantTurnStop: AssistantTurnStopActions?
+    /// Opens the Shared section's photos, files and links; nil hides it.
+    var sharedCollections: SharedCollectionsOpener?
 }
 
 /// What the panel reads when it opens. Every field may be unknown; an unknown
@@ -320,6 +322,8 @@ struct ChatInfoHome: View {
     let open: (ChatPanelPolicy.Page) -> Void
     /// Reads the panel's details again after a change they show (Block).
     var reload: () -> Void = {}
+    /// The panel's Shared scope owner (`ChatPanelHost`); nil hides the section.
+    var sharedCollections: SharedCollectionsController? = nil
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -389,6 +393,10 @@ struct ChatInfoHome: View {
                             teamSpacesSection(spaces).padding(.top, 24)
                         }
                         conversationSection.padding(.top, 24)
+                        if let sharedCollections {
+                            SharedCollectionsSection(design: design, info: info, open: actions.sharedCollections,
+                                                     controller: sharedCollections, seeAll: { open(.shared($0)) })
+                        }
                         assistantAccessSection.padding(.top, 24)
                         exitSection.padding(.top, 24)
                     }
