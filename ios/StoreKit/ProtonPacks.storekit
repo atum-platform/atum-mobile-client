@@ -8,13 +8,13 @@
       "internalID": "1000000001",
       "localizations": [
         {
-          "description": "95,000 paid + 5,000 bonus Protons",
+          "description": "100,000 Protons",
           "displayName": "100k Protons",
           "locale": "en_US"
         },
         {
-          "description": "StoreKit test",
-          "displayName": "100k Protons",
+          "description": "100.000 Proton",
+          "displayName": "100k Proton",
           "locale": "vi"
         }
       ],
@@ -28,13 +28,13 @@
       "internalID": "1000000002",
       "localizations": [
         {
-          "description": "395,000 paid + 105,000 bonus Protons",
+          "description": "500,000 Protons",
           "displayName": "500k Protons",
           "locale": "en_US"
         },
         {
-          "description": "StoreKit test",
-          "displayName": "500k Protons",
+          "description": "500.000 Proton",
+          "displayName": "500k Proton",
           "locale": "vi"
         }
       ],

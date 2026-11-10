@@ -227,3 +227,114 @@ enum StorePricePresentation {
         }.joined(separator: " · ")
     }
 }
+
+/// One Store row as the shelves list it: a catalog item, or the one Hatch
+/// card the two hatch rows fold into. `regularOffer` is set only while the
+/// first-hatch price stands in for a higher regular one (desktop
+/// `hatch-listing.ts:26-47`), so the row can strike the regular price through.
+struct StoreListing: Identifiable, Equatable {
+    let item: LiveProductStoreItem
+    var regularOffer: StoreCatalogOffer? = nil
+    var id: String { item.id }
+}
+
+/// Desktop's Store shelves (`store-sidebar.tsx:14-21`, `discover-view.tsx:498-560`)
+/// on one phone list: Featured, Skills, Assistants, Apps, Pets, then Purchased.
+/// Featured items also sit in their kind's shelf. A query filters every shelf
+/// (accent- and đ-insensitive, `StoreSearch`).
+struct StoreShelfPlan: Equatable {
+    static let regularHatchID = "pet/hatch"
+    static let firstHatchID = "pet/hatch-first"
+
+    let featured: [StoreListing]
+    let skills: [StoreListing]
+    let assistants: [StoreListing]
+    let apps: [LiveProductStoreApp]
+    let pets: [StoreListing]
+    let searching: Bool
+
+    var isEmpty: Bool {
+        featured.isEmpty && skills.isEmpty && assistants.isEmpty && apps.isEmpty && pets.isEmpty
+    }
+
+    init(items: [LiveProductStoreItem], apps: [LiveProductStoreApp], query: String) {
+        searching = !StoreSearch.normalized(query).isEmpty
+        let listings = Self.listings(items).filter { listing in
+            StoreSearch.matches(query, fields: [Self.kindWord(listing.item.kind), listing.item.title,
+                                                listing.item.summary])
+        }
+        featured = listings.filter(\.item.featured)
+        skills = listings.filter { $0.item.kind == .skill }
+        assistants = listings.filter { $0.item.kind == .agent }
+        pets = listings.filter { $0.item.kind == .pet }
+        self.apps = apps.filter { StoreSearch.matches(query, fields: [$0.slug, $0.title, $0.subtitle ?? ""]) }
+    }
+
+    /// Desktop matches the wire kind word, not a localized label.
+    static func kindWord(_ kind: LiveProductStoreItemKind) -> String {
+        switch kind {
+        case .skill: "skill"
+        case .agent: "agent"
+        case .pet: "pet"
+        }
+    }
+
+    /// The two hatch rows are one card while the catalog lists the first-hatch
+    /// offer (the server lists it only to an account that hasn't used it). The
+    /// card keeps the first-hatch item, so a review quotes the price shown, and
+    /// wears the regular card's words and art; an owned row wins.
+    static func listings(_ items: [LiveProductStoreItem]) -> [StoreListing] {
+        guard let first = items.first(where: { $0.id == firstHatchID }), let firstOffer = first.offer,
+              let regular = items.first(where: { $0.id == regularHatchID }) else {
+            return items.map { StoreListing(item: $0) }
+        }
+        let ownership = [regular, first].first { $0.ownership?.state == .owned }?.ownership ?? first.ownership
+        let card = LiveProductStoreItem(
+            id: first.id, kind: regular.kind, title: regular.title, summary: regular.summary,
+            glyph: regular.glyph, featured: regular.featured || first.featured, price: first.price,
+            accent: regular.accent, art: regular.art ?? first.art,
+            detailDescription: regular.detailDescription, tryPrompt: regular.tryPrompt,
+            offer: firstOffer, ownership: ownership, deliverable: first.deliverable,
+            needs: regular.needs, install: first.install)
+        let regularOffer = regular.offer.flatMap { $0.priceMicroProtons > firstOffer.priceMicroProtons ? $0 : nil }
+        let position = min(items.firstIndex { $0.id == first.id }!, items.firstIndex { $0.id == regular.id }!)
+        var result = items.filter { $0.id != first.id && $0.id != regular.id }.map { StoreListing(item: $0) }
+        result.insert(StoreListing(item: card, regularOffer: regularOffer), at: min(position, result.count))
+        return result
+    }
+}
+
+/// Desktop `storeRequirements` (`store-copy.ts:791-793`): the requirement
+/// tokens the export can name, in catalog order; unknown tokens are not shown.
+enum StoreRequirementPresentation {
+    static let keys: [String: String] = [
+        "internet": "desktop.atum.discover.needsInternet",
+        "runs-scripts": "desktop.atum.discover.needsScripts",
+    ]
+
+    static func keys(for needs: [String]) -> [String] {
+        var seen = Set<String>()
+        return needs.compactMap { keys[$0] }.filter { seen.insert($0).inserted }
+    }
+}
+
+/// Shelf and action words from the current desktop Store copy
+/// (`store-copy.ts`, exported under `mobileScreensCopy.store`, wave 1 repin).
+enum StoreShelfCopyKey {
+    private static let store = "src.matrix.mobile-copy.mobileScreensCopy.store."
+
+    static let featured = store + "featured"
+    static let skills = store + "skills"
+    static let assistants = store + "assistants"
+    static let apps = store + "apps"
+    static let pets = store + "pets"
+    static let getWithPrice = store + "getWithPrice"
+    static let get = store + "get"
+    // PENDING-COPY: desktop `search` ("Search the store") is not exported; the
+    // device "Search" word stands in.
+    static let search = "src.matrix.mobile-device-copy.mobileDeviceCopy.uiSearch"
+    static let empty = "src.matrix.mobile-copy.mobilePhoneCopy.storeEmpty"
+
+    static let all: [String] = [featured, skills, assistants, apps, pets, getWithPrice, get, search, empty]
+        + StoreRequirementPresentation.keys.values.sorted()
+}

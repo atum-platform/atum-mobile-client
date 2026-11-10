@@ -176,6 +176,25 @@ public enum AppleStorePurchaseResult: Sendable {
         }
     }
 
+    /// Forget outcomes the person has already seen, so the next pack sheet
+    /// starts from the packs. In-flight states (purchasing, Ask to Buy pending,
+    /// retrying), a sandbox cap pause and needs-support (it carries the
+    /// transaction ID) are kept. A failed purchase attempt on an open catalogue
+    /// returns to ready; nothing is reloaded, credited or finished here.
+    public func clearSettledOutcomes() {
+        purchaseStates = purchaseStates.filter { _, value in
+            switch value {
+            case .purchasing, .pending, .retrying, .needsSupport, .sandboxCapExceeded: true
+            default: false
+            }
+        }
+        guard checkoutOpen, !products.isEmpty else { return }
+        switch state {
+        case .succeeded, .cancelled, .otherAccount, .revoked, .unavailable: state = .ready
+        default: break
+        }
+    }
+
     public func replayUnfinished() async {
         let scope = generation
         guard api != nil, accountID != nil else { return }

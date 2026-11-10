@@ -158,6 +158,10 @@ struct ChatScreen: View {
                                 .accessibilityIdentifier("chat.conversation.note")
                         }
                         JumpPillHost(store: store, chrome: chrome)
+                        // ST-5 (lane 4 W7): out of Protons, the same top-up as the Store.
+                        if store.kind == .assistant, conversationChat?.banner == nil {
+                            ProtonTopUpChatNotice(design: design)
+                        }
                         if let banner = conversationChat?.banner {
                             // Read-only is the platform's word: no composer, only the banner.
                             ConversationReadOnlyBanner(text: banner, design: design)

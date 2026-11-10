@@ -164,14 +164,12 @@ struct AccountSettingsDetail: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("account.settings.protons.balance")
-                // ST-5 slot: the Top up button, drawn when a pack sheet is passed in.
+                // ST-5: the one Proton top-up entry (the shared pack sheet), or a
+                // host-provided opener. Neither: no button.
                 if let openTopUp = callbacks.openTopUp {
-                    Button(text(.topUp), action: openTopUp)
-                        .buttonStyle(.bordered)
-                        .buttonBorderShape(.capsule)
-                        .controlSize(.small)
-                        .tint(atum.color(.ink, scheme: scheme))
-                        .accessibilityIdentifier("account.settings.protons.top-up")
+                    topUpButton(openTopUp)
+                } else {
+                    ProtonTopUpEntry(design: design) { present in topUpButton(present) }
                 }
             }
             .frame(minHeight: 52)
@@ -183,6 +181,15 @@ struct AccountSettingsDetail: View {
         } header: {
             header(.howAtumAnswers)
         }
+    }
+
+    private func topUpButton(_ action: @escaping () -> Void) -> some View {
+        Button(text(.topUp), action: action)
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+            .tint(atum.color(.ink, scheme: scheme))
+            .accessibilityIdentifier("account.settings.protons.top-up")
     }
 
     private var protonsHelp: String {

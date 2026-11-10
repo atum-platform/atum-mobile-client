@@ -490,6 +490,7 @@ struct AppRoot: View {
                           })
         }
         .environment(\.showsConnectionGlyph, model.showsConnectionGlyph)
+        .environment(\.protonTopUp, model.protonTopUp)
         .task(id: rosterSnapshot) {
             rosterStore.apply(rosterSnapshot)
             validatePendingPush()

@@ -201,7 +201,7 @@ final class S6SystemUITests: TranscriptUITestCase {
         loading.terminate()
 
         let empty = launchS6("store.empty")
-        XCTAssertTrue(empty.staticTexts["Chưa có gì để xem"].waitForExistence(timeout: 15))
+        XCTAssertTrue(empty.staticTexts["Chưa có gì ở đây."].waitForExistence(timeout: 15))
         keepScreenshot("U-S6-8-store-empty-light-vi", of: empty)
         empty.terminate()
 

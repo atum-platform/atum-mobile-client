@@ -297,6 +297,18 @@ final class LiveAppModel {
         refreshWallet: { [weak self] in await self?.refreshApplePurchaseWallet() }
     )
 
+    /// The one top-up entry's context (lane 4 ST-5): the pack sheet over
+    /// `applePurchases`, with the fresh spendable balance.
+    @ObservationIgnored lazy var protonTopUp = ProtonTopUpContext(
+        purchases: applePurchases,
+        balance: { [weak self] in self?.freshWalletAvailable }
+    )
+
+    /// Spendable micro-Protons from a fresh wallet read only.
+    var freshWalletAvailable: Int64? {
+        walletRead.condition == .fresh ? walletRead.value?.balances.available : nil
+    }
+
     private func refreshApplePurchaseWallet() async {
         guard let client = domainClient else { return }
         let result = await readWallet(using: client)
