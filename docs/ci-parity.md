@@ -31,7 +31,8 @@ secret rules. No private source files, fixtures or manifests were copied.
 | ci aggregate/classifier, release/signing/provenance, private integration | stays private | Coordinator adjusts only after exact-head public proof. |
 | mobile resources | mobile resources/client | Selected public importer/push checks; full resource suite depends on excluded inputs. |
 | mobile swift package | mobile swift | Full public package tests on standard macos-26. |
-| mobile ios-app, SDK custody/Apple/phone | stays private | Xcode 27 project and private SDK evidence not reproduced. |
+| mobile ios-app AppTests | app-tests | Standard public `macos-26` runner discovers an available iPhone simulator, builds the app/test targets without signing, and runs `AtumMobileTests`. |
+| mobile SDK custody/Apple/phone | stays private | Private SDK source packs, generated Apple frameworks and proof receipts are not public client inputs. |
 
 ## Outbound guard and bootstrap
 
@@ -101,7 +102,7 @@ Do not retire duplicate private checks based solely on this checkpoint.
 | resources: native-catalog / API / turn / auth / deletion / push-localization generators | stays private until input relocation: native-catalog fails on excluded design catalog; full parity not claimed. |
 | swift: swift test --package-path ios | swift on standard macos-26, 500 tests passed locally. Package tools-version 5.10; no Xcode project build. Hosted image execution still pending. |
 | swift: notification fallback, prototype-session, SDK study | stays private initially: these separate runtime assertions are not replaced by Swift package tests. |
-| ios-app client simulator | disabled existing public job retained; Xcode 27 requirement cannot be proved on standard image locally. |
+| ios-app client simulator | `app-tests` on standard public `macos-26`; runtime destination discovery avoids coupling the workflow to one preinstalled simulator runtime. |
 | sdk-custody, sdk-apple, phone and signing/release | stays private per source/evidence boundary. |
 
 The public Swift test lane is independent of the disabled Xcode-project build.
