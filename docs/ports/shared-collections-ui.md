@@ -148,3 +148,12 @@ Not verified:
   window style), so the offline screenshot is light. Dark mode relies on the colour tokens.
 - **Not run:** VoiceOver, Dynamic Type at accessibility sizes, Reduce Motion, iPad.
 - **No live data:** no live homeserver or encrypted room was used.
+
+### Coordinator verification (2026-11-10)
+
+- Rebased onto main `30ec84d`; the two conflicts (`ChatInfoSheet.swift`, `ScriptedChatHost.swift`) were additive, and both `assistantTurnStop` and `sharedCollections` are kept.
+- Test helper `reveal` fixes: it can look upwards for a target that was scrolled past (a lazy list may drop it, or its frame sits wholly above the screen), and it accepts a hittable target once scrolling stops moving it (Load more under the last row).
+- `-only-testing:AtumMobileUITests/SharedCollectionsUITests` on the iPhone 17 simulator (iOS 27.0, locked): 5 of 5 passed, including See all → page → Load more to the room start → photo viewer, and failed → retry.
+- Cross-family review (Codex): no blocking findings.
+- Still not exercised: Save to Photos, Share, Quick Look, dark mode, VoiceOver, live homeserver data.
+- Public guard (no exceptions): two synthetic test values matched its private-hostname rule, so they were renamed rather than allowlisted. An unknown Matrix event type in `SharedCollectionsTests` is now `io.test.unknown-kind`, and the scripted senders use Quân in place of the cast member whose name ends in `.lan`.

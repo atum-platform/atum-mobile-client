@@ -19,22 +19,33 @@ final class SharedCollectionsUITests: TranscriptUITestCase {
 
     /// Scrolls the panel until `target` sits clear of the bar and the bottom
     /// edge (a tap at the very edge can miss), in either direction.
+    /// `above`: the target was scrolled past, so a lazy list may have dropped
+    /// it from the hierarchy; look upwards while it doesn't exist.
     @MainActor
-    private func reveal(_ target: XCUIElement, in app: XCUIApplication, file: StaticString = #filePath,
-                        line: UInt = #line) {
+    private func reveal(_ target: XCUIElement, in app: XCUIApplication, above: Bool = false,
+                        file: StaticString = #filePath, line: UInt = #line) {
         let window = app.windows.firstMatch.frame
         func clear() -> Bool {
             target.exists && target.isHittable
                 && target.frame.minY > window.minY + 160 && target.frame.maxY < window.maxY - 140
         }
-        for _ in 0..<10 where !clear() {
-            if target.exists, target.frame.maxY > 0, target.frame.minY <= window.minY + 160 {
+        var last: CGRect?
+        var settled = false
+        for _ in 0..<(above ? 16 : 10) where !clear() {
+            // The scroll hit its end with the target in view but near an edge
+            // (e.g. Load more under the last row): good enough to tap.
+            if target.exists, target.isHittable, target.frame == last { settled = true; break }
+            last = target.exists ? target.frame : nil
+            let isAbove = above
+                ? !target.exists || target.frame.minY <= window.minY + 160
+                : target.exists && target.frame.maxY > 0 && target.frame.minY <= window.minY + 160
+            if isAbove {
                 app.swipeDown(velocity: .slow)
             } else {
                 app.swipeUp(velocity: .slow)
             }
         }
-        XCTAssertTrue(clear(), "not revealed: \(target)", file: file, line: line)
+        XCTAssertTrue(clear() || settled, "not revealed: \(target)", file: file, line: line)
     }
 
     /// Rows of one kind: `info.shared-file.$shared-files-<n>`, not their Share buttons.
@@ -61,7 +72,7 @@ final class SharedCollectionsUITests: TranscriptUITestCase {
         keepScreenshot("shared-preview-files-links", of: app)
 
         let seeAll = element(app, "info.shared-media.see-all")
-        reveal(seeAll, in: app)
+        reveal(seeAll, in: app, above: true)
         seeAll.tap()
         XCTAssertTrue(element(app, "info.shared-page.media").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "info.shared-media.$shared-media-12").waitForExistence(timeout: 5))
