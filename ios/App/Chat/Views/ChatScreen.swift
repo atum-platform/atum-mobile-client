@@ -183,14 +183,7 @@ struct ChatScreen: View {
                                     // Read-only is the platform's word: no composer, only the banner.
                                     ConversationReadOnlyBanner(text: banner, design: design)
                                 } else {
-                                    ChatComposer(store: store, design: design, haptics: haptics,
-                                                 modelActions: infoActions.assistantModels,
-                                                 modelDestinations: infoActions.assistantModelDestinations,
-                                                 modelRefreshToken: composerModelRefreshToken,
-                                                 modelPickerPresented: $composerModelPresented,
-                                                 turnStopActions: store.kind == .assistant
-                                                     ? infoActions.assistantTurnStop : nil,
-                                                 placeholder: thread?.composerPlaceholder)
+                                    composer
                                 }
                             }
                         }
@@ -400,6 +393,19 @@ struct ChatScreen: View {
             .alert(theme.copy.text(.linkHeld), isPresented: $links.showsHeld) {
                 Button(theme.copy.text(.dismiss), role: .cancel) {}
             }
+    }
+
+    /// The composer, split out of `body` so the type checker stays within its
+    /// time limit (TS-6b's thread placeholder tipped the inline call over).
+    private var composer: some View {
+        let turnStop = store.kind == .assistant ? infoActions.assistantTurnStop : nil
+        return ChatComposer(store: store, design: design, haptics: haptics,
+                            modelActions: infoActions.assistantModels,
+                            modelDestinations: infoActions.assistantModelDestinations,
+                            modelRefreshToken: composerModelRefreshToken,
+                            modelPickerPresented: $composerModelPresented,
+                            turnStopActions: turnStop,
+                            placeholder: thread?.composerPlaceholder)
     }
 
     /// Add people (a new conversation with the larger group; not on a read-only

@@ -165,3 +165,4 @@ thread data or thread-capable timeline source, so a capture would need a new scr
 - **Room reads are bounded** to four `/threads` requests at a time, in batches of main-actor tasks. A task group with `@MainActor` child closures hit the Swift 6 region-isolation checker's "pattern … does not understand" error on hosted Xcode.
 - **Mark read clears the thread's mentions** in the optimistic override until a newer reply arrives, so a read thread no longer badges `@N`.
 - Verified by `swiftc -parse` and the hosted checks; the build lock was busy.
+- Hosted compile: adding the thread `placeholder:` to the inline `ChatComposer(...)` call in `ChatScreen.body` hit "unable to type-check this expression in reasonable time". The composer is now a separate `composer` property, built the same way.
