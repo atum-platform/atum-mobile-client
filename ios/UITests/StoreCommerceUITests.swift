@@ -18,6 +18,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     private static let owned = "Đã sở hữu"
     private static let topUpComplete = "Proton của bạn đã sẵn sàng."
     private static let skillOwned = "Trợ lý này đã có kỹ năng."
+    private static let purchasesClosed = "Chưa thể mua hàng"
     private static let renewalCancelled = "Đã hủy gia hạn. Quyền truy cập còn đến ngày hiển thị."
 
     @MainActor
@@ -203,6 +204,46 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         XCTAssertTrue(confirm.isHittable)
         XCTAssertGreaterThanOrEqual(confirm.frame.height, 44)
         keepScreenshot("U-Store-11-review-light-ax5-vi", of: app)
+    }
+
+    /// REL-15 App Store gate: with Apple checkout closed a paid item offers
+    /// neither Get nor top-up, only the quiet closed line.
+    @MainActor
+    func testClosedCheckoutHidesPaidGetAndTopUp() {
+        let app = launchStore("store.closed")
+        openItem("pet/gigi", in: app)
+        XCTAssertTrue(firstAction(app).waitForExistence(timeout: 8))
+        keepScreenshot("U-Store-13-paid-checkout-closed-light-vi", of: app)
+        let closed = element(app, "store.detail.closed")
+        XCTAssertTrue(closed.exists, "the paid item says purchases are not available yet")
+        XCTAssertEqual(closed.label, Self.purchasesClosed)
+        XCTAssertFalse(element(app, "store.detail.acquire").exists, "no paid Get while checkout is closed")
+        XCTAssertFalse(element(app, "topup.entry").exists, "no top-up while checkout is closed")
+        assertNoTopUp(app)
+        assertNoEconomicMath(app)
+    }
+
+    /// The same closed checkout never blocks a free item: Get, review, confirm.
+    @MainActor
+    func testClosedCheckoutKeepsFreeItemGettable() {
+        let app = launchStore("store.closed")
+        openItem("pet/mochi", in: app)
+        XCTAssertTrue(firstAction(app).waitForExistence(timeout: 8))
+        keepScreenshot("U-Store-14-free-checkout-closed-light-vi", of: app)
+        let acquire = element(app, "store.detail.acquire")
+        XCTAssertTrue(acquire.exists, "a free item can still be got")
+        XCTAssertFalse(element(app, "store.detail.closed").exists)
+        acquire.tap()
+        XCTAssertTrue(element(app, "store.review").waitForExistence(timeout: 3))
+        element(app, "store.review.confirm").tap()
+        XCTAssertTrue(text(app, Self.delivered).waitForExistence(timeout: 5))
+    }
+
+    /// The item sheet's settled action: Get or the closed line.
+    @MainActor
+    private func firstAction(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier IN %@", ["store.detail.acquire", "store.detail.closed"])).firstMatch
     }
 
     // MARK: Helpers
