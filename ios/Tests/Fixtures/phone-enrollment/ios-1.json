@@ -1,0 +1,27 @@
+{
+  "body": {
+    "deviceServiceId": "4a6b809a-ad82-41c9-b362-02cea6e40584",
+    "displayName": "iPhone 1",
+    "platform": "ios",
+    "osVersion": "26.1",
+    "matrix": {
+      "userId": "@owner-3f9a1c7e5b2d:atumplatform.com",
+      "deviceId": "IPHONE1",
+      "fingerprint": "aI0n6ZGXFokRaoRUNI2blPYRIkCBcXfENFad4dxrhho"
+    },
+    "enrollmentEpoch": 1,
+    "scopes": [],
+    "controllerKeys": [
+      "plJGzaJ5hHeUynWfTlm_C9mDvu1-KPgOm21oBLYWsxg"
+    ],
+    "issuedAt": 1791014400000
+  },
+  "sigs": {
+    "identity": "AGKO59GXpnPJxyP6ctsNphqCDYcxMvsIRC5AiAq-OmFkZBPD-usrGyotExkKSrBt1kzOQdd3P-L5ExwOui5Z0Q",
+    "approval": "OWkU3mTwnuw_GMD8fLq_YuHoDmnVEj3RD_ytiyCoQv11EEwM1JvaOn-IUMzmNpYthU6YZSJYePGjyVuD8EB0aQ"
+  },
+  "identityPublicDERHex": "3059301306072a8648ce3d020106082a8648ce3d03010703420004cdf8225032ade837d20e44154f87cbd0f19791a6855d8bd425b1824f559d808392748c166433c8eefb1105a0aa476e37a9ae1cdf77379069e542e9c622ffee88",
+  "approvalPublicDERHex": "3059301306072a8648ce3d020106082a8648ce3d0301070342000487de7d75abb6b5c661604168adb3de569412672c6a51ffce0b87e3742539201900535fe964a9fd8668bd177f8a52aed609a4b6cf592f3e06e7cebb5978f8e1bd",
+  "expectedIdentityId": "IRVO4WRzKsxsMZ-hqJnRJl8q3Y4Xw0ig8AhF8-LRVGE",
+  "expectedApprovalId": "onnnhw0rHhP6umCjU2q9LkUH3o3xotzLGBaCCdwgXVo"
+}

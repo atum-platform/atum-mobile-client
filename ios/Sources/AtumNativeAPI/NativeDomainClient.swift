@@ -1327,6 +1327,33 @@ public struct AgentsRead: Sendable {
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
+    /// Owner-authenticated phone registry transport; no additional wire headers.
+    func phoneDeviceServices(request: Data? = nil, revoking id: UUID? = nil) async throws -> Data {
+        let root = Self.baseURL.appendingPathComponent("device-services")
+        let url = id.map { root.appendingPathComponent($0.uuidString.lowercased()) } ?? root
+        let method = id != nil ? "DELETE" : (request == nil ? "GET" : "POST")
+        let token = try await authorize(forceRefresh: false)
+        try requireActiveTask()
+        var result = try await perform(url: url, token: token, method: method,
+            body: method == "GET" ? nil : (request ?? Data()),
+            maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000)
+        if result.status == 401 {
+            let refreshed = try await authorize(forceRefresh: true)
+            try requireActiveTask()
+            result = try await perform(url: url, token: refreshed, method: method,
+                body: method == "GET" ? nil : (request ?? Data()),
+                maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000)
+            if result.status == 401 { authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused) }
+        }
+        try requireActiveTask()
+        guard (method == "POST" ? [200, 201] : [200]).contains(result.status) else {
+            let failure = try JSONDecoder().decode(PhoneRegistryError.self, from: result.body)
+            guard failure.error.rawValue == "matrix_\(result.status)" else { throw NativeDomainClientFailure.invalidResponse }
+            throw failure
+        }
+        return result.body
+    }
+
     private func perform(url: URL, token: String, method: String,
                          body: Data?, companyWire: CompanyWire? = nil, maximumRequestBodyBytes: Int,
                          maximumResponseBodyBytes: Int,
@@ -1444,6 +1471,9 @@ public struct AgentsRead: Sendable {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
         guard url.path.hasPrefix(Self.baseURL.path + "/") else { return false }
+        let phoneRoot = Self.baseURL.path + "/device-services"
+        let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
+        if url.path == phoneRoot || (url.path.hasPrefix(phoneRoot + "/") && UUID(uuidString: phoneTail) != nil) { return url.query == nil }
         let allowedPaths = [Self.agentsURL.path, Self.agentLifecycleURL.path,
                             Self.appsURL.path, Self.officialAccountsURL.path,
                             Self.storeCatalogURL.path,
