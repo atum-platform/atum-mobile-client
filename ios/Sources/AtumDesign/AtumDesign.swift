@@ -18,13 +18,7 @@ public enum AtumDesign {
     }
 
     public static func manifest() throws -> Manifest {
-        let source = try decodeManifest(Data(contentsOf: resourceURL("manifest.json")))
-        // The retained producer manifest also inventories test fixtures. Those
-        // files are not members of this production resource bundle.
-        return Manifest(schemaVersion: source.schemaVersion,
-                        developmentLanguage: source.developmentLanguage,
-                        locales: source.locales,
-                        files: source.files.filter { !$0.key.hasPrefix("fixtures/") })
+        try decodeManifest(Data(contentsOf: resourceURL("manifest.json")))
     }
 
     public static func decodeManifest(_ data: Data) throws -> Manifest {
@@ -51,7 +45,7 @@ public enum AtumDesign {
         guard let root = Bundle.module.resourceURL else {
             throw ResourceError.missingResource(path)
         }
-        let url = root.appendingPathComponent(path)
+        let url = root.appendingPathComponent("AtumDesign").appendingPathComponent(path)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw ResourceError.missingResource(path)
         }

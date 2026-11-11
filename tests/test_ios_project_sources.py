@@ -86,18 +86,6 @@ class IOSProjectSourcesTests(unittest.TestCase):
         scheme = (PROJECT.parent / "xcshareddata/xcschemes/AtumMobile.xcscheme").read_text()
         self.assertRegex(scheme, r'TestAction\s+buildConfiguration = "Debug"')
 
-    def test_production_design_resource_membership_omits_fixture_directory(self):
-        package = (ROOT / "ios/Package.swift").read_text()
-        resources = re.search(r"let productionDesignResources: \[Resource\] = \[(.*?)\n\]",
-                              package, re.S)[1]
-        paths = re.findall(r'\.copy\("([^"]+)"\)', resources)
-        self.assertTrue(paths)
-        exported = ROOT / "ios/Vendor/AtumDesign"
-        self.assertEqual(set(paths), {str(path.relative_to(ROOT / "ios"))
-                                    for path in exported.iterdir() if path.name != "fixtures"})
-        self.assertNotIn('.copy("Vendor/AtumDesign")', package)
-        self.assertIn("resources: productionDesignResources", package)
-
     def test_privacy_manifests_are_bundled_in_their_own_targets(self):
         objects = self.objects()
         for target_name, directory in [("AtumMobile", "App"), ("AtumNotifications", "Notifications")]:

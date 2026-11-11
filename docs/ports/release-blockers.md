@@ -198,3 +198,16 @@ generic iOS device without signing. It fails if the Release `.app` contains any
 `fixtures` path or lacks `PrivacyInfo.xcprivacy`. That is the build of record
 for the Release-only exclusions above; it is not an archive or privacy-report
 check.
+
+Coordinator revision (11 Nov, 11:40 UTC): the first hosted run crashed AppTests at
+launch with `missingResource("Localizable.xcstrings")`. Under Xcode, a SwiftPM
+`.copy` of a single `.xcstrings` file is still compiled by `CompileXCStrings`, so
+the raw catalog AtumDesign reads was missing. Only main's whole-directory
+`.copy("Vendor/AtumDesign")` keeps it raw. The explicit resource list, the
+AtumDesign path change and their tests are reverted to main. **Deferred:** the
+design export's `fixtures/` folder (inert JSON) still ships in the AtumDesign
+bundle in Release. Remove it later with a Release-only post-build step or by
+moving fixtures out of the vendored folder in the importer. The Release CI step
+no longer checks for fixtures; it still builds Release and requires the app
+privacy manifest. Release source exclusions (no scripted, debug or probe code)
+are unchanged.

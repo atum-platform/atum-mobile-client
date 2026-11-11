@@ -122,7 +122,7 @@ jobs:
             test-without-building
       - name: Build Release for device without signing
         # TestFlight archives use Release; prove it compiles without Debug-only
-        # sources and ships no scenario fixtures.
+        # sources and carries its privacy manifest.
         env:
           RELEASE_DERIVED_DATA: ${{ runner.temp }}/atum-mobile-release-derived-data
           SOURCE_PACKAGES: ${{ runner.temp }}/atum-mobile-source-packages
@@ -142,9 +142,6 @@ jobs:
             build
           app=$(find "$RELEASE_DERIVED_DATA/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' | head -1)
           test -n "$app" || { echo "no Release .app produced"; exit 1; }
-          if find "$app" -ipath '*fixtures*' | grep -q .; then
-            echo "Release bundle contains fixtures:"; find "$app" -ipath '*fixtures*' | head; exit 1
-          fi
           test -f "$app/PrivacyInfo.xcprivacy" || { echo "app privacy manifest missing"; exit 1; }
       - name: Shut down simulator
         if: always()
