@@ -69,8 +69,13 @@ struct AssistantRoutinesView: View {
     @State private var loading = false
     @State private var failed = false
     @State private var appeared = false
+    @State private var toggling: NativeID?
+    @State private var listNotice: String?
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private let requestLedger = RoutineRequestLedger()
+    /// Desktop `MAX_ROUTINES`: past this, the quota line replaces "+".
+    static let maximumRoutines = 64
 
     var body: some View {
         Group {
@@ -104,22 +109,55 @@ struct AssistantRoutinesView: View {
                         .listRowBackground(Color.clear)
                         .accessibilityIdentifier("assistant.routines.legacy-pending")
                     } else if snapshot.routines.isEmpty {
-                        ContentUnavailableView(copy(.routineEmpty), image: atum.symbol(.clock))
-                            .listRowBackground(Color.clear)
-                            .accessibilityIdentifier("assistant.routines.empty")
+                        ContentUnavailableView {
+                            Label(copy(.routineEmpty), image: atum.symbol(.clock))
+                        } actions: {
+                            // Desktop's one suggestion: a routine already
+                            // written, for the person to adjust and save.
+                            NavigationLink {
+                                AssistantRoutineEditor(
+                                    design: design, actions: actions, routine: nil,
+                                    seedInstruction: cardCopy.polish(.routineSuggestBriefInstruction),
+                                    onChanged: apply)
+                            } label: {
+                                Text(cardCopy.polish(.routineSuggestBrief))
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("assistant.routines.suggest-brief")
+                        }
+                        .listRowBackground(Color.clear)
+                        .accessibilityIdentifier("assistant.routines.empty")
                     } else {
-                        ForEach(snapshot.routines) { routine in
-                            if routine.schedule.isReadOnly {
-                                routineRow(routine, isReadOnly: true)
+                        Section {
+                            ForEach(snapshot.routines) { routine in
+                                if routine.schedule.isReadOnly {
+                                    routineRow(routine, isReadOnly: true)
+                                        .accessibilityIdentifier("assistant.routine.\(routine.id.rawValue)")
+                                } else {
+                                    NavigationLink {
+                                        AssistantRoutineEditor(design: design, actions: actions, routine: routine,
+                                                               onChanged: apply)
+                                    } label: {
+                                        routineRow(routine)
+                                    }
                                     .accessibilityIdentifier("assistant.routine.\(routine.id.rawValue)")
-                            } else {
-                                NavigationLink {
-                                    AssistantRoutineEditor(design: design, actions: actions, routine: routine,
-                                                           onChanged: apply)
-                                } label: {
-                                    routineRow(routine)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        pauseButton(routine)
+                                    }
+                                    .contextMenu { pauseButton(routine) }
                                 }
-                                .accessibilityIdentifier("assistant.routine.\(routine.id.rawValue)")
+                            }
+                        } footer: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let listNotice {
+                                    Text(verbatim: listNotice)
+                                        .foregroundStyle(atum.color(.danger, scheme: scheme))
+                                        .accessibilityIdentifier("assistant.routines.notice")
+                                }
+                                if snapshot.routines.count >= Self.maximumRoutines {
+                                    Text(cardCopy.polish(.routineQuotaReached, [String(Self.maximumRoutines)]))
+                                        .accessibilityIdentifier("assistant.routines.quota")
+                                }
                             }
                         }
                     }
@@ -133,7 +171,8 @@ struct AssistantRoutinesView: View {
         .navigationTitle(copy(.routines))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let snapshot, snapshot.legacyState == .clear, snapshot.routines.count < 64, !loading {
+            if let snapshot, snapshot.legacyState == .clear,
+               snapshot.routines.count < Self.maximumRoutines, !loading {
                 ToolbarItem(placement: .confirmationAction) {
                     NavigationLink {
                         AssistantRoutineEditor(design: design, actions: actions, routine: nil,
@@ -153,16 +192,26 @@ struct AssistantRoutinesView: View {
         }
     }
 
+    /// Desktop's row (`routines-panel.tsx:740-790`): the name, the schedule
+    /// in words, then the next run (the zone only when it is not this
+    /// device's) or "Paused". The raw IANA zone is no longer a caption (D-11).
     private func routineRow(_ routine: AgentRoutine, isReadOnly: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: routine.title).font(.body)
-            Text(routine.nextRunAt.map { copy(.routineNext, [.text(date($0, timezone: routine.timezone))]) }
-                 ?? copy(.routinePaused))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: cardCopy.scheduleWords(routine))
                 .font(.footnote)
-                .foregroundStyle(atum.color(.muted, scheme: scheme))
-            Text(verbatim: routine.timezone)
-                .font(.caption2)
-                .foregroundStyle(atum.color(.muted, scheme: scheme))
+                .foregroundStyle(atum.color(.soft, scheme: scheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("assistant.routine.\(routine.id.rawValue).schedule")
+            HStack(spacing: 6) {
+                Text(verbatim: cardCopy.nextWords(routine) ?? copy(.routinePaused))
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("assistant.routine.\(routine.id.rawValue).next")
+                if toggling == routine.id { ProgressView().controlSize(.mini) }
+            }
             if isReadOnly {
                 Text(cardCopy.routine(.routineReadOnly))
                     .font(.caption)
@@ -181,12 +230,49 @@ struct AssistantRoutinesView: View {
         switch result { case let .value(value): apply(value); case .failed: failed = true }
     }
     private func apply(_ value: AgentRoutinesSnapshot) { snapshot = value; failed = false }
-    private func date(_ milliseconds: Int64, timezone: String) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: design.locale)
-        formatter.timeZone = TimeZone(identifier: timezone)
-        formatter.dateStyle = .medium; formatter.timeStyle = .short
-        return formatter.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1_000))
+
+    /// Desktop's inline Pause / Resume, as a swipe (and the long-press menu,
+    /// so it is reachable without the gesture).
+    private func pauseButton(_ routine: AgentRoutine) -> some View {
+        Button(routine.enabled ? copy(.routinePause) : copy(.routineResume)) {
+            toggle(routine)
+        }
+        .tint(atum.color(.actionStrong, scheme: scheme))
+        .disabled(toggling != nil)
+        .accessibilityIdentifier("assistant.routine.\(routine.id.rawValue).toggle")
+    }
+
+    /// The same update the editor sends, with only `enabled` flipped. A
+    /// conflict shows the routine as it now is and says so.
+    private func toggle(_ routine: AgentRoutine) {
+        guard toggling == nil, !routine.schedule.isReadOnly else { return }
+        let key = requestLedger.key(scope: actions.scope, operation: "toggle",
+                                    fingerprint: "\(routine.id.rawValue):\(routine.revision):\(!routine.enabled)")
+        let requestID = requestLedger.requestID(for: key)
+        toggling = routine.id
+        listNotice = nil
+        Task { @MainActor in
+            defer { toggling = nil }
+            let result: AssistantRoutineMutationResult
+            do {
+                result = await actions.update(try AgentRoutineUpdate(
+                    requestId: requestID, routine: routine, title: routine.title,
+                    instruction: routine.instruction, schedule: routine.schedule,
+                    timezone: routine.timezone, enabled: !routine.enabled,
+                    notifications: routine.notifications))
+            } catch { result = .failed }
+            switch result {
+            case let .saved(value):
+                requestLedger.clear(key)
+                apply(value)
+            case let .conflict(latest):
+                requestLedger.clear(key)
+                if let latest { apply(latest) }
+                listNotice = copy(.routineConflict)
+            case .failed:
+                listNotice = copy(.saveFailed)
+            }
+        }
     }
     private func copy(_ key: AssistantCardCopyKey,
                       _ arguments: [AtumCopy.Argument] = []) -> String {
@@ -234,11 +320,12 @@ private struct AssistantRoutineEditor: View {
     private let requestLedger = RoutineRequestLedger()
 
     init(design: LiveDesign, actions: AssistantRoutineActions, routine: AgentRoutine?,
+         seedInstruction: String? = nil,
          onChanged: @escaping (AgentRoutinesSnapshot) -> Void) {
         self.design = design; self.actions = actions; self.onChanged = onChanged
         _base = State(initialValue: routine)
         _title = State(initialValue: routine?.title ?? "")
-        _instruction = State(initialValue: routine?.instruction ?? "")
+        _instruction = State(initialValue: routine?.instruction ?? seedInstruction ?? "")
         let zoneID = routine?.timezone ?? TimeZone.current.identifier
         let values = Self.values(routine?.schedule, timezone: zoneID)
         _kind = State(initialValue: values.kind)
@@ -256,11 +343,29 @@ private struct AssistantRoutineEditor: View {
     var body: some View {
         Form {
             Section {
-                TextField(copy(.routineTitle), text: $title)
-                    .accessibilityIdentifier("assistant.routine.title")
-                TextField(copy(.routineInstruction), text: $instruction, axis: .vertical)
-                    .lineLimit(4...12)
-                    .accessibilityIdentifier("assistant.routine.instruction")
+                // Desktop's dialog subtitle, then the name ("Leave empty to
+                // use the first words") and the instruction.
+                Text(cardCopy.polish(.routineDialogSubtitle))
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("assistant.routine.subtitle")
+                LabeledContent {
+                    TextField(cardCopy.polish(.routineNamePlaceholder), text: $title, axis: .vertical)
+                        .lineLimit(1...3)
+                        .accessibilityIdentifier("assistant.routine.title")
+                } label: {
+                    Text(copy(.routineTitle))
+                }
+                .labeledContentStyle(AssistantRoutineStackedLabel())
+                LabeledContent {
+                    TextField(copy(.purposePlaceholder), text: $instruction, axis: .vertical)
+                        .lineLimit(4...12)
+                        .accessibilityIdentifier("assistant.routine.instruction")
+                } label: {
+                    Text(copy(.routineInstruction))
+                }
+                .labeledContentStyle(AssistantRoutineStackedLabel())
             }
             Section(copy(.routineSchedule)) {
                 Picker(copy(.routineSchedule), selection: $kind) {
@@ -282,15 +387,27 @@ private struct AssistantRoutineEditor: View {
             Section {
                 Toggle(copy(.routineNotifications), isOn: $notifications)
                     .accessibilityIdentifier("assistant.routine.notifications")
-                Toggle(copy(.routineEnabled), isOn: $enabled)
-                    .accessibilityIdentifier("assistant.routine.enabled")
+                Toggle(isOn: $enabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(copy(.routineEnabled))
+                        Text(cardCopy.polish(.routineEnabledHint))
+                            .font(.footnote)
+                            .foregroundStyle(atum.color(.muted, scheme: scheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .accessibilityIdentifier("assistant.routine.enabled")
             }
             Section { status }
             if let base {
                 Section {
-                    Button(copy(.routineRunNow)) { run(base) }
-                        .disabled(running || saving || deleting)
-                        .accessibilityIdentifier("assistant.routine.run")
+                    // Desktop: with unsaved changes the same button saves
+                    // them first ("Save & run now").
+                    Button(canSave ? cardCopy.polish(.routineSaveAndRun) : copy(.routineRunNow)) {
+                        if canSave { save(thenRun: true) } else { run(base) }
+                    }
+                    .disabled(running || saving || deleting)
+                    .accessibilityIdentifier("assistant.routine.run")
                     NavigationLink {
                         AssistantRoutineRunsView(design: design, routine: base, actions: actions)
                     } label: {
@@ -353,9 +470,9 @@ private struct AssistantRoutineEditor: View {
                 .environment(\.timeZone, selectedTimeZone)
             VStack(alignment: .leading, spacing: 8) {
                 Text(copy(.routineWeekdays)).font(.footnote)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
                     ForEach(1...7, id: \.self) { day in
-                        Button(Self.weekday(day, locale: design.locale)) {
+                        Button(AssistantRoutineWords.weekdayChip(day, locale: design.locale)) {
                             if weekdays.contains(day) { weekdays.remove(day) } else { weekdays.insert(day) }
                         }
                         .buttonStyle(.bordered)
@@ -407,7 +524,12 @@ private struct AssistantRoutineEditor: View {
         }
     }
     private var selectedTimeZone: TimeZone { TimeZone(identifier: timezone) ?? .current }
-    private var normalizedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// What the platform stores: the typed name, else the instruction's
+    /// first words (desktop `routineTitleFor`).
+    private var normalizedTitle: String {
+        let typed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? AssistantRoutineWords.title(fromInstruction: instruction) : typed
+    }
     private var normalizedInstruction: String { instruction.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSave: Bool {
         guard !saving, !running, !deleting, !normalizedTitle.isEmpty,
@@ -428,7 +550,7 @@ private struct AssistantRoutineEditor: View {
                 String(enabled), String(notifications)].joined(separator: "\u{0}")
     }
 
-    private func save() {
+    private func save(thenRun: Bool = false) {
         guard let schedule else { return }
         let operation = base == nil ? "create" : "update"
         let key = requestLedger.key(scope: actions.scope, operation: operation, fingerprint: draftToken)
@@ -458,6 +580,7 @@ private struct AssistantRoutineEditor: View {
                 pendingSaveID = nil; pendingSaveKey = nil
                 if let current = base, let updated = snapshot.routines.first(where: { $0.id == current.id }) {
                     base = updated; savedToken = draftToken
+                    if thenRun { run(updated) }
                 } else { dismiss() }
             case let .conflict(latest):
                 if let current = base, let updated = latest?.routines.first(where: { $0.id == current.id }) {
@@ -531,10 +654,6 @@ private struct AssistantRoutineEditor: View {
         conflict = false
     }
 
-    private static func weekday(_ day: Int, locale: String) -> String {
-        var calendar = Calendar(identifier: .gregorian); calendar.locale = Locale(identifier: locale)
-        return calendar.veryShortWeekdaySymbols[day % 7]
-    }
     private static func values(_ schedule: AgentRoutineSchedule?, timezone: String) ->
         (kind: AgentRoutineSchedule.Kind, onceDate: Date, time: Date, hour: Int, minute: Int,
          weekdays: Set<Int>, monthDay: Int) {
@@ -554,6 +673,20 @@ private struct AssistantRoutineEditor: View {
     private func copy(_ key: AssistantCardCopyKey,
                       _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key.rawValue, arguments: arguments)
+    }
+    private var cardCopy: AssistantCardCopy { AssistantCardCopy(design: design) }
+}
+
+/// A form field with its label above it, so a long label and a long
+/// placeholder both wrap at the largest text sizes instead of clipping.
+private struct AssistantRoutineStackedLabel: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            configuration.label
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            configuration.content
+        }
     }
 }
 

@@ -45,6 +45,10 @@ public struct AgentsRead: Sendable {
     private static let walletURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet")!
     private static let walletHistoryURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet/history")!
     private static let aliasLookupURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/lookup")!
+    private static let aliasCheckURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/check")!
+    private static let aliasCurrentURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/current")!
+    private static let aliasClaimURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/claim")!
+    private static let aliasRenameURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/rename")!
     private static let assistantURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/assistant")!
     private static let cloudDisclosureURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/cloud/disclosure")!
     private static let companiesURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/companies")!
@@ -426,6 +430,70 @@ public struct AgentsRead: Sendable {
             guard returned == handle else { throw NativeDomainClientFailure.invalidResponse }
         }
         return response
+    }
+
+    /// Whether `handle` could be this assistant's (desktop's handle editor
+    /// and create sheet check as typing pauses). Only a well-formed handle is
+    /// sent; the platform still decides availability and reserved names.
+    public func aliasCheck(handle: NativeHandle, assistantID: NativeID) async throws -> AgentAliasCheck {
+        var components = URLComponents(url: Self.aliasCheckURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "handle", value: handle.rawValue),
+                                 URLQueryItem(name: "assistantId", value: assistantID.rawValue)]
+        guard let url = components.url else { throw NativeDomainClientFailure.invalidRequest }
+        let check = try await read(AgentAliasCheck.self, url: url, maximumResponseBodyBytes: 4_096)
+        if let returned = check.handle, returned != handle { throw NativeDomainClientFailure.invalidResponse }
+        return check
+    }
+
+    /// This assistant's assigned handle, or `.none`.
+    public func aliasCurrent(assistantID: NativeID) async throws -> AliasCurrentResponse {
+        var components = URLComponents(url: Self.aliasCurrentURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "assistantId", value: assistantID.rawValue)]
+        guard let url = components.url else { throw NativeDomainClientFailure.invalidRequest }
+        return try await read(AliasCurrentResponse.self, url: url, maximumResponseBodyBytes: 4_096)
+    }
+
+    /// Gives an assistant without a handle its first one. The request ID
+    /// makes a resend after a lost answer a replay, never a second claim.
+    public func aliasClaim(_ input: AgentAliasClaimRequest) async throws -> AgentAliasAssignment {
+        let assignment = try await aliasChange(input, url: Self.aliasClaimURL)
+        guard assignment.handle == input.handle, assignment.previous == nil else {
+            throw NativeDomainClientFailure.invalidResponse
+        }
+        return assignment
+    }
+
+    /// Changes an assistant's handle (once every 30 days; the old one stays
+    /// held for 30 days). A refusal inside the wait is `limit` with its wait.
+    public func aliasRename(_ input: AgentAliasRenameRequest) async throws -> AgentAliasAssignment {
+        let assignment = try await aliasChange(input, url: Self.aliasRenameURL)
+        guard assignment.handle == input.handle, assignment.previous == input.from else {
+            throw NativeDomainClientFailure.invalidResponse
+        }
+        return assignment
+    }
+
+    private func aliasChange<T: Encodable>(_ input: T, url: URL) async throws -> AgentAliasAssignment {
+        let body: Data
+        do { body = try JSONEncoder().encode(input) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        return try await request(AgentAliasAssignment.self, url: url, method: "POST", body: body,
+                                 acceptsAssistantNameRefusal: false,
+                                 maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 4_096)
+    }
+
+    /// Retires one of the owner's assistants for good (desktop
+    /// `retireAgent`, platform `DELETE agents/{id}`). The platform refuses
+    /// the primary. Nothing is changed on the phone until this returns.
+    public func retireAgent(assistantID: NativeID) async throws -> AgentRetirement {
+        guard let url = URL(string: Self.agentsURL.absoluteString + "/" + assistantID.rawValue) else {
+            throw NativeDomainClientFailure.invalidRequest
+        }
+        let retired = try await request(AgentRetirement.self, url: url, method: "DELETE", body: Data(),
+                                        acceptsAssistantNameRefusal: false,
+                                        maximumRequestBodyBytes: 0, maximumResponseBodyBytes: 4_096)
+        guard retired.id == assistantID else { throw NativeDomainClientFailure.invalidResponse }
+        return retired
     }
 
     /// Probes and reads the company directory under `Atum-Company-Wire: 1.1`.
@@ -1228,6 +1296,7 @@ public struct AgentsRead: Sendable {
                          maximumResponseBodyBytes: Int,
                          extraHeaders: [String: String] = [:]) async throws -> NativeDomainHTTPResponse {
         guard isApprovedURL(url), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
+              !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
               maximumRequestBodyBytes >= 0, (body?.count ?? 0) <= maximumRequestBodyBytes,
               (0...4_500_000).contains(maximumResponseBodyBytes),
               (method == "GET") == (body == nil),
@@ -1343,6 +1412,8 @@ public struct AgentsRead: Sendable {
                             Self.appsURL.path, Self.officialAccountsURL.path,
                             Self.storeCatalogURL.path,
                             Self.walletURL.path, Self.walletHistoryURL.path, Self.aliasLookupURL.path,
+                            Self.aliasCheckURL.path, Self.aliasCurrentURL.path,
+                            Self.aliasClaimURL.path, Self.aliasRenameURL.path,
                             Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
                             Self.inviteLinkPreviewURL.path, Self.inviteLinkRedeemURL.path,
@@ -1365,6 +1436,17 @@ public struct AgentsRead: Sendable {
         if url.path == Self.aliasLookupURL.path {
             guard query.count == 1, query[0].name == "handle", let value = query[0].value,
                   (try? NativeHandle(value)) != nil else { return false }
+            return true
+        }
+        if url.path == Self.aliasCheckURL.path {
+            guard query.count == 2, query[0].name == "handle", query[1].name == "assistantId",
+                  let handle = query[0].value, (try? NativeHandle(handle)) != nil,
+                  let assistant = query[1].value, (try? NativeID(assistant)) != nil else { return false }
+            return true
+        }
+        if url.path == Self.aliasCurrentURL.path {
+            guard query.count == 1, query[0].name == "assistantId", let value = query[0].value,
+                  (try? NativeID(value)) != nil else { return false }
             return true
         }
         guard url.path == Self.walletHistoryURL.path else { return url.query == nil }
@@ -1411,6 +1493,8 @@ public struct AgentsRead: Sendable {
         guard path.hasPrefix(prefix) else { return false }
         let tail = path.dropFirst(prefix.count)
         let parts = tail.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        // `agents/{id}` alone is the retire route; `perform` admits it for DELETE only.
+        if parts.count == 1 { return (try? NativeID(parts[0])) != nil }
         guard parts.count >= 2, (try? NativeID(parts[0])) != nil else { return false }
         if parts[1] == "home" { return isAgentHomePath(Array(parts.dropFirst(2))) }
         if parts.count == 2 {
@@ -1419,6 +1503,14 @@ public struct AgentsRead: Sendable {
         }
         return parts.count == 4 && parts[1] == "routines" && parts[3] == "runs"
             && (try? NativeID(parts[2])) != nil
+    }
+
+    /// `agents/{id}` with nothing after it: only the retire DELETE uses it.
+    private func isBareAgentPath(_ path: String) -> Bool {
+        let prefix = Self.baseURL.path + "/agents/"
+        guard path.hasPrefix(prefix) else { return false }
+        let tail = path.dropFirst(prefix.count)
+        return !tail.contains("/") && (try? NativeID(String(tail))) != nil
     }
 
     private func isAgentHomePath(_ tail: [String]) -> Bool {
