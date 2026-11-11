@@ -217,7 +217,7 @@ enum MessageMenuActions {
         case .reply: actions.reply(row.id)
         case .copy: actions.copy(row.id)
         case .selectText:
-            presenter.selectText = SelectTextRequest(itemID: row.id, body: row.item.body,
+            presenter.selectText = SelectTextRequest(itemID: row.id, body: row.item.markdownBody,
                                                      parsed: parsedBody)
         case .edit: actions.edit(row.id)
         case .report: presenter.reportRequest = ReportMessageRequest(itemID: row.id)
@@ -511,11 +511,12 @@ private struct MessageMenuPreview: View {
                 Label(name, image: design.symbol("File"))
             }
         default:
-            if MessageMenuRules.isAnswer(row.item, in: kind) {
-                // Answers render as markdown, from the store's parse.
+            if MessageMenuRules.isAnswer(row.item, in: kind) || row.item.privateCosGreeting != nil {
+                // Answers render as markdown, from the store's parse; so does the Chief of
+                // Staff greeting, whose board URL is never shown raw.
                 // Textual turns line limits off inside, so a long answer is
                 // cut by height: the preview stays a preview.
-                StructuredText(row.item.body, parser: ParsedOrFreshMarkdown(parsed: parsedBody))
+                StructuredText(row.item.markdownBody, parser: ParsedOrFreshMarkdown(parsed: parsedBody))
                     .font(.body)
                     .textual.inlineStyle(design.chatInlineStyle(scheme))
                     .frame(maxHeight: Self.maximumContentHeight, alignment: .top)

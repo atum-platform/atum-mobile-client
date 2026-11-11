@@ -56,6 +56,8 @@ struct TeamSpacePresentation: Equatable {
     /// Favorites / Channels / Archived sections: only in the desktop's C2
     /// channels mode (`CompanyTeamSpaceProfile.channels`); a flat list before it.
     var sectionsChannels = false
+    /// A board link tapped in a chat, until this screen shows that board.
+    var boardLinkRequest: CompanyBoardLinkRequest?
 }
 
 struct TeamSpaceActions {
@@ -86,6 +88,8 @@ struct TeamSpaceActions {
     /// The invite sheet, invite links, join with a link and channel create (TS-11, TS-13).
     /// Nil keeps all of them undrawn.
     var invites: CompanyInviteActions?
+    /// The board link was applied (its company's Board page shows, with its card).
+    var clearBoardLink: ((CompanyBoardLinkRequest) -> Void)?
 }
 
 /// Workplace is a separate mode from Personal Home. It reuses the existing
@@ -110,6 +114,8 @@ struct TeamSpaceScreen: View {
     @State private var archivedExpanded = false
     /// The page per company (desktop keeps it in the company's space preferences).
     @State private var pages = [String: CompanySpaceTab]()
+    /// The open card per company (desktop `selectedCardId` in the company's space preferences).
+    @State private var boardCards = [String: String]()
     @State private var query = ""
     /// Activity for one company: rows read for another company are never shown.
     @State private var activityRead: (companyID: String, rows: [CompanyActivityRow]?)?
@@ -147,6 +153,30 @@ struct TeamSpaceScreen: View {
             })
     }
 
+    private var boardCard: Binding<String?> {
+        Binding(
+            get: { presentation.workspace.flatMap { boardCards[$0.id] } },
+            set: { card in
+                guard let id = presentation.workspace?.id else { return }
+                boardCards[id] = card
+            })
+    }
+
+    /// Desktop's board-link effect (company-workspace.tsx:1631): once the company is
+    /// listed, select it, show its Board page with the link's card (or none), then clear.
+    private func applyBoardLink() {
+        guard let request = presentation.boardLinkRequest else { return }
+        let companyID = request.target.companyID
+        guard presentation.switcher.contains(where: { $0.id == companyID }) else { return }
+        guard presentation.workspace?.id == companyID else {
+            actions.selectCompany(companyID)
+            return
+        }
+        pages[companyID] = .board
+        boardCards[companyID] = request.target.cardID
+        actions.clearBoardLink?(request)
+    }
+
     private var sidebarEntries: TeamSpaceSidebarEntries {
         // Threads and Drafts have no phone projection yet (their desktop records are the
         // SDK thread list and the per-target `com.atum.draft.v2.*` account data), so they
@@ -171,7 +201,8 @@ struct TeamSpaceScreen: View {
             } else if presentation.workspace == nil && presentation.invitations.isEmpty {
                 emptyState
             } else if presentation.workspace != nil, page.wrappedValue == .board {
-                CompanyBoardPage(design: design)
+                CompanyBoardPage(design: design, companyID: presentation.workspace?.id ?? "",
+                                 selectedCardID: boardCard)
                     .safeAreaInset(edge: .top, spacing: 0) {
                         CompanyPagesBar(design: design, tabs: pageTabs, selection: page)
                     }
@@ -214,6 +245,9 @@ struct TeamSpaceScreen: View {
                                 })
                 .atumDesign(visual: atum)
         }
+        .onChange(of: presentation.boardLinkRequest?.serial, initial: true) { _, _ in applyBoardLink() }
+        .onChange(of: presentation.workspace?.id) { _, _ in applyBoardLink() }
+        .onChange(of: presentation.switcher.map(\.id)) { _, _ in applyBoardLink() }
         .task(id: presentation.workspace?.id) {
             query = ""
             await reloadStructure()

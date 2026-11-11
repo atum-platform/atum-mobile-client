@@ -3390,7 +3390,7 @@ final class LiveAppModel {
         let candidates = MobileAgentRoomPolicy.candidateUserIDs(memberCount: room.memberCount,
                                                                 heroes: room.memberUserIDs,
                                                                 latestSenderID: room.latestSenderID)
-        let context: RoomContext
+        var context: RoomContext
         if let conversation = companyWorkspace.conversationClaim(roomID: roomID) {
             // A company DM is a conversation between people (a group DM a group), whatever the
             // room's size says; never an assistant's or a bot's, and never from `m.room.create.type`.
@@ -3407,6 +3407,7 @@ final class LiveAppModel {
         } else {
             context = RoomContext(kind: room.memberCount > 2 ? .group : .person, ownUserID: ownUserID)
         }
+        if case .privateCos = companyWorkspace.roomClassification(roomID) { context.isCompanyPrivateCos = true }
         return ConversationRoomInfo(roomID: roomID, title: title, context: context,
                                     knownNames: knownAgentAndBotNames,
                                     catalogBotUserIDs: catalogBotUserIDs,
