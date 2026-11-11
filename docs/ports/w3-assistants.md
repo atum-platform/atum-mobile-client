@@ -234,8 +234,15 @@ scratch `/Volumes/AtumTestFlight/swiftbuild-w3-as`, with
 - App unit tests (`AtumMobileTests`): **325 tests, 0 failures** (twice, before
   and after the button and AX fixes).
 - `AssistantsWave3UITests`: **13/13 passed** on the final build (run 4).
-- `ChatInfoUITests`: 11/12 on the final build. See the open item below on
-  `testGroupInfoShowsMembersRowAndOptimisticSwitches`.
+- `ChatInfoUITests`: 11/12 on the final build. The one failure,
+  `testGroupInfoShowsMembersRowAndOptimisticSwitches` (group info pin/mute
+  switch value not flipping within its 5 s wait), is intermittent: it passed in
+  run 2, failed in runs 3 and 4, and in a targeted check on the same build it
+  failed once and passed once when run alone with no appearance change, then
+  failed again (on mute) after the dark test. This branch does not touch the
+  group info switches (`ChatInfoSheet.swift` only gains three assistant action
+  fields). A baseline on `main` was not run in this session (lock queue); it
+  is listed under Open questions.
 - Earlier runs: `HomeShellUITests.testPlusOpensStartChat…` passed;
   `KitBoardCaptureUITests` 3/3 passed.
 - `bash scripts/pre-push-public dc0634b <head>`: PASS.
@@ -255,6 +262,18 @@ elsewhere in `HomeScreen.swift` (HC) and was not checked here.
 
 Screenshots: `.scratch/w3-as/` (light, dark, AX5; new assistant, taken handle,
 handle editor, delete row and confirmation, routines list and editor).
+
+## Open questions
+
+- `ChatInfoUITests.testGroupInfoShowsMembersRowAndOptimisticSwitches` is
+  intermittent on this Mac under load (above). Run it alone a few times on
+  `main` `dc0634b` to confirm it is a pre-existing flake before assembly.
+- Does the frozen `atum.mobile-native-api` contract pack need to list the
+  alias and retire routes (SV)?
+- Owner decision D-13 (retire from the phone) is implemented as the plan's
+  coordinator default (non-primary only, with confirmation).
+- The `.borderedProminent` dark-on-ink pattern fixed here also appears in
+  `HomeScreen.swift` (HC) and other screens; worth a look by their owners.
 
 ## Not verified
 
