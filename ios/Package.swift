@@ -22,7 +22,7 @@ let package = Package(
         .target(name: "AtumTelemetry", path: "Sources/AtumTelemetry"),
         .testTarget(name: "AtumDesignTests", dependencies: ["AtumDesign", "AtumPrototype", "AtumNativeAPI", "AtumChat"], path: "Tests",
                     exclude: ["AtumChat", "AtumDrive", "AtumTelemetry"],
-                    resources: [.copy("Fixtures/model-choice-v1.3"),
+                    resources: [.copy("Fixtures/phone-enrollment"), .copy("Fixtures/model-choice-v1.3"),
                                 .copy("Fixtures/agent-home-v2.5"),
                                 .copy("Fixtures/live-platform-2026-10-28"),
                                 .copy("Fixtures/company-workspace-v1.1"),
