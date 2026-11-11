@@ -70,6 +70,10 @@ struct DeliveryLine: View {
                 }
             }
             .padding(.horizontal, 4)
+            // `.contain` keeps the line's identifier on the line itself, so the
+            // Copy button and Seen faces inside keep their own (`answer.copy`,
+            // `delivery.seen`); without it SwiftUI stamps this ID on each child.
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("delivery.line.\(row.id)")
         }
     }
