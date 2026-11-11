@@ -16,6 +16,12 @@ public struct AtumLaunchArguments: Equatable, Sendable {
     /// `failed`; `failed-then-stopped` fails once, then stops. Without it a
     /// scripted chat, like a live one without the route, offers no Stop.
     public static let scriptedTurnStopFlag = "-AtumScriptedTurnStop"
+    /// `-AtumScriptedAppPanel <pages|empty|failed|connect>` gives a scripted
+    /// app chat's side panel its declared pages (AS-11) from a synthetic Moon
+    /// catalog entry and manifest, run through the real page policy. A page's
+    /// launch is recorded for the UI probe and answers "could not open"; no
+    /// network. Without it a scripted app chat's panel shows no pages.
+    public static let scriptedAppPanelFlag = "-AtumScriptedAppPanel"
 
     public var disablesAnimations: Bool
     public var scriptedScenario: ScriptedScenario?

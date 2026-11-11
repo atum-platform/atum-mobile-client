@@ -540,6 +540,62 @@ final class S6SystemUITests: TranscriptUITestCase {
         }
     }
 
+    /// Wave 3 AC-8: Your devices lists the account's other sessions by name and
+    /// last activity (never an ID); signing one out asks here, then opens the
+    /// sign-in server's own confirmation page; recovery says "Not set up".
+    @MainActor
+    func testU17YourDevicesSignOutAndRecoveryStatus() {
+        let app = launchS6("account.devices")
+        XCTAssertTrue(element(app, "account.screen").waitForExistence(timeout: 15))
+        openSettingsPage("devices", in: app)
+        let mac = element(app, "account.settings.privacy.devices.other.0")
+        XCTAssertTrue(mac.waitForExistence(timeout: 5))
+        XCTAssertTrue(scrollSettingsList(to: mac, in: app))
+        XCTAssertEqual(mac.label, "MacBook Pro")
+        XCTAssertTrue((mac.value as? String)?.hasPrefix("Hoạt động") == true, "no last-active line")
+        let unnamed = element(app, "account.settings.privacy.devices.other.1")
+        XCTAssertTrue(scrollSettingsList(to: unnamed, in: app))
+        XCTAssertEqual(unnamed.label, "Thiết bị khác")
+        XCTAssertFalse(visibleTexts(app).contains { $0.contains("SCRIPTED") }, "a device ID is visible")
+        assertS6TextSafe(app)
+        keepScreenshot("U-S6-17-devices-light-vi", of: app)
+
+        XCTAssertTrue(scrollSettingsList(to: mac, in: app))
+        mac.tap()
+        let confirm = app.buttons["Đăng xuất thiết bị đó"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 3), "no confirmation before the browser page")
+        keepScreenshot("U-S6-17-devices-confirm-light-vi", of: app)
+        confirm.tap()
+        XCTAssertTrue(element(app, "scripted.device-sign-out-opened").waitForExistence(timeout: 3),
+                      "confirming did not open the server's sign-out page")
+
+        let recovery = element(app, "account.settings.privacy.recovery-unavailable")
+        XCTAssertTrue(scrollSettingsList(to: recovery, in: app))
+        XCTAssertTrue(recovery.label.contains("Khóa khôi phục, Chưa thiết lập"), recovery.label)
+        keepScreenshot("U-S6-17-recovery-off-light-vi", of: app)
+        app.terminate()
+
+        let ax = launchS6("account.devices", contentSize: Self.ax5Size)
+        XCTAssertTrue(element(ax, "account.screen").waitForExistence(timeout: 15))
+        openSettingsPage("devices", in: ax)
+        // At AX5 the row is below the fold and the list has not built it yet.
+        let axMac = element(ax, "account.settings.privacy.devices.other.0")
+        XCTAssertTrue(scrollSettingsList(to: axMac, in: ax))
+        assertS6TextSafe(ax)
+        keepScreenshot("U-S6-17-devices-light-ax5-vi", of: ax)
+        ax.terminate()
+
+        let failed = launchS6("account.devices-failed")
+        XCTAssertTrue(element(failed, "account.screen").waitForExistence(timeout: 15))
+        openSettingsPage("devices", in: failed)
+        let retry = element(failed, "account.settings.privacy.devices.retry")
+        XCTAssertTrue(scrollSettingsList(to: retry, in: failed))
+        XCTAssertTrue(failed.staticTexts["Chưa tải được thiết bị."].exists)
+        keepScreenshot("U-S6-17-devices-failed-light-vi", of: failed)
+        retry.tap()
+        XCTAssertTrue(element(failed, "account.settings.privacy.devices.other.0").waitForExistence(timeout: 5))
+    }
+
     // MARK: - Helpers
 
     @MainActor

@@ -16,6 +16,11 @@ final class AppOnboardingTests: XCTestCase {
         XCTAssertTrue(AppOnboardingPolicy.allowsLaunch(slug: "andy", routeID: "chat"))
         XCTAssertFalse(AppOnboardingPolicy.allowsLaunch(slug: "moon", routeID: "top-up"))
         XCTAssertFalse(AppOnboardingPolicy.allowsLaunch(slug: "moon", routeID: "purchase"))
+        XCTAssertFalse(AppOnboardingPolicy.allowsLaunch(slug: "moon", routeID: "Pricing"))
+        // Every other declared page opens, as on desktop; the server checks it is declared.
+        XCTAssertTrue(AppOnboardingPolicy.allowsLaunch(slug: "moon", routeID: "history"))
+        XCTAssertTrue(AppOnboardingPolicy.allowsLaunch(slug: "andy", routeID: "settings"))
+        XCTAssertFalse(AppOnboardingPolicy.allowsLaunch(slug: "andy", routeID: ""))
         XCTAssertTrue(AppOnboardingPolicy.allowsComposerRoute(slug: "moon", routeID: "readings"))
         XCTAssertFalse(AppOnboardingPolicy.allowsComposerRoute(slug: "andy", routeID: "chat"))
     }
