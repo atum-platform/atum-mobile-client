@@ -147,7 +147,7 @@ struct S6ScriptedHost: View {
             offersHistoryRecovery: restore, holdsRecoveryKey: key,
             recoveryKeySavedOnThisPhone: false, signOutInProgress: false,
             signOutFailureToken: 0, version: "1.0.0 (202610130001)",
-            directoryHandle: "an_nguyen"
+            directoryHandle: "annguyen"
         )
     }
 

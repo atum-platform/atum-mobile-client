@@ -17,7 +17,7 @@ sheet) and Store shelf scrolling (AS vs ST).
 - Test fixes made at assembly:
   - U10: the S6 account fixture's handle was `an`, which wave 1's handle rule
     (`^[a-z][a-z0-9_]{2,31}$`) rejects, so the card hid it. The fixture now uses
-    `an_nguyen`.
+    `annguyen` (an underscore trips the S6 raw-error-code text check).
   - U8: `store.partial` expected "Chưa có số dư". Current desktop
     (`discover-view.tsx`) hides the header balance until the wallet loads; that
     string belongs to the retired legacy wallet. The test now checks that the
