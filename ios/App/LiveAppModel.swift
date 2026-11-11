@@ -2675,7 +2675,8 @@ final class LiveAppModel {
               workspace.appVersionID == descriptor.appVersionID, workspace.supportsLaunch,
               workspace.routes.contains(where: {
                   $0.id == routeID && $0.session == .required
-              }), AppOnboardingPolicy.allowsLaunch(slug: descriptor.app, routeID: routeID),
+              }), routeID != descriptor.bot?.purchaseRouteID,
+              AppOnboardingPolicy.allowsLaunch(slug: descriptor.app, routeID: routeID),
               let request = try? AppLaunchRequest(appVersionID: descriptor.appVersionID,
                                                   routeID: routeID),
               case .signedIn = stage else { return false }

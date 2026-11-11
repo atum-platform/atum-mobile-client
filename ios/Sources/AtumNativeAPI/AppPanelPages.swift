@@ -165,12 +165,13 @@ public enum AppPanelPagesPolicy {
 
     /// The phone opens a page through the same signed launch the composer's
     /// route uses (`LiveAppModel.openAppRoute`), so the same gate applies: a
-    /// launchable manifest, a session the account holds, and a route
-    /// `atum.mobile-native-api/1.3` admits (`AppOnboardingPolicy.allowsLaunch`).
+    /// launchable manifest, a session the account holds, and a route the phone
+    /// admits (`AppOnboardingPolicy.allowsLaunch`: any declared page but commerce).
     public static func opens(_ route: AppWorkspaceSnapshot.Route, workspace: AppWorkspaceSnapshot,
                              app: AppDescriptor) -> Bool {
         guard workspace.supportsLaunch, route.session == .required,
-              app.bot?.consent == .accepted, app.link.state == .linked else { return false }
+              app.bot?.consent == .accepted, app.link.state == .linked,
+              route.id != app.bot?.purchaseRouteID else { return false }
         return AppOnboardingPolicy.allowsLaunch(slug: app.app, routeID: route.id)
     }
 

@@ -32,7 +32,7 @@ final class AppSidePanelUITests: TranscriptUITestCase {
     }
 
     /// The declared pages, in their declared order, after the header; the chat
-    /// itself is not repeated. Only a page the mobile contract admits opens.
+    /// itself is not repeated. Every declared page opens (commerce pages excepted).
     @MainActor
     func testAppPanelListsDeclaredPagesAndOpensAnAdmittedOne() throws {
         try XCTSkipIf(isPad, "iPhone sheet")
@@ -41,7 +41,7 @@ final class AppSidePanelUITests: TranscriptUITestCase {
         XCTAssertTrue(readings.waitForExistence(timeout: 3), boundedHierarchy(app))
         for id in ["library", "match", "tarot"] {
             XCTAssertTrue(element(app, "info.app.page." + id).exists, id)
-            XCTAssertFalse(element(app, "info.app.page." + id).isEnabled, "\(id) opens on the phone")
+            XCTAssertTrue(element(app, "info.app.page." + id).isEnabled, "\(id) does not open on the phone")
         }
         XCTAssertFalse(element(app, "info.app.page.chat").exists, "the chat is offered as a page")
         let order = ["readings", "library", "match", "tarot"].map { element(app, "info.app.page." + $0).frame.minY }

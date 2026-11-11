@@ -81,15 +81,16 @@ Moon's composer "readings" action (`AppBotPresentation.composerAction`) and
 
 ## Remaining differences (desktop ↔ phone)
 
-1. **Pages the phone cannot open.** Desktop launches any declared page
-   (`panel.tsx:236-240`, `:426-443`). The phone's launch is limited by
-   `atum.mobile-native-api/1.3` amendment `routes-unchanged` (atum-platform
-   `spec/mobile-native-api/v1.3/contract.json:52-55`) to Moon `readings`/`chat` and Andy
-   `chat` (`ios/Sources/AtumNativeAPI/AppOnboarding.swift` `allowsLaunch`). Every declared
-   page is listed as on desktop, but only admitted ones are enabled: with desktop's Moon
-   fixture (`src/matrix/playground/app-look-fixtures.ts:156-172`) that is Readings only,
-   and none for Andy (its only admitted route is its chat). Widening needs a mobile
-   contract amendment; then only `AppOnboardingPolicy.allowsLaunch` changes.
+1. **Commerce pages stay closed.** Owner decision (11 Nov): every declared page
+   opens, as on desktop (`panel.tsx:236-240`, `:426-443`), except pages that sell or
+   price digital goods (the app's own `purchase_route_id`, and `top-up`, `purchase`, `pricing`, … in
+   `AppOnboardingPolicy.commerceRouteIDs`), which App Store guideline 3.1.1 keeps on
+   In-App Purchase. The platform needed no change: its launch already refuses a route
+   the app version doesn't declare (`target_route_id = any(endpoint.session_route_ids)`,
+   migrations 0400/0403/0411, `app_launch_route_unknown`) and has no iOS-specific limit.
+   Follow-up: `atum.mobile-native-api/1.3` still says `routes-unchanged`
+   (`spec/mobile-native-api/v1.3/contract.json:52-55`); record this as a v1.4 text
+   amendment in atum-platform.
 2. **Page content** opens in Safari, not inside the panel; there is no in-panel bar with
    the app tile or "Open in browser" (Safari has its own). Desktop's in-page navigation
    bridge (`panelCommand`, `focus-chat`, `⌘1-9`, `⌘R`) has no phone equivalent.

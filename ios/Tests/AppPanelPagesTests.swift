@@ -104,12 +104,14 @@ final class AppPanelPagesTests: XCTestCase {
         XCTAssertEqual(menu.map(\.glyph), ["books", "book-2", "hearts"])
     }
 
-    /// The phone opens only what `atum.mobile-native-api/1.3` admits for launch,
-    /// with the account's session; every other declared page is shown, closed.
-    func testOnlyAdmittedLaunchRoutesOpen() throws {
+    /// Every declared session page opens, as on desktop, except commerce pages
+    /// (the app's purchase route and `AppOnboardingPolicy.commerceRouteIDs`).
+    func testDeclaredSessionPagesOpenExceptCommerce() throws {
         let value = try workspace(routes: moonRoutes)
         let pages = AppPanelPagesPolicy.pages(value, app: try app())
-        XCTAssertEqual(pages.filter(\.opens).map(\.id), ["readings"])
+        XCTAssertEqual(pages.filter(\.opens).map(\.id), ["library", "readings", "match"])
+        let withShop = try workspace(routes: moonRoutes + [route("pricing", "Pricing")])
+        XCTAssertFalse(AppPanelPagesPolicy.pages(withShop, app: try app()).first { $0.id == "pricing" }?.opens ?? true)
         XCTAssertTrue(AppPanelPagesPolicy.pages(value, app: try app(consent: "required")).allSatisfy { !$0.opens })
         let noLaunch = try workspace(routes: moonRoutes.map { $0.replacingOccurrences(of: "required", with: "none") },
                                      launch: "null")

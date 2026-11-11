@@ -24,12 +24,19 @@ public enum AppOnboardingPolicy {
         }
     }
 
+    /// Pages that sell or price digital goods stay off the phone: App Store
+    /// guideline 3.1.1 routes those through In-App Purchase (Protons, Store).
+    static let commerceRouteIDs: Set<String> = [
+        "top-up", "topup", "purchase", "purchases", "buy", "pricing", "plans", "upgrade",
+        "checkout", "billing", "payment", "payments", "subscribe", "subscription", "wallet",
+    ]
+
+    /// Any page the app declares opens, as on desktop (owner decision 11 Nov),
+    /// except commerce pages. The platform stays authoritative: its launch
+    /// refuses a route the app version doesn't declare (`app_launch_route_unknown`).
     public static func allowsLaunch(slug: String, routeID: String) -> Bool {
-        switch slug {
-        case "moon": routeID == "readings" || routeID == "chat"
-        case "andy": routeID == "chat"
-        default: false
-        }
+        let id = routeID.lowercased()
+        return !slug.isEmpty && !id.isEmpty && !commerceRouteIDs.contains(id)
     }
 
     public static func allowsComposerRoute(slug: String, routeID: String) -> Bool {
