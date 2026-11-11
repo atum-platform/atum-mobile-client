@@ -104,3 +104,13 @@ provisioning, APNs credentials or SDK revision was changed by this port.
 localization held only the provider's generic key. It now also expects the seven
 rich-notification phrases (unnamed, image, video, audio, file, sticker, invite),
 each in all five locales.
+
+## Release packaging fix
+
+The first TestFlight export after #24 failed App Store validation: the
+extension embedded its own `MatrixRustSDK.framework` ("disallowed file
+Frameworks", "disallowed nested bundles", and a CFBundleIdentifier collision with
+the app's copy). CI does not run a release export, so it passed. The extension
+now links the SDK without embedding it and finds the app's copy through
+`LD_RUNPATH_SEARCH_PATHS` (`@executable_path/../../Frameworks`). The project file
+was regenerated from `ios/project.yml` with XcodeGen.
