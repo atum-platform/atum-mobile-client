@@ -52,6 +52,9 @@ public struct AgentsRead: Sendable {
     private static let inviteLinkPreviewURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/invite-links/preview")!
     private static let inviteLinkRedeemURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/invite-links/redeem")!
     private static let privateCosCapabilityURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/cloud/controller/company-private-cos")!
+    /// The subscription status reads desktop's model picker uses (owner-scoped GETs).
+    private static let chatGPTRelayURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/chatgpt-relay")!
+    private static let providerConnectionsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/provider-connections")!
     private static let driveAccountURL = DriveContract.accountURL
 
     typealias Authorization = @MainActor @Sendable (_ forceRefresh: Bool) async throws -> String
@@ -938,14 +941,13 @@ public struct AgentsRead: Sendable {
     /// `atum.chatgpt-relay/1`: whether an owner Mac relays its ChatGPT plan
     /// to the cloud now, and the models it relays. Owner-scoped by the bearer.
     public func chatGPTRelayStatus() async throws -> ChatGPTRelayStatus {
-        try await read(ChatGPTRelayStatus.self, url: Self.baseURL.appendingPathComponent("chatgpt-relay"))
+        try await read(ChatGPTRelayStatus.self, url: Self.chatGPTRelayURL)
     }
 
     /// `atum.provider-connections/1`: the account-wide OpenCode Go connection.
     /// The status never carries the key.
     public func providerConnectionsStatus() async throws -> ProviderConnectionsStatus {
-        try await read(ProviderConnectionsStatus.self,
-                       url: Self.baseURL.appendingPathComponent("provider-connections"))
+        try await read(ProviderConnectionsStatus.self, url: Self.providerConnectionsURL)
     }
 
     // MARK: Agent home (`atum.agent-home/2.5`)
@@ -1380,7 +1382,8 @@ public struct AgentsRead: Sendable {
                             Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
                             Self.inviteLinkPreviewURL.path, Self.inviteLinkRedeemURL.path,
-                            Self.driveAccountURL.path, Self.privateCosCapabilityURL.path]
+                            Self.driveAccountURL.path, Self.privateCosCapabilityURL.path,
+                            Self.chatGPTRelayURL.path, Self.providerConnectionsURL.path]
         let storeRoot = Self.baseURL.path + "/store/"
         let storeTail = String(url.path.dropFirst(storeRoot.count))
         let storeParts = storeTail.split(separator: "/", omittingEmptySubsequences: false)

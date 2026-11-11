@@ -263,3 +263,7 @@ Things that may not compile and should be watched in CI:
   trailing optional `subscriptions` argument. Existing call sites
   (`ScriptedChatHost`, `LiveAppModel`, tests) rely on its implicit `nil`
   default.
+
+## Coordinator fix after the first hosted CI run (2026-11-11)
+
+The hosted `swift` job failed `NativeDomainClientTests.testSubscriptionStatusReadsAndThePlanWriteUseTheDesktopRoutes` with `invalidRequest`. The client's URL allowlist (`isApprovedURL`) didn't include `/chatgpt-relay` or `/provider-connections`, so the client refused its own status reads before sending them, and the phone could never have listed a subscription. Both paths are now named constants in the allowlist. The test caught it; no test change was needed.
