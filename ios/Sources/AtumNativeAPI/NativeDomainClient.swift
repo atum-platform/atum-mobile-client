@@ -914,6 +914,40 @@ public struct AgentsRead: Sendable {
         return snapshot
     }
 
+    /// Switches the cloud destination to one subscription model (1.4 / 1.5),
+    /// fenced like the Atum write. The platform accepts only a connected
+    /// subscription and a model it serves now; a refusal changes nothing.
+    public func writeManagedModelSubscription(agentPrincipal: NativeID,
+                                              value: ManagedModelSubscriptionWrite) async throws
+        -> ManagedModelDestinationSnapshot {
+        let body: Data
+        do { body = try JSONEncoder().encode(value) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let snapshot = try await request(
+            ManagedModelDestinationSnapshot.self,
+            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
+            method: "PUT", body: body,
+            acceptsAssistantNameRefusal: false
+        )
+        guard snapshot.agentPrincipal == agentPrincipal else {
+            throw NativeDomainClientFailure.invalidResponse
+        }
+        return snapshot
+    }
+
+    /// `atum.chatgpt-relay/1`: whether an owner Mac relays its ChatGPT plan
+    /// to the cloud now, and the models it relays. Owner-scoped by the bearer.
+    public func chatGPTRelayStatus() async throws -> ChatGPTRelayStatus {
+        try await read(ChatGPTRelayStatus.self, url: Self.baseURL.appendingPathComponent("chatgpt-relay"))
+    }
+
+    /// `atum.provider-connections/1`: the account-wide OpenCode Go connection.
+    /// The status never carries the key.
+    public func providerConnectionsStatus() async throws -> ProviderConnectionsStatus {
+        try await read(ProviderConnectionsStatus.self,
+                       url: Self.baseURL.appendingPathComponent("provider-connections"))
+    }
+
     // MARK: Agent home (`atum.agent-home/2.5`)
 
     /// The narrow owner projection: authoritative home, current reachability,

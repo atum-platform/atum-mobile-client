@@ -373,7 +373,8 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertEqual(subscriptions[0].model, "glm-5.2")
         XCTAssertTrue(subscriptions[0].isSubscription)
         XCTAssertTrue(subscriptions[0].selected)
-        XCTAssertFalse(subscriptions[0].selectable, "the phone has no subscription write for this destination")
+        XCTAssertFalse(subscriptions[0].selectable,
+                       "without the account status the saved choice stays read-only")
     }
 
     func testOpencodeGoIsCloudOnly() throws {

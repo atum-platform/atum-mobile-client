@@ -3,6 +3,23 @@ import AtumDesign
 import AtumNativeAPI
 import SwiftUI
 
+/// The cloud's subscription models: the account status the desktop reads for a
+/// cloud assistant (relay and provider connections) and the 1.4 / 1.5 write
+/// it sends (`chooseRoute`, `model-picker.tsx`). No credential, device name or
+/// sign-in crosses: connecting a plan stays where the desktop does it.
+struct AssistantSubscriptionActions {
+    let read: () async -> PhoneSubscriptionAccount
+    let save: (ManagedModelDestinationSnapshot, ManagedModelDestinationSource, String, ManagedModelEffort,
+               NativeID) async -> AssistantModelDestinationSaveResult
+}
+
+/// One subscription pick, for an idempotent retry of the same write.
+private struct SubscriptionWrite: Hashable, Sendable {
+    let connection: String
+    let model: String
+    let revision: Int64
+}
+
 /// The composer's model picker and the assistant card's destination picker.
 /// Each loads its decoded model-choice snapshot, projects it to rows
 /// and saves a pick; `PhoneModelPickerList` draws the rows (T3-style layout).
@@ -38,6 +55,9 @@ struct PhoneConversationModelPicker: View {
     /// the payload it belongs to.
     @State private var writes = ModelWriteRequests<ConversationModelWrite>()
     @State private var destinationWrites = ModelWriteRequests<ConversationDestinationWrite>()
+    /// What the account's subscriptions can run in the cloud now; nil until read.
+    @State private var account: PhoneSubscriptionAccount?
+    @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
 
     private struct ConversationModelWrite: Hashable, Sendable {
         let model: String
@@ -79,7 +99,7 @@ struct PhoneConversationModelPicker: View {
             selectedAtumModel: pickedAtumModel
         )
         let subscriptions = destination.map {
-            PhoneModelPickerProjection.subscriptions($0, destination: cloudDestination)
+            PhoneModelPickerProjection.subscriptions($0, destination: cloudDestination, account: account)
         }?.map { pickedAtumModel == nil ? $0 : $0.selecting(false) } ?? []
         return atum + subscriptions
     }
@@ -95,7 +115,9 @@ struct PhoneConversationModelPicker: View {
                     context: .conversation,
                     savingRowID: savingRowID,
                     saveFailed: saveFailed,
-                    thinking: snapshot.flatMap(PhoneModelPickerProjection.thinking),
+                    // Atum's levels only while Atum answers: changing one writes an Atum model.
+                    thinking: subscriptionAnswers ? nil
+                        : snapshot.flatMap(PhoneModelPickerProjection.thinking),
                     savingEffort: savingEffort,
                     selectEffort: chooseEffort,
                     select: choose
@@ -125,7 +147,10 @@ struct PhoneConversationModelPicker: View {
         let offer: AssistantModelLoadResult? = if let actions { await actions.read() } else { nil }
         let defaults: AssistantModelDestinationLoadResult? =
             if let destinations { await destinations.read() } else { nil }
+        let subscriptionAccount: PhoneSubscriptionAccount? =
+            if let read = destinations?.subscriptions?.read { await read() } else { nil }
         guard !Task.isCancelled else { return }
+        if let subscriptionAccount { account = subscriptionAccount }
         loading = false
 
         var anyValue = false
@@ -153,6 +178,7 @@ struct PhoneConversationModelPicker: View {
     }
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
+        if row.isSubscription { return chooseSubscription(row) }
         let model = row.model
         guard savingRowID == nil, savingEffort == nil, row.source == .atum,
               row.selectable, !row.selected else { return }
@@ -229,6 +255,45 @@ struct PhoneConversationModelPicker: View {
                 destinationWrites.settled()
             }
         }
+    }
+
+    /// A subscription pick writes the cloud destination (1.4 / 1.5), as the
+    /// desktop's cloud picker does. Only the server's answer moves the check.
+    private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
+        guard savingRowID == nil, savingEffort == nil, let destination,
+              let save = destinations?.subscriptions?.save,
+              let effort = PhoneModelPickerProjection.canSelectSubscription(
+                  row, snapshot: destination, account: account) else { return }
+        savingRowID = row.stableID
+        saveFailed = false
+        let operation = subscriptionWrites.begin(SubscriptionWrite(
+            connection: row.connectionID, model: row.model, revision: destination.revision))
+        Task { @MainActor in
+            let result = await save(destination, row.source, row.model, effort, operation)
+            guard !Task.isCancelled else { return }
+            savingRowID = nil
+            switch result {
+            case let .saved(value):
+                pickedAtumModel = nil
+                // The chip names the subscription model as it names a saved one.
+                onPick(row.model)
+                applyDestination(value)
+                subscriptionWrites.settled()
+            case let .refused(latest):
+                if let latest {
+                    applyDestination(latest)
+                    subscriptionWrites.settled()
+                }
+                saveFailed = true
+                // A relay that went down or a disconnected plan shows as such now.
+                if let read = destinations?.subscriptions?.read { account = await read() }
+            }
+        }
+    }
+
+    /// The cloud answers with a subscription's model, so no Atum level applies.
+    private var subscriptionAnswers: Bool {
+        pickedAtumModel == nil && destination?.choice(for: cloudDestination)?.source.isSubscription == true
     }
 
     private func apply(_ value: ManagedModelSnapshot) {
@@ -340,6 +405,8 @@ private struct PhoneDestinationModelPicker: View {
     @State private var savingRowID: String?
     @State private var saveFailed = false
     @State private var writes = ModelWriteRequests<DestinationModelWrite>()
+    @State private var account: PhoneSubscriptionAccount?
+    @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
 
     private struct DestinationModelWrite: Hashable, Sendable {
         let destination: String
@@ -357,17 +424,24 @@ private struct PhoneDestinationModelPicker: View {
             saveFailed: saveFailed,
             select: choose
         )
+        .task {
+            if let read = actions.subscriptions?.read { account = await read() }
+        }
     }
 
     private var rows: [PhoneModelPickerProjection.Row] {
-        PhoneModelPickerProjection.destination(
+        let atum = PhoneModelPickerProjection.destination(
             value.snapshot,
             destination: destination,
             cloudEligibleAliases: value.cloudEligibleAliases
         )
+        guard destination.isCloud else { return atum }
+        return atum + PhoneModelPickerProjection.subscriptions(value.snapshot, destination: destination,
+                                                               account: account)
     }
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
+        if row.isSubscription { return chooseSubscription(row) }
         guard savingRowID == nil,
               PhoneModelPickerProjection.canSelectAtumModel(
                   row.model,
@@ -398,6 +472,37 @@ private struct PhoneDestinationModelPicker: View {
                 }
                 // Without it the outcome is unknown; an identical retry replays.
                 saveFailed = true
+            }
+        }
+    }
+
+    /// The same 1.4 / 1.5 cloud write as the composer's picker.
+    private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
+        guard savingRowID == nil, destination.isCloud, let save = actions.subscriptions?.save,
+              let effort = PhoneModelPickerProjection.canSelectSubscription(
+                  row, snapshot: value.snapshot, account: account) else { return }
+        savingRowID = row.stableID
+        saveFailed = false
+        let operation = subscriptionWrites.begin(SubscriptionWrite(
+            connection: row.connectionID, model: row.model, revision: value.snapshot.revision))
+        Task { @MainActor in
+            let result = await save(value.snapshot, row.source, row.model, effort, operation)
+            guard !Task.isCancelled else { return }
+            savingRowID = nil
+            switch result {
+            case let .saved(snapshot):
+                value.snapshot = snapshot
+                saveFailed = false
+                subscriptionWrites.settled()
+                onValue(value)
+            case let .refused(latest):
+                if let latest {
+                    value.snapshot = latest
+                    subscriptionWrites.settled()
+                    onValue(value)
+                }
+                saveFailed = true
+                if let read = actions.subscriptions?.read { account = await read() }
             }
         }
     }

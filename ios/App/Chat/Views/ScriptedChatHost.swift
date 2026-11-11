@@ -57,7 +57,8 @@ struct ScriptedChatHost: View {
         _path = State(initialValue: [script.name])
         _scriptedDefinition = State(initialValue: Self.definition(name: script.title))
         _scriptedModels = State(initialValue: Self.models())
-        _scriptedModelDestinations = State(initialValue: Self.modelDestinations())
+        _scriptedModelDestinations = State(initialValue: Self.subscriptionDemo == nil
+            ? Self.modelDestinations() : Self.subscriptionDestinations())
         _scriptedPresentation = State(initialValue: Self.presentation())
         _scriptedRoutines = State(initialValue: Self.routines())
         let joining = script.name == ScriptedScenario.botMoonRoomJoin.rawValue
@@ -182,7 +183,8 @@ struct ScriptedChatHost: View {
                                                 revision: Int(scriptedModelDestinations.revision + 1)
                                             )
                                             return .saved(scriptedModelDestinations)
-                                        }
+                                        },
+                                        subscriptions: scriptedSubscriptions
                                     ) : nil,
                                 assistantPresentation: script.context.kind == .assistant
                                     ? AssistantPresentationActions(
@@ -527,6 +529,76 @@ struct ScriptedChatHost: View {
         ]
         let data = try! JSONSerialization.data(withJSONObject: value)
         return try! NativeAPI.decode(ManagedModelDestinationSnapshot.self, from: data)
+    }
+
+    /// `-AtumScriptedSubscriptions ready|not-ready`: the cloud answers with a
+    /// saved ChatGPT plan model; `ready` has an owner Mac relaying the plan and
+    /// OpenCode Go connected, `not-ready` has no relay up. Synthetic data, for
+    /// the subscription picker's captures and UI tests.
+    static let subscriptionsFlag = "-AtumScriptedSubscriptions"
+    private static let subscriptionDemo: String? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: subscriptionsFlag), index + 1 < arguments.count
+        else { return nil }
+        return arguments[index + 1]
+    }()
+
+    /// The scripted subscription actions, only with `-AtumScriptedSubscriptions`.
+    private var scriptedSubscriptions: AssistantSubscriptionActions? {
+        guard let demo = Self.subscriptionDemo else { return nil }
+        return AssistantSubscriptionActions(
+            read: { Self.subscriptionAccount(demo) },
+            save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
+                     effort: ManagedModelEffort, _: NativeID) -> AssistantModelDestinationSaveResult in
+                let next = Self.subscriptionDestinations(
+                    source: source == .opencodeGo ? "opencode_go" : "chatgpt_plan",
+                    model: model, effort: effort.rawValue,
+                    revision: Int(scriptedModelDestinations.revision + 1))
+                scriptedModelDestinations = next
+                return .saved(next)
+            })
+    }
+
+    private static func subscriptionDestinations(source: String = "chatgpt_plan", model: String = "gpt-6.1",
+                                                 effort: String = "medium",
+                                                 revision: Int = 3) -> ManagedModelDestinationSnapshot {
+        let value: [String: Any] = [
+            "profile": "atum.model-choice/1.5",
+            "agentPrincipal": "14600000-0000-4000-8000-0000000000a1",
+            "revision": revision,
+            "policyDigest": String(repeating: "a", count: 64),
+            "recommended": ["source": "atum", "model": ManagedModelLineup.defaultAlias, "effort": "medium"],
+            "choices": [["destination": "cloud", "source": source, "model": model, "effort": effort]],
+            "dailyCap": ["dailyProtons": 200_000, "timeZone": "Asia/Ho_Chi_Minh",
+                         "warningPercent": 80, "counts": "atum_billed_only"],
+            "spend": ["day": "2026-10-20", "usedProtons": 42_000, "state": "normal", "notice": "none"],
+        ]
+        return try! NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                     from: JSONSerialization.data(withJSONObject: value))
+    }
+
+    private static func subscriptionAccount(_ demo: String) -> PhoneSubscriptionAccount {
+        func model(_ id: String, _ name: String, _ efforts: [String]) -> [String: Any] {
+            ["id": id, "displayName": name, "efforts": efforts, "defaultEffort": "medium",
+             "contextBudget": 200_000, "outputBudget": 32_000]
+        }
+        let relay: [String: Any] = demo == "ready"
+            ? ["profile": "atum.chatgpt-relay/1", "revision": 2, "state": "enabled",
+               "deviceServiceId": "14600000-0000-4000-8000-0000000000d1", "selectedAt": 1_760_000_000,
+               "models": [model("gpt-6.1", "GPT-6.1", ["low", "medium", "high"]),
+                          model("gpt-6.1-mini", "GPT-6.1 mini", ["low", "medium", "high"])]]
+            : ["profile": "atum.chatgpt-relay/1", "revision": 3, "state": "disabled", "models": []]
+        let connections: [String: Any] = [
+            "profile": "atum.provider-connections/1", "revision": 1,
+            "connections": [["provider": "opencode_go", "state": "connected", "revision": 1,
+                             "models": [model("glm-5.2", "GLM 5.2", ["medium", "high"])],
+                             "modelPolicy": "subscription", "connectedAt": 1_760_000_000, "keyVersion": 1]],
+        ]
+        return PhoneSubscriptionAccount(
+            chatGPT: try! NativeAPI.decode(ChatGPTRelayStatus.self,
+                                           from: JSONSerialization.data(withJSONObject: relay)),
+            openCodeGo: try! NativeAPI.decode(ProviderConnectionsStatus.self,
+                                              from: JSONSerialization.data(withJSONObject: connections)))
     }
 
     private static func presentation(title: String? = nil,

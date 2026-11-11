@@ -308,6 +308,8 @@ struct AssistantModelDestinationActions {
     let read: () async -> AssistantModelDestinationLoadResult
     let save: (ManagedModelDestinationSnapshot, ManagedModelDestinationID, String, NativeID) async
         -> AssistantModelDestinationSaveResult
+    /// The cloud's subscription models (`PhoneModelPicker.swift`). Nil where the host has none.
+    var subscriptions: AssistantSubscriptionActions?
 }
 
 enum AssistantAvatarSaveResult { case saved, failed }

@@ -1769,7 +1769,20 @@ final class LiveAppModel {
                     roomID: roomID, snapshot: snapshot, destination: destination,
                     model: model, requestID: requestID
                 )
-            }
+            },
+            subscriptions: AssistantSubscriptionActions(
+                read: { [weak self] in
+                    await self?.readSubscriptionAccount()
+                        ?? PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)
+                },
+                save: { [weak self] snapshot, source, model, effort, requestID in
+                    guard let self else { return .refused(nil) }
+                    return await self.saveAssistantModelSubscription(
+                        roomID: roomID, snapshot: snapshot, source: source,
+                        model: model, effort: effort, requestID: requestID
+                    )
+                }
+            )
         )
     }
 
@@ -2166,6 +2179,51 @@ final class LiveAppModel {
                 destination: destination, model: model
             )
             let value = try await client.writeManagedModelDestination(
+                agentPrincipal: agent.principal, value: write
+            )
+            guard domainClient === client,
+                  agentForRoom(roomID)?.principal == agent.principal else { return .refused(nil) }
+            return .saved(value)
+        } catch let failure as NativeDomainClientFailure {
+            guard case let .http(http) = failure,
+                  http.response.error == .conflict else { return .refused(nil) }
+            let latest = try? await client.managedModelDestinations(agentPrincipal: agent.principal)
+            guard domainClient === client,
+                  agentForRoom(roomID)?.principal == agent.principal else { return .refused(nil) }
+            return .refused(latest)
+        } catch {
+            return .refused(nil)
+        }
+    }
+
+    /// The account's subscriptions as the cloud can use them: the two owner
+    /// status reads the desktop makes for a cloud assistant's picker. Each one
+    /// that fails is nil, so the picker keeps a saved choice read-only.
+    private func readSubscriptionAccount() async -> PhoneSubscriptionAccount {
+        guard let client = domainClient else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
+        async let relay = try? client.chatGPTRelayStatus()
+        async let connections = try? client.providerConnectionsStatus()
+        let value = PhoneSubscriptionAccount(chatGPT: await relay, openCodeGo: await connections)
+        guard domainClient === client else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
+        return value
+    }
+
+    /// The cloud destination switched to a subscription model (1.4 / 1.5),
+    /// with the same conflict readback as the Atum destination write.
+    private func saveAssistantModelSubscription(roomID: String,
+                                                snapshot: ManagedModelDestinationSnapshot,
+                                                source: ManagedModelDestinationSource,
+                                                model: String,
+                                                effort: ManagedModelEffort,
+                                                requestID: NativeID) async
+        -> AssistantModelDestinationSaveResult {
+        guard let client = domainClient, let agent = agentForRoom(roomID),
+              snapshot.agentPrincipal == agent.principal else { return .refused(nil) }
+        do {
+            let write = try ManagedModelSubscriptionWrite(
+                requestId: requestID, snapshot: snapshot, source: source, model: model, effort: effort
+            )
+            let value = try await client.writeManagedModelSubscription(
                 agentPrincipal: agent.principal, value: write
             )
             guard domainClient === client,
