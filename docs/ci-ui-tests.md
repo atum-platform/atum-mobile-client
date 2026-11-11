@@ -18,7 +18,9 @@ per run on 2026-11-11 with six lanes active).
   is not a check. Also `GScrollUITests`: its scenario clock is too tight for the
   slower hosted runners (first hosted run, 2026-11-11: checks 3 and 9 timed out).
   These are listed in `LOCAL_ONLY` in the workflow. `LOCAL_ONLY_TESTS` holds the
-  two `Wave2MediaBotUITests` tests that need the appearance/content-size runner,
+  two `Wave2MediaBotUITests` tests, `AssistantsWave3UITests/testNewAssistantReadsInDark` and
+  `TeamSpaceInviteUITests/testInviteSheetAtAX5DarkHasNoClippedText`, which need the
+  appearance/content-size runner,
   plus three tests whose scenario windows hosted runners miss (second hosted run,
   2026-11-11): `HomeShellUITests/testInvitationShowsJoinProgressThenPushes`
   (the 0.8 s "joining" window passes before the poll sees it),

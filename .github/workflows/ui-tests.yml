@@ -26,6 +26,8 @@ env:
   LOCAL_ONLY_TESTS: >-
     Wave2MediaBotUITests/testWave2DarkLargestTypeEvidence
     Wave2MediaBotUITests/testWave2AccessibilitySmoke
+    AssistantsWave3UITests/testNewAssistantReadsInDark
+    TeamSpaceInviteUITests/testInviteSheetAtAX5DarkHasNoClippedText
     HomeShellUITests/testInvitationShowsJoinProgressThenPushes
     HomeShellUITests/testPlusOpensStartChatWithRealRowsAndAvailableCreationActions
     ChatKindsUITests/testLinksGoThroughLinkPolicyAndNothingIsReadWhileCovered
