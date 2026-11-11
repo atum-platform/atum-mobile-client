@@ -160,10 +160,10 @@ final class TimelineController {
     /// `start()`, so the first batch (the SDK's cache) cannot be published
     /// to nobody. `aliases`: the previous timeline's `echoAliases`.
     static func make(room: Room, mapperRoom: ItemMapperRoom, generation: UInt64,
-                     aliases: [String: String], calendar: Calendar = .current,
+                     aliases: [String: String], calendar: Calendar = .current, threadRootID: String? = nil,
                      clock: @escaping @Sendable () -> Date) async throws -> TimelineController {
         let source = try await SDKTimelineSource.make(room: room, mapperRoom: mapperRoom, aliases: aliases,
-                                                      calendar: calendar)
+                                                      calendar: calendar, threadRootID: threadRootID)
         return TimelineController(source: source, roomID: mapperRoom.roomID, context: mapperRoom.context,
                                   generation: generation, echoAliases: aliases, calendar: calendar, clock: clock)
     }

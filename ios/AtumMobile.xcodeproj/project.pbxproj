@@ -225,6 +225,11 @@
 		E3665AB49BD1951028D9DF2B /* ProbeLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE2D07D34EDD53B2BC9B079 /* ProbeLog.swift */; };
 		E407B377E96207C435E818DB /* SwiftUIMath-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 434D4AEA1F0B23ECF0B0C391 /* SwiftUIMath-LICENSE.txt */; };
 		E4862B548E390F2312D09724 /* CompanySpaceReads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */; };
+		48AB73BA0B54E435C1FAC1EE /* TeamSpaceThreadsPendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00EF5DAF57BEB8283BFEE1EE /* TeamSpaceThreadsPendingCopy.swift */; };
+		8F4F84FB3B6C4EF5B19665CE /* CompanyThreadsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022359D27CD9337222F70230 /* CompanyThreadsViews.swift */; };
+		3CB98FE8DB0AE6FF17B4C83F /* CompanyThreadsReads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96D72BA32F4C6D6F89B49AB8 /* CompanyThreadsReads.swift */; };
+		4B44F28F4C9219EA2C0FB2C7 /* CompanyThreadsMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = E131B6FD0C90CB6795F41537 /* CompanyThreadsMatrix.swift */; };
+		13CEB81A41C0704FD0F45403 /* CompanyThreadsCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1FFA5E4C06A968061E5F97B /* CompanyThreadsCopy.swift */; };
 		E7999E30F4D60C7DF47C9ECE /* S1MatrixUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93E1EECC6509DF3CD28B9F13 /* S1MatrixUITests.swift */; };
 		E875903DB92DAE3524043FF0 /* ElementX-NSE.md in Resources */ = {isa = PBXBuildFile; fileRef = AE23F200921E3C4EB9F38A89 /* ElementX-NSE.md */; };
 		E8768073B70AADA21D4543F7 /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 0CFF1FDDA5302B1B9089C38D /* AtumChat */; };
@@ -451,6 +456,11 @@
 		99F22D7ED106BEA5B648BDE0 /* AppRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRoot.swift; sourceTree = "<group>"; };
 		9C2D9DF99EFDD46B2622E0F9 /* AvatarArtTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarArtTests.swift; sourceTree = "<group>"; };
 		9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceReads.swift; sourceTree = "<group>"; };
+		00EF5DAF57BEB8283BFEE1EE /* TeamSpaceThreadsPendingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceThreadsPendingCopy.swift; sourceTree = "<group>"; };
+		022359D27CD9337222F70230 /* CompanyThreadsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyThreadsViews.swift; sourceTree = "<group>"; };
+		96D72BA32F4C6D6F89B49AB8 /* CompanyThreadsReads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyThreadsReads.swift; sourceTree = "<group>"; };
+		E131B6FD0C90CB6795F41537 /* CompanyThreadsMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyThreadsMatrix.swift; sourceTree = "<group>"; };
+		F1FFA5E4C06A968061E5F97B /* CompanyThreadsCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyThreadsCopy.swift; sourceTree = "<group>"; };
 		9E12532A687A3AD0B73DE494 /* TeamSpaceDailyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceDailyTests.swift; sourceTree = "<group>"; };
 		9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyChannelChrome.swift; sourceTree = "<group>"; };
 		9FD917529F420AC1D926B526 /* ReactionChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionChips.swift; sourceTree = "<group>"; };
@@ -986,6 +996,11 @@
 				F802940C864EB823935C92C5 /* CompanyLogo.swift */,
 				48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */,
 				9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */,
+				00EF5DAF57BEB8283BFEE1EE /* TeamSpaceThreadsPendingCopy.swift */,
+				022359D27CD9337222F70230 /* CompanyThreadsViews.swift */,
+				96D72BA32F4C6D6F89B49AB8 /* CompanyThreadsReads.swift */,
+				E131B6FD0C90CB6795F41537 /* CompanyThreadsMatrix.swift */,
+				F1FFA5E4C06A968061E5F97B /* CompanyThreadsCopy.swift */,
 				A978118D2881F551EC2169DA /* CompanySpaceViews.swift */,
 				CDC217316B8ABD288A5390BB /* CompanyWorkspaceModel.swift */,
 				647EAA4C4F8860728B7FE09B /* CompanyWorkspaceViews.swift */,
@@ -1490,6 +1505,11 @@
 				FF01DEF113A4327D55782296 /* CompanyLogo.swift in Sources */,
 				EEB7C9632C3F68FFAC743371 /* CompanySpaceMatrix.swift in Sources */,
 				E4862B548E390F2312D09724 /* CompanySpaceReads.swift in Sources */,
+				48AB73BA0B54E435C1FAC1EE /* TeamSpaceThreadsPendingCopy.swift in Sources */,
+				8F4F84FB3B6C4EF5B19665CE /* CompanyThreadsViews.swift in Sources */,
+				3CB98FE8DB0AE6FF17B4C83F /* CompanyThreadsReads.swift in Sources */,
+				4B44F28F4C9219EA2C0FB2C7 /* CompanyThreadsMatrix.swift in Sources */,
+				13CEB81A41C0704FD0F45403 /* CompanyThreadsCopy.swift in Sources */,
 				58FFF98F5431C75863E264C5 /* CompanySpaceViews.swift in Sources */,
 				5424CCE97A6C9AC111B63526 /* CompanyWorkspaceModel.swift in Sources */,
 				94B141630A5C19F5646A0136 /* CompanyWorkspaceViews.swift in Sources */,
