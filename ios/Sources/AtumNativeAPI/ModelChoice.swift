@@ -618,3 +618,49 @@ public struct ManagedModelDestinationWrite: Encodable, Equatable, Sendable {
         try c.encode(choice, forKey: .choice)
     }
 }
+
+/// The cloud destination switched to one model of an account subscription:
+/// the same `PUT agents/{principal}/model-destinations` the desktop sends
+/// (`matrixSubscriptionDestinationWrite`, `model-destinations.ts`). OpenCode Go
+/// is written as `atum.model-choice/1.4`; a ChatGPT plan, which the cloud
+/// reaches through an owner Mac's relay, as `atum.model-choice/1.5` (the
+/// platform refuses it under any other profile: `relay_profile_required`).
+/// The level is Atum's three-level vocabulary, as the cloud row requires.
+public struct ManagedModelSubscriptionWrite: Encodable, Equatable, Sendable {
+    public let requestId: NativeID
+    public let expectedRevision: Int64
+    public let policyDigest: String
+    public let choice: ManagedModelDestinationChoice
+
+    public init(requestId: NativeID,
+                snapshot: ManagedModelDestinationSnapshot,
+                source: ManagedModelDestinationSource,
+                model: String,
+                effort: ManagedModelEffort) throws {
+        guard source == .chatGPTPlan || source == .opencodeGo else { throw ContractViolation.invariant }
+        self.requestId = requestId
+        expectedRevision = snapshot.revision
+        policyDigest = snapshot.policyDigest
+        choice = try ManagedModelDestinationChoice(
+            destination: ManagedModelDestinationID("cloud"), source: source,
+            model: model, effort: effort.rawValue
+        )
+    }
+
+    public var profile: String {
+        choice.source == .chatGPTPlan ? "atum.model-choice/1.5" : "atum.model-choice/1.4"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case profile, requestId, expectedRevision, policyDigest, choice
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(profile, forKey: .profile)
+        try c.encode(requestId, forKey: .requestId)
+        try c.encode(expectedRevision, forKey: .expectedRevision)
+        try c.encode(policyDigest, forKey: .policyDigest)
+        try c.encode(choice, forKey: .choice)
+    }
+}
