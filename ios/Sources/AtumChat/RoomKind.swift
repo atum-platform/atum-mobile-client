@@ -47,10 +47,17 @@ public struct RoomContext: Equatable, Sendable {
     /// The room's agent or bot users: their text answers are results, and
     /// their notices that a result supersedes are hidden (B17, B21).
     public var agentUserIDs: Set<String>
+    /// The platform's company-private CoS view binds this room to this account
+    /// (`CompanyRoomClassification.privateCos`): only here is the Chief of
+    /// Staff greeting's pill and board link projected (desktop proves the same
+    /// room from its `io.atum.company_private_cos` state).
+    public var isCompanyPrivateCos: Bool
 
-    public init(kind: RoomKind, ownUserID: String, agentUserIDs: Set<String> = []) {
+    public init(kind: RoomKind, ownUserID: String, agentUserIDs: Set<String> = [],
+                isCompanyPrivateCos: Bool = false) {
         self.kind = kind
         self.ownUserID = ownUserID
         self.agentUserIDs = agentUserIDs
+        self.isCompanyPrivateCos = isCompanyPrivateCos
     }
 }

@@ -120,6 +120,17 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
     /// The `io.atum.progress` marker on a working-line notice (agent-turns/1.4
     /// A7/A8). Nil for every other row.
     public var progress: ChatProgress?
+    /// The Chief of Staff greeting's pill and titled board link, parsed only
+    /// in this account's company-private CoS room (desktop
+    /// `privateCosAgentPill` / `privateCosBoardLink`). Nil everywhere else.
+    public var privateCosGreeting: PrivateCosGreeting?
+
+    /// The Markdown the bubble renders: the greeting's safe projection
+    /// (desktop `privateCosGreetingMarkdown`), else the body as sent. Copy
+    /// still copies `body`.
+    public var markdownBody: String {
+        privateCosGreeting?.markdown(body: body) ?? body
+    }
 
     public init(id: String, kind: Kind, sender: String = "", senderName: String? = nil,
                 isOwn: Bool = false, isLocalEcho: Bool = false,
@@ -130,7 +141,8 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
                 receiptUserIDs: [String] = [], resultFor: String? = nil,
                 appBotMeta: String? = nil, botAPI: BotAPIMessage? = nil,
                 senderAvatarURI: String? = nil,
-                interim: Bool = false, progress: ChatProgress? = nil) {
+                interim: Bool = false, progress: ChatProgress? = nil,
+                privateCosGreeting: PrivateCosGreeting? = nil) {
         self.id = id
         self.kind = kind
         self.sender = sender
@@ -153,6 +165,7 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
         self.senderAvatarURI = senderAvatarURI
         self.interim = interim
         self.progress = progress
+        self.privateCosGreeting = privateCosGreeting
     }
 
     /// What a row is (plan §2.2: message | notice | image | file |

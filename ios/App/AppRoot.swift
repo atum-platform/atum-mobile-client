@@ -395,7 +395,8 @@ struct AppRoot: View {
                         companyID: model.companyWorkspace.activeCompanyID),
                     canCreateChannel: model.companyWorkspace.channelCreationAllowed(
                         companyID: model.companyWorkspace.activeCompanyID),
-                    sectionsChannels: model.companyWorkspace.teamSpaceProfile.channels
+                    sectionsChannels: model.companyWorkspace.teamSpaceProfile.channels,
+                    boardLinkRequest: model.companyWorkspace.boardLinkRequest
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },
@@ -431,6 +432,7 @@ struct AppRoot: View {
                     loadSavedPointers: { await model.companySavedPointers() },
                     loadSavedRows: { await model.companySavedRows($0) },
                     invites: companyInviteActions,
+                    clearBoardLink: { model.companyWorkspace.clearBoardLink($0) },
                     threads: CompanyThreadsActions(
                         load: { await model.companyThreadRows(companyID: $0) },
                         follow: { thread, followed in
@@ -812,6 +814,11 @@ struct AppRoot: View {
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),
                 onOpenAppBot: { router.open(app: $0) },
+                // A first-party board link stays in Atum (desktop `openMatrixMarkdownLink`):
+                // Team space → that company → Board, and the card.
+                onOpenCompanyBoard: { target in
+                    if model.companyWorkspace.requestBoardLink(target) { router.showTeamSpaceRoot() }
+                },
                 onBeginAppBotSetup: model.beginAppOnboarding,
                 onOpenAppBotRoute: model.openAppRoute,
                 onOpenAppBotTerms: model.openAppTerms,
