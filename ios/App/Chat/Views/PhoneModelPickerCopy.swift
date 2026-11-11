@@ -20,11 +20,13 @@ enum PhonePickerCopyKey: String, CaseIterable {
     case modelList = "src.matrix.model-picker-copy.COPY.modelList"
     case modelsFailed = "src.matrix.model-picker-copy.COPY.modelsFailed"
     case modelsRetry = "src.matrix.model-picker-copy.COPY.modelsRetry"
+    case modelsSignedOut = "src.matrix.model-picker-copy.COPY.modelsSignedOut"
     case modelsUnavailable = "src.matrix.model-picker-copy.COPY.modelsUnavailable"
     case noMatches = "src.matrix.model-picker-copy.COPY.noMatches"
     case noModels = "src.matrix.model-picker-copy.COPY.noModels"
     case planAccount = "src.matrix.model-picker-copy.COPY.planAccount"
     case searchPlaceholder = "src.matrix.model-picker-copy.COPY.searchPlaceholder"
+    case switchProblemUnavailable = "src.matrix.model-picker-copy.COPY.switchProblem.unavailable"
     case thisMac = "src.matrix.model-picker-copy.COPY.thisMac"
     case unfavorite = "src.matrix.model-picker-copy.COPY.unfavorite"
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
@@ -68,6 +70,24 @@ struct PhoneModelPickerCopy {
     }
 
     func state(_ key: PhoneModelPickerStateCopyKey) -> String { design.text(key.rawValue) }
+
+    /// Desktop's words for a subscription model the cloud cannot run now.
+    /// `chatgptCloudNotReady` ("Not ready for your assistants yet") is not in
+    /// the pin, nor in the desktop export at atum-desktop 583ae946; until an
+    /// export carries it the row says the pinned `switchProblem.unavailable`
+    /// ("Couldn't choose this model for this assistant right now."), never a
+    /// string written here. See `docs/ports/phone-subscription-models.md`.
+    func unavailable(_ reason: PhoneModelPickerProjection.Row.Unavailable) -> String {
+        switch reason {
+        case .notReady:
+            design.copy.contains(Self.chatgptCloudNotReady)
+                ? design.text(Self.chatgptCloudNotReady) : text(.switchProblemUnavailable)
+        case .signedOut:
+            text(.modelsSignedOut)
+        }
+    }
+
+    static let chatgptCloudNotReady = "src.matrix.model-picker-copy.COPY.chatgptCloudNotReady"
 
     /// Atum's own one-line description under a line-up model's name.
     func tagline(_ tagline: ManagedModelLineup.Tagline) -> String {
