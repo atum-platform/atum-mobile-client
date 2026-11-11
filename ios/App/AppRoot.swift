@@ -72,6 +72,8 @@ struct AppRoot: View {
     @State private var legalLinks = ChatLinkRouter()
     @State private var roomlessAppFallback: AppBotContinueRequest?
     @State private var appliedAccountScopeGeneration: UInt64?
+    /// TS-6b: the one thread panel and the thread drafts.
+    @State private var companyThreads = CompanyThreadsCoordinator()
     private let design = try! LiveDesign()
     @Environment(\.colorScheme) private var scheme
 
@@ -430,7 +432,19 @@ struct AppRoot: View {
                     loadSavedPointers: { await model.companySavedPointers() },
                     loadSavedRows: { await model.companySavedRows($0) },
                     invites: companyInviteActions,
-                    clearBoardLink: { model.companyWorkspace.clearBoardLink($0) }
+                    clearBoardLink: { model.companyWorkspace.clearBoardLink($0) },
+                    threads: CompanyThreadsActions(
+                        load: { await model.companyThreadRows(companyID: $0) },
+                        follow: { thread, followed in
+                            await model.setCompanyThreadFollow(roomID: thread.roomID, rootID: thread.root.eventID,
+                                                               followed: followed)
+                        },
+                        markRead: { await model.readCompanyThread($0) },
+                        open: { roomID, rootID in
+                            // Desktop `onOpenCompanyThread`: the room opens with its thread on top.
+                            companyThreads.pending = CompanyThreadRoute(roomID: roomID, rootID: rootID)
+                            routeFromRootDestination(roomID)
+                        })
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -834,8 +848,13 @@ struct AppRoot: View {
                 dismissPresentationRequest: dismissChatPresentationRequest,
                 onPresentationChanged: { active in
                     if router.activeRoomID == roomID { router.presentationChanged(active) }
-                }
+                },
+                openThreads: model.offersCompanyThreads(roomID: roomID)
+                    ? { rootID in companyThreads.open(roomID: roomID, rootID: rootID) } : nil,
+                threadPanelPresented: companyThreads.panel?.roomID == roomID
             )
+            .modifier(CompanyThreadPanelHost(model: model, design: design, coordinator: companyThreads,
+                                             roomID: roomID))
         } else if let opening = model.appBotRoomOpening, opening.roomID == roomID {
             AppBotRoomOpeningView(opening: opening, design: design) {
                 model.retryAppBotJoin(roomID: roomID)

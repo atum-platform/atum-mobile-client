@@ -90,6 +90,8 @@ struct TeamSpaceActions {
     var invites: CompanyInviteActions?
     /// The board link was applied (its company's Board page shows, with its card).
     var clearBoardLink: ((CompanyBoardLinkRequest) -> Void)?
+    /// The Threads row and its company list (TS-6b); nil keeps the row undrawn.
+    var threads: CompanyThreadsActions?
 }
 
 /// Workplace is a separate mode from Personal Home. It reuses the existing
@@ -108,6 +110,11 @@ struct TeamSpaceScreen: View {
     @State private var showsOverview = false
     @State private var showsActivity = false
     @State private var showsSaved = false
+    @State private var showsThreads = false
+    /// The open company's threads (TS-6b): rows read for another company are never shown.
+    @State private var threadsRead: (companyID: String, rows: [CompanyThreadListRow]?)?
+    @State private var threadsLoading = false
+    @State private var threadsGeneration: UInt64 = 0
     @State private var showsInvite = false
     @State private var showsJoin = false
     @State private var showsCreateChannel = false
@@ -177,11 +184,21 @@ struct TeamSpaceScreen: View {
         actions.clearBoardLink?(request)
     }
 
+    private var threadRows: [CompanyThreadListRow]? {
+        guard let threadsRead, threadsRead.companyID == presentation.workspace?.id else { return nil }
+        return threadsRead.rows
+    }
+
     private var sidebarEntries: TeamSpaceSidebarEntries {
-        // Threads and Drafts have no phone projection yet (their desktop records are the
-        // SDK thread list and the per-target `com.atum.draft.v2.*` account data), so they
-        // stay hidden, as the desktop hides a row with nothing to open.
-        TeamSpaceSidebarEntries(threads: 0, saved: savedPointers.count, drafts: 0)
+        // Drafts have no phone projection yet (their desktop record is the per-target
+        // `com.atum.draft.v2.*` account data), so the row stays hidden, as the desktop
+        // hides a row with nothing to open. Threads (TS-6b) shows once the company has one.
+        TeamSpaceSidebarEntries(threads: threadRows?.count ?? 0, saved: savedPointers.count, drafts: 0)
+    }
+
+    /// Desktop `threadsBadge`: unread thread mentions as a count, else a dot.
+    private var threadsBadge: Badge {
+        CompanyThreads.badge((threadRows ?? []).map(\.thread))
     }
 
     private var activityBadge: Badge {
@@ -235,6 +252,23 @@ struct TeamSpaceScreen: View {
                                        actions.openRoom(row.item.roomID)
                                    })
                 .atumDesign(visual: atum)
+        }
+        .sheet(isPresented: $showsThreads) {
+            if let threads = actions.threads {
+                TeamSpaceThreadsSheet(design: design, rows: threadRows, isLoading: threadsLoading,
+                                      reload: { await reloadThreads() },
+                                      follow: threads.follow, markRead: threads.markRead,
+                                      open: { row in
+                                          showsThreads = false
+                                          threads.open(row.thread.roomID, row.thread.root.eventID)
+                                      },
+                                      loadMatrixThumbnail: actions.loadMatrixThumbnail)
+                    .atumDesign(visual: atum)
+            }
+        }
+        .onChange(of: showsThreads) { _, shown in
+            // A thread read or followed in the list changes the row's mark.
+            if !shown { Task { await reloadThreads() } }
         }
         .sheet(isPresented: $showsSaved) {
             TeamSpaceSavedSheet(design: design, pointers: savedPointers,
@@ -351,6 +385,24 @@ struct TeamSpaceScreen: View {
     private func reloadStructure() async {
         await reloadSaved()
         await reloadActivity()
+        await reloadThreads()
+    }
+
+    private func reloadThreads() async {
+        threadsGeneration &+= 1
+        let generation = threadsGeneration
+        guard let companyID = presentation.workspace?.id, let load = actions.threads?.load else {
+            threadsRead = nil
+            threadsLoading = false
+            return
+        }
+        if threadsRead?.companyID != companyID { threadsRead = nil }
+        threadsLoading = true
+        let rows = await load(companyID)
+        guard generation == threadsGeneration, !Task.isCancelled else { return }
+        threadsLoading = false
+        // A failed read keeps the rows already shown rather than hiding the row.
+        if rows != nil || threadsRead?.companyID != companyID { threadsRead = (companyID, rows) }
     }
 
     private func reloadActivity() async {
@@ -384,8 +436,18 @@ struct TeamSpaceScreen: View {
             if let workspace = presentation.workspace {
                 notices(workspace)
             }
-            if presentation.workspace != nil, sidebarEntries.saved {
+            if presentation.workspace != nil, sidebarEntries.threads || sidebarEntries.saved {
                 Section {
+                    // Desktop order: Threads, then Saved (`company-workspace.tsx:2865–2900`).
+                    if sidebarEntries.threads, actions.threads != nil {
+                        TeamSpaceUtilityRow(design: design, glyph: .messageCircle,
+                                            title: CompanyThreadsCopy(design: design).companyTitle,
+                                            badge: threadsBadge,
+                                            identifier: "company.threads.entry") { showsThreads = true }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                     if sidebarEntries.saved {
                         TeamSpaceUtilityRow(design: design, glyph: .star, title: team.savedTitle,
                                             identifier: "company.saved.entry") { showsSaved = true }
