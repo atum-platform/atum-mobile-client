@@ -8,6 +8,10 @@ public enum MessageMenuItem: Equatable, Hashable, Sendable {
     case react
     /// "Trả lời" (B21).
     case reply
+    /// "Reply in thread": Team Space channels and conversations only, on a
+    /// message that is not itself in a thread (desktop `onThread`; nested
+    /// threads are never made).
+    case replyInThread
     /// "Sao chép": the raw text, as sent.
     case copy
     /// "Chọn văn bản": answers only; opens the select-text sheet.
@@ -54,7 +58,8 @@ public enum MessageMenuRules {
     /// phone knows): without it the menu cannot tell a person from an
     /// assistant in a group, so it offers no Report.
     public static func items(for item: ChatItem, in kind: RoomKind,
-                             nonPersonSenders: Set<String>? = nil) -> [MessageMenuItem] {
+                             nonPersonSenders: Set<String>? = nil,
+                             threads: Bool = false) -> [MessageMenuItem] {
         switch item.kind {
         case .message, .image, .file: break
         default: return []
@@ -65,6 +70,7 @@ public enum MessageMenuRules {
         var items: [MessageMenuItem] = []
         if !isBotRoom, ChatItemRules.canReact(item) { items.append(.react) }
         if !isBotRoom, ChatItemRules.canReply(item) { items.append(.reply) }
+        if threads, !isBotRoom, threadRootID(for: item) != nil { items.append(.replyInThread) }
         if hasText { items.append(.copy) }
         if hasText, isAnswer(item, in: kind) { items.append(.selectText) }
         if ChatItemRules.canEdit(item, in: kind) { items.append(.edit) }
@@ -73,6 +79,19 @@ public enum MessageMenuRules {
         }
         if !isBotRoom, ChatItemRules.canDelete(item) || isHeldSend(item) { items.append(.delete) }
         return items
+    }
+
+    /// The thread root a "Reply in thread" on `item` opens: the message's own
+    /// server event ID, when it is a server message and not itself a thread
+    /// reply (desktop: `actionable && !message.thread`). Nil otherwise.
+    public static func threadRootID(for item: ChatItem) -> String? {
+        switch item.kind {
+        case .message, .image, .file: break
+        default: return nil
+        }
+        guard item.threadRoot == nil, ChatItemRules.canReply(item),
+              let eventID = item.eventID, eventID.hasPrefix("$") else { return nil }
+        return eventID
     }
 
     /// A send tapped while no timeline was attached (a session renewal): it

@@ -41,6 +41,9 @@ final class MessageActionsPresenter {
     /// presents the in-app page or the held-link line, and SwiftUI presents
     /// nothing from under a presented sheet.
     @ObservationIgnored var linkAfterSelectText: String?
+    /// "Reply in thread" (TS-6b): opens the room's thread panel on this root.
+    /// Set only in a Team Space channel or conversation; nil offers no item.
+    var openThread: ((String) -> Void)?
 
     /// The select-text sheet's link tap: close the sheet, then route.
     func openLinkFromSelectText(_ url: String) {
@@ -135,7 +138,8 @@ private struct MessageMenuModifier: ViewModifier {
     @State private var frame: CGRect = .zero
 
     func body(content: Content) -> some View {
-        let items = MessageMenuRules.items(for: row.item, in: kind, nonPersonSenders: nonPersonSenders)
+        let items = MessageMenuRules.items(for: row.item, in: kind, nonPersonSenders: nonPersonSenders,
+                                           threads: presenter.openThread != nil)
         if items.isEmpty {
             content
         } else {
@@ -187,6 +191,7 @@ enum MessageMenuActions {
         switch item {
         case .react: ChatCopy.text(design, ChatCopy.Key.react)
         case .reply: ChatCopy.text(design, ChatCopy.Key.reply)
+        case .replyInThread: design.text("src.matrix.thread-copy.copy.replyInThread")
         case .copy: ChatCopy.text(design, ChatCopy.Key.copy)
         case .selectText: ChatCopy.text(design, ChatCopy.Key.selectText)
         case .edit: ChatCopy.text(design, ChatCopy.Key.edit)
@@ -199,6 +204,8 @@ enum MessageMenuActions {
         switch item {
         case .react: .smiley
         case .reply: .arrowBackUp
+        // The vendored Phosphor subset has no Messages glyph (desktop's thread mark).
+        case .replyInThread: .messageCircle
         case .copy: .copy
         case .selectText: .fileText
         case .edit: .pencil
@@ -215,6 +222,8 @@ enum MessageMenuActions {
         switch item {
         case .react: break
         case .reply: actions.reply(row.id)
+        case .replyInThread:
+            if let rootID = MessageMenuRules.threadRootID(for: row.item) { presenter.openThread?(rootID) }
         case .copy: actions.copy(row.id)
         case .selectText:
             presenter.selectText = SelectTextRequest(itemID: row.id, body: row.item.body,
@@ -381,7 +390,7 @@ struct MessageActionsOverlay: View {
                     }
                     // A sheet or the delete alert can only be presented once
                     // the cover has gone; the rest act at once.
-                    if item == .selectText || item == .delete || item == .report {
+                    if item == .selectText || item == .delete || item == .report || item == .replyInThread {
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(120))
                             run()
