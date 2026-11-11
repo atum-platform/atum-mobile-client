@@ -45,6 +45,8 @@ struct ChatScreen: View {
     var appBot: AppBotPresentation? = nil
     var appBotCatalog = AppBotCatalogPresentation.empty
     var onOpenAppBot: @MainActor @Sendable (String) -> Void = { _ in }
+    /// A tapped `#atum-board/…` link: Team space → that company → Board (and card).
+    var onOpenCompanyBoard: @MainActor (CompanyBoardLinkTarget) -> Void = { _ in }
     var onBeginAppBotSetup: @MainActor @Sendable (AppBotPresentation) -> Bool = { _ in false }
     var onOpenAppBotRoute: @MainActor @Sendable (AppBotPresentation, String) -> Bool = { _, _ in false }
     var onOpenAppBotTerms: @MainActor @Sendable (URL) -> Void = { _ in }
@@ -377,6 +379,7 @@ struct ChatScreen: View {
                 dismissPresentations()
             }
             .onDisappear { onPresentationChanged(false) }
+            .onAppear { links.openCompanyBoard = onOpenCompanyBoard }
             .fullScreenCover(item: $links.presented) { page in
                 SafariView(url: page.url).ignoresSafeArea()
             }

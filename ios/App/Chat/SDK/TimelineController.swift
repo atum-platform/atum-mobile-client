@@ -32,6 +32,8 @@ struct TimelinePublication: Sendable {
 
 struct ParsedBody: Equatable, Sendable {
     let body: String
+    /// What was parsed: `ChatItem.markdownBody` (the greeting's projection or the body).
+    let markdownBody: String
     let botAPIFormattedBody: String?
     let isBotAPI: Bool
     let attributed: AttributedString
@@ -99,6 +101,7 @@ actor TimelinePipeline {
             if item.isOwn || !Self.rendersMarkdown(item.kind) {
                 parsedBodies[item.id] = nil
             } else if parsedBodies[item.id]?.body != item.body
+                        || parsedBodies[item.id]?.markdownBody != item.markdownBody
                         || parsedBodies[item.id]?.botAPIFormattedBody != item.botAPI?.formattedBody
                         || parsedBodies[item.id]?.isBotAPI != (item.botAPI != nil) {
                 let attributed: AttributedString
@@ -107,10 +110,11 @@ actor TimelinePipeline {
                         MessageMarkup.parseBotAPIHTML($0, fallback: item.body)
                     } ?? MessageMarkup.parsePlain(item.body)
                 } else {
-                    attributed = MessageMarkup.parse(item.body)
+                    attributed = MessageMarkup.parse(item.markdownBody)
                 }
                 parsedBodies[item.id] = ParsedBody(
                     body: item.body,
+                    markdownBody: item.markdownBody,
                     botAPIFormattedBody: item.botAPI?.formattedBody,
                     isBotAPI: item.botAPI != nil,
                     attributed: attributed
