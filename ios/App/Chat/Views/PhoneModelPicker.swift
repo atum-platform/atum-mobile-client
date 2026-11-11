@@ -3,8 +3,8 @@ import AtumDesign
 import AtumNativeAPI
 import SwiftUI
 
-/// The composer's model picker and the assistant card's per-destination
-/// pickers. Each loads its decoded model-choice snapshot, projects it to rows
+/// The composer's model picker and the assistant card's destination picker.
+/// Each loads its decoded model-choice snapshot, projects it to rows
 /// and saves a pick; `PhoneModelPickerList` draws the rows (T3-style layout).
 /// Rows come only from decoded model-choice contracts; these views own no
 /// provider discovery, account identity, credential, or remote Mac route.
@@ -270,6 +270,16 @@ private extension AssistantModelDestinationLoadResult {
     }
 }
 
+extension ManagedModelDestinationSnapshot {
+    /// Cloud-only, as on desktop (`cardModelChoice`): the card edits the model
+    /// of the place that answers now, and that is the cloud. The snapshot keeps
+    /// its Mac entries for older desktops; the phone does not draw them. A
+    /// not-yet-moved Mac home changes its model from the Lives on sheet.
+    var cardDestination: ManagedModelDestinationID { try! ManagedModelDestinationID("cloud") }
+}
+
+/// The card's Model page when only the 1.3/1.4 destination read is available:
+/// the one picker for the destination that answers now.
 struct PhoneModelDestinationsPicker: View {
     let design: LiveDesign
     let actions: AssistantModelDestinationActions
@@ -282,31 +292,9 @@ struct PhoneModelDestinationsPicker: View {
     var body: some View {
         Group {
             if let value {
-                List {
-                    ForEach(Array(destinations(in: value.snapshot).enumerated()), id: \.element) { index, destination in
-                        NavigationLink {
-                            PhoneDestinationModelPicker(
-                                design: design,
-                                actions: actions,
-                                value: value,
-                                destination: destination,
-                                destinationOrdinal: index,
-                                onValue: { self.value = $0 }
-                            )
-                        } label: {
-                            HStack(spacing: 10) {
-                                Text(destinationName(destination, ordinal: index))
-                                Spacer()
-                                Text(verbatim: currentModelName(value.snapshot, destination: destination))
-                                    .foregroundStyle(AtumVisualSystem(design: design).color(.muted,
-                                                                                         scheme: colorScheme))
-                                    .multilineTextAlignment(.trailing)
-                            }
-                        }
-                        .accessibilityIdentifier("assistant.model.destination.\(destination.rawValue)")
-                    }
-                }
-                .scrollContentBackground(.hidden)
+                PhoneDestinationModelPicker(design: design, actions: actions, value: value,
+                                            destination: value.snapshot.cardDestination,
+                                            onValue: { self.value = $0 })
             } else if unavailable {
                 ContentUnavailableView(copy(.modelsUnavailable), image: symbol(.globe))
             } else if loadFailed {
@@ -324,8 +312,6 @@ struct PhoneModelDestinationsPicker: View {
         .task { if value == nil, !loading { await load() } }
     }
 
-    @Environment(\.colorScheme) private var colorScheme
-
     @MainActor private func load() async {
         loading = true
         unavailable = false
@@ -340,27 +326,6 @@ struct PhoneModelDestinationsPicker: View {
         }
     }
 
-    private func destinations(in snapshot: ManagedModelDestinationSnapshot) -> [ManagedModelDestinationID] {
-        let cloud = try! ManagedModelDestinationID("cloud")
-        return [cloud] + snapshot.choices.compactMap { $0.destination.isCloud ? nil : $0.destination }
-    }
-
-    private func destinationName(_ destination: ManagedModelDestinationID, ordinal: Int) -> String {
-        if destination.isCloud { return copy(.cloud) }
-        return design.text("src.matrix.execution-machines-copy.words.mac",
-                           arguments: [.number(Int64(max(1, ordinal)))])
-    }
-
-    private func currentModelName(_ snapshot: ManagedModelDestinationSnapshot,
-                                  destination: ManagedModelDestinationID) -> String {
-        guard let choice = snapshot.choice(for: destination) else {
-            return ManagedModelLineup.displayName(for: snapshot.recommended.model) ?? snapshot.recommended.model
-        }
-        return choice.source == .atum
-            ? ManagedModelLineup.displayName(for: choice.model) ?? choice.model
-            : choice.model
-    }
-
     private func copy(_ key: PhonePickerCopyKey) -> String { design.text(key.rawValue) }
     private func symbol(_ glyph: AtumGlyph) -> String { AtumVisualSystem(design: design).symbol(glyph) }
 }
@@ -370,7 +335,6 @@ private struct PhoneDestinationModelPicker: View {
     let actions: AssistantModelDestinationActions
     @State var value: AssistantModelDestinationValue
     let destination: ManagedModelDestinationID
-    let destinationOrdinal: Int
     let onValue: (AssistantModelDestinationValue) -> Void
 
     @State private var savingRowID: String?
@@ -391,17 +355,8 @@ private struct PhoneDestinationModelPicker: View {
             context: destination.isCloud ? .cloudAssistant : .mac,
             savingRowID: savingRowID,
             saveFailed: saveFailed,
-            switchBack: switchBackModel.map { model in { chooseModel(model) } },
             select: choose
         )
-        .navigationTitle(destinationTitle)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    /// Set only while this Mac's saved choice, in the latest snapshot, is a
-    /// connection's; the write goes through `choose`, the same boundary as a row.
-    private var switchBackModel: String? {
-        PhoneModelPickerProjection.switchBackModel(value.snapshot, destination: destination)
     }
 
     private var rows: [PhoneModelPickerProjection.Row] {
@@ -410,17 +365,6 @@ private struct PhoneDestinationModelPicker: View {
             destination: destination,
             cloudEligibleAliases: value.cloudEligibleAliases
         )
-    }
-
-    private var destinationTitle: String {
-        if destination.isCloud { return copy(.cloud) }
-        return design.text("src.matrix.execution-machines-copy.words.mac",
-                           arguments: [.number(Int64(max(1, destinationOrdinal)))])
-    }
-
-    private func chooseModel(_ model: String) {
-        guard let row = rows.first(where: { $0.source == .atum && $0.model == model }) else { return }
-        choose(row)
     }
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
@@ -457,6 +401,4 @@ private struct PhoneDestinationModelPicker: View {
             }
         }
     }
-
-    private func copy(_ key: PhonePickerCopyKey) -> String { design.text(key.rawValue) }
 }
