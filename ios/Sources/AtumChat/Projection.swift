@@ -200,6 +200,14 @@ public enum Projection {
         // previous event row and ignore virtual rows, as desktop's entries do.
         var previousForSender: ChatItem?
         var previousForQuote: ChatItem?
+        // Built on the first Seen row only, then shared by every other one.
+        var profileIndex: [String: ChatReader]?
+        func senderProfileIndex() -> [String: ChatReader] {
+            if let profileIndex { return profileIndex }
+            let index = Delivery.senderProfiles(items)
+            profileIndex = index
+            return index
+        }
         for (index, item) in visible.enumerated() {
             guard item.kind.isEventContent else {
                 if case .dayDivider = item.kind { previousForSender = nil }
@@ -214,7 +222,7 @@ public enum Projection {
             }
             let delivery = marks.map { $0[item.id] ?? .none } ?? Delivery.mark(for: item)
             let readers: [ChatReader] = if case .seen = delivery {
-                Delivery.readers(of: item, in: items, context: context)
+                Delivery.readers(of: item, profiles: senderProfileIndex(), context: context)
             } else {
                 []
             }

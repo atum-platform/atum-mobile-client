@@ -114,8 +114,23 @@ public enum Delivery {
             !userID.isEmpty && userID != context.ownUserID && seen.insert(userID).inserted
         }
         guard !userIDs.isEmpty else { return [] }
-        let profiles = senderProfiles(items, wanted: Set(userIDs))
-        return userIDs.map { userID in
+        return readers(userIDs, profiles: senderProfiles(items, wanted: Set(userIDs)))
+    }
+
+    /// `readers(of:in:context:)` with a sender-profile index the caller built
+    /// once (`senderProfiles(items)`), so a projection with many Seen rows
+    /// scans the timeline once rather than once per row.
+    static func readers(of item: ChatItem, profiles: [String: ChatReader],
+                        context: RoomContext) -> [ChatReader] {
+        var seen = Set<String>()
+        let userIDs = item.receiptUserIDs.filter { userID in
+            !userID.isEmpty && userID != context.ownUserID && seen.insert(userID).inserted
+        }
+        return readers(userIDs, profiles: profiles)
+    }
+
+    private static func readers(_ userIDs: [String], profiles: [String: ChatReader]) -> [ChatReader] {
+        userIDs.map { userID in
             ChatReader(userID: userID, name: profiles[userID]?.name, avatarURI: profiles[userID]?.avatarURI)
         }
     }
@@ -131,16 +146,20 @@ public enum Delivery {
         }.map(\.key)
     }
 
-    /// The newest name and avatar each wanted sender's messages carry.
-    static func senderProfiles(_ items: [ChatItem], wanted: Set<String>) -> [String: ChatReader] {
+    /// Each sender's profile, taken whole from their newest message whose
+    /// profile is known (a name or an avatar), so a removed photo stays
+    /// removed rather than falling back to an older message's. A message
+    /// carrying neither is an unavailable profile and is skipped. `wanted`
+    /// nil indexes every sender in one pass.
+    static func senderProfiles(_ items: [ChatItem], wanted: Set<String>? = nil) -> [String: ChatReader] {
         var profiles = [String: ChatReader]()
-        for item in items.reversed() where wanted.contains(item.sender) && item.kind.isEventContent {
-            var profile = profiles[item.sender] ?? ChatReader(userID: item.sender)
-            if profile.name == nil, let name = item.senderName, !name.isEmpty { profile.name = name }
-            if profile.avatarURI == nil, let uri = item.senderAvatarURI, !uri.isEmpty { profile.avatarURI = uri }
-            profiles[item.sender] = profile
-            if profiles.count == wanted.count,
-               profiles.values.allSatisfy({ $0.name != nil && $0.avatarURI != nil }) { break }
+        for item in items.reversed() where item.kind.isEventContent && profiles[item.sender] == nil {
+            if let wanted, !wanted.contains(item.sender) { continue }
+            let name = item.senderName.flatMap { $0.isEmpty ? nil : $0 }
+            let avatarURI = item.senderAvatarURI.flatMap { $0.isEmpty ? nil : $0 }
+            guard name != nil || avatarURI != nil else { continue }
+            profiles[item.sender] = ChatReader(userID: item.sender, name: name, avatarURI: avatarURI)
+            if let wanted, profiles.count == wanted.count { break }
         }
         return profiles
     }

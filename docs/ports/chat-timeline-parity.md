@@ -151,3 +151,9 @@ Copy keys missing from the pinned export (`atum-design.lock`), all under
 - Not run: UI tests (the XCUITest suites). `S1MatrixUITests.testBotRoom` and
   `ComposerAndMenuUITests` already check the composer typing line. The answer Copy
   button keeps its `answer.copy` identifier.
+
+## Review follow-up (cross-family review of #38)
+
+- Seen faces read one sender-profile index per projection (`Delivery.senderProfiles(items)`, built on the first Seen row), not a backwards timeline scan per Seen row.
+- A reader's profile is taken whole from their newest message whose profile is known (a name or an avatar), so a photo they removed doesn't come back from an older message. A message with neither is an unavailable profile and is skipped. Regression test: `DeliveryS1Tests.testANewerProfileWithoutAPhotoWinsOverAnOlderPhoto`.
+- Verified by `swiftc -parse` locally and the hosted `swift` check; the build lock was busy.

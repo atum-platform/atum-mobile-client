@@ -53,6 +53,29 @@ final class DeliveryS1Tests: XCTestCase {
         XCTAssertEqual(rows.first { $0.id == "t" }?.readers, [], "only a Seen row carries readers")
     }
 
+    /// Review of #38: a reader who removed their photo keeps no photo, even
+    /// though an older message of theirs still carries it; a message with no
+    /// profile at all doesn't hide the older known one.
+    func testANewerProfileWithoutAPhotoWinsOverAnOlderPhoto() {
+        var old = F.text("t1", from: F.other)
+        old.senderName = "Lan"
+        old.senderAvatarURI = "mxc://example.test/lan-old"
+        var renamed = F.text("t2", from: F.other)
+        renamed.senderName = "Lan N."
+        var unknown = F.text("t3", from: F.friend)
+        unknown.senderName = nil
+        var friendOld = F.text("t0", from: F.friend)
+        friendOld.senderName = "Minh"
+        friendOld.senderAvatarURI = "mxc://example.test/minh"
+        var item = F.mine("q")
+        item.receiptUserIDs = [F.other, F.friend]
+        let group = RoomContext(kind: .group, ownUserID: F.me)
+        let rows = Projection.rows([friendOld, old, renamed, unknown, item], context: group, options: .s1)
+        XCTAssertEqual(rows.first { $0.id == "q" }?.readers,
+                       [ChatReader(userID: F.other, name: "Lan N.", avatarURI: nil),
+                        ChatReader(userID: F.friend, name: "Minh", avatarURI: "mxc://example.test/minh")])
+    }
+
     func testReceiptOrderIsDesktopsEarliestFirstThenByUserID() {
         XCTAssertEqual(Delivery.receiptOrder(["@c:x": 30, "@a:x": 20, "@b:x": 20, "@d:x": nil]),
                        ["@d:x", "@a:x", "@b:x", "@c:x"])
