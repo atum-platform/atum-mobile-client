@@ -67,7 +67,7 @@ final class MatrixCustodyTests: XCTestCase {
         let marker = OIDCInstallationMarker(directory: directory)
         _ = try marker.createForExplicitSignIn(generation: generation)
         let operations = Operations()
-        let store = MatrixSessionKeychain(generation: generation, clients: try Self.clients(), metadata: try Self.metadata(), operations: operations)
+        let store = MatrixSessionKeychain(generation: generation, clients: try Self.clients(), metadata: try Self.metadata(), operations: operations, refreshLockURL: directory.appendingPathComponent("refresh.lock"))
         return (operations, store, marker, directory)
     }
     @MainActor private func prepared(_ store: MatrixSessionKeychain, _ marker: OIDCInstallationMarker, scope: String? = nil) throws -> MatrixCustodyTicket {
@@ -197,6 +197,184 @@ final class MatrixCustodyTests: XCTestCase {
         XCTAssertNoThrow(try reader.loadCurrent(now: Date(timeIntervalSince1970: 400)))
     }
 
+    @MainActor func testNotificationAndAppRefreshAreSingleFlightAcrossCoordinators() async throws {
+        let (_, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        let ready = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let app = try OIDCGrantRefresh(resuming: store.resumeGrantForRefresh(marker: marker))
+        let extensionRefresh = try OIDCGrantRefresh(resuming: store.resumeGrantForNotificationRefresh(ticket: ready))
+        let response = try OIDCTokenResponse.decode(JSONSerialization.data(withJSONObject: [
+            "token_type": "Bearer", "access_token": "rotated", "refresh_token": "replacement", "expires_in": 400]))
+        var calls = 0
+        _ = try await app.refresh(now: Date(timeIntervalSince1970: 300), preflight: {
+            do {
+                _ = try await extensionRefresh.refresh(now: Date(timeIntervalSince1970: 300)) { _ in
+                    calls += 1; return .init(response: response, jwks: Data())
+                }
+                XCTFail("Second coordinator must not enter the spend")
+            } catch { XCTAssertEqual(error as? MatrixRefreshFailure, .busy) }
+        }) { _ in
+            calls += 1
+            // App launch/continuity must treat the live journal as busy.
+            XCTAssertThrowsError(try store.resume(marker: marker)) {
+                XCTAssertEqual($0 as? MatrixRefreshFailure, .busy)
+            }
+            return .init(response: response, jwks: Data())
+        }
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(try store.resume(marker: marker).session.accessToken, "rotated")
+    }
+
+    @MainActor func testAppCallerCancellationStillPersistsTheRotatedCredential() async throws {
+        let (_, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let refresh = try OIDCGrantRefresh(resuming: store.resumeGrantForRefresh(marker: marker))
+        let response = try OIDCTokenResponse.decode(JSONSerialization.data(withJSONObject: [
+            "token_type": "Bearer", "access_token": "retained", "refresh_token": "replacement", "expires_in": 400]))
+        var reply: CheckedContinuation<Void, Never>?
+        let caller = Task {
+            try await refresh.refresh(now: Date(timeIntervalSince1970: 300)) { _ in
+                await withCheckedContinuation { reply = $0 }
+                XCTAssertFalse(Task.isCancelled)
+                return .init(response: response, jwks: Data())
+            }
+        }
+        while reply == nil { await Task.yield() }
+        caller.cancel()
+        reply?.resume()
+        let token = try await caller.value
+        XCTAssertEqual(token, "retained")
+        XCTAssertEqual(try store.resume(marker: marker).session.accessToken, "retained")
+    }
+
+    @MainActor func testNotificationTimeoutCancelsActualCoordinatorAndPreservesJournal() async throws {
+        let (_, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        let ticket = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let refresh = try OIDCGrantRefresh(resuming: store.resumeGrantForNotificationRefresh(ticket: ticket))
+        var requests = 0, cancelled = false
+        do {
+            _ = try await MatrixNotificationSession.bounded(seconds: 0.02) {
+                try await refresh.refresh(now: Date(timeIntervalSince1970: 300)) { _ in
+                    requests += 1
+                    do { try await Task.sleep(for: .seconds(30)) }
+                    catch { cancelled = true; throw error }
+                    throw OIDCGrantFailure.invalidResponse
+                }
+            }
+            XCTFail("Expected bounded cancellation")
+        } catch { XCTAssertEqual(error as? MatrixRefreshFailure, .timedOut) }
+        XCTAssertEqual(requests, 1); XCTAssertTrue(cancelled)
+        XCTAssertThrowsError(try store.resumeGrantForRefresh(marker: marker)) {
+            XCTAssertEqual($0 as? OIDCGrantFailure, .refreshInterrupted)
+        }
+        XCTAssertNoThrow(try MatrixRefreshLease.acquire(at: dir.appendingPathComponent("refresh.lock")))
+    }
+
+    @MainActor func testRecordChangedAfterPreflightNeverSpends() async throws {
+        let (ops, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let refresh = try OIDCGrantRefresh(resuming: store.resumeGrantForRefresh(marker: marker))
+        let writes = ops.calls.filter { $0 == "update" }.count
+        do {
+            _ = try await refresh.refresh(now: Date(timeIntervalSince1970: 300), preflight: {
+                var record = try JSONSerialization.jsonObject(with: XCTUnwrap(ops.item?[kSecValueData as String] as? Data)) as! [String: Any]
+                var session = record["session"] as! [String: Any]
+                session["accessToken"] = "changed-by-other-process"
+                record["session"] = session
+                ops.item?[kSecValueData as String] = try JSONSerialization.data(withJSONObject: record)
+            }) { _ in
+                XCTFail("Changed snapshot must never spend"); throw OIDCGrantFailure.invalidResponse
+            }
+            XCTFail("Expected changed record")
+        } catch { XCTAssertEqual(error as? MatrixRefreshFailure, .recordChanged) }
+        XCTAssertEqual(ops.calls.filter { $0 == "update" }.count, writes)
+    }
+
+    @MainActor func testBusyLockCannotJournalOrSpend() async throws {
+        let (ops, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let refresh = try OIDCGrantRefresh(resuming: store.resumeGrantForRefresh(marker: marker))
+        let original = ops.item?[kSecValueData as String] as? Data
+        let lease = try MatrixRefreshLease.acquire(at: dir.appendingPathComponent("refresh.lock"))
+        defer { withExtendedLifetime(lease) {} }
+        do {
+            _ = try await refresh.refresh(now: Date(timeIntervalSince1970: 300)) { _ in
+                XCTFail("Busy lock must never spend"); throw OIDCGrantFailure.invalidResponse
+            }
+            XCTFail("Expected busy")
+        } catch { XCTAssertEqual(error as? MatrixRefreshFailure, .busy) }
+        XCTAssertEqual(ops.item?[kSecValueData as String] as? Data, original)
+    }
+
+    @MainActor func testOtherProcessAlreadyRefreshedReusesCredentialAndRejectsStaleTicket() async throws {
+        let (_, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        let original = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let app = try OIDCGrantRefresh(resuming: store.resumeGrantForRefresh(marker: marker))
+        let notification = try OIDCGrantRefresh(resuming: store.resumeGrantForNotificationRefresh(ticket: original))
+        let response = try OIDCTokenResponse.decode(JSONSerialization.data(withJSONObject: [
+            "token_type": "Bearer", "access_token": "other-process-access", "refresh_token": "replacement", "expires_in": 400]))
+        var calls = 0
+        // Near expiry is enough; expiry is measured from real request time,
+        // never inflated by the minimum-validity lead.
+        _ = try await notification.accessToken(now: Date(timeIntervalSince1970: 280), minimumValidity: 30) { _ in
+            calls += 1; return .init(response: response, jwks: Data())
+        }
+        let token = try await app.accessToken(now: Date(timeIntervalSince1970: 300), minimumValidity: 60) { _ in
+            calls += 1; throw OIDCGrantFailure.invalidResponse
+        }
+        XCTAssertEqual(calls, 1); XCTAssertEqual(token, "other-process-access")
+        XCTAssertEqual(try store.resume(marker: marker).session.expiresAt, Date(timeIntervalSince1970: 680))
+        XCTAssertThrowsError(try store.resumeGrantForNotificationRefresh(ticket: original)) {
+            XCTAssertEqual($0 as? MatrixRefreshFailure, .recordChanged)
+        }
+    }
+
+    @MainActor func testNotificationSnapshotChangedByOtherProcessCannotSpendOrExposeIt() async throws {
+        let (_, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        let ticket = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let notification = try OIDCGrantRefresh(resuming: store.resumeGrantForNotificationRefresh(ticket: ticket))
+        let app = try OIDCGrantRefresh(resuming: store.resumeGrantForRefresh(marker: marker))
+        let response = try OIDCTokenResponse.decode(JSONSerialization.data(withJSONObject: [
+            "token_type": "Bearer", "access_token": "app-rotated", "refresh_token": "replacement", "expires_in": 400]))
+        _ = try await app.refresh(now: Date(timeIntervalSince1970: 300)) { _ in .init(response: response, jwks: Data()) }
+        do {
+            _ = try await notification.accessToken(now: Date(timeIntervalSince1970: 300)) { _ in
+                XCTFail("A stale notification must not spend"); throw OIDCGrantFailure.invalidResponse
+            }
+            XCTFail("Changed snapshot must fall back")
+        } catch { XCTAssertEqual(error as? MatrixRefreshFailure, .recordChanged) }
+    }
+
+    @MainActor func testCrashJournalSurvivesFreshNotificationAndAppCoordinators() async throws {
+        let (ops, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
+        let ticket = try store.commitPrepared(prepared(store, marker), marker: marker, curve25519: key, ed25519: key)
+        let refresh = try OIDCGrantRefresh(resuming: store.resumeGrantForNotificationRefresh(ticket: ticket))
+        do {
+            _ = try await refresh.refresh(now: Date(timeIntervalSince1970: 300)) { _ in
+                // Process death after server acceptance is indistinguishable
+                // from lost response: only the durable journal survives.
+                throw OIDCGrantFailure.invalidResponse
+            }
+            XCTFail("Ambiguous spend must remain closed")
+        } catch {}
+        // Reconstruct adapters using only the encoded Keychain item, as after
+        // process death. No coordinator/flight object is reused for recovery.
+        let freshOperations = Operations()
+        freshOperations.item = try XCTUnwrap(ops.item)
+        let fresh = MatrixSessionKeychain(generation: ticket.generation, clients: try Self.clients(),
+            metadata: try Self.metadata(), operations: freshOperations,
+            refreshLockURL: dir.appendingPathComponent("refresh.lock"))
+        XCTAssertThrowsError(try fresh.resumeGrantForRefresh(marker: marker)) {
+            XCTAssertEqual($0 as? OIDCGrantFailure, .refreshInterrupted)
+        }
+        let reader = MatrixSessionReader(clients: try Self.clients(), metadata: try Self.metadata(),
+            operations: ReaderOperations([try XCTUnwrap(freshOperations.item)]))
+        XCTAssertThrowsError(try reader.loadForRefresh()) {
+            XCTAssertEqual($0 as? OIDCGrantFailure, .refreshInterrupted)
+        }
+        XCTAssertThrowsError(try fresh.resumeGrantForNotificationRefresh(ticket: ticket))
+        XCTAssertNoThrow(try MatrixRefreshLease.acquire(at: dir.appendingPathComponent("refresh.lock")))
+    }
+
     @MainActor func testRefreshJournalMustPersistBeforeNetwork() async throws {
         let (ops, store, marker, dir) = try setup(); defer { try? FileManager.default.removeItem(at: dir) }
         let ready = try store.commitPrepared(prepared(store, marker), marker: marker,
@@ -241,7 +419,7 @@ final class MatrixCustodyTests: XCTestCase {
             XCTAssertEqual($0 as? MatrixCustodyFailure, .refreshRequired)
         }
         XCTAssertThrowsError(try store.resumeGrantForRefresh(marker: marker)) {
-            XCTAssertEqual($0 as? OIDCGrantFailure, .reauthenticationRequired)
+            XCTAssertEqual($0 as? OIDCGrantFailure, .refreshInterrupted)
         }
         let reader = MatrixSessionReader(clients: try Self.clients(), metadata: try Self.metadata(),
                                          operations: ReaderOperations([try XCTUnwrap(ops.item)]))

@@ -41,7 +41,9 @@ final class NotificationServiceTests: XCTestCase {
         }
     }
     func testNotFoundKeepsGeneric() throws {
-        XCTAssertEqual(try MatrixNotificationFetcher.presentation(.eventNotFound, eventID: "$event", ownUserID: "me", copy: .init(generic: "New message")), .generic)
+        XCTAssertThrowsError(try MatrixNotificationFetcher.presentation(.eventNotFound, eventID: "$event", ownUserID: "me", copy: .init(generic: "New message"))) {
+            XCTAssertEqual($0 as? NotificationFallbackReason, .eventNotFound)
+        }
     }
     func testSDKTimelineTextNoticeAndEmoteProjection() throws {
         let types: [(MessageType, String)] = [
@@ -55,9 +57,13 @@ final class NotificationServiceTests: XCTestCase {
         }
     }
     func testSDKUTDAndWrongEventIDKeepGeneric() throws {
-        XCTAssertEqual(try project(FakeTimelineEvent(.messageLike(content: .roomEncrypted))), .generic)
+        XCTAssertThrowsError(try project(FakeTimelineEvent(.messageLike(content: .roomEncrypted)))) {
+            XCTAssertEqual($0 as? NotificationFallbackReason, .presentationUnavailable)
+        }
         let event = FakeTimelineEvent(.messageLike(content: .roomMessage(messageType: .text(content: .init(body: "wrong", formatted: nil)), inReplyToEventId: nil)))
-        XCTAssertEqual(try project(event, eventID: "$different"), .generic)
+        XCTAssertThrowsError(try project(event, eventID: "$different")) {
+            XCTAssertEqual($0 as? NotificationFallbackReason, .eventMismatch)
+        }
     }
     func testOSExpiryBeforeReceiveStillDeliversGenericOnce() {
         let service = NotificationService()

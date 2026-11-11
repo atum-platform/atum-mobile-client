@@ -14,6 +14,16 @@ final class PushDeliveryTests: XCTestCase {
         delivery.expire(); delivery.finish("rich"); delivery.expire()
         XCTAssertEqual(values, ["generic"])
     }
+    func testFallbackDiagnosticsOnlyRunForTheWinningDelivery() {
+        var codes: [String] = []
+        let expired = PushDelivery(fallback: "generic") { _ in }
+        expired.expire(onDelivery: { codes.append("deadline") })
+        expired.expire(onDelivery: { codes.append("late_error") })
+        let rich = PushDelivery(fallback: "generic") { _ in }
+        rich.finish("rich")
+        rich.expire(onDelivery: { codes.append("late_deadline") })
+        XCTAssertEqual(codes, ["deadline"])
+    }
     func testConcurrentExpiryAndResultsCallHandlerOnce() {
         let values = Values()
         let delivery = PushDelivery(fallback: "generic") { values.append($0) }
