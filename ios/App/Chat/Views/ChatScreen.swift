@@ -82,7 +82,6 @@ struct ChatScreen: View {
     @State private var infoPresented = false
     @State private var composerModelPresented = false
     @State private var composerModelRefreshToken: UInt64 = 0
-    @State private var confirmsCompanyLeave = false
     @State private var addPeoplePresented = false
     /// Today, for the day dividers (B14): updated at midnight and when the
     /// app comes back, so a chat left open overnight relabels its days.
@@ -122,8 +121,16 @@ struct ChatScreen: View {
                         )
                     } else if let appBot {
                         AppBotHero(app: appBot, design: design)
+                    } else if let company = info?.company {
+                        // TS-9: an empty channel opens on its intro (desktop `ChannelIntro`).
+                        CompanyChannelIntro(design: design, roomID: store.roomID, company: company,
+                                            actions: infoActions.companyChannel)
+                    } else if EmptyChatPolicy.content(for: store.kind) == .assistantGreeting {
+                        EmptyChatGreeting(face: greetingFace(roomFace),
+                                          onPickStarter: conversationChat?.banner == nil
+                                              ? { store.pickStarter($0) } : nil)
                     } else {
-                        EmptyChatGreeting()
+                        EmptyChatNote()
                     }
                 }
             }
@@ -151,17 +158,25 @@ struct ChatScreen: View {
                                 .accessibilityIdentifier("chat.conversation.note")
                         }
                         JumpPillHost(store: store, chrome: chrome)
-                        if let banner = conversationChat?.banner {
-                            // Read-only is the platform's word: no composer, only the banner.
-                            ConversationReadOnlyBanner(text: banner, design: design)
-                        } else {
-                            ChatComposer(store: store, design: design, haptics: haptics,
-                                         modelActions: infoActions.assistantModels,
-                                         modelDestinations: infoActions.assistantModelDestinations,
-                                         modelRefreshToken: composerModelRefreshToken,
-                                         modelPickerPresented: $composerModelPresented,
-                                         turnStopActions: store.kind == .assistant
-                                             ? infoActions.assistantTurnStop : nil)
+                        // The notice shares the composer's stack (spacing 0) so its
+                        // empty host, kept for the sheet, adds no gap above the composer.
+                        VStack(spacing: 0) {
+                            // ST-5 (lane 4 W7): out of Protons, the same top-up as the Store.
+                            if store.kind == .assistant, conversationChat?.banner == nil {
+                                ProtonTopUpChatNotice(design: design)
+                            }
+                            if let banner = conversationChat?.banner {
+                                // Read-only is the platform's word: no composer, only the banner.
+                                ConversationReadOnlyBanner(text: banner, design: design)
+                            } else {
+                                ChatComposer(store: store, design: design, haptics: haptics,
+                                             modelActions: infoActions.assistantModels,
+                                             modelDestinations: infoActions.assistantModelDestinations,
+                                             modelRefreshToken: composerModelRefreshToken,
+                                             modelPickerPresented: $composerModelPresented,
+                                             turnStopActions: store.kind == .assistant
+                                                 ? infoActions.assistantTurnStop : nil)
+                            }
                         }
                     }
                 }
@@ -170,7 +185,11 @@ struct ChatScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    if let info {
+                    if let info, let company = info.company {
+                        CompanyChannelTitle(design: design, title: company.channelName, topic: info.topic) {
+                            openPanel()
+                        }
+                    } else if let info {
                         ChatTitleCapsule(info: info, design: design,
                                          loadMatrixThumbnail: loadMatrixThumbnail) {
                             openPanel()
@@ -209,26 +228,20 @@ struct ChatScreen: View {
                         conversationMenu(conversation)
                     }
                 }
-                if let company = info?.company {
+                // TS-9: the channel's people and its own "…" menu (no Leave on the
+                // 1.1 wire; Leave company is in the company menu, lane 2 D6).
+                if let info, let company = info.company {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button { openPanel() } label: {
-                                Label { Text(verbatim: CompanyCopy(design: design).membersTitle) } icon: {
-                                    Image(AtumVisualSystem(design: design).symbol(.users))
-                                }
-                            }
-                            .accessibilityIdentifier("chat.company.members")
-                            Button(role: .destructive) { confirmsCompanyLeave = true } label: {
-                                Label { Text(verbatim: CompanyCopy(design: design).leaveAction) } icon: {
-                                    Image(AtumVisualSystem(design: design).symbol(.logOut))
-                                }
-                            }
-                            .accessibilityIdentifier("chat.company.leave")
-                        } label: {
-                            AtumVisualSystem(design: design).barIcon(.moreHorizontal)
+                        CompanyChannelMembersCapsule(design: design, company: company,
+                                                     loadMatrixThumbnail: loadMatrixThumbnail) {
+                            openPanel()
                         }
-                        .accessibilityIdentifier("chat.company.menu")
-                        .disabled(company.leavePending)
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        CompanyChannelMenu(design: design, info: info,
+                                           setPinned: infoActions.setPinned, setMuted: infoActions.setMuted) {
+                            openPanel()
+                        }
                     }
                 }
             }
@@ -315,18 +328,6 @@ struct ChatScreen: View {
                 appBotPresenter.openRoute = onOpenAppBotRoute
                 appBotPresenter.openTerms = onOpenAppBotTerms
             }
-            .confirmationDialog(CompanyCopy(design: design).leaveTitle(company: info?.company?.companyName ?? ""),
-                                isPresented: $confirmsCompanyLeave,
-                                titleVisibility: .visible) {
-                Button(CompanyCopy(design: design).leaveConfirm, role: .destructive) {
-                    if let companyID = info?.company?.companyID {
-                        infoActions.leaveCompany?(companyID)
-                    }
-                }
-                Button(design.text("src.matrix.chat-copy.copies.cancel"), role: .cancel) {}
-            } message: {
-                Text(verbatim: CompanyCopy(design: design).leaveMessage)
-            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshToday() }
             }
@@ -405,6 +406,17 @@ struct ChatScreen: View {
         known.union(members.values.filter { $0.isAssistant || $0.isApp }.map(\.userID))
     }
 
+    /// The assistant's face for its empty chat (desktop `--atum-avatar-lg`):
+    /// the title capsule's own face, so Atum's crescent, a photo or a mark
+    /// look the same in both places.
+    @ViewBuilder private func greetingFace(_ roomFace: ChatFace) -> some View {
+        if let info {
+            ChatInfoAvatar(info: info, size: 64, loadMatrixThumbnail: loadMatrixThumbnail)
+        } else {
+            ChatFaceView(face: roomFace, size: 64)
+        }
+    }
+
     static func avatarKind(_ kind: RoomKind) -> AtumAvatarKind {
         switch kind {
         case .assistant: .assistant
@@ -444,8 +456,9 @@ struct ChatScreen: View {
         mediaPresenter.dismissAll()
     }
 
-    /// B2, §3.3, U10: the greeting shows in an empty chat once the start of
-    /// the room is reached (coordinator decision 6: in every room kind).
+    /// B2, §3.3, U10: the empty state shows once the start of the room is
+    /// reached: the assistant greeting in an assistant's chat, "No messages
+    /// yet." elsewhere (HC-4, desktop `app.tsx` `Conversation`).
     static func isEmptyChat(rows: [ChatRow], pagination: PaginationState) -> Bool {
         guard !rows.contains(where: { $0.item.kind.isEventContent }) else { return false }
         return pagination == .idle(hitTimelineStart: true) || rows.contains { $0.item.kind == .timelineStart }

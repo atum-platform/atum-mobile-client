@@ -5,8 +5,8 @@ import Foundation
 /// whichever providers happened to answer most recently. Keep these identifiers
 /// and this order stable while capabilities load, fail, or remain unsupported.
 /// The order and ids mirror the desktop's destinations (atum-app
-/// `MATRIX_SETTINGS_DESTINATIONS`, 2026-10-25 reorg). `devices` keeps its id and
-/// is this phone's own page, as it is the "This Mac" page on the desktop.
+/// `MATRIX_SETTINGS_DESTINATIONS`). Every id still opens something, so deep
+/// links keep working; `page` says which page draws it.
 enum AccountSettingsSectionID: String, CaseIterable, Identifiable, Sendable {
     case account
     case assistants
@@ -19,19 +19,31 @@ enum AccountSettingsSectionID: String, CaseIterable, Identifiable, Sendable {
     case advanced
 
     var id: String { rawValue }
+
+    /// The page a destination is drawn on, as the desktop's `settingsPageOf`
+    /// (atum-app `settings-revamp.tsx`, 050ede8edf5): Protons and Privacy are
+    /// sections of Account. The desktop folds "This Mac" into Connections but
+    /// no longer draws it there (DESIGN.md: no This Mac section); this phone's
+    /// own row is in Account's devices list, so `devices` opens Account.
+    /// Advanced holds only desktop-only tools (local model setup, repair of a
+    /// local assistant, developer pages; parity audit lane 5 §2.9), so the
+    /// phone has no Advanced page and its id opens Help, its group's sibling.
+    var page: AccountSettingsSectionID {
+        switch self {
+        case .protons, .privacy, .devices: .account
+        case .advanced: .help
+        default: self
+        }
+    }
 }
 
-/// The index's three quiet groups, separated only by space, with the desktop's
-/// six pages in the desktop's order (atum-app `settings-revamp.tsx`
-/// `SETTINGS_NAV`, Atum Kit Settings 2026-10-28): you (Account, Assistants,
-/// Connections), the app (General, Help), then the expert corner (Advanced).
-/// Protons and Privacy are sections of Account, and this phone's own page is a
-/// section of Connections, as "This Mac" is on the desktop; their ids stay so
-/// deep links keep opening them.
+/// The index's quiet groups, separated only by space, with the desktop's pages
+/// in the desktop's order (atum-app `settings-revamp.tsx` `SETTINGS_NAV`): you
+/// (Account, Assistants, Connections), then the app (General, Help). The
+/// desktop's third group holds only Advanced, which is desktop-only by design.
 enum AccountSettingsGroupID: String, CaseIterable, Identifiable, Sendable {
     case you
     case app
-    case support
 
     var id: String { rawValue }
 
@@ -39,7 +51,6 @@ enum AccountSettingsGroupID: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .you: [.account, .assistants, .connections]
         case .app: [.general, .help]
-        case .support: [.advanced]
         }
     }
 
@@ -49,7 +60,6 @@ enum AccountSettingsGroupID: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .you: .groupYou
         case .app: .groupApp
-        case .support: .groupSupport
         }
     }
 }
@@ -85,6 +95,22 @@ enum AccountSettingsCapability: Equatable, Sendable {
     case available
 }
 
+/// What a capability row says. The desktop's own words: "Not available yet"
+/// while there is no phone adapter; nothing at all once it is live.
+enum AccountSettingsCapabilityStatus: Equatable, Sendable {
+    case loading
+    case notAvailableYet
+    case live
+
+    init(_ capability: AccountSettingsCapability) {
+        switch capability {
+        case .unknown: self = .loading
+        case .unavailable: self = .notAvailableYet
+        case .available: self = .live
+        }
+    }
+}
+
 /// Phone adapters that may eventually make currently unavailable rows live.
 /// Memory deliberately defaults to unavailable until its real account-wide
 /// adapter exists; it is never inferred from local UI state.
@@ -105,6 +131,27 @@ struct AccountSettingsCapabilities: Equatable, Sendable {
     }
 
     static let phone = AccountSettingsCapabilities()
+}
+
+/// The order of the Account page's sections, after the profile, as the
+/// desktop's `AccountPane` then `PrivacyPane` draw them (050ede8edf5): how Atum
+/// answers, your devices, chats, memory, activity, ignored people, and the
+/// recovery key last, unless this phone must restore messages first.
+enum AccountPageSection: String, CaseIterable, Sendable {
+    case howAtumAnswers
+    case recovery
+    case devices
+    case chats
+    case memory
+    case activity
+    case ignored
+
+    static func order(restoresFirst: Bool) -> [AccountPageSection] {
+        let everyone: [AccountPageSection] = [.devices, .chats, .memory, .activity, .ignored]
+        return restoresFirst
+            ? [.howAtumAnswers, .recovery] + everyone
+            : [.howAtumAnswers] + everyone + [.recovery]
+    }
 }
 
 struct AccountSettingsState: Equatable, Sendable {
@@ -151,74 +198,73 @@ struct AccountSettingsState: Equatable, Sendable {
     }
 }
 
+/// Help › Contact us when no Founder is reachable: desktop's "Email support"
+/// (`founder/contact-us.tsx`), a mail draft to Atum's support mailbox.
+enum AccountSupportMail {
+    static let mailbox = "support@atumplatform.com"
+
+    static func url(subject: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = mailbox
+        components.queryItems = [URLQueryItem(name: "subject", value: subject)]
+        return components.url
+    }
+}
+
 /// Phone fallbacks for Settings copy the pinned design export does not carry
 /// yet. A key the export has always wins (`resolved`); the text below is used
 /// until it does, and should disappear once the coordinator re-pins.
 ///
-/// Desktop-owned keys use the desktop namespace and mirror the desktop's own
-/// five-locale wording (`shared/matrix-settings-revamp-copy.ts`); phone-only
-/// keys use the `phoneSettingsCopy` namespace and carry five locales authored
-/// here (en, vi, ja, zh, zh-Hant). A locale a key has no text for reads English.
+/// Desktop-owned keys use the desktop namespace and are the desktop's own
+/// five-locale wording (atum-app `shared/matrix-settings-revamp-copy.ts` at
+/// 050ede8edf5); phone-only keys use the `phoneSettingsCopy` namespace. A
+/// locale a key has no text for reads English.
 enum AccountSettingsText: String, CaseIterable, Sendable {
-    // Desktop keys from `shared/matrix-settings-revamp-copy.ts` that the
-    // desktop reorg asked to promote into the phone export.
+    // Desktop keys from `shared/matrix-settings-revamp-copy.ts`.
     case destinationConnections
     case destinationPrivacy
     case destinationHelp
     case destinationAdvanced
-    case providersAndRepair
-    // The index's groups (assistive technology only) and the Assistants page.
     case groupYou
     case groupApp
-    case groupSupport
     case assistantsLead
+    case assistantPrepared
     case assistantReady
     case assistantPreparing
     case openAssistant
-    // Phone-only keys.
-    case thisIPhone
-    case thisIPad
-    case onYourMac
-    case macAccessHelp
-    case nameRequired
-    case profile
-    case contactAtum
-    case contactUnavailable
-    case assistantPrepared
-    case thisDevice
-    case connected
-    case otherDevices
-    case manageOnMac
-    case availability
-    case macAccess
-    case notAvailable
-    case loadingSettings
+    case howAtumAnswers
+    case protonsLeft
+    case topUp
+    case walletUnavailableHelp
+    case yourSubscription
+    case subscriptionHelp
+    case notAvailableYet
+    case google
     case apps
+    case otherDevices
     case memory
     case remembers
+    case remembersHelp
     case memoryDisclosure
     case activity
     case shareActivity
     case shareActivityHelp
-    case reportingData
+    case chats
+    case chatsStored
+    case chatsStoredHelp
+    case encryptionDetail
+    // Phone-only keys (`phoneSettingsCopy`).
+    case thisIPhone
+    case thisIPad
+    case nameRequired
     case shareCrashReports
     case shareCrashReportsHelp
     case shareUsageData
     case shareUsageDataHelp
     case reportingFooter
-    case chats
-    case chatEncryption
-    case display
-    case appearance
-    case textSize
     case usesIOSSettings
     case opensIOSSettings
-    case notifications
-    case protonBalance
-    case noStoreKitPurchase
-    case providersAndChatGPT
-    case expertTools
-    case technicalDetails
 
     var exportKey: String {
         switch self {
@@ -226,24 +272,36 @@ enum AccountSettingsText: String, CaseIterable, Sendable {
         case .destinationPrivacy: Self.desktopKey + "destinations.privacy"
         case .destinationHelp: Self.desktopKey + "destinations.help"
         case .destinationAdvanced: Self.desktopKey + "destinations.advanced"
-        case .providersAndRepair: Self.desktopKey + "providersAndRepair"
         case .groupYou: Self.desktopKey + "groups.you"
         case .groupApp: Self.desktopKey + "groups.app"
-        case .groupSupport: Self.desktopKey + "groups.support"
-        case .assistantsLead: Self.desktopKey + "assistantsLead"
         case .assistantPrepared: Self.desktopKey + "assistantsEmpty"
-        case .assistantReady: Self.desktopKey + "assistantReady"
-        case .assistantPreparing: Self.desktopKey + "assistantPreparing"
-        case .openAssistant: Self.desktopKey + "openAssistant"
-        default: "shared.matrix-settings-revamp-copy.phoneSettingsCopy." + rawValue
+        case .assistantsLead, .assistantReady, .assistantPreparing, .openAssistant,
+             .howAtumAnswers, .protonsLeft, .topUp, .walletUnavailableHelp,
+             .yourSubscription, .subscriptionHelp, .notAvailableYet, .google, .apps,
+             .otherDevices, .memory, .remembers, .remembersHelp, .memoryDisclosure,
+             .activity, .shareActivity, .shareActivityHelp, .chats, .chatsStored,
+             .chatsStoredHelp, .encryptionDetail:
+            Self.desktopKey + rawValue
+        case .thisIPhone, .thisIPad, .nameRequired, .shareCrashReports,
+             .shareCrashReportsHelp, .shareUsageData, .shareUsageDataHelp,
+             .reportingFooter, .usesIOSSettings, .opensIOSSettings:
+            "shared.matrix-settings-revamp-copy.phoneSettingsCopy." + rawValue
         }
     }
 
     private static let desktopKey = "shared.matrix-settings-revamp-copy.copies."
 
+    /// Keys the pinned export carries with words the desktop has since
+    /// replaced. The desktop renamed "What Atum knows" back to "Connections"
+    /// in atum-app `1043f1b48d7` (2026-10-31); the pinned export
+    /// (atum-desktop `c14d74a`) predates it. Until the re-pin, the desktop's
+    /// current words are read here instead of the stale export.
+    static let staleInPinnedExport: Set<AccountSettingsText> = [.destinationConnections]
+
     /// The export's text when it carries the key, else the phone's fallback.
     func resolved(locale: String, exported: (String) -> String?) -> String {
-        exported(exportKey) ?? fallback(locale: locale)
+        if Self.staleInPinnedExport.contains(self) { return fallback(locale: locale) }
+        return exported(exportKey) ?? fallback(locale: locale)
     }
 
     func fallback(locale: String) -> String {
@@ -261,20 +319,15 @@ enum AccountSettingsText: String, CaseIterable, Sendable {
         return String(code.prefix(2))
     }
 
-    private static func t(_ en: String, _ vi: String, ja: String? = nil, zh: String? = nil,
-                          zhHant: String? = nil) -> [String: String] {
-        var table = ["en": en, "vi": vi]
-        if let ja { table["ja"] = ja }
-        if let zh { table["zh"] = zh }
-        if let zhHant { table["zh-hant"] = zhHant }
-        return table
+    private static func t(_ en: String, _ vi: String, ja: String, zh: String,
+                          zhHant: String) -> [String: String] {
+        ["en": en, "vi": vi, "ja": ja, "zh": zh, "zh-hant": zhHant]
     }
 
     private var texts: [String: String] {
         switch self {
         case .destinationConnections:
-            Self.t("What Atum knows", "Atum biết gì", ja: "Atum が知っていること",
-                   zh: "Atum 了解的内容", zhHant: "Atum 了解的內容")
+            Self.t("Connections", "Kết nối", ja: "接続", zh: "连接", zhHant: "連接")
         case .destinationPrivacy:
             Self.t("Privacy & security", "Riêng tư & bảo mật", ja: "プライバシーと安全",
                    zh: "隐私与安全", zhHant: "隱私與安全")
@@ -282,22 +335,20 @@ enum AccountSettingsText: String, CaseIterable, Sendable {
             Self.t("Help", "Trợ giúp", ja: "ヘルプ", zh: "帮助", zhHant: "說明")
         case .destinationAdvanced:
             Self.t("Advanced", "Nâng cao", ja: "詳細", zh: "高级", zhHant: "進階")
-        case .providersAndRepair:
-            Self.t("AI model & repair", "Mô hình AI & sửa lỗi", ja: "AI モデルと修復",
-                   zh: "AI 模型与修复", zhHant: "AI 模型與修復")
         case .groupYou:
             Self.t("You", "Bạn", ja: "あなた", zh: "你", zhHant: "你")
         case .groupApp:
             Self.t("Atum", "Atum", ja: "Atum", zh: "Atum", zhHant: "Atum")
-        case .groupSupport:
-            Self.t("Help and advanced", "Trợ giúp và nâng cao", ja: "ヘルプと詳細",
-                   zh: "帮助与高级", zhHant: "說明與進階")
         case .assistantsLead:
             Self.t("Open an assistant to change its name, photo and how it works.",
                    "Mở một trợ lý để đổi tên, ảnh và cách trợ lý làm việc.",
                    ja: "アシスタントを開くと、名前・写真・働き方を変更できます。",
                    zh: "打开助手即可更改它的名字、照片和工作方式。",
                    zhHant: "開啟助理即可變更它的名字、照片和工作方式。")
+        case .assistantPrepared:
+            Self.t("Your assistant is being prepared", "Trợ lý đang được chuẩn bị",
+                   ja: "アシスタントを準備しています", zh: "正在准备你的助手",
+                   zhHant: "正在準備你的助理")
         case .assistantReady:
             Self.t("Ready", "Sẵn sàng", ja: "準備完了", zh: "已就绪", zhHant: "已就緒")
         case .assistantPreparing:
@@ -306,61 +357,54 @@ enum AccountSettingsText: String, CaseIterable, Sendable {
         case .openAssistant:
             Self.t("Open assistant", "Mở trợ lý", ja: "アシスタントを開く", zh: "打开助手",
                    zhHant: "開啟助理")
-        case .thisIPhone:
-            Self.t("This iPhone", "iPhone này", ja: "この iPhone", zh: "这台 iPhone",
-                   zhHant: "這台 iPhone")
-        case .thisIPad:
-            Self.t("This iPad", "iPad này", ja: "この iPad", zh: "这台 iPad", zhHant: "這台 iPad")
-        case .onYourMac:
-            Self.t("On your Mac", "Trên máy Mac", ja: "お使いの Mac で", zh: "在你的 Mac 上",
-                   zhHant: "在你的 Mac 上")
-        case .macAccessHelp:
-            Self.t("Your assistants work on your Mac. What they may do there is set on that Mac.",
-                   "Trợ lý làm việc trên máy Mac của bạn. Những gì trợ lý được làm ở đó được đặt trên chính máy Mac ấy.",
-                   ja: "アシスタントはお使いの Mac で作業します。そこで許可する内容は、その Mac 側で設定します。",
-                   zh: "你的助手在你的 Mac 上工作。它们在那里可以做什么，由那台 Mac 来设置。",
-                   zhHant: "你的助理在你的 Mac 上工作。它們在那裡可以做什麼，由那台 Mac 來設定。")
-        case .nameRequired:
-            Self.t("Enter a name.", "Hãy nhập tên.", ja: "名前を入力してください。",
-                   zh: "请输入名字。", zhHant: "請輸入名字。")
-        case .profile:
-            Self.t("Profile", "Hồ sơ", ja: "プロフィール", zh: "个人资料", zhHant: "個人資料")
-        case .contactAtum:
-            Self.t("Contact Atum", "Liên hệ Atum")
-        case .contactUnavailable:
-            Self.t("In-app contact is not available yet.", "Chưa có cách liên hệ trong ứng dụng.")
-        case .assistantPrepared:
-            Self.t("Your assistant is being prepared", "Trợ lý đang được chuẩn bị",
-                   ja: "アシスタントを準備しています", zh: "正在准备你的助手",
-                   zhHant: "正在準備你的助理")
-        case .thisDevice:
-            Self.t("This device", "Thiết bị này")
-        case .connected:
-            Self.t("Connected", "Đã kết nối")
+        case .howAtumAnswers:
+            Self.t("How Atum answers", "Cách Atum trả lời", ja: "Atum の回答方法",
+                   zh: "Atum 的回答方式", zhHant: "Atum 的回答方式")
+        case .protonsLeft:
+            // `%1$@` is the whole-Proton balance, already formatted.
+            Self.t("%1$@ left · used for Atum’s built-in models and the Store",
+                   "Còn %1$@ · dùng cho mô hình tích hợp của Atum và Cửa hàng",
+                   ja: "残り %1$@ · Atum の内蔵モデルとストアで使用",
+                   zh: "剩余 %1$@ · 用于 Atum 内置模型和商店",
+                   zhHant: "剩餘 %1$@ · 用於 Atum 內建模型和商店")
+        case .topUp:
+            Self.t("Top up", "Nạp thêm", ja: "チャージ", zh: "充值", zhHant: "儲值")
+        case .walletUnavailableHelp:
+            Self.t("Proton balance and activity will appear here when the wallet is available.",
+                   "Số dư và hoạt động Proton sẽ xuất hiện tại đây khi ví khả dụng.",
+                   ja: "ウォレットが利用可能になると、Proton の残高と履歴がここに表示されます。",
+                   zh: "钱包可用后，Proton 余额和活动会显示在这里。",
+                   zhHant: "錢包可用後，Proton 餘額與活動會顯示在這裡。")
+        case .yourSubscription:
+            Self.t("Your subscription", "Gói đăng ký của bạn", ja: "あなたのサブスクリプション",
+                   zh: "你的订阅", zhHant: "你的訂閱")
+        case .subscriptionHelp:
+            Self.t("Use ChatGPT, Claude or Gemini you already pay for",
+                   "Dùng ChatGPT, Claude hoặc Gemini bạn đang trả phí",
+                   ja: "契約中の ChatGPT、Claude、Gemini を使う",
+                   zh: "使用你已付费的 ChatGPT、Claude 或 Gemini",
+                   zhHant: "使用你已付費的 ChatGPT、Claude 或 Gemini")
+        case .notAvailableYet:
+            Self.t("Not available yet", "Chưa khả dụng", ja: "まだ利用できません",
+                   zh: "暂不可用", zhHant: "暫時無法使用")
+        case .google:
+            Self.t("Google", "Google", ja: "Google", zh: "Google", zhHant: "Google")
+        case .apps:
+            Self.t("Apps", "Ứng dụng", ja: "アプリ", zh: "应用", zhHant: "應用程式")
         case .otherDevices:
             Self.t("Other devices", "Thiết bị khác", ja: "ほかのデバイス", zh: "其他设备",
                    zhHant: "其他裝置")
-        case .manageOnMac:
-            Self.t("Manage on your Mac", "Quản lý trên máy Mac", ja: "Mac で管理",
-                   zh: "在 Mac 上管理", zhHant: "在 Mac 上管理")
-        case .availability:
-            Self.t("Availability", "Sẵn sàng giúp bạn", ja: "利用可能性", zh: "可用性",
-                   zhHant: "可用性")
-        case .macAccess:
-            Self.t("Access on your Mac", "Quyền truy cập trên máy Mac", ja: "Mac でのアクセス権",
-                   zh: "Mac 上的访问权限", zhHant: "Mac 上的存取權限")
-        case .notAvailable:
-            Self.t("Not available in this version. You can still chat.",
-                   "Chưa khả dụng trên phiên bản này. Bạn vẫn có thể trò chuyện.")
-        case .loadingSettings:
-            Self.t("Loading settings…", "Đang tải cài đặt…")
-        case .apps:
-            Self.t("Apps", "Ứng dụng", ja: "アプリ", zh: "应用", zhHant: "應用程式")
         case .memory:
             Self.t("Memory", "Trí nhớ", ja: "メモリ", zh: "记忆", zhHant: "記憶")
         case .remembers:
             Self.t("Atum remembers", "Atum ghi nhớ", ja: "Atum のメモリ", zh: "Atum 会记忆",
                    zhHant: "Atum 會記憶")
+        case .remembersHelp:
+            Self.t("Helps your assistants remember context between conversations.",
+                   "Giúp các trợ lý nhớ ngữ cảnh giữa những lần trò chuyện.",
+                   ja: "会話をまたいでアシスタントが文脈を覚えるのに役立ちます。",
+                   zh: "帮助你的助手在不同对话间记住上下文。",
+                   zhHant: "幫助你的助理在不同對話間記住脈絡。")
         case .memoryDisclosure:
             Self.t("Messages in your chats, including other people’s messages, may be processed by model providers and stored as searchable memory.",
                    "Tin nhắn trong các cuộc trò chuyện của bạn, kể cả của người khác, có thể được nhà cung cấp mô hình xử lý và lưu thành trí nhớ có thể tìm kiếm.",
@@ -378,9 +422,32 @@ enum AccountSettingsText: String, CaseIterable, Sendable {
                    ja: "既読と入力中の状態をほかの人に表示します。",
                    zh: "让其他人看到你的已读和正在输入状态。",
                    zhHant: "讓其他人看到你的已讀與正在輸入狀態。")
-        case .reportingData:
-            Self.t("Reports & data", "Báo cáo & dữ liệu", ja: "レポートとデータ",
-                   zh: "报告与数据", zhHant: "報告與資料")
+        case .chats:
+            Self.t("Chats", "Cuộc trò chuyện", ja: "チャット", zh: "聊天", zhHant: "聊天")
+        case .chatsStored:
+            Self.t("Kept on Atum’s servers", "Được lưu trên máy chủ của Atum",
+                   ja: "Atum のサーバーに保存されます", zh: "保存在 Atum 的服务器上",
+                   zhHant: "儲存在 Atum 的伺服器上")
+        case .chatsStoredHelp:
+            Self.t("They aren’t end-to-end encrypted by default. You can turn encryption on for a single chat, in that chat’s info.",
+                   "Mặc định không mã hóa đầu cuối. Bạn có thể bật mã hóa cho từng cuộc trò chuyện, trong thông tin của cuộc trò chuyện đó.",
+                   ja: "デフォルトではエンドツーエンド暗号化されません。チャットごとに、そのチャットの情報から暗号化をオンにできます。",
+                   zh: "默认不做端到端加密。你可以在某个聊天的信息中为它单独开启加密。",
+                   zhHant: "預設不做端對端加密。你可以在某個聊天的資訊中為它單獨開啟加密。")
+        case .encryptionDetail:
+            Self.t("An encrypted chat stays out of Atum’s memory. Turning encryption on doesn’t erase memory already saved.",
+                   "Cuộc trò chuyện đã mã hóa không vào trí nhớ của Atum. Bật mã hóa không xóa trí nhớ đã lưu.",
+                   ja: "暗号化したチャットは Atum のメモリに入りません。暗号化をオンにしても、保存済みのメモリは削除されません。",
+                   zh: "加密的聊天不会进入 Atum 的记忆。开启加密不会删除已保存的记忆。",
+                   zhHant: "加密的聊天不會進入 Atum 的記憶。開啟加密不會刪除已儲存的記憶。")
+        case .thisIPhone:
+            Self.t("This iPhone", "iPhone này", ja: "この iPhone", zh: "这台 iPhone",
+                   zhHant: "這台 iPhone")
+        case .thisIPad:
+            Self.t("This iPad", "iPad này", ja: "この iPad", zh: "这台 iPad", zhHant: "這台 iPad")
+        case .nameRequired:
+            Self.t("Enter a name.", "Hãy nhập tên.", ja: "名前を入力してください。",
+                   zh: "请输入名字。", zhHant: "請輸入名字。")
         case .shareCrashReports:
             Self.t("Share crash reports", "Chia sẻ báo cáo sự cố",
                    ja: "クラッシュレポートを共有", zh: "共享崩溃报告",
@@ -406,34 +473,15 @@ enum AccountSettingsText: String, CaseIterable, Sendable {
                    ja: "どちらのレポートもいつでもオフにできます。オフにするとすぐに送信が止まります。",
                    zh: "你可以随时关闭任一报告。关闭后立即停止发送。",
                    zhHant: "你可以隨時關閉任一報告。關閉後立即停止傳送。")
-        case .chats:
-            Self.t("Chats", "Cuộc trò chuyện", ja: "チャット", zh: "聊天", zhHant: "聊天")
-        case .chatEncryption:
-            Self.t("Encryption for each chat", "Mã hóa theo cuộc trò chuyện",
-                   ja: "チャットごとの暗号化", zh: "按聊天加密", zhHant: "按聊天加密")
-        case .display:
-            Self.t("Display", "Hiển thị")
-        case .appearance:
-            Self.t("Appearance", "Giao diện")
-        case .textSize:
-            Self.t("Text size", "Cỡ chữ")
+        // Phone-only words for iOS-owned settings (Dynamic Type and the
+        // notification permission). ja/zh/zh-Hant are phone fallbacks until
+        // the export carries `phoneSettingsCopy.usesIOSSettings`/`opensIOSSettings`.
         case .usesIOSSettings:
-            Self.t("Uses iOS settings", "Theo cài đặt iOS")
+            Self.t("Uses iOS settings", "Theo cài đặt iOS", ja: "iOS の設定に従います",
+                   zh: "跟随 iOS 设置", zhHant: "依照 iOS 設定")
         case .opensIOSSettings:
-            Self.t("Opens iOS Settings", "Mở Cài đặt iOS")
-        case .notifications:
-            Self.t("Notifications", "Thông báo")
-        case .protonBalance:
-            Self.t("Proton balance", "Số dư Proton")
-        case .noStoreKitPurchase:
-            Self.t("Proton purchases stay unavailable until StoreKit is ready.",
-                   "Chưa thể mua Proton khi StoreKit chưa sẵn sàng.")
-        case .providersAndChatGPT:
-            Self.t("Providers & ChatGPT", "Nhà cung cấp & ChatGPT")
-        case .expertTools:
-            Self.t("Expert tools", "Công cụ chuyên sâu")
-        case .technicalDetails:
-            Self.t("Technical details", "Chi tiết kỹ thuật")
+            Self.t("Opens iOS Settings", "Mở Cài đặt iOS", ja: "iOS の設定を開きます",
+                   zh: "打开 iOS 设置", zhHant: "開啟 iOS 設定")
         }
     }
 }

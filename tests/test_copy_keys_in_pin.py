@@ -24,8 +24,6 @@ KEY = re.compile(r'"((?:desktop|src|shared)\.[A-Za-z0-9_.\-=]+)"')
 # lands in the pin; add one only together with that guard.
 PENDING = {
     "src.matrix.mobile-device-copy.mobileDeviceCopy.dictationListening",
-    "src.matrix.agent-home-copy.words.summary",
-    "src.matrix.agent-home-copy.words.waitingForMac",
     "src.matrix.model-picker-copy.COPY.taglineEveryday",
     "src.matrix.model-picker-copy.COPY.taglineHard",
     "src.matrix.model-picker-copy.COPY.taglineFlagship",
@@ -44,6 +42,9 @@ PENDING = {
     "src.matrix.person-info-copy.copy.noFiles",
     "src.matrix.person-info-copy.copy.noLinks",
     "src.matrix.person-info-copy.copy.noneRecent",
+    # Desktop assistant-card routineCount (a plural); AssistantCardCopy.routineCount
+    # falls back to AssistantRoutinePendingCopy (docs/ports/assistant-card-rows.md).
+    "src.matrix.assistant-card.copy.assistantCardCopies.routineCount",
 }
 
 

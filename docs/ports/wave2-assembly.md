@@ -1,0 +1,79 @@
+# Wave 2 assembly (`wip/w2-assembly`)
+
+Merges the five wave 2 streams from `dd26d6e`: AC (`d39c6b9`), AS (`34870e1`),
+TS (`91c00ea`), HC (`8978b98`) and ST (`63dfc42`). Conflicts resolved at merge
+time: `ChatScreen.swift` empty-chat state (HC vs TS: channel intro, assistant
+greeting, "No messages yet."), Settings Top up slot (AC vs ST: the shared top-up
+sheet) and Store shelf scrolling (AS vs ST).
+
+## Verification (2026-11-11, iPhone simulator, under the build lock)
+
+- App unit tests (`AtumMobileTests`): 325 passed.
+- Full UI suite, first pass: 148 run, 4 skipped, 28 failed. 17 of the failures
+  were environmental: the tests ask `scripts/sim-content-size-runner.sh` (kept
+  in the private release repo) to switch appearance and text size, and no
+  runner was running. Rerun the failures with that runner beside xcodebuild:
+  `sim-content-size-runner.sh <UDID> <worktree>`.
+- Test fixes made at assembly:
+  - U10: the S6 account fixture's handle was `an`, which wave 1's handle rule
+    (`^[a-z][a-z0-9_]{2,31}$`) rejects, so the card hid it. The fixture now uses
+    `annguyen` (an underscore trips the S6 raw-error-code text check).
+  - U8: `store.partial` expected "Chưa có số dư". Current desktop
+    (`discover-view.tsx`) hides the header balance until the wallet loads; that
+    string belongs to the retired legacy wallet. The test now checks that the
+    balance chip is absent.
+
+## Store row price (owner feedback on the wave 1 TestFlight build, 2026-11-11)
+
+The owner found the Store rows clunky: a monthly hire put "8,000 Protons first
+month · then 39,000/mo" in the row, and rows had no price button. Desktop
+(`store-card.tsx`) shows one small button per row with the Proton mark and the
+first price, "Open" once owned and "Get" when free. The full monthly terms
+appear only in the item sheet. Parity plan v2 ST-2 had put the long form in the
+row. The assembly now matches desktop:
+- `StoreItemRow` trailing is a quiet capsule (`fill-quiet`, as the kit's
+  secondary button): Proton mark and first price, "Mở"/"Open" when owned, or
+  "Miễn phí"/"Free" (desktop's "Get" is not exported yet, `PENDING-COPY`). The
+  whole row still opens the sheet. VoiceOver still reads the full monthly
+  terms.
+- Every row with an offer formats its amount with
+  `StoreOutcomePresentation.protons`, so pet and assistant prices group digits
+  the same way (the build showed "8,000" next to "90.000").
+- Still open: the balance chip ("105.449 Protons") uses its own formatter, and
+  "Get" needs a desktop export.
+
+## Baseline against main (`dd26d6e`, same 26 UI tests, same runner)
+
+10 failures also fail on main and predate wave 2: the accessibility audits
+(avatar monograms at fixed size, one contrast case), ChatPanel
+block-in-place (flaky), S6 U7's "Mở" count, U16 and the Wave2MediaBot smoke.
+Wave 2 introduced three, now fixed:
+- S1 `testEmptyChat` "Text clipped": the HC-4 starter chips were one line. They
+  now wrap (a rounded rectangle with an 18 pt radius, which is a capsule on one
+  line). The rerun then flagged the greeting prompt as clipped, so the title and
+  prompt keep their full height (`fixedSize(vertical:)`).
+- Transcript U7 keyboard dismiss: the ST-5 chat top-up notice's empty host sat
+  in the composer area's 4 pt-spaced stack, so it raised the composer 4 pt even
+  when hidden, and the drag started in that gap. The notice now shares a
+  zero-spacing stack with the composer and carries its own 4 pt when shown.
+- S6 U12: AC-3 folds Privacy into Account, so the recovery key row can be below
+  the fold. The test scrolls to `account.settings.privacy.recovery-key`; U10 likewise
+  scrolls to `account.settings.help.legal` at AX5.
+
+## Cross-family review (GPT-6.1 Sol, Codex), 2026-11-11
+
+Four findings, all confirmed and fixed:
+1. Team space Activity kept company A's rows after a switch, and its stale-read
+   guard compared against the view's pre-await copy of `presentation`.
+   Activity is now stored with its company ID and fenced by a shared request
+   generation and task cancellation.
+2. The folded Hatch card carried the regular Hatch item's ownership, but the
+   row status and item sheet looked up only `pet/hatch-first`, so a held
+   `pet/hatch` credit read as unowned (and could offer Top up).
+   `StoreShelfPlan.itemIDs(for:)` resolves both IDs. Rows and the sheet honour
+   the folded ownership and check pending purchases across both.
+3. Saved/Pinned summaries and Activity used raw `memberDisplayName`. Both now go
+   through `MatrixPersonName.name(_:userID:)`, so a Matrix ID, opaque localpart
+   or SDK " (@id)" suffix is never shown as a name.
+4. A shelf jump kept a leftover Store search and could land on filtered results.
+   It now clears the search, lets the full list draw, then scrolls.

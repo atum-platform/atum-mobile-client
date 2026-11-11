@@ -77,6 +77,8 @@ struct ConversationSectionView: View {
     let actions: ConversationListActions?
     let rowActions: DirectMessagesActions
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
+    /// The sidebar search's needle (`TeamSpaceSearch.needle`); nil shows every row.
+    let needle: String?
 
     @State private var showsPicker = false
     @State private var showsHidden: Bool
@@ -89,13 +91,15 @@ struct ConversationSectionView: View {
     /// `initiallyShowsHidden` is for previews and the simulator harness.
     init(design: LiveDesign, companyID: String, directMessages: DirectMessagesPresentation,
          actions: ConversationListActions?, rowActions: DirectMessagesActions = DirectMessagesActions(),
-         loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil, initiallyShowsHidden: Bool = false) {
+         loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil, needle: String? = nil,
+         initiallyShowsHidden: Bool = false) {
         self.design = design
         self.companyID = companyID
         self.directMessages = directMessages
         self.actions = actions
         self.rowActions = rowActions
         self.loadMatrixThumbnail = loadMatrixThumbnail
+        self.needle = needle
         _showsHidden = State(initialValue: initiallyShowsHidden)
     }
 
@@ -107,10 +111,29 @@ struct ConversationSectionView: View {
 
     static let faceSize: CGFloat = 28
 
+    private var locale: Locale { Locale(identifier: design.locale) }
+
+    /// Desktop `conversation-sections.tsx:126–139`: "You" matches its name or "personal
+    /// notes", the Chief of Staff its name or state line, a conversation its title.
+    private var showsNotes: Bool {
+        TeamSpaceSearch.matches([dmCopy.you, dmCopy.personalNotes], needle: needle, locale: locale)
+    }
+
+    private func showsChief(_ chief: ChiefOfStaffRowPresentation) -> Bool {
+        TeamSpaceSearch.matches([dmCopy.chiefOfStaff(platformName: chief.platformName),
+                                 dmCopy.line(chief.status) ?? ""], needle: needle, locale: locale)
+    }
+
+    private func shown(_ rows: [ConversationListRow]) -> [ConversationListRow] {
+        rows.filter { TeamSpaceSearch.matches([$0.row.title], needle: needle, locale: locale) }
+    }
+
     var body: some View {
         Section {
-            notesRow
-            if let chief = directMessages.chief {
+            if showsNotes {
+                notesRow
+            }
+            if let chief = directMessages.chief, showsChief(chief) {
                 chiefRow(chief)
             }
             if let section, let actions {
@@ -123,7 +146,7 @@ struct ConversationSectionView: View {
                     // The last read failed: these are the last good rows, and nothing can be sent.
                     note(copy.failed).accessibilityIdentifier("conversations.stale")
                 }
-                ForEach(section.rows) { row in
+                ForEach(shown(section.rows)) { row in
                     rowView(row, actions: actions)
                 }
                 if !section.hidden.isEmpty {

@@ -1,3 +1,4 @@
+import AtumChat
 import AtumDesign
 import AtumNativeAPI
 import SwiftUI
@@ -742,112 +743,100 @@ private struct AssistantHomeMoveSheet: View {
     }
 }
 
-// MARK: - Phone-owned fallbacks pending atum-app export
+// MARK: - Words: the pinned export, then desktop's own pending words
 
+/// Every word the "where it lives" row and sheet show. Each key reads the
+/// pinned export; a word the pin does not carry yet reads desktop's own value
+/// in the app language from `AgentHomePendingCopy` (D-8). There are no
+/// phone literals here, so no locale shows another language.
 @MainActor
-private struct AgentHomeCopy {
+struct AgentHomeCopy {
     enum Key: String, CaseIterable {
-        case title = "agentHome.title", livesOn = "agentHome.livesOn", livesOnLoading = "agentHome.livesOnLoading"
-        case move = "agentHome.move", model = "agentHome.model", loading = "agentHome.loading"
-        case movesUnavailable = "agentHome.movesUnavailable", loadFailed = "agentHome.loadFailed"
-        case retry = "agentHome.retry", close = "agentHome.close", chooseHome = "agentHome.chooseHome"
-        case chooseModel = "agentHome.chooseModel", cloud = "agentHome.cloud", available = "agentHome.available"
-        case cloudPlace = "agentHome.cloudPlace"
-        case selected = "agentHome.selected", notSelected = "agentHome.notSelected"
-        case catalogUnavailable = "agentHome.catalogUnavailable", catalogStale = "agentHome.catalogStale"
-        case actualLosses = "agentHome.actualLosses", noLosses = "agentHome.noLosses"
-        case acceptCheckpointLoss = "agentHome.acceptCheckpointLoss", status = "agentHome.status"
-        case modelNextTurn = "agentHome.modelNextTurn", commandFailed = "agentHome.commandFailed"
-        case modelSaveFailed = "agentHome.modelSaveFailed", cancelMove = "agentHome.cancelMove"
-        case working = "agentHome.working"
-        case reviewMove = "agentHome.reviewMove"
+        case title, livesOn, livesOnLoading, move, model, loading, movesUnavailable, loadFailed
+        case retry, close, chooseHome, chooseModel, cloud, available, cloudPlace
+        case selected, notSelected, catalogUnavailable, catalogStale
+        case actualLosses, noLosses, acceptCheckpointLoss, status
+        case modelNextTurn, commandFailed, modelSaveFailed, cancelMove, working, reviewMove
+    }
+
+    enum Source: Equatable {
+        case export(String)
+        case pending(AgentHomePendingCopy.Key)
+    }
+
+    private static let words = "src.matrix.agent-home-copy.words."
+
+    /// Where each word comes from. Exported desktop words keep their meaning;
+    /// the phone-only labels (Close, Selected, Status, …) use the export's
+    /// existing words for the same thing.
+    static func source(_ key: Key) -> Source {
+        switch key {
+        case .title: .export(words + "title")
+        case .livesOn: .export(words + "livesOn")
+        case .move: .export(words + "move")
+        case .model: .export(words + "model")
+        case .cloud: .export(words + "cloud")
+        case .cloudPlace: .export(words + "cloudPlace")
+        case .available: .export(words + "ready")
+        case .chooseHome: .export(words + "moveSection")
+        case .actualLosses: .export(words + "actualLosses")
+        case .noLosses: .export(words + "noLosses")
+        case .reviewMove: .export(words + "reviewMove")
+        case .cancelMove: .export(words + "cancel")
+        case .working: .export(words + "moving")
+        case .close: .export("desktop.common.close")
+        case .chooseModel, .notSelected: .export("src.matrix.model-picker-copy.COPY.chooseModel")
+        case .selected: .export("src.matrix.mobile-device-copy.mobileDeviceCopy.uiSelected")
+        case .status: .export(AssistantCardCopyKey.setupRow.rawValue)
+        case .modelNextTurn: .export(AssistantCardCopyKey.footnote.rawValue)
+        case .modelSaveFailed: .export(AssistantCardCopyKey.saveFailed.rawValue)
+        case .livesOnLoading, .loading: .pending(.finding)
+        case .movesUnavailable: .pending(.unavailableFallback)
+        case .loadFailed: .pending(.unknownPlace)
+        case .retry: .pending(.retryRead)
+        case .catalogUnavailable: .pending(.unavailableCatalog)
+        case .catalogStale: .pending(.refusalCatalogStale)
+        case .acceptCheckpointLoss: .pending(.acceptCheckpointLoss)
+        case .commandFailed: .pending(.endedFallback)
+        }
     }
 
     let design: LiveDesign
     private var locale: String { design.locale }
-    private var vi: Bool { locale == "vi" }
 
     func text(_ key: Key) -> String {
-        if let export = exportKey(key), design.copy.contains(export) { return design.text(export) }
-        return switch (vi, key) {
-        case (false, .title): "Where it lives"; case (true, .title): "Trợ lý đang ở đâu"
-        case (false, .livesOn): "Lives on"; case (true, .livesOn): "Đang ở trên"
-        case (false, .livesOnLoading): "Lives on: Loading…"; case (true, .livesOnLoading): "Đang ở trên: Đang tải…"
-        case (false, .move): "Move"; case (true, .move): "Chuyển"
-        case (false, .model): "Model"; case (true, .model): "Mô hình"
-        case (false, .loading): "Loading…"; case (true, .loading): "Đang tải…"
-        case (false, .movesUnavailable): "Move is not available yet"; case (true, .movesUnavailable): "Chưa thể chuyển"
-        case (false, .loadFailed): "Couldn’t load the current home"; case (true, .loadFailed): "Không tải được nhà hiện tại"
-        case (false, .retry): "Try again"; case (true, .retry): "Thử lại"
-        case (false, .close): "Close"; case (true, .close): "Đóng"
-        case (false, .chooseHome): "Home"; case (true, .chooseHome): "Nhà"
-        case (false, .chooseModel): "Choose model"; case (true, .chooseModel): "Chọn mô hình"
-        case (false, .cloud): "the cloud"; case (true, .cloud): "đám mây"
-        case (false, .cloudPlace): "The cloud"; case (true, .cloudPlace): "Đám mây"
-        case (false, .available): "Available"; case (true, .available): "Sẵn sàng"
-        case (false, .selected): "Selected"; case (true, .selected): "Đã chọn"
-        case (false, .notSelected): "Not selected"; case (true, .notSelected): "Chưa chọn"
-        case (false, .catalogUnavailable): "This Mac’s models aren’t available"; case (true, .catalogUnavailable): "Mô hình trên máy Mac này chưa sẵn sàng"
-        case (false, .catalogStale): "Reconnect this Mac before moving"; case (true, .catalogStale): "Kết nối lại máy Mac này trước khi chuyển"
-        case (false, .actualLosses): "What will not move"; case (true, .actualLosses): "Những gì sẽ không được chuyển"
-        case (false, .noLosses): "Everything supported moves with this assistant."
-        case (true, .noLosses): "Mọi nội dung được hỗ trợ sẽ đi cùng trợ lý này."
-        case (false, .acceptCheckpointLoss): "I accept losing changes since this checkpoint"
-        case (true, .acceptCheckpointLoss): "Tôi chấp nhận mất thay đổi kể từ điểm lưu này"
-        case (false, .status): "Status"; case (true, .status): "Trạng thái"
-        case (false, .modelNextTurn): "The model applies on the next turn"; case (true, .modelNextTurn): "Mô hình áp dụng từ lượt tiếp theo"
-        case (false, .commandFailed): "The move didn’t complete. The current home is unchanged."
-        case (true, .commandFailed): "Chưa chuyển xong. Nhà hiện tại không đổi."
-        case (false, .modelSaveFailed): "The model wasn’t saved"; case (true, .modelSaveFailed): "Chưa lưu mô hình"
-        case (false, .cancelMove): "Cancel move"; case (true, .cancelMove): "Hủy chuyển"
-        // agent-home/2.5 removed the phone signer-unavailable state.
-        // Write failures continue through the ordinary command error copy.
-        case (false, .working): "Moving…"; case (true, .working): "Đang chuyển…"
-        case (false, .reviewMove): "Review move"; case (true, .reviewMove): "Xem trước khi chuyển"
+        switch Self.source(key) {
+        case let .export(name): design.text(name)
+        case let .pending(pending): self.pending(pending)
         }
     }
 
-    private func exportKey(_ key: Key) -> String? {
-        let name: String? = switch key {
-        case .title: "title"
-        case .livesOn: "livesOn"
-        case .move: "move"
-        case .model: "model"
-        case .cloud: "cloud"
-        case .cloudPlace: "cloudPlace"
-        case .actualLosses: "actualLosses"
-        case .noLosses: "noLosses"
-        case .reviewMove: "reviewMove"
-        case .cancelMove: "cancel"
-        case .working: "moving"
-        default: nil
+    private func pending(_ key: AgentHomePendingCopy.Key, argument: String? = nil) -> String {
+        if let export = AgentHomePendingCopy.exportKey(key), design.copy.contains(export) {
+            return design.text(export, arguments: argument.map { [.text($0)] } ?? [])
         }
-        return name.map { "src.matrix.agent-home-copy.words." + $0 }
+        return AgentHomePendingCopy.text(key, locale: locale, argument: argument)
     }
 
     func summary(home: String, provider: String?, model: String?) -> String {
-        if let provider, let model {
-            let key = "src.matrix.agent-home-copy.words.summary"
-            if design.copy.contains(key) {
-                return design.text(key, arguments: [.text(home), .text(provider), .text(model)])
-            }
+        guard let provider, let model else {
+            return [home, provider].compactMap { $0 }.joined(separator: " · ")
         }
-        var parts = [(vi ? "Đang ở trên: " : "Lives on: ") + home]
-        if let provider { parts.append((vi ? "Mô hình: " : "Model: ") + provider) }
-        if let model { parts.append(model) }
-        return parts.joined(separator: " · ")
+        return design.text(Self.words + "summary", arguments: [.text(home), .text(provider), .text(model)])
     }
 
-    func move(_ name: String) -> String { vi ? "Chuyển \(name)" : "Move \(name)" }
+    /// The sheet's primary action once the move is reviewed.
+    func move(_ name: String) -> String { text(.move) }
 
     func provider(_ source: AgentHomeModelSource) -> String {
         switch source { case .atum: "Atum"; case .chatGPTPlan: "ChatGPT"; case let .ownKey(name): name }
     }
 
+    /// A place mid-sentence: "the cloud", a Mac's name, or "another Mac".
     func homeName(_ home: AgentHomeLocation, snapshot: AgentHomeSnapshot) -> String {
         switch home {
         case .cloud: text(.cloud)
-        case let .mac(id): snapshot.device(id)?.displayName ?? (vi ? "Máy Mac" : "Mac")
+        case let .mac(id): snapshot.device(id)?.displayName ?? design.text(Self.words + "anotherMac")
         }
     }
 
@@ -855,7 +844,7 @@ private struct AgentHomeCopy {
     func placeName(_ home: AgentHomeLocation, snapshot: AgentHomeSnapshot) -> String {
         switch home {
         case .cloud: text(.cloudPlace)
-        case let .mac(id): snapshot.device(id)?.displayName ?? (vi ? "Máy Mac" : "Mac")
+        case let .mac(id): snapshot.device(id)?.displayName ?? pending(.unnamedMac)
         }
     }
 
@@ -869,35 +858,32 @@ private struct AgentHomeCopy {
 
     func application(_ value: AgentHomeModelApplication, home: String) -> String {
         switch value.status {
-        case .applied: return vi ? "Đã áp dụng" : "Applied"
-        case .pending:
-            let key = "src.matrix.agent-home-copy.words.waitingForMac"
-            if design.copy.contains(key) { return design.text(key, arguments: [.text(home)]) }
-            return vi ? "Đang chờ \(home)" : "Waiting for \(home)"
-        case .unavailable: return vi ? "Đang chờ kết nối trên máy Mac" : "Waiting for the Mac connection"
+        case .applied: text(.available)
+        case .pending: design.text(Self.words + "waitingForMac", arguments: [.text(home)])
+        case .unavailable: pending(.readinessUnavailable)
         }
     }
 
     func connectionNeedsAttention(provider: String, home: String) -> String {
-        vi ? "Kết nối \(provider) trên \(home)" : "Connect \(provider) on \(home)"
+        design.text(Self.words + "noModels", arguments: [.text(home)])
     }
 
     func reachability(_ value: AgentHomeReachability) -> String {
-        switch (vi, value.state) {
-        case (false, "reachable"): "Available"; case (true, "reachable"): "Sẵn sàng"
-        case (false, "asleep"): "Asleep"; case (true, "asleep"): "Đang ngủ"
-        default: vi ? "Ngoại tuyến" : "Offline"
+        switch value.state {
+        case "reachable": text(.available)
+        case "asleep": pending(.readinessAsleep)
+        default: pending(.readinessUnavailable)
         }
     }
 
     func deviceUnavailable(_ reason: AgentHomeNamedDevice.Eligibility.Reason) -> String {
-        switch (vi, reason) {
-        case (false, .offline): "Offline"; case (true, .offline): "Ngoại tuyến"
-        case (false, .versionUnsupported): "Update required"; case (true, .versionUnsupported): "Cần cập nhật"
-        case (false, .homeConflict): "Home conflict"; case (true, .homeConflict): "Xung đột nhà"
+        switch reason {
+        case .offline: pending(.unavailableOffline)
+        case .versionUnsupported: pending(.unavailableVersionUnsupported)
+        case .homeConflict: pending(.unavailableHomeConflict)
         // A Mac the platform does not list as ready has no active set-up for this assistant (or it lapsed), and
         // only that Mac can fix it: say what to do, in the owner's language, not just that models are missing.
-        case (_, .notEnrolled), (_, .catalogUnavailable):
+        case .notEnrolled, .catalogUnavailable:
             AgentHomePlacementCopy.text(.openAtumOnMac, locale: locale)
         }
     }
@@ -912,44 +898,18 @@ private struct AgentHomeCopy {
         AgentHomePlacementCopy.text(.waitingForHome, locale: locale, name: homeName)
     }
 
+    /// Every loss the platform names is in the export; a newer one this pin
+    /// does not know reads as desktop's general "Some local access won't move."
     func loss(_ loss: AgentHomeFeatureLoss) -> String {
-        let export = "src.matrix.agent-home-copy.words.losses." + loss.rawValue
-        if design.copy.contains(export) { return design.text(export) }
-        let en: [AgentHomeFeatureLoss: String] = [
-            .googleProtectedRoute: "Protected Google access on the current home",
-            .protectedPrivateSkill: "A private skill that cannot be exported",
-            .cloudBrowserSession: "Cloud browser sessions", .cloudComputer: "Cloud computer access",
-            .drivePublication: "Drive publication from the current home",
-            .routineExecution: "Routines that only run on the current home",
-            .pushDelivery: "Push delivery from the current home",
-            .changesSinceLastCheckpointLost: "Changes since the last checkpoint",
-            .modelSourceChangesToAtum: "The current Mac connection; cloud uses an Atum model",
-            .localToolsUnavailable: "Tools installed only on this Mac",
-            .localFilesUnavailable: "Files stored only on this Mac",
-            .localBrowserSessionsUnavailable: "Browser sessions stored only on this Mac",
-            .conversationOverridesCleared: "Conversation-specific model choices",
-        ]
-        let viText: [AgentHomeFeatureLoss: String] = [
-            .googleProtectedRoute: "Quyền truy cập Google được bảo vệ ở nơi hiện tại",
-            .protectedPrivateSkill: "Một kỹ năng riêng tư không thể xuất",
-            .cloudBrowserSession: "Các phiên trình duyệt trên đám mây",
-            .cloudComputer: "Quyền dùng máy tính đám mây",
-            .drivePublication: "Đăng lên Drive từ nơi hiện tại",
-            .routineExecution: "Các lịch việc chỉ chạy ở nơi hiện tại",
-            .pushDelivery: "Thông báo đẩy từ nơi hiện tại",
-            .changesSinceLastCheckpointLost: "Các thay đổi kể từ điểm lưu gần nhất",
-            .modelSourceChangesToAtum: "Kết nối trên Mac hiện tại; đám mây dùng mô hình Atum",
-            .localToolsUnavailable: "Công cụ chỉ được cài trên máy Mac này",
-            .localFilesUnavailable: "Tệp chỉ được lưu trên máy Mac này",
-            .localBrowserSessionsUnavailable: "Phiên trình duyệt chỉ được lưu trên máy Mac này",
-            .conversationOverridesCleared: "Lựa chọn mô hình riêng của từng cuộc trò chuyện",
-        ]
-        return (vi ? viText : en)[loss]!
+        let export = Self.words + "losses." + loss.rawValue
+        return design.copy.contains(export) ? design.text(export) : text(.actualLosses)
     }
 
     func checkpoint(_ timestamp: Int64) -> String {
         let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
-        return (vi ? "Điểm lưu gần nhất: " : "Last checkpoint: ") + date.formatted(date: .abbreviated, time: .shortened)
+        let time = date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened)
+            .locale(Locale(identifier: locale)))
+        return pending(.lastCheckpoint, argument: time)
     }
 
     func blocked(_ reason: AgentHomeMovePreflight.BlockReason?, target: AgentHomeLocation? = nil) -> String {
@@ -959,51 +919,34 @@ private struct AgentHomeCopy {
         if reason == .targetUnavailable, target?.deviceID != nil {
             return AgentHomePlacementCopy.text(.macNotSetUp, locale: locale)
         }
-        return switch (vi, reason) {
-        case (false, .targetUnavailable): "The destination is unavailable"
-        case (true, .targetUnavailable): "Đích đến chưa sẵn sàng"
-        case (false, .connectionUnavailable): "The selected connection is unavailable"
-        case (true, .connectionUnavailable): "Kết nối đã chọn chưa sẵn sàng"
-        case (false, .catalogStale): "Reconnect the Mac and try again"
-        case (true, .catalogStale): "Kết nối lại máy Mac rồi thử lại"
-        case (false, .notEligible): "This agent can’t move there"
-        case (true, .notEligible): "Trợ lý này không thể chuyển đến đó"
-        case (false, .unknownExportClass): "Some home data can’t be moved safely"
-        case (true, .unknownExportClass): "Một số dữ liệu nhà chưa thể chuyển an toàn"
-        case (false, .cloudControllerVersionUnsupported): "The cloud home needs an update"
-        case (true, .cloudControllerVersionUnsupported): "Nhà đám mây cần được cập nhật"
+        return switch reason {
+        case .targetUnavailable: pending(.refusalTargetUnavailable)
+        case .connectionUnavailable: pending(.refusalConnectionUnavailable)
+        case .catalogStale: pending(.refusalCatalogStale)
+        case .notEligible: pending(.refusalNotEligible)
+        case .unknownExportClass: pending(.refusalUnknownExportClass)
+        case .cloudControllerVersionUnsupported: pending(.refusalCloudVersion)
         }
     }
 
     func progress(_ value: AgentHomeMoveProgress, snapshot: AgentHomeSnapshot) -> String {
         let target = homeName(value.target, snapshot: snapshot)
-        let export = "src.matrix.agent-home-copy.words.progress." + value.state.rawValue
-        if design.copy.contains(export) {
-            let arguments: [AtumCopy.Argument] = [.waitingForDestination, .ready].contains(value.state)
-                ? [.text(target)] : []
-            return design.text(export, arguments: arguments)
-        }
-        switch value.state {
-        case .finishingCurrentWork: return vi ? "Đang hoàn thành công việc hiện tại" : "Finishing current work"
-        case .moving: return vi ? "Đang chuyển" : "Moving"
-        case .waitingForDestination: return vi ? "Đang chờ \(target)" : "Waiting for \(target)"
-        case .reconciling: return vi ? "Đang kiểm tra việc chuyển" : "Checking the move"
-        case .ready: return vi ? "Sẵn sàng trên \(target)" : "Ready on \(target)"
-        case .failed: return vi ? "Việc chuyển chưa hoàn tất" : "Move did not finish"
-        }
+        let export = Self.words + "progress." + value.state.rawValue
+        guard design.copy.contains(export) else { return text(.working) }
+        let arguments: [AtumCopy.Argument] = [.waitingForDestination, .ready].contains(value.state)
+            ? [.text(target)] : []
+        return design.text(export, arguments: arguments)
     }
 
+    /// Why the last move did not finish, as desktop's one calm sentence.
     func failure(_ value: AgentHomeMoveProgress, snapshot: AgentHomeSnapshot) -> String {
-        let current = homeName(value.authoritativeHome, snapshot: snapshot)
-        let reason: String
         switch value.failureReason {
-        case .targetUnavailable: reason = vi ? "Đích đến chưa sẵn sàng" : "Destination unavailable"
-        case .destinationUnreachable: reason = vi ? "Đã chuyển nhưng chưa kết nối được đích đến" : "Moved, but the destination is unreachable"
-        case .sourceUnreachable: reason = vi ? "Không liên lạc được nhà cũ" : "The current home is unreachable"
-        case .modelUnavailable: reason = vi ? "Mô hình đã chọn chưa sẵn sàng" : "The selected model is unavailable"
-        case .ownerCancelled: reason = vi ? "Đã hủy" : "Cancelled"
-        default: reason = vi ? "Không thể hoàn tất việc chuyển" : "The move could not finish"
+        case .targetUnavailable: pending(.issueTargetUnavailable)
+        case .destinationUnreachable:
+            waitingForMac(homeName(value.authoritativeHome, snapshot: snapshot))
+        case .sourceUnreachable: pending(.refusalCurrentHomeUnreachable)
+        case .modelUnavailable: pending(.refusalModelUnavailable)
+        default: text(.commandFailed)
         }
-        return reason + " · " + (vi ? "Nhà hiện tại: " : "Current home: ") + current
     }
 }

@@ -80,6 +80,13 @@ import SwiftUI
         try decode(["purchases": purchases])
     }
 
+    /// A credited synthetic top-up (the scripted Apple server's only effect).
+    func credit(_ microProtons: Int64) { available += microProtons }
+
+    var balances: [String: Any] {
+        ["available": available, "paid": available, "earned": 0, "promo": 0, "held": 0]
+    }
+
     func wallet() async throws -> WalletResponse {
         try decode(["unit": "micro_proton",
                     "balances": ["available": available, "paid": available, "earned": 0, "promo": 0, "held": 0],
@@ -194,12 +201,87 @@ import SwiftUI
     }
 }
 
+/// Synthetic StoreKit for the scripted pack sheet. Prices are the local
+/// StoreKit configuration's (`ios/StoreKit/ProtonPacks.storekit`, VND),
+/// formatted for the device locale as StoreKit's `displayPrice` is. Nothing
+/// reaches StoreKit, App Store Connect or a payment method.
+@MainActor final class ScriptedApplePurchaseStore: ApplePurchaseStore {
+    static let prices: [String: Decimal] = [
+        "com.atum.mobile.protons.100k": 95_000, "com.atum.mobile.protons.500k": 395_000,
+    ]
+    private var next = 2_000_000_000_000_001
+
+    func products(ids: Set<String>) async throws -> [AppleStoreProduct] {
+        ids.compactMap { id in
+            Self.prices[id].map {
+                AppleStoreProduct(id: id, displayPrice: $0.formatted(.currency(code: "VND")))
+            }
+        }
+    }
+
+    func purchase(id: String, accountToken: UUID) async throws -> AppleStorePurchaseResult {
+        try await Task.sleep(for: .milliseconds(300))
+        next += 1
+        let pack = id.split(separator: ".").last.map(String.init) ?? ""
+        return .verified(.init(id: String(next), productID: id, environment: .sandbox, accountToken: accountToken,
+                               signedTransaction: Self.signed(id: String(next), pack: pack), finish: {}))
+    }
+
+    /// `<transactionID>.<pack>.synthetic`: three dot-separated parts, the
+    /// request's required shape; no Apple signature is involved.
+    static func signed(id: String, pack: String) -> String { "\(id).\(pack).synthetic" }
+
+    func updates() -> AsyncStream<AppleVerifiedTransaction> { AsyncStream { _ in } }
+    func unfinished() async -> [AppleVerifiedTransaction] { [] }
+}
+
+/// The scripted Apple purchase server: the allowlisted Sandbox catalogue
+/// (`mobile-purchases/1.2` shapes, synthetic values) and an in-memory credit.
+@MainActor final class ScriptedApplePurchasesAPI: ApplePurchasesAPI {
+    static let packs: [String: Int64] = [
+        "com.atum.mobile.protons.100k": 100_000_000_000, "com.atum.mobile.protons.500k": 500_000_000_000,
+    ]
+    let store: ScriptedStoreAPI
+    init(store: ScriptedStoreAPI) { self.store = store }
+
+    func appleProducts() async throws -> AppleProductsResponse {
+        try decode(["catalogVersion": 1, "environment": "sandbox", "checkoutOpen": true,
+                    "products": Self.packs.keys.sorted().map { id in
+                        ["productId": id, "packId": String(id.split(separator: ".").last!),
+                         "paidMicroProtons": Self.packs[id]!, "bonusMicroProtons": 0] as [String: Any]
+                    }])
+    }
+
+    func appleAccountToken() async throws -> AppleAccountTokenResponse {
+        try decode(["appAccountToken": "00000000-0000-4000-8000-0000000000aa"])
+    }
+
+    /// The synthetic signed transaction names its ID and pack
+    /// (`ScriptedApplePurchaseStore.signed`); a real one is never parsed here.
+    func appleTransaction(_ request: AppleTransactionRequest) async throws -> AppleTransactionResponse {
+        try await Task.sleep(for: .milliseconds(300))
+        let parts = request.signedTransaction.split(separator: ".").map(String.init)
+        guard parts.count == 3, let total = Self.packs["com.atum.mobile.protons." + parts[1]] else {
+            throw URLError(.badServerResponse)
+        }
+        store.credit(total)
+        return try decode(["transactionId": parts[0], "state": "credited", "finish": true,
+                           "credited": ["paidMicroProtons": 0, "bonusMicroProtons": total],
+                           "balances": store.balances])
+    }
+
+    private func decode<T: Decodable>(_ value: Any) throws -> T {
+        try NativeAPI.decode(T.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+}
+
 /// The scripted Store with a live `LiveStoreCommerce` over the synthetic API.
 struct StoreCommerceScriptedHost: View {
     let design: LiveDesign
     let mode: ScriptedStoreAPI.Mode
     @State private var commerce = LiveStoreCommerce(journal: ScriptedStoreJournal())
     @State private var api: ScriptedStoreAPI?
+    @State private var topUp: ProtonTopUpContext?
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -210,11 +292,19 @@ struct StoreCommerceScriptedHost: View {
                     Text(verbatim: "Mai").accessibilityIdentifier("scripted.mai-chat")
                 }
         }
+        .environment(\.protonTopUp, topUp)
         .task {
             guard api == nil else { return }
             let value = ScriptedStoreAPI(mode: mode)
             api = value
             commerce.configure(account: ScriptedStoreAPI.account, client: value, targets: value.targets)
+            let commerce = commerce
+            let purchases = ApplePurchaseCoordinator(
+                store: ScriptedApplePurchaseStore(), environment: .production,
+                refreshWallet: { await commerce.refresh() })
+            purchases.bind(accountID: ScriptedStoreAPI.account, api: ScriptedApplePurchasesAPI(store: value))
+            topUp = ProtonTopUpContext(purchases: purchases,
+                                       balance: { commerce.wallet?.balances.available })
         }
     }
 

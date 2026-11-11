@@ -12,8 +12,11 @@ struct AccountSettingsDetailCallbacks {
     var restoreMessages: () -> Void
     var beginSignOut: () -> Void
     var notificationTapped: () -> Void
+    /// Account › How Atum answers › Protons: desktop's "Top up". Nil draws no
+    /// button. This is the Store stream's slot (plan v2 ST-5): it passes the
+    /// pack sheet here and Settings draws the button beside the balance.
+    var openTopUp: (() -> Void)? = nil
     var founderContactAvailable: Bool = false
-    var founderContactTitle: String = "Contact us"
     /// The roster's local draft is the only Founder chat on offer: opening it makes nothing.
     var founderDraftAvailable: Bool = false
     var openFounderDraft: () -> Void = {}
@@ -42,6 +45,7 @@ struct AccountSettingsDetail: View {
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.openURL) private var openURL
     @State private var openedAssistant: AccountAssistantSummary?
     @State private var deletesAccount = false
 
@@ -51,35 +55,30 @@ struct AccountSettingsDetail: View {
 
     var body: some View {
         List {
-            switch section {
+            // A folded destination draws its page, as the desktop's `settingsPageOf`.
+            switch section.page {
             case .account:
-                // Desktop's Account page: you, your Protons, Privacy & security,
-                // then signing out last.
                 accountContent
-                protonsContent
-                privacyContent
-                // Desktop: Sign out, then Delete account… beside it, both neutral.
+                ForEach(AccountPageSection.order(restoresFirst: restoresFirst), id: \.self) { part in
+                    accountSection(part)
+                }
+                // Desktop: Sign out, then Delete account… beside it, both neutral,
+                // below every section folded into Account.
                 Section {
                     signOutButton
                     deleteAccountButton
                 }
             case .assistants: assistantsContent
-            case .protons: protonsContent
             case .general: generalContent
-            case .connections:
-                // Desktop's Connections page holds "This Mac"; here, this phone.
-                connectionsContent
-                devicesContent
-            case .devices: devicesContent
-            case .privacy: privacyContent
+            case .connections: connectionsContent
             case .help: helpContent
-            case .advanced: advancedContent
+            case .protons, .devices, .privacy, .advanced: EmptyView()
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
-        .navigationTitle(AccountSettingsCopy.sectionTitle(section, design: design))
+        .navigationTitle(AccountSettingsCopy.sectionTitle(section.page, design: design))
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $openedAssistant) { assistant in
             if let card = callbacks.assistantCard {
@@ -91,20 +90,17 @@ struct AccountSettingsDetail: View {
                 deletesAccount = false
             }
         }
-        .accessibilityIdentifier("account.settings." + section.rawValue)
+        .accessibilityIdentifier("account.settings." + section.page.rawValue)
     }
 
-    // MARK: You
+    // MARK: Account
 
-    /// Who you are: name and photo (edited in place), the public handle, and
-    /// signing out. Assistants, the Store and contact moved to their own pages.
+    /// Who you are: name and photo (edited in place) and the public handle.
     @ViewBuilder private var accountContent: some View {
         Section {
             AccountProfileHeader(design: design, presentation: presentation, actions: actions,
                                  identifierPrefix: "account.settings.account.profile",
                                  background: .cell, showsHandle: false)
-        } header: {
-            header(.profile)
         }
 
         // Only the directory's @handle, never the Matrix ID's localpart: with
@@ -119,6 +115,186 @@ struct AccountSettingsDetail: View {
             }
         }
     }
+
+    /// The desktop recovery key comes last unless this phone must restore
+    /// messages before anything else (desktop `recovery_required`).
+    private var restoresFirst: Bool {
+        AccountRecoverySlot.decide(
+            offersHistoryRecovery: presentation.offersHistoryRecovery,
+            holdsRecoveryKey: presentation.holdsRecoveryKey
+        ) == .restoreMessages
+    }
+
+    @ViewBuilder private func accountSection(_ part: AccountPageSection) -> some View {
+        switch part {
+        case .howAtumAnswers: howAtumAnswersContent
+        case .recovery:
+            Section {
+                recoveryRows
+            } header: {
+                Text(copy("src.matrix.settings-copy.copy.encryptedMessages"))
+            }
+        case .devices: devicesContent
+        case .chats: chatsContent
+        case .memory: memoryContent
+        case .activity: activityContent
+        case .ignored: ignoredContent
+        }
+    }
+
+    /// Desktop's "How Atum answers": one Protons row with the whole-Proton
+    /// balance and what it pays for (never a paid/bonus split or a rate), and
+    /// Top up when the Store stream provides it.
+    @ViewBuilder private var howAtumAnswersContent: some View {
+        Section {
+            HStack(spacing: 12) {
+                ProtonMark(.regular)
+                    .frame(width: 28)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(copy("desktop.atum.protons.title"))
+                        .font(.body)
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    Text(protonsHelp)
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("account.settings.protons.balance")
+                // ST-5: the one Proton top-up entry (the shared pack sheet), or a
+                // host-provided opener. Neither: no button.
+                if let openTopUp = callbacks.openTopUp {
+                    topUpButton(openTopUp)
+                } else {
+                    ProtonTopUpEntry(design: design) { present in topUpButton(present) }
+                }
+            }
+            .frame(minHeight: 52)
+            settingsRow(glyph: .compass,
+                        title: copy("src.matrix.mobile-device-copy.mobileDeviceCopy.uiStore"),
+                        indicator: .push,
+                        identifier: "account.settings.protons.store",
+                        action: callbacks.openStore)
+        } header: {
+            header(.howAtumAnswers)
+        }
+    }
+
+    private func topUpButton(_ action: @escaping () -> Void) -> some View {
+        Button(text(.topUp), action: action)
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+            .tint(atum.color(.ink, scheme: scheme))
+            .accessibilityIdentifier("account.settings.protons.top-up")
+    }
+
+    private var protonsHelp: String {
+        if let value = store.walletValue {
+            return AccountSettingsCopy.text(.protonsLeft, argument: value, design: design)
+        }
+        if store.availability == .loading { return copy("desktop.common.loading") }
+        return text(.walletUnavailableHelp)
+    }
+
+    /// Your devices come first under how Atum answers (desktop `PrivacyPane`).
+    @ViewBuilder private var devicesContent: some View {
+        Section {
+            statusRow(glyph: .deviceMobile,
+                      title: UIDevice.current.name,
+                      value: AccountSettingsCopy.sectionTitle(.devices, design: design)
+                          + " · " + connectionText,
+                      identifier: "account.settings.privacy.devices.current")
+            capabilityRow(capability: presentation.settingsCapabilities.pairedDevices,
+                          glyph: .users,
+                          title: text(.otherDevices),
+                          identifier: "account.settings.privacy.devices.others")
+        } header: {
+            Text(copy("src.matrix.security-copy.copies.devicesTitle"))
+        }
+    }
+
+    /// The fact that is true for every chat, as on the desktop: where chats are
+    /// kept, that end-to-end encryption is per chat, and what it does to memory.
+    @ViewBuilder private var chatsContent: some View {
+        Section {
+            helpRow(glyph: .keyRound,
+                    title: text(.chatsStored),
+                    help: text(.chatsStoredHelp),
+                    value: nil,
+                    identifier: "account.settings.privacy.chats")
+        } header: {
+            header(.chats)
+        } footer: {
+            footer(text(.encryptionDetail))
+        }
+    }
+
+    /// Memory is not a setting yet: one honest row and the disclosure.
+    @ViewBuilder private var memoryContent: some View {
+        Section {
+            helpRow(glyph: .history,
+                    title: text(.remembers),
+                    help: text(.remembersHelp),
+                    value: capabilityMessage(presentation.settingsCapabilities.memory),
+                    identifier: "account.settings.privacy.memory")
+        } header: {
+            header(.memory)
+        } footer: {
+            footer(text(.memoryDisclosure))
+        }
+    }
+
+    @ViewBuilder private var activityContent: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { shareActivity },
+                set: { value in Task { _ = await setShareActivity(value) } }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(text(.shareActivity))
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    Text(text(.shareActivityHelp))
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                }
+            }
+            .tint(atum.color(.ink, scheme: scheme))
+            .frame(minHeight: 52)
+            .accessibilityIdentifier("account.share-activity")
+        } header: {
+            header(.activity)
+        }
+    }
+
+    /// Always drawn, as on the desktop; the list explains how ignoring works
+    /// when it is empty.
+    @ViewBuilder private var ignoredContent: some View {
+        Section {
+            NavigationLink {
+                IgnoredPeopleList(design: design, actions: actions)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(atum.symbol(.eyeOff))
+                        .font(.system(size: 20, weight: .light))
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .frame(width: 28)
+                        .accessibilityHidden(true)
+                    Text(copy("src.matrix.moderation-copy.copies.ignoredPeople"))
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                }
+                .frame(minHeight: 52)
+            }
+            .accessibilityIdentifier("account.settings.privacy.ignored")
+        } footer: {
+            footer(copy("src.matrix.moderation-copy.copies.ignoredHow"))
+        }
+    }
+
+    // MARK: Assistants
 
     /// The one index of assistants, as on the desktop: a lead line, then each
     /// assistant with what it is for and whether it is ready. A ready assistant
@@ -147,54 +323,25 @@ struct AccountSettingsDetail: View {
         }
     }
 
-    @ViewBuilder private var protonsContent: some View {
-        Section {
-            if let value = store.walletValue {
-                HStack(spacing: 8) {
-                    ProtonMark(.regular)
-                    Text(verbatim: value)
-                        .font(.title2.weight(.semibold))
-                        .monospacedDigit()
-                }
-                .frame(minHeight: 52)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(copy("desktop.atum.discover.protons", [.text(value)]))
-                .accessibilityIdentifier("account.settings.protons.balance")
-            } else {
-                statusRow(glyph: .compass,
-                          title: text(.protonBalance),
-                          value: storeStatus,
-                          identifier: "account.settings.protons.balance")
-            }
-            settingsRow(glyph: .compass,
-                        title: copy("src.matrix.mobile-device-copy.mobileDeviceCopy.uiStore"),
-                        indicator: .push,
-                        identifier: "account.settings.protons.store",
-                        action: callbacks.openStore)
-        } header: {
-            Text(copy("desktop.atum.protons.title"))
-        } footer: {
-            footer(text(.noStoreKitPurchase))
-        }
-    }
+    // MARK: General
 
-    // MARK: The app
-
+    /// Desktop's General: Look (appearance, text size, language), then
+    /// Notifications. Startup is a macOS login item and stays on the Mac.
     @ViewBuilder private var generalContent: some View {
         Section {
             appearanceRow
+            disabledRow(glyph: .fileText,
+                        title: copy("desktop.atum.settings.textSize"),
+                        value: text(.usesIOSSettings),
+                        identifier: "account.settings.general.text-size")
             settingsRow(glyph: .globe,
                         title: copy("desktop.atum.account.language"),
                         value: languageName,
                         indicator: .external,
                         identifier: "account.settings.general.language",
                         action: actions.openAppSettings)
-            disabledRow(glyph: .fileText,
-                        title: text(.textSize),
-                        value: text(.usesIOSSettings),
-                        identifier: "account.settings.general.text-size")
         } header: {
-            header(.display)
+            Text(copy("src.matrix.settings-copy.copy.display"))
         }
 
         Section {
@@ -205,149 +352,63 @@ struct AccountSettingsDetail: View {
                         identifier: "account.settings.general.notifications",
                         action: callbacks.notificationTapped)
         } header: {
-            header(.notifications)
+            Text(copy("src.matrix.settings-copy.copy.notifications"))
         } footer: {
             footer(text(.opensIOSSettings))
         }
     }
 
+    // MARK: Connections
+
+    /// Desktop's Connections: the account's subscription first, then Google
+    /// and the apps used in your chats. Browser logins read Chrome on a Mac
+    /// and stay there. Each row says "Not available yet" until its phone
+    /// adapter exists (plan v2 AC-5, wave 3 S8).
     @ViewBuilder private var connectionsContent: some View {
         Section {
-            capabilityRow(capability: presentation.settingsCapabilities.google,
-                          glyph: .globe,
-                          title: "Google",
-                          identifier: "account.settings.connections.google")
+            helpRow(glyph: .sparkles,
+                    title: text(.yourSubscription),
+                    help: text(.subscriptionHelp),
+                    value: text(.notAvailableYet),
+                    identifier: "account.settings.connections.subscription")
+        } header: {
+            Text(copy("src.matrix.model-picker-copy.COPY.subscriptions"))
         }
 
         Section {
-            if store.apps.isEmpty {
-                disabledRow(glyph: .compass,
-                            title: text(.apps),
-                            value: storeStatus,
-                            identifier: "account.settings.connections.apps")
-            } else {
-                ForEach(store.apps) { app in
-                    statusRow(glyph: .compass,
-                              title: app.title,
-                              value: app.subtitle,
-                              identifier: "account.settings.connections.app." + app.id)
-                }
-            }
+            statusRow(glyph: .globe,
+                      title: capabilityMessage(presentation.settingsCapabilities.google)
+                          ?? text(.google),
+                      value: nil,
+                      identifier: "account.settings.connections.google")
+        } header: {
+            header(.google)
+        }
+
+        Section {
+            statusRow(glyph: .compass,
+                      title: text(.notAvailableYet),
+                      value: nil,
+                      identifier: "account.settings.connections.apps")
         } header: {
             header(.apps)
         }
     }
 
-    /// This phone's own page, the sibling of the desktop's "This Mac": its
-    /// status, and where the things an assistant may do on a computer are set.
-    @ViewBuilder private var devicesContent: some View {
-        Section {
-            statusRow(glyph: .deviceMobile,
-                      title: UIDevice.current.name,
-                      value: connectionText,
-                      identifier: "account.settings.devices.current")
-        } header: {
-            Text(AccountSettingsCopy.sectionTitle(.devices, design: design))
-        }
+    // MARK: Help
 
+    /// Desktop's Help: the version, Help improve Atum (the reports), reaching
+    /// a person, then the fine print. Software updates belong to the App Store.
+    @ViewBuilder private var helpContent: some View {
         Section {
-            disabledRow(glyph: .clock,
-                        title: text(.availability),
-                        value: text(.manageOnMac),
-                        identifier: "account.settings.devices.availability")
-            disabledRow(glyph: .keyRound,
-                        title: text(.macAccess),
-                        value: text(.manageOnMac),
-                        identifier: "account.settings.devices.access")
+            statusRow(glyph: .fileText,
+                      title: copy("src.matrix.updates.copy.copy.currentVersion",
+                                  [.text(presentation.version)]),
+                      value: nil,
+                      identifier: "account.version")
+                .textSelection(.enabled)
         } header: {
-            header(.onYourMac)
-        } footer: {
-            footer(text(.macAccessHelp))
-        }
-    }
-
-    /// Most protective first, as on the desktop: the recovery key, your
-    /// devices, memory, chat encryption, then activity and the two reports.
-    @ViewBuilder private var privacyContent: some View {
-        Section {
-            recoveryRows
-        } header: {
-            Text(copy("src.matrix.settings-copy.copy.encryptedMessages"))
-        }
-
-        Section {
-            statusRow(glyph: .deviceMobile,
-                      title: UIDevice.current.name,
-                      value: text(.thisDevice) + " · " + connectionText,
-                      identifier: "account.settings.privacy.devices.current")
-            capabilityRow(capability: presentation.settingsCapabilities.pairedDevices,
-                          glyph: .users,
-                          title: text(.otherDevices),
-                          identifier: "account.settings.privacy.devices.others")
-        } header: {
-            Text(copy("src.matrix.security-copy.copies.devicesTitle"))
-        }
-
-        if actions.setIgnored != nil {
-            Section {
-                NavigationLink {
-                    IgnoredPeopleList(design: design, actions: actions)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(atum.symbol(.eyeOff))
-                            .font(.system(size: 20, weight: .light))
-                            .foregroundStyle(atum.color(.soft, scheme: scheme))
-                            .frame(width: 28)
-                            .accessibilityHidden(true)
-                        Text(copy("src.matrix.moderation-copy.copies.ignoredPeople"))
-                            .foregroundStyle(atum.color(.ink, scheme: scheme))
-                    }
-                    .frame(minHeight: 52)
-                }
-                .accessibilityIdentifier("account.settings.privacy.ignored")
-            } footer: {
-                footer(copy("src.matrix.moderation-copy.copies.ignoredHow"))
-            }
-        }
-
-        Section {
-            statusRow(glyph: .history,
-                      title: text(.remembers),
-                      value: capabilityMessage(presentation.settingsCapabilities.memory),
-                      identifier: "account.settings.privacy.memory")
-        } header: {
-            header(.memory)
-        } footer: {
-            footer(text(.memoryDisclosure))
-        }
-
-        Section {
-            disabledRow(glyph: .keyRound,
-                        title: text(.chatEncryption),
-                        value: text(.notAvailable),
-                        identifier: "account.settings.privacy.encryption")
-        } header: {
-            header(.chats)
-        }
-
-        Section {
-            Toggle(isOn: Binding(
-                get: { shareActivity },
-                set: { value in Task { _ = await setShareActivity(value) } }
-            )) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(text(.shareActivity))
-                        .foregroundStyle(atum.color(.ink, scheme: scheme))
-                    Text(text(.shareActivityHelp))
-                        .font(.footnote)
-                        .foregroundStyle(atum.color(.soft, scheme: scheme))
-                }
-            }
-            .tint(atum.color(.ink, scheme: scheme))
-            .frame(minHeight: 52)
-            .accessibilityIdentifier("account.share-activity")
-        } header: {
-            header(.activity)
+            Text(copy("desktop.atum.settings.about"))
         }
 
         Section {
@@ -364,20 +425,16 @@ struct AccountSettingsDetail: View {
                             identifier: "account.share-usage-data",
                             set: setUsageDataEnabled)
         } header: {
-            header(.reportingData)
+            Text(copy("src.matrix.settings-copy.copy.improve"))
         } footer: {
             footer(text(.reportingFooter))
         }
-    }
 
-    // MARK: Help and the expert corner
-
-    /// Reaching a person, the fine print and the version.
-    @ViewBuilder private var helpContent: some View {
         Section {
             if callbacks.founderContactAvailable {
                 settingsRow(glyph: .mail,
-                            title: callbacks.founderContactTitle,
+                            // Desktop: "Founder" under the section's "Contact us".
+                            title: copy("src.matrix.founder.founder-copy.FOUNDER_COPY.name"),
                             indicator: .push,
                             identifier: "account.settings.help.contact") {
                     Task { @MainActor in
@@ -395,11 +452,18 @@ struct AccountSettingsDetail: View {
                     }
                 }
             } else {
-                disabledRow(glyph: .mail,
-                            title: text(.contactAtum),
-                            value: text(.contactUnavailable),
-                            identifier: "account.settings.help.contact")
+                // Desktop: "Email support" when no Founder is reachable.
+                settingsRow(glyph: .mail,
+                            title: copy("src.matrix.founder.founder-copy.FOUNDER_COPY.emailSupport"),
+                            value: AccountSupportMail.mailbox,
+                            indicator: .external,
+                            identifier: "account.settings.help.contact") {
+                    let subject = copy("src.matrix.founder.founder-copy.FOUNDER_COPY.emailSubject")
+                    if let url = AccountSupportMail.url(subject: subject) { openURL(url) }
+                }
             }
+        } header: {
+            Text(copy("src.matrix.founder.founder-copy.FOUNDER_COPY.contactTitle"))
         }
 
         Section {
@@ -408,38 +472,6 @@ struct AccountSettingsDetail: View {
                         indicator: .push,
                         identifier: "account.settings.help.legal",
                         action: callbacks.openLegal)
-            statusRow(glyph: .fileText,
-                      title: copy("src.matrix.updates.copy.copy.currentVersion",
-                                  [.text(presentation.version)]),
-                      value: nil,
-                      identifier: "account.version")
-                .textSelection(.enabled)
-        } header: {
-            Text(copy("desktop.atum.settings.about"))
-        }
-    }
-
-    @ViewBuilder private var advancedContent: some View {
-        Section {
-            capabilityRow(capability: presentation.settingsCapabilities.advanced,
-                          glyph: .globe,
-                          title: text(.providersAndChatGPT),
-                          identifier: "account.settings.advanced.providers")
-        } header: {
-            header(.providersAndRepair)
-        }
-
-        Section {
-            disabledRow(glyph: .keyRound,
-                        title: text(.expertTools),
-                        value: text(.manageOnMac),
-                        identifier: "account.settings.advanced.tools")
-            disabledRow(glyph: .fileText,
-                        title: text(.technicalDetails),
-                        value: text(.manageOnMac),
-                        identifier: "account.settings.advanced.details")
-        } header: {
-            header(.expertTools)
         }
     }
 
@@ -463,7 +495,7 @@ struct AccountSettingsDetail: View {
         case nil:
             disabledRow(glyph: .keyRound,
                         title: copy("src.matrix.security-copy.copies.recoveryTitle"),
-                        value: text(.notAvailable),
+                        value: text(.notAvailableYet),
                         identifier: "account.settings.privacy.recovery-unavailable")
         }
     }
@@ -566,14 +598,16 @@ struct AccountSettingsDetail: View {
                                glyph: AtumGlyph,
                                title: String,
                                identifier: String) -> some View {
-        disabledRow(glyph: glyph, title: title,
-                    value: capabilityMessage(capability), identifier: identifier)
+        statusRow(glyph: glyph, title: title,
+                  value: capabilityMessage(capability), identifier: identifier)
     }
 
-    private func capabilityMessage(_ capability: AccountSettingsCapability) -> String {
-        switch capability {
-        case .unknown: text(.loadingSettings)
-        case .unavailable, .available: text(.notAvailable)
+    /// Nil once the capability is live: the row then says nothing about it.
+    private func capabilityMessage(_ capability: AccountSettingsCapability) -> String? {
+        switch AccountSettingsCapabilityStatus(capability) {
+        case .loading: copy("desktop.common.loading")
+        case .notAvailableYet: text(.notAvailableYet)
+        case .live: nil
         }
     }
 
@@ -585,14 +619,6 @@ struct AccountSettingsDetail: View {
         case .connecting: copy("src.matrix.copy.copies.connecting")
         case .offline: copy("src.matrix.copy.copies.offline")
         case .error: copy("src.matrix.copy.copies.enrollmentAbsent")
-        }
-    }
-
-    private var storeStatus: String {
-        switch store.availability {
-        case .loading: return text(.loadingSettings)
-        case .ready, .empty: return text(.connected)
-        case .offline, .unavailable: return text(.notAvailable)
         }
     }
 
@@ -723,6 +749,48 @@ struct AccountSettingsDetail: View {
         statusRow(glyph: glyph, title: title, value: value, identifier: identifier)
     }
 
+    /// A row with a quiet second line under its title, and an optional status
+    /// at the end (desktop `SettingsRow` with `help` and a status control).
+    private func helpRow(glyph: AtumGlyph,
+                         title: String,
+                         help: String,
+                         value: String?,
+                         identifier: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(atum.symbol(glyph))
+                .font(.body)
+                .foregroundStyle(atum.color(.muted, scheme: scheme))
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                statusTitle(title)
+                Text(help)
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let value, !value.isEmpty, dynamicTypeSize.isAccessibilitySize {
+                    Text(value)
+                        .font(.subheadline)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let value, !value.isEmpty, !dynamicTypeSize.isAccessibilitySize {
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 140, alignment: .trailing)
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(minHeight: 52)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([title, help, value].compactMap { $0 }
+            .filter { !$0.isEmpty }.joined(separator: ", "))
+        .accessibilityIdentifier(identifier)
+    }
+
     private func stackedStatus(_ title: String, _ value: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             statusTitle(title)
@@ -780,6 +848,17 @@ enum AccountSettingsCopy {
         key.resolved(locale: design.locale) { exportKey in
             design.copy.contains(exportKey) ? design.text(exportKey) : nil
         }
+    }
+
+    /// A key whose words carry one value (`%1$@`), such as the balance line.
+    static func text(_ key: AccountSettingsText, argument: String,
+                     design: LiveDesign) -> String {
+        if !AccountSettingsText.staleInPinnedExport.contains(key),
+           design.copy.contains(key.exportKey) {
+            return design.text(key.exportKey, arguments: [.text(argument)])
+        }
+        return key.fallback(locale: design.locale)
+            .replacingOccurrences(of: "%1$@", with: argument)
     }
 
     static func sectionTitle(_ section: AccountSettingsSectionID,

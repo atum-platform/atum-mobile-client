@@ -105,6 +105,23 @@ final class DriveFeatureModelTests: XCTestCase {
         XCTAssertEqual(model.connection, .ready)
     }
 
+    func testAFreshListingIsStampedAndACachedRepaintKeepsTheStamp() async throws {
+        let cache = try cache()
+        let reader = FakeDriveReader(rootResults: [.success(try page(items: [try item()]))])
+        let model = DriveFeatureModel()
+        let stamp = Date(timeIntervalSince1970: 1_800_000_000)
+        model.now = { stamp }
+        model.configure(accountID: "owner", resume: {
+            LiveDriveAccess(cache: cache, state: .active(reader))
+        }, connect: { LiveDriveAccess(cache: cache, state: .active(reader)) })
+        await model.start()
+        let root = model.directory(parentID: DrivePage.rootParentID)
+        XCTAssertEqual(root.condition, .fresh)
+        XCTAssertEqual(root.refreshedAt, stamp)
+        XCTAssertEqual(DriveStatusLine.decide(connection: model.connection, directory: root),
+                       .upToDate(stamp))
+    }
+
     func testConcurrentStartJoinsOneResumeAndOneClientLoad() async throws {
         let cache = try cache()
         let reader = FakeDriveReader(rootResults: [.success(try page(items: [try item()]))])

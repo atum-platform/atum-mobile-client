@@ -297,6 +297,18 @@ final class LiveAppModel {
         refreshWallet: { [weak self] in await self?.refreshApplePurchaseWallet() }
     )
 
+    /// The one top-up entry's context (lane 4 ST-5): the pack sheet over
+    /// `applePurchases`, with the fresh spendable balance.
+    @ObservationIgnored lazy var protonTopUp = ProtonTopUpContext(
+        purchases: applePurchases,
+        balance: { [weak self] in self?.freshWalletAvailable }
+    )
+
+    /// Spendable micro-Protons from a fresh wallet read only.
+    var freshWalletAvailable: Int64? {
+        walletRead.condition == .fresh ? walletRead.value?.balances.available : nil
+    }
+
     private func refreshApplePurchaseWallet() async {
         guard let client = domainClient else { return }
         let result = await readWallet(using: client)
@@ -1704,8 +1716,24 @@ final class LiveAppModel {
                 guard let self else { return .failed }
                 return await self.renameAssistantDefinition(roomID: roomID,
                                                             snapshot: snapshot, name: name)
-            }
+            },
+            pet: AssistantPetActions(read: { [weak self] in
+                await self?.readAssistantPetName(roomID: roomID)
+            })
         )
+    }
+
+    /// The card's Pet row value (AS-2): the assistant's pet by name, read from
+    /// `agents/{id}/pet` (plus the shelf only when a personal pet or the
+    /// primary's stand-in needs it). Any failure is nil, so the row says
+    /// "Choose", as desktop's `useAgentPetName` does.
+    private func readAssistantPetName(roomID: String) async -> String? {
+        guard let client = domainClient, let agent = agentForRoom(roomID) else { return nil }
+        guard let selection = try? await client.agentPet(assistantID: agent.id) else { return nil }
+        let catalog = AgentPetName.needsCatalog(selection, isPrimary: agent.isDefault)
+            ? try? await client.agentPetCatalog(assistantID: agent.id) : nil
+        guard domainClient === client, agentForRoom(roomID)?.id == agent.id else { return nil }
+        return AgentPetName.resolve(selection, catalog: catalog, isPrimary: agent.isDefault)
     }
 
     func assistantModelActions(roomID: String) -> AssistantModelActions? {
@@ -3662,11 +3690,14 @@ final class LiveAppModel {
         return CompanyChatInfo(
             companyID: claim.companyID,
             companyName: companyWorkspace.companyName(claim.companyID) ?? claim.displayName,
-            channelName: claim.displayName,
+            channelName: companyWorkspace.copy?.channelName(claim.displayName, isDefault: claim.isDefault)
+                ?? claim.displayName,
             members: companyWorkspace.members(companyID: claim.companyID),
             membersLoading: companyWorkspace.membersLoading.contains(claim.companyID),
             leavePending: companyWorkspace.isLeavePending(companyID: claim.companyID),
-            notice: companyWorkspace.copy?.notEncrypted ?? "")
+            notice: companyWorkspace.copy?.notEncrypted ?? "",
+            memberCount: companyWorkspace.channelMemberCount(roomID: roomID),
+            isDefaultChannel: claim.isDefault)
     }
 
     func refreshCompanyWorkspace() async {

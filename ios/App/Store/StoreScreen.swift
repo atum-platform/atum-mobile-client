@@ -20,10 +20,16 @@ struct StoreScreen: View {
     /// Acquisition, ownership and recovery. Without it the sheet shows the
     /// item only and offers no action.
     var commerce: LiveStoreCommerce? = nil
+    /// A shelf to scroll to once (an assistant card's Pet or Skills row);
+    /// `onShelfShown` clears the request.
+    var shelfRequest: StoreSectionKind? = nil
+    var onShelfShown: (() -> Void)? = nil
 
+    @Environment(\.protonTopUp) private var topUp
     @State private var showsDelayedLoadingMark = false
     @State private var selectedItem: LiveProductStoreItem?
     @State private var showsPurchased = false
+    @State private var query = ""
     @Environment(\.colorScheme) private var scheme
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -46,9 +52,9 @@ struct StoreScreen: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { ConnectionGlyph(design: design) }
-            // FlowPhone › Store: the balance once, as a glass capsule in the
-            // top bar. Display-only until the phone top-up board exists
-            // (owner, 11-01).
+            // FlowPhone › Store: the balance once, in the top bar, as the
+            // Proton mark and whole Protons. Pressing it opens the top-up
+            // (desktop `discover-view.tsx:563-581`, lane 4 W14).
             if let value = store.walletValue {
                 ToolbarItem(placement: .topBarTrailing) { balanceChip(value) }
             }
@@ -79,24 +85,96 @@ struct StoreScreen: View {
         }
     }
 
+    /// Desktop shelf order: Featured, Skills, Assistants, Apps, Pets, then
+    /// Purchased. Featured items also sit in their kind's shelf.
     private var catalog: some View {
-        List {
-            if showsPurchasedEntry { purchasedSection }
-            if !featured.isEmpty { itemSection(.featured, items: featured) }
-            if !store.apps.isEmpty { appSection }
-            if !assistants.isEmpty { itemSection(.assistants, items: assistants) }
-            if !skills.isEmpty { itemSection(.skills, items: skills) }
-            if !pets.isEmpty { itemSection(.pets, items: pets) }
-            if store.items.isEmpty && store.apps.isEmpty { emptySection }
+        ScrollViewReader { proxy in
+            catalogList
+                .task(id: ShelfScroll(shelf: shelfRequest, itemCount: store.items.count)) {
+                    guard let shelf = shelfRequest else { return }
+                    // A card opening a shelf lands on the unfiltered Store:
+                    // drop a leftover search, then let the full list draw
+                    // before scrolling to it.
+                    if !query.isEmpty {
+                        query = ""
+                        try? await Task.sleep(for: .milliseconds(50))
+                        guard !Task.isCancelled else { return }
+                    }
+                    if let first = firstItemID(on: shelf) {
+                        withAnimation { proxy.scrollTo(first, anchor: .top) }
+                    }
+                    onShelfShown?()
+                }
+        }
+    }
+
+    private struct ShelfScroll: Equatable {
+        let shelf: StoreSectionKind?
+        let itemCount: Int
+    }
+
+    /// The first row of a shelf as `catalogList` draws it (no search query:
+    /// a card opening a shelf lands on the unfiltered Store).
+    private func firstItemID(on shelf: StoreSectionKind) -> String? {
+        let plan = StoreShelfPlan(items: store.items, apps: store.apps, query: "")
+        switch shelf {
+        case .featured: return plan.featured.first?.id
+        case .apps: return plan.apps.first?.id
+        case .assistants: return plan.assistants.first?.id
+        case .skills: return plan.skills.first?.id
+        case .pets: return plan.pets.first?.id
+        }
+    }
+
+    private var catalogList: some View {
+        let plan = StoreShelfPlan(items: store.items, apps: store.apps, query: query)
+        return List {
+            if !plan.featured.isEmpty { itemSection(.featured, items: plan.featured) }
+            if !plan.skills.isEmpty { itemSection(.skills, items: plan.skills) }
+            if !plan.assistants.isEmpty {
+                itemSection(.assistants, items: plan.assistants)
+            } else if !plan.searching && !(store.items.isEmpty && store.apps.isEmpty) {
+                assistantsSoonSection
+            }
+            if !plan.apps.isEmpty { appSection(plan.apps) }
+            if !plan.pets.isEmpty { itemSection(.pets, items: plan.pets) }
+            if showsPurchasedEntry && !plan.searching { purchasedSection }
+            if plan.searching && plan.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .accessibilityIdentifier("store.search.empty")
+            } else if store.items.isEmpty && store.apps.isEmpty {
+                emptySection
+            }
             if store.staleAvailability != nil { staleSection }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: Text(copy(StoreShelfCopyKey.search)))
         .refreshable {
             await onRefresh()
             await commerce?.refresh()
         }
         .accessibilityIdentifier("store.catalog")
+    }
+
+    /// Desktop's Assistants shelf while nothing is for hire: "Coming soon".
+    private var assistantsSoonSection: some View {
+        Section {
+            Text(copy(StoreCopyKey.comingSoon))
+                .font(.subheadline)
+                .foregroundStyle(atum.color(.soft, scheme: scheme))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .accessibilityIdentifier("store.assistants.soon")
+        } header: {
+            sectionHeader(copy(sectionKey(.assistants)))
+        }
     }
 
     /// Purchased, once the account's purchase journal can be read: the way
@@ -130,36 +208,54 @@ struct StoreScreen: View {
             : kind == "pet" ? "desktop.atum.discover.petsSection" : "desktop.atum.discover.agentsSection")
     }
 
-    private func balanceChip(_ value: String) -> some View {
-        Text(verbatim: copy("desktop.atum.discover.protons", [.text(value)]))
-            .font(.subheadline.weight(.medium))
-            .monospacedDigit()
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .accessibilityLabel(copy(StoreCopyKey.protons, [.text(value)]))
-            .accessibilityIdentifier("store.balance")
+    /// The mark stands for the word, as a currency sign does; VoiceOver
+    /// reads "N Protons". With a top-up context it is the top-up button.
+    @ViewBuilder private func balanceChip(_ value: String) -> some View {
+        let label = HStack(spacing: 3) {
+            ProtonMark(.small)
+            Text(verbatim: value).monospacedDigit()
+        }
+        .font(.subheadline.weight(.semibold))
+        .lineLimit(1)
+        .padding(.horizontal, 6)
+        if topUp != nil {
+            ProtonTopUpEntry(design: design) { present in
+                Button(action: present) { label }
+                    .accessibilityLabel(copy(StoreCopyKey.protons, [.text(value)]))
+                    .accessibilityHint(copy(ProtonTopUpCopyKey.topUp))
+                    .accessibilityIdentifier("store.balance")
+            }
+        } else {
+            label
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(copy(StoreCopyKey.protons, [.text(value)]))
+                .accessibilityIdentifier("store.balance")
+        }
     }
 
     private func itemSection(_ kind: StoreSectionKind,
-                             items: [LiveProductStoreItem]) -> some View {
+                             items: [StoreListing]) -> some View {
         Section {
-            ForEach(items) { item in
+            ForEach(items) { listing in
+                let item = listing.item
                 Button { selectedItem = item } label: {
-                    StoreItemRow(design: design, item: item, status: status(for: item))
+                    StoreItemRow(design: design, item: item, status: status(for: item),
+                                 regularOffer: listing.regularOffer)
                 }
                 .buttonStyle(StoreRowButtonStyle(design: design))
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                .accessibilityIdentifier("store.item.\(item.id)")
+                // A featured item is listed again in its kind's shelf.
+                .accessibilityIdentifier(kind == .featured ? "store.featured.\(item.id)" : "store.item.\(item.id)")
             }
         } header: {
             sectionHeader(copy(sectionKey(kind)))
         }
     }
 
-    private var appSection: some View {
+    private func appSection(_ apps: [LiveProductStoreApp]) -> some View {
         Section {
-            ForEach(store.apps) { app in
+            ForEach(apps) { app in
                 StoreAppRow(
                     design: design,
                     app: app,
@@ -172,13 +268,13 @@ struct StoreScreen: View {
                 )
             }
         } header: {
-            sectionHeader(copy("desktop.atum.discover.appsSection"))
+            sectionHeader(copy(sectionKey(.apps)))
         }
     }
 
     private var emptySection: some View {
         Section {
-            Text(copy("desktop.atum.workspace.empty"))
+            Text(copy(StoreShelfCopyKey.empty))
                 .font(.subheadline)
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -257,35 +353,25 @@ struct StoreScreen: View {
         guard let commerce else {
             return item.kind != .skill && item.ownership?.state == .owned ? .owned : .price
         }
-        if commerce.purchases.contains(where: { $0.itemID == item.id && $0.state == .deliveryPending }) {
+        let ids = StoreShelfPlan.itemIDs(for: item.id)
+        if commerce.purchases.contains(where: { ids.contains($0.itemID) && $0.state == .deliveryPending }) {
             return .pending
         }
         // A skill is owned per assistant: its row keeps the price.
-        guard item.kind != .skill,
-              let catalogItem = commerce.catalog.first(where: { $0.itemID == item.id }) else {
-            return item.kind != .skill && item.ownership?.state == .owned ? .owned : .price
-        }
-        return commerce.owned(catalogItem, assistant: nil) ? .owned : .price
-    }
-
-    private var featured: [LiveProductStoreItem] { store.items.filter(\.featured) }
-    private var assistants: [LiveProductStoreItem] {
-        store.items.filter { !$0.featured && $0.kind == .agent }
-    }
-    private var skills: [LiveProductStoreItem] {
-        store.items.filter { !$0.featured && $0.kind == .skill }
-    }
-    private var pets: [LiveProductStoreItem] {
-        store.items.filter { !$0.featured && $0.kind == .pet }
+        guard item.kind != .skill else { return .price }
+        // The folded Hatch card carries the regular card's ownership.
+        if item.ownership?.state == .owned { return .owned }
+        let catalogItems = commerce.catalog.filter { ids.contains($0.itemID) }
+        return catalogItems.contains { commerce.owned($0, assistant: nil) } ? .owned : .price
     }
 
     private func sectionKey(_ kind: StoreSectionKind) -> String {
         switch kind {
-        case .featured: "desktop.atum.discover.featuredSection"
-        case .apps: "desktop.atum.discover.appsSection"
-        case .assistants: "desktop.atum.discover.agentsSection"
-        case .skills: "desktop.atum.discover.skillsSection"
-        case .pets: "desktop.atum.discover.petsSection"
+        case .featured: StoreShelfCopyKey.featured
+        case .apps: StoreShelfCopyKey.apps
+        case .assistants: StoreShelfCopyKey.assistants
+        case .skills: StoreShelfCopyKey.skills
+        case .pets: StoreShelfCopyKey.pets
         }
     }
 
@@ -358,6 +444,24 @@ private struct StoreRowButtonStyle: ButtonStyle {
 }
 
 /// The trailing value's one style, shared by every row in the Store.
+/// The row's price button (desktop `ak-btn--sm`): a quiet capsule. The
+/// whole row is the tap target and opens the item sheet, as on desktop.
+private struct StoreRowPill<Label: View>: View {
+    let design: LiveDesign
+    @ViewBuilder let label: Label
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        label
+            .font(design.kit.font(.callout).weight(.semibold))
+            .foregroundStyle(design.kit.color(.ink, scheme: scheme))
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(design.kit.color(.fillQuiet, scheme: scheme), in: Capsule())
+    }
+}
+
 private struct StoreTrailingText: View {
     let design: LiveDesign
     let text: String
@@ -413,10 +517,13 @@ private struct StorePurchasedEntry: View {
 
 struct StoreItemRow: View {
     enum Status: Equatable { case price, owned, pending }
+    @Environment(\.colorScheme) private var scheme
 
     let design: LiveDesign
     let item: LiveProductStoreItem
     var status: Status = .price
+    /// The Hatch card's regular price, struck through beside the first-hatch one.
+    var regularOffer: StoreCatalogOffer? = nil
 
     var body: some View {
         StoreRowLayout(design: design, title: item.title, summary: item.summary,
@@ -429,31 +536,51 @@ struct StoreItemRow: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    /// Desktop `store-card.tsx`: one small button per row, the Proton mark
+    /// and the first price ("Open" once owned, "Free" when it costs
+    /// nothing). A monthly hire's "first month · then …/mo" terms belong to
+    /// the item sheet, not the row; VoiceOver still reads them here.
     @ViewBuilder private var trailing: some View {
         switch status {
         case .owned:
-            StoreTrailingText(design: design, text: design.text(StoreCopyKey.owned), quiet: true)
+            StoreRowPill(design: design) { Text(design.text(StoreCopyKey.open)) }
         case .pending:
             Image(AtumVisualSystem(design: design).symbol(.clock))
                 .font(design.kit.font(.callout))
                 .accessibilityHidden(true)
         case .price:
-            if let offer = item.offer, offer.billingInterval == .month {
-                StoreTrailingText(design: design, text: StorePricePresentation.text(offer, design: design),
-                                  lineLimit: nil)
-            } else if let value = item.price {
-                if value == "0" {
-                    StoreTrailingText(design: design, text: design.text(StoreCopyKey.free), quiet: true)
-                } else {
-                    // A price, not a purchase button: the sheet holds the review.
-                    HStack(spacing: 3) {
-                        ProtonMark(.small)
-                        Text(verbatim: value).monospacedDigit()
+            if let amount = firstPrice {
+                VStack(alignment: .trailing, spacing: 2) {
+                    StoreRowPill(design: design) {
+                        HStack(spacing: 3) {
+                            ProtonMark(.small)
+                            Text(verbatim: amount).monospacedDigit()
+                        }
                     }
-                    .font(design.kit.font(.callout).weight(.semibold))
+                    if let regularOffer {
+                        // PENDING-COPY:store-copy.ts firstHatch / regularPrice labels.
+                        Text(verbatim: StoreOutcomePresentation.protons(regularOffer.priceMicroProtons))
+                            .font(design.kit.font(.caption))
+                            .monospacedDigit()
+                            .strikethrough()
+                            .foregroundStyle(design.kit.color(.ink3, scheme: scheme))
+                    }
                 }
+            } else if item.offer != nil || item.price == "0" {
+                // PENDING-COPY: desktop says "Get" (store-copy.ts `get`), not yet exported.
+                StoreRowPill(design: design) { Text(design.text(StoreCopyKey.free)) }
             }
         }
+    }
+
+    /// The first price, formatted the same way as every other amount on the
+    /// screen; nil when the item is free or has no price.
+    private var firstPrice: String? {
+        if let offer = item.offer {
+            return offer.priceMicroProtons > 0 ? StoreOutcomePresentation.protons(offer.priceMicroProtons) : nil
+        }
+        guard let value = item.price, value != "0" else { return nil }
+        return value
     }
 
     private var accessibilityLabel: String {
@@ -495,7 +622,7 @@ struct StoreItemArt: View {
                             .resizable()
                             .scaledToFill()
                     } else {
-                        Image(atum.symbol(glyph))
+                        Image(atum.design.symbol(glyphAlias))
                             .font(.system(size: size * 0.42, weight: .light))
                             .foregroundStyle(atum.color(.ink, scheme: scheme))
                     }
@@ -510,12 +637,15 @@ struct StoreItemArt: View {
         .accessibilityHidden(true)
     }
 
-    private var glyph: AtumGlyph {
-        switch item.kind {
-        case .skill: .sparkles
-        case .agent: .userCircle
-        case .pet: .pawPrint
+    /// The item's own Phosphor glyph from its catalog emoji, else its kind's
+    /// (desktop `storeGlyphIcon`, `store-card.tsx:92-97`).
+    private var glyphAlias: String {
+        let kind: StoreCatalogItem.Kind = switch item.kind {
+        case .skill: .skill
+        case .agent: .agent
+        case .pet: .pet
         }
+        return StoreGlyphs.alias(glyph: item.glyph, kind: kind)
     }
 }
 

@@ -334,6 +334,71 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
+    func testPackRowsSumPaidAndBonusIntoOneTotalWithStoreKitPrice() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        let c = await make(store, api)
+        // Owner ruling 1: one total per pack, never the paid/bonus parts.
+        XCTAssertEqual(c.packRows, [
+            .init(id: "com.atum.mobile.protons.100k", totalMicroProtons: 100_000_000_000,
+                  displayPrice: "synthetic-price"),
+            .init(id: "com.atum.mobile.protons.500k", totalMicroProtons: 500_000_000_000,
+                  displayPrice: "synthetic-price"),
+        ])
+        c.bind(accountID: nil, api: nil)
+        XCTAssertTrue(c.packRows.isEmpty)
+    }
+
+    func testPackRowsSkipUnpricedProductsAndSortByTotal() throws {
+        func pack(_ id: String, _ paid: Int64, _ bonus: Int64) throws -> AppleProductsResponse.Pack {
+            try NativeAPI.decode(AppleProductsResponse.Pack.self, from: JSONSerialization.data(withJSONObject: [
+                "productId": id, "packId": "p", "paidMicroProtons": paid, "bonusMicroProtons": bonus]))
+        }
+        let rows = AppleProtonPackRow.rows(
+            packs: [try pack("com.atum.mobile.protons.500k", 400, 100),
+                    try pack("com.atum.mobile.protons.100k", 90, 10),
+                    try pack("com.atum.mobile.protons.unpriced", 1, 0)],
+            products: [.init(id: "com.atum.mobile.protons.100k", displayPrice: "A"),
+                       .init(id: "com.atum.mobile.protons.500k", displayPrice: "B")])
+        XCTAssertEqual(rows.map(\.id), ["com.atum.mobile.protons.100k", "com.atum.mobile.protons.500k"])
+        XCTAssertEqual(rows.map(\.totalMicroProtons), [100, 500])
+    }
+
+    func testClearingSettledOutcomesReopensPacksButKeepsInFlightAndSupportStates() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.result = .unverified
+        let c = await make(store, api)
+        await c.purchase(id)
+        XCTAssertEqual(c.state, .unavailable); XCTAssertFalse(c.canPurchase)
+        c.clearSettledOutcomes()
+        XCTAssertEqual(c.state, .ready); XCTAssertTrue(c.canPurchase)
+        XCTAssertEqual(c.purchaseState(for: id), .idle)
+
+        store.result = .pending
+        await c.purchase(id)
+        c.clearSettledOutcomes()
+        XCTAssertEqual(c.purchaseState(for: id), .pending); XCTAssertFalse(c.canPurchase)
+        c.bind(accountID: nil, api: nil)
+
+        // needs_support keeps its transaction ID for the person to quote.
+        let supportStore = PurchaseStoreStub(); let supportAPI = PurchaseAPIStub()
+        supportAPI.sample = .transactionNeedsSupport
+        supportStore.result = .verified(transaction(id: "2000000123456790") {})
+        let s = await make(supportStore, supportAPI)
+        await s.purchase(id)
+        await settled { s.state == .needsSupport("2000000123456790") }
+        s.clearSettledOutcomes()
+        XCTAssertEqual(s.purchaseState(for: id), .needsSupport("2000000123456790"))
+        s.bind(accountID: nil, api: nil)
+    }
+
+    func testClearingSettledOutcomesNeverReopensAClosedCheckout() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub(); api.closed = true
+        let c = await make(store, api)
+        c.clearSettledOutcomes()
+        XCTAssertEqual(c.state, .closed); XCTAssertFalse(c.canPurchase)
+        c.bind(accountID: nil, api: nil)
+    }
+
     private func transaction(id transactionID: String = "2000000123456789",
                              environment: ApplePurchaseEnvironment = .sandbox,
                              _ finish: @escaping @MainActor @Sendable () async -> Void) -> AppleVerifiedTransaction {

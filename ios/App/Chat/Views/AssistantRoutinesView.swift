@@ -1,3 +1,4 @@
+import AtumChat
 import AtumDesign
 import AtumNativeAPI
 import CryptoKit
@@ -74,10 +75,11 @@ struct AssistantRoutinesView: View {
     var body: some View {
         Group {
             if snapshot == nil, !failed {
-                ProgressView().accessibilityIdentifier("assistant.routines.loading")
+                ProgressView { Text(cardCopy.routine(.routineLoading)) }
+                    .accessibilityIdentifier("assistant.routines.loading")
             } else if failed, snapshot == nil {
                 ContentUnavailableView {
-                    Label(copy(.loadFailed, [.text(assistantName)]),
+                    Label(cardCopy.routine(.routineLoadFailed, name: assistantName),
                           image: atum.symbol(.alertCircle))
                 } actions: {
                     Button(copy(.retry)) { Task { await load() } }
@@ -85,10 +87,9 @@ struct AssistantRoutinesView: View {
             } else if let snapshot {
                 List {
                     if snapshot.legacyState == .unknown {
+                        // Desktop says only "Getting ready…" here (`routinePreparing`).
                         ContentUnavailableView {
-                            Label("Đang chuẩn bị…", image: atum.symbol(.clock))
-                        } description: {
-                            Text(verbatim: "Lịch tự động sẽ hiện ở đây khi máy chủ sẵn sàng.")
+                            Label(cardCopy.routine(.routinePreparing), image: atum.symbol(.clock))
                         } actions: {
                             Button(copy(.retry)) { Task { await load() } }
                         }
@@ -96,7 +97,7 @@ struct AssistantRoutinesView: View {
                         .accessibilityIdentifier("assistant.routines.preparing")
                     } else if snapshot.legacyState == .present {
                         ContentUnavailableView {
-                            Label("Đang chuyển lịch cũ", image: atum.symbol(.clock))
+                            Label(cardCopy.routine(.routineLegacyMoving), image: atum.symbol(.clock))
                         } description: {
                             Text(copy(.routineLegacyPending))
                         }
@@ -163,7 +164,7 @@ struct AssistantRoutinesView: View {
                 .font(.caption2)
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
             if isReadOnly {
-                Text(verbatim: "Không sửa được trên điện thoại")
+                Text(cardCopy.routine(.routineReadOnly))
                     .font(.caption)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
                     .accessibilityIdentifier("assistant.routine.\(routine.id.rawValue).read-only")
@@ -191,6 +192,7 @@ struct AssistantRoutinesView: View {
                       _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key.rawValue, arguments: arguments)
     }
+    private var cardCopy: AssistantCardCopy { AssistantCardCopy(design: design) }
 }
 
 private struct AssistantRoutineEditor: View {

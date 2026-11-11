@@ -6,8 +6,9 @@ import SwiftUI
 /// One Store item (FlowStore-2 / FlowPhone3 › Store item): what it is, its
 /// price in Protons, owned or pending state, the recipient for a skill, and a
 /// separate review step before any Protons move. An action appears only when
-/// `LiveStoreCommerce` reports it possible; there is no top-up or Proton
-/// purchase entry here (App Review 3.1.1).
+/// `LiveStoreCommerce` reports it possible. Short of Protons, the action is the
+/// in-app Proton top-up (Apple IAP only, App Review 3.1.1), which returns here
+/// with Continue (desktop `store-detail.tsx:372-420, 611-614`).
 struct StoreItemSheet: View {
     let design: LiveDesign
     let item: LiveProductStoreItem
@@ -19,6 +20,9 @@ struct StoreItemSheet: View {
     @State private var reviewing = false
     /// Check status from the sheet: its outcome is this sheet's to show.
     @State private var checking = false
+    /// Hosted here, not on the short-of-Protons button: the credit turns that
+    /// button into Get, which would otherwise dismiss the sheet mid-flow.
+    @State private var showsTopUp = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
 
@@ -38,6 +42,8 @@ struct StoreItemSheet: View {
                 }
         }
         .atumDesign(design)
+        .protonTopUpSheet(design: design, isPresented: $showsTopUp, finish: .continueToItem,
+                          onFinished: { Task { await commerce?.refresh() } })
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(commerce?.busy == true)
         .task {
@@ -60,6 +66,9 @@ struct StoreItemSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, kit.space(.s5))
                         .accessibilityIdentifier("store.detail.description")
+                }
+                if !requirementKeys.isEmpty {
+                    requirements.padding(.top, kit.space(.s5))
                 }
                 if !item.tryPrompt.isEmpty {
                     Text(copy(StoreCopyKey.tryExample, [.text(item.tryPrompt)]))
@@ -121,6 +130,32 @@ struct StoreItemSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.top, kit.space(.s2))
+    }
+
+    // MARK: What it uses
+
+    private var requirementKeys: [String] { StoreRequirementPresentation.keys(for: item.needs) }
+
+    /// Desktop "What it uses" (`store-detail.tsx:177-187`): one check row per
+    /// requirement the export names.
+    private var requirements: some View {
+        // PENDING-COPY: the "What it uses" heading (store-copy.ts `whatItUses`)
+        // is not exported; the rows stand alone until it is.
+        VStack(alignment: .leading, spacing: kit.space(.s2)) {
+            ForEach(requirementKeys, id: \.self) { key in
+                HStack(spacing: 10) {
+                    Image(atum.symbol(.check))
+                        .font(kit.font(.callout))
+                        .foregroundStyle(kit.color(.ink2, scheme: scheme))
+                        .accessibilityHidden(true)
+                    Text(copy(key))
+                        .font(kit.font(.body))
+                        .foregroundStyle(kit.color(.ink, scheme: scheme))
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("store.detail.requirements")
     }
 
     // MARK: Recipient
@@ -267,10 +302,14 @@ struct StoreItemSheet: View {
     }
 
     private func ownedFor(_ assistant: NativeID?) -> Bool {
-        guard let commerce, let catalogItem else {
-            return item.kind != .skill && item.ownership?.state == .owned
-        }
-        return commerce.owned(catalogItem, assistant: assistant)
+        // The folded Hatch card carries the regular card's ownership.
+        if item.kind != .skill, item.ownership?.state == .owned { return true }
+        guard let commerce, let catalogItem else { return false }
+        if commerce.owned(catalogItem, assistant: assistant) { return true }
+        // A held credit for the other Hatch item counts too.
+        return commerce.catalog
+            .filter { StoreShelfPlan.itemIDs(for: item.id).contains($0.itemID) && $0.itemID != catalogItem.itemID }
+            .contains { commerce.owned($0, assistant: assistant) }
     }
 
     private var phase: Phase {
@@ -349,18 +388,25 @@ struct StoreItemSheet: View {
     private var actionContent: AnyView? {
         switch phase {
         case .ready(let value):
-            let price = copy(StoreCopyKey.protons,
-                             [.text(StoreOutcomePresentation.protons(value.price))])
+            let amount = StoreOutcomePresentation.protons(value.price)
             return AnyView(
                 Button {
                     quote = value
                     reviewing = true
                 } label: {
-                    Text(copy(StoreCopyKey.buyFor, [.text(price)]))
+                    StoreGetLabel(design: design, amount: value.price == 0 ? nil : amount)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.atumPrimary)
+                .accessibilityLabel(value.price == 0 ? copy(StoreShelfCopyKey.get)
+                    : copy(StoreShelfCopyKey.getWithPrice, [.text(copy(StoreCopyKey.protons, [.text(amount)]))]))
                 .accessibilityIdentifier("store.detail.acquire")
+            )
+        case .blocked(.insufficientBalance):
+            guard commerce != nil else { return nil }
+            return AnyView(
+                ProtonTopUpButton(design: design, style: .atumPrimary, fullWidth: true,
+                                  present: { showsTopUp = true })
             )
         case .owned:
             guard let roomID = roomID(assistant) else { return nil }
@@ -474,6 +520,15 @@ private struct StoreReviewView: View {
     }
 
     private var working: Bool { commerce.busy || state == .working }
+
+    /// The write was refused for want of Protons (locally or by the server).
+    private var short: Bool {
+        if requoteFailure == .insufficientBalance { return true }
+        switch state {
+        case .insufficientBalance?, .result(.refused(.insufficientProtons))?: return true
+        default: return false
+        }
+    }
 
     private var outcome: StoreOutcome? {
         guard let state, !commerce.busy else { return nil }
@@ -610,6 +665,15 @@ private struct StoreReviewView: View {
                         .buttonStyle(.atumPlain)
                         .accessibilityIdentifier("store.review.open")
                 }
+            case .stopped? where short:
+                // Refused short: top up, then back to the item to review again.
+                ProtonTopUpButton(design: design, style: .atumPrimary, fullWidth: true,
+                                  finish: .continueToItem,
+                                  onFinished: {
+                                      pop()
+                                      Task { await commerce.refresh() }
+                                  })
+                closeButton(.atumPlain)
             case .recorded?, .stopped?:
                 closeButton(.atumPrimary)
             }
@@ -654,6 +718,30 @@ private struct StoreReviewView: View {
 }
 
 // MARK: - Shared pieces
+
+/// "Get · [mark] 8,000" (desktop `store-detail.tsx:327-333, 615-624`), or "Get"
+/// when free: the exported phrase, with the Proton mark before the amount.
+struct StoreGetLabel: View {
+    let design: LiveDesign
+    let amount: String?
+
+    var body: some View {
+        if let amount {
+            let marker = "\u{1}"
+            let parts = design.text(StoreShelfCopyKey.getWithPrice, arguments: [.text(marker)])
+                .components(separatedBy: marker)
+            HStack(spacing: 4) {
+                if let lead = parts.first, !lead.isEmpty { Text(verbatim: lead) }
+                ProtonMark(.small)
+                Text(verbatim: amount).monospacedDigit()
+                if parts.count > 1, !parts[1].isEmpty { Text(verbatim: parts[1]) }
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            Text(design.text(StoreShelfCopyKey.get))
+        }
+    }
+}
 
 /// A label and its value on one line; at accessibility sizes the value moves
 /// under the label instead of squeezing it.

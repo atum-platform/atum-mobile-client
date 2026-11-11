@@ -61,6 +61,8 @@ struct AppRoot: View {
     @State private var reporting = LiveReporting.shared
     @State private var router = Router()
     @State private var rosterStore = RosterStore()
+    /// HC-3: my assistants' typing, for Home's working atom.
+    @State private var assistantActivity = HomeAssistantActivity()
     @State private var openRequestGeneration: UInt64 = 0
     @State private var dismissChatPresentationRequest: UInt64 = 0
     @State private var signInAttempt = SignInAttemptGate()
@@ -334,6 +336,15 @@ struct AppRoot: View {
                     model.recordChatListSnapshot(accountID: account.matrixUserID,
                                                  rows: value.rows)
                 }
+                .task(id: HomeAssistantActivityKey(
+                    session: model.liveMatrix.map { ObjectIdentifier($0) },
+                    ready: model.liveMatrix?.isReady == true,
+                    roomIDs: Set(home.rows.filter { $0.kind.isAssistant && $0.canOpen }.map(\.roomID))
+                )) {
+                    assistantActivity.watch(
+                        roomIDs: Set(home.rows.filter { $0.kind.isAssistant && $0.canOpen }.map(\.roomID)),
+                        session: model.liveMatrix)
+                }
                 .navigationDestination(for: String.self) { roomID in
                     chatHost(account, roomID: roomID)
                 }
@@ -349,7 +360,9 @@ struct AppRoot: View {
                 setAppShortcutVisibility: { appID, shown in
                     await model.setAppShortcutVisibility(appID: appID, shown: shown)
                 },
-                commerce: model.storeCommerce
+                commerce: model.storeCommerce,
+                shelfRequest: router.storeShelfRequest,
+                onShelfShown: { router.storeShelfShown() }
             )
         } teamSpace: {
             TeamSpaceScreen(
@@ -366,7 +379,11 @@ struct AppRoot: View {
                     switcher: model.companyWorkspace.switcherEntries(signals: companySignals),
                     canCreate: model.companyWorkspace.canCreate,
                     appIconCount: home.appIconCount,
-                    logos: model.companyWorkspace.logoURIs(from: presentation.rooms.rooms)
+                    logos: model.companyWorkspace.logoURIs(from: presentation.rooms.rooms),
+                    menu: model.companyWorkspace.menuAllowed(companyID: model.companyWorkspace.activeCompanyID),
+                    viewerRole: model.companyWorkspace.activeCompanyID.flatMap {
+                        model.companyWorkspace.viewerRole(companyID: $0)
+                    }
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },
@@ -397,7 +414,10 @@ struct AppRoot: View {
                     loadMatrixThumbnail: { uri, side in
                         await model.avatarThumbnail(uri: uri, pixelSide: side)
                     },
-                    directMessages: directMessagesActions
+                    directMessages: directMessagesActions,
+                    loadActivity: { await model.companyActivity(companyID: $0) },
+                    loadSavedPointers: { await model.companySavedPointers() },
+                    loadSavedRows: { await model.companySavedRows($0) }
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -462,14 +482,15 @@ struct AppRoot: View {
                                       router.dismissAccount()
                                       requestRoomOpen(assistant.roomID)
                                   },
-                                  onOpenStore: {
+                                  onOpenStore: { shelf in
                                       router.dismissAccount()
-                                      router.select(tab: .store)
+                                      router.openStore(shelf: shelf)
                                   }
                               ))
                           })
         }
         .environment(\.showsConnectionGlyph, model.showsConnectionGlyph)
+        .environment(\.protonTopUp, model.protonTopUp)
         .task(id: rosterSnapshot) {
             rosterStore.apply(rosterSnapshot)
             validatePendingPush()
@@ -641,9 +662,16 @@ struct AppRoot: View {
         } else {
             rows = liveRows
         }
+        // HC-3/HC-5: live-only facts (an assistant at work, a group's size)
+        // on top of whichever rows were painted; never cached.
+        let memberCounts = (model.liveMatrix?.rooms ?? []).reduce(into: [String: Int]()) {
+            $0[$1.roomID] = Int(min($1.memberCount, UInt64(Int.max)))
+        }
         return HomePresentation(
             state: state,
-            rows: rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) },
+            rows: HomeRow.applyingLive(rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) },
+                                       workingRoomIDs: assistantActivity.workingRoomIDs,
+                                       memberCounts: memberCounts),
             showsNotificationPrompt: source.notificationPrompt,
             showsDomainReauthentication: model.domainRecoveryState == .reauthenticationRequired,
             domainReauthenticationBusy: model.domainReauthenticationInProgress,
@@ -724,7 +752,7 @@ struct AppRoot: View {
                     assistantAvatar: model.assistantAvatarActions(roomID: roomID),
                     assistantPresentation: model.assistantPresentationActions(roomID: roomID),
                     assistantRoutines: model.assistantRoutineActions(roomID: roomID),
-                    openStore: { router.select(tab: .store) },
+                    openStore: { router.openStore(shelf: $0) },
                     // The Chief of Staff and "You" offer no Delete chat, Leave or Ignore (lane 2 D5).
                     exitRoom: model.offersPersonalExits(roomID: roomID) ? { roomID, action in
                         model.exitRoom(roomID, action)
@@ -737,7 +765,10 @@ struct AppRoot: View {
                     loadDetails: { await model.chatPanelDetails(roomID: $0) },
                     moderateMember: { await model.moderateMember(roomID: $0, userID: $1, action: $2) },
                     assistantTurnStop: model.assistantTurnStopActions(roomID: roomID),
-                    sharedCollections: model.sharedCollectionsOpener(roomID: roomID)
+                    sharedCollections: model.sharedCollectionsOpener(roomID: roomID),
+                    companyChannel: CompanyChannelActions(
+                        loadFacts: { await model.companyChannelFacts(roomID: $0) },
+                        loadPinned: { await model.companyPinnedRows(roomID: $0) })
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),

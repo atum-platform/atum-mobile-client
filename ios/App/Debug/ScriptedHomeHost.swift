@@ -61,7 +61,7 @@ struct ScriptedHomeHost: View {
                     router: router,
                     accountName: Self.accountName,
                     presentation: HomePresentation(state: rows.isEmpty ? .empty : .ready,
-                                                   rows: Self.testHomeRows(roster, productRows: rows)),
+                                                   rows: Self.workingRows(Self.testHomeRows(roster, productRows: rows))),
                     actions: HomeActions(
                         openRoom: { router.open(roomId: $0) },
                         joinInvitation: { roomID in
@@ -327,6 +327,14 @@ struct ScriptedHomeHost: View {
             appAccent: removed.appAccent, appVerification: removed.appVerification,
             canOpen: true, isAppBotRoom: true
         ))
+    }
+
+    /// HC-3 captures: `-AtumDebugWorking` shows the first assistant at work,
+    /// as a typing agent does live (`HomeAssistantActivity`).
+    static func workingRows(_ rows: [HomeRow]) -> [HomeRow] {
+        guard ProcessInfo.processInfo.arguments.contains("-AtumDebugWorking"),
+              let first = rows.first(where: \.kind.isAssistant) else { return rows }
+        return HomeRow.applyingLive(rows, workingRoomIDs: [first.roomID], memberCounts: [:])
     }
 
     static func homeRows(_: ScriptedRoster, productRows: [LiveProductRoom]) -> [HomeRow] {
