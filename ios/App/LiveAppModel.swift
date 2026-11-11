@@ -3439,7 +3439,9 @@ final class LiveAppModel {
     /// The chat's kind and who is who in it (§2.7), from the same tested
     /// policies the roster uses: the owner's agent → my assistant; a catalog
     /// bot → app bot; otherwise a 1:1 person or a group by member count.
-    private func conversationInfo(roomID: String, title: String, ownUserID: String) -> ConversationRoomInfo? {
+    /// Internal (not private) for TS-6b: a thread's store is built from the same facts
+    /// (`CompanyThreadsReads.swift`).
+    func conversationInfo(roomID: String, title: String, ownUserID: String) -> ConversationRoomInfo? {
         guard let room = liveMatrix?.rooms.first(where: { $0.roomID == roomID }) else { return nil }
         var agentByUser = [String: AgentsResponse.Agent]()
         for agent in agentsRead.value?.agents ?? [] where agent.status == .active {

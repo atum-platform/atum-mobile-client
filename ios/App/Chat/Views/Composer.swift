@@ -40,6 +40,9 @@ struct ChatComposer: View {
     /// Stop for my assistant's turn; nil where the stop route is not
     /// reachable, and then no Stop is drawn.
     let turnStopActions: AssistantTurnStopActions?
+    /// The field's prompt when the host names its own (a thread says "Reply",
+    /// desktop `MatrixComposer` with `threadRootId`); nil keeps "Message {chat}".
+    var placeholder: String? = nil
 
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var scheme
@@ -217,7 +220,7 @@ struct ChatComposer: View {
     /// B25: plain multi-line text. Return inserts a newline (no
     /// `submitLabel`, no `onSubmit`); only the circle sends.
     private var field: some View {
-        TextField(ChatCopy.text(design, ChatCopy.Key.composerPlaceholder, [.text(store.title)]),
+        TextField(placeholder ?? ChatCopy.text(design, ChatCopy.Key.composerPlaceholder, [.text(store.title)]),
                   text: Binding(get: { store.draft }, set: { store.draft = $0 }),
                   axis: .vertical)
             .lineLimit(1...ComposerRules.maximumLines)
