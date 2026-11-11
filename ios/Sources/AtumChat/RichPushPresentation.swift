@@ -30,6 +30,17 @@ public enum RichPushPresentation {
     }
     public struct Content: Equatable, Sendable {
         public let title, subtitle, body: String
+        /// The validated sender name (or the exported "unnamed" word) and,
+        /// in a group, the validated room name: the communication intent's
+        /// person and group names. Never push-supplied.
+        public var senderName: String = ""
+        public var roomName: String? = nil
+
+        public init(title: String, subtitle: String, body: String, senderName: String = "",
+                    roomName: String? = nil) {
+            self.title = title; self.subtitle = subtitle; self.body = body
+            self.senderName = senderName; self.roomName = roomName
+        }
     }
     public enum Result: Equatable, Sendable {
         case generic, suppress, content(Content)
@@ -62,11 +73,11 @@ public enum RichPushPresentation {
         }
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .generic }
         if item.isDirect {
-            return .content(Content(title: sender, subtitle: "", body: body))
+            return .content(Content(title: sender, subtitle: "", body: body, senderName: sender))
         }
         guard let room = displayName(item.roomName, userID: item.senderID) else { return .generic }
         // Element X's group layout: room title, sender subtitle, message body.
-        return .content(Content(title: room, subtitle: sender, body: body))
+        return .content(Content(title: room, subtitle: sender, body: body, senderName: sender, roomName: room))
     }
 
     private static func displayName(_ raw: String?, userID: String) -> String? {

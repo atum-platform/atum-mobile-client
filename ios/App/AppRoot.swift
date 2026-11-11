@@ -509,6 +509,21 @@ struct AppRoot: View {
             rosterStore.apply(rosterSnapshot)
             validatePendingPush()
         }
+        // Communication notifications: what only the app knows about a room
+        // (assistant/app faces, Team Space names and logos) for the extension.
+        .task(id: NotificationRoomPublisher.input(ownUserID: model.notificationOwnUserID,
+                                                  rooms: presentation.rooms.rooms,
+                                                  workspace: model.companyWorkspace)) {
+            guard let input = NotificationRoomPublisher.input(ownUserID: model.notificationOwnUserID,
+                                                              rooms: presentation.rooms.rooms,
+                                                              workspace: model.companyWorkspace) else { return }
+            // Coalesce bursts of roster updates into one write.
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await NotificationRoomPublisher.publish(input, design: design) { uri, side in
+                await model.avatarThumbnail(uri: uri, pixelSide: side)
+            }
+        }
         .task(id: RoomClassificationInput(
             roomIDs: presentation.rooms.rooms.map(\.id).sorted(),
             typeClaims: presentation.rooms.rooms.filter(\.claimsConversationType).map(\.id).sorted(),

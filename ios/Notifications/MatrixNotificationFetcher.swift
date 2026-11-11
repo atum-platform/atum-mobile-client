@@ -12,7 +12,7 @@ actor MatrixNotificationFetcher {
     static let shared = MatrixNotificationFetcher()
     private var busy = false
 
-    func fetch(roomID: String, eventID: String, copy: RichPushPresentation.Copy) async throws -> RichPushPresentation.Result {
+    func fetch(roomID: String, eventID: String, copy: RichPushPresentation.Copy) async throws -> FetchedNotification {
         guard !busy else { throw NotificationFallbackReason.fetchBusy }
         busy = true
         defer { busy = false }
@@ -69,10 +69,16 @@ actor MatrixNotificationFetcher {
             let status = try await notifications.getNotification(roomId: roomID, eventId: eventID)
             try Task.checkCancellation()
             let result = try Self.presentation(status, eventID: eventID, ownUserID: session.userId, copy: copy)
+            // The big image is best effort: any failure here keeps the rich text.
+            let face = await Self.face(status, result: result, roomID: roomID, ownUserID: session.userId,
+                                       store: try? NotificationSharedStore()) { uri, side in
+                let source = try MediaSource.fromUrl(url: uri)
+                return try await client.getMediaThumbnail(mediaSource: source, width: UInt64(side), height: UInt64(side))
+            }
             try? await client.pause()
             try delegate.requireCurrent()
             try Task.checkCancellation()
-            return result
+            return FetchedNotification(result: result, face: face)
         } catch {
             try? await client.pause()
             throw error
@@ -122,8 +128,34 @@ actor MatrixNotificationFetcher {
         }
     }
 
+    /// The communication plan for a fetched event and its image: the app's
+    /// drawn face from the shared store, else a cached or freshly fetched SDK
+    /// thumbnail (one URI at a time, each with a short deadline), else nil for
+    /// the monogram. Image sources come from the SDK item and the app's
+    /// directory, never from the push.
+    static func face(_ status: NotificationStatus, result: RichPushPresentation.Result, roomID: String,
+                     ownUserID: String, store: NotificationSharedStore?,
+                     thumbnail: @escaping @Sendable (String, Int) async throws -> Data) async -> CommunicationFace? {
+        guard case let .content(content) = result, case let .event(item) = status else { return nil }
+        let senderID: String
+        switch item.event {
+        case let .invite(userID): senderID = userID
+        case let .timeline(event): senderID = event.senderId()
+        }
+        let input = CommunicationNotificationPolicy.Input(
+            roomID: roomID, senderName: content.senderName, senderAvatarURI: item.senderInfo.avatarUrl,
+            roomName: content.roomName, roomAvatarURI: item.roomInfo.avatarUrl, isDirect: item.roomInfo.isDirect)
+        let entry = CommunicationNotificationPolicy.entry(roomID: roomID, ownUserID: ownUserID,
+                                                          directory: store?.readDirectory())
+        guard let plan = CommunicationNotificationPolicy.plan(input, entry: entry) else { return nil }
+        let image = await CommunicationNotification.image(for: plan, store: store, thumbnail: thumbnail)
+        return CommunicationFace(plan: plan, roomID: roomID, senderID: senderID, senderName: content.senderName,
+                                 ownUserID: ownUserID, image: image)
+    }
+
     private enum FetchFailure: Error { case unavailable }
 }
+
 
 /// Copy-only callback. Session mutation invalidates the result; it never writes
 /// a Keychain record and cannot access the app's domain/recovery credential APIs.

@@ -46,6 +46,10 @@ targets:
         NSSpeechRecognitionUsageDescription: Atum dùng nhận dạng giọng nói để chuyển lời bạn nói thành chữ trong khung soạn tin.
         UILaunchScreen:
           UIColorName: ground
+        # Communication notifications (sender/group face as the big image):
+        # the extension donates INSendMessageIntent; Apple requires the app to
+        # declare it. The entitlement is in App/AtumMobile.entitlements.
+        NSUserActivityTypes: [INSendMessageIntent]
         # The app and its extension must report the same versions to App
         # Store Connect; scripts/testflight.sh sets the build number.
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -54,6 +58,11 @@ targets:
       - App
       - path: App/Resources/NOTICE
         buildPhase: resources
+      # Shared with the notification extension so Debug simulator builds can
+      # post the extension's communication content locally
+      # (App/Debug/ScriptedNotificationPoster.swift).
+      - path: Notifications/CommunicationNotification.swift
+      - path: Notifications/ScriptedNotificationFixtures.swift
     dependencies:
       - target: AtumNotifications
         embed: true
@@ -100,6 +109,7 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+        NSUserActivityTypes: [INSendMessageIntent]
     sources:
       - path: Notifications
         excludes: [Info.plist, AtumNotifications.entitlements]

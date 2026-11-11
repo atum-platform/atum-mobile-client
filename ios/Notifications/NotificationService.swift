@@ -32,15 +32,38 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         }
         guard shouldStart else { delivery.expire(onDelivery: { Self.log(.systemExpiry) }); return }
         let copy = Self.copy(bundle: .main)
+        let scripted = Self.scriptedFixture(request.content.userInfo)
         delivery.start(waitForDeadline: {
             try await Task.sleep(for: .seconds(20))
         }, onDeadline: { Self.log(.fetchTimeout) }, onFailure: {
             Self.log(NotificationFallbackReason.classify($0))
         }) {
-            let result = try await MatrixNotificationFetcher.shared.fetch(
-                roomID: payload.roomID.rawValue, eventID: payload.eventID.rawValue, copy: copy)
-            return NotificationSnapshot(Self.content(result, generic: generic.content))
+            let fetched: FetchedNotification
+            if let scripted {
+                fetched = await ScriptedNotificationFixtures.fetched(scripted, roomID: payload.roomID.rawValue)
+            } else {
+                fetched = try await MatrixNotificationFetcher.shared.fetch(
+                    roomID: payload.roomID.rawValue, eventID: payload.eventID.rawValue, copy: copy)
+            }
+            let rich = Self.content(fetched.result, generic: generic.content)
+            guard let face = fetched.face else { return NotificationSnapshot(rich) }
+            let communication = await CommunicationNotification.apply(face, to: rich, log: Self.log)
+            if communication != nil { Self.logCommunication(face) }
+            return NotificationSnapshot(communication ?? rich)
         }
+    }
+
+    /// Debug simulator builds only: `atum_scripted_notification` picks a
+    /// compiled-in fixture so `xcrun simctl push` can show the communication
+    /// layout without a live Matrix session. The key selects a fixture; no
+    /// display string, image or URI is read from the push. Release and device
+    /// builds compile this out.
+    static func scriptedFixture(_ userInfo: [AnyHashable: Any]) -> ScriptedNotificationFixtures.Fixture? {
+        #if DEBUG && targetEnvironment(simulator)
+        return (userInfo["atum_scripted_notification"] as? String).flatMap(ScriptedNotificationFixtures.Fixture.init)
+        #else
+        return nil
+        #endif
     }
 
     override func serviceExtensionTimeWillExpire() {
@@ -54,6 +77,15 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
     private static let logger = Logger(subsystem: "com.atum.mobile.notifications", category: "rich-push")
     private static func log(_ reason: NotificationFallbackReason) {
         logger.notice("generic_alert reason=\(reason.rawValue, privacy: .public)")
+    }
+    /// Closed values only: the style and whether a picture or the monogram was used.
+    private static func logCommunication(_ face: CommunicationFace) {
+        let style = if case .group = face.plan.style { "group" } else { "person" }
+        let image = face.image == nil ? "monogram" : "picture"
+        logger.notice("communication_alert style=\(style, privacy: .public) image=\(image, privacy: .public)")
+    }
+    private static func log(_ reason: CommunicationFallback) {
+        logger.notice("plain_alert reason=\(reason.rawValue, privacy: .public)")
     }
 
     static func payload(_ userInfo: [AnyHashable: Any]) -> MobilePushPayload? {
