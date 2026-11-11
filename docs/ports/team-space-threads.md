@@ -162,6 +162,6 @@ thread data or thread-capable timeline source, so a capture would need a new scr
 
 - **Follow writes no longer overwrite each other.** Writes to one room run one at a time (`CompanyThreadAttentionWrites`), each built on the record the previous one wrote. That record is kept until the synced copy matches it, or for 120 s at most so another device's later choice still wins. Before, two quick taps in one room could both read the same record and the later `PUT` dropped the earlier choice.
 - **A thread opened directly** ("Reply in thread", the company list) reads its real follow state first: the explicit choice, then the automatic rule (`companyThreadFollowed`). The capsule stays disabled until it's known. Before, it always started as "Follow".
-- **Room reads are bounded** to four `/threads` requests at a time.
+- **Room reads are bounded** to four `/threads` requests at a time, in batches of main-actor tasks. A task group with `@MainActor` child closures hit the Swift 6 region-isolation checker's "pattern … does not understand" error on hosted Xcode.
 - **Mark read clears the thread's mentions** in the optimistic override until a newer reply arrives, so a read thread no longer badges `@N`.
 - Verified by `swiftc -parse` and the hosted checks; the build lock was busy.

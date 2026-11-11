@@ -129,22 +129,18 @@ extension LiveAppModel {
             activity = CompanyActivityFeed.parse(notificationsJSON: data, ownUserID: own, roomIDs: roomIDs) ?? []
         }
         let session = liveMatrix
-        // At most `concurrentRoomReads` rooms at once, so a large workspace
-        // doesn't fire one `/threads` request per room together.
-        let read = await withTaskGroup(of: (String, [CompanyThreadRoot]?).self) { group in
-            var pending = roomIDs.sorted()[...]
-            var collected = [(String, [CompanyThreadRoot]?)]()
-            while true {
-                while collected.count + Self.concurrentRoomReads > roomIDs.count - pending.count,
-                      let roomID = pending.popFirst() {
-                    group.addTask { @MainActor in
-                        (roomID, await session.companyThreadRoots(roomID: roomID, ownUserID: own))
-                    }
+        // At most `concurrentRoomReads` rooms at once, in batches, so a large
+        // workspace doesn't fire one `/threads` request per room together.
+        let ordered = roomIDs.sorted()
+        var read = [(String, [CompanyThreadRoot]?)]()
+        for start in stride(from: 0, to: ordered.count, by: Self.concurrentRoomReads) {
+            let batch = ordered[start..<min(start + Self.concurrentRoomReads, ordered.count)]
+            let reads = batch.map { roomID in
+                Task { @MainActor in
+                    (roomID, await session.companyThreadRoots(roomID: roomID, ownUserID: own))
                 }
-                guard let result = await group.next() else { break }
-                collected.append(result)
             }
-            return collected
+            for task in reads { read.append(await task.value) }
         }
         guard liveMatrix === self.liveMatrix else { return nil }
         // Every room failing is a failed read; one room failing hides only its threads.
