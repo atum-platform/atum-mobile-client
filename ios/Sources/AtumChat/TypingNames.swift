@@ -62,15 +62,18 @@ public enum TypingNames {
         }
     }
 
-    /// Where typing shows in this room (§2.7): agents and bots get the dots
-    /// as the transcript's last row; people and groups get one quiet line
-    /// above the composer and no row. The projection shows a typing row for
-    /// any non-empty `rowNames`, so people rooms must pass it an empty list.
+    /// Where typing shows in this room, as desktop draws it
+    /// (`src/matrix/app.tsx` `MatrixTypingLine`, rendered `!room.assistant`):
+    /// my assistant's chat gets the working atom as the transcript's last row
+    /// (`MatrixAgentWorking`); every other chat, an app bot's included, gets
+    /// one quiet line above the composer ("Moon đang soạn tin…") and no row.
+    /// The projection shows a typing row for any non-empty `rowNames`, so
+    /// those rooms must pass it an empty list.
     public static func presentation(kind: RoomKind, names: [String]) -> TypingPresentation {
         switch kind {
-        case .assistant, .appBot:
+        case .assistant:
             return TypingPresentation(rowNames: names, line: .nobody)
-        case .person, .group:
+        case .appBot, .person, .group:
             return TypingPresentation(rowNames: [], line: line(names))
         }
     }

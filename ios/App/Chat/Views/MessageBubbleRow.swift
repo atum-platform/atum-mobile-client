@@ -89,13 +89,8 @@ struct MessageBubbleRow: View {
                     ReactionChips(row: row, trailing: trailing)
                         .padding(.leading, avatarSlot)
                 }
-                if isLatestAnswer && !trailing {
-                    LatestAnswerCopyRow(itemID: row.id)
-                        .padding(.leading, avatarSlot)
-                        .padding(.top, -4)
-                }
-                if row.delivery != .none {
-                    DeliveryLine(row: row, kind: kind)
+                if DeliveryLine.shows(row, isLatestAnswer: isLatestAnswer && !trailing, flat: false) {
+                    DeliveryLine(row: row, kind: kind, isLatestAnswer: isLatestAnswer && !trailing)
                         .padding(.leading, avatarSlot)
                 }
             }
@@ -136,7 +131,7 @@ struct MessageBubbleRow: View {
                 if !row.item.reactions.isEmpty {
                     ReactionChips(row: row, trailing: false)
                 }
-                if row.delivery != .none {
+                if DeliveryLine.shows(row, isLatestAnswer: false, flat: true) {
                     DeliveryLine(row: row, kind: kind)
                 }
             }
@@ -311,7 +306,8 @@ struct MessageBubbleRow: View {
         }
     }
 
-    /// The text and its "đã sửa".
+    /// The text. Its "đã sửa" is in the line under the bubble (TL-5,
+    /// `DeliveryLine`), as on desktop.
     private func messageText(_ theme: ChatTheme) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if row.item.isOwn {
@@ -333,18 +329,6 @@ struct MessageBubbleRow: View {
             } else {
                 NativeRichText(bodyText: row.item.body, parsed: parsedBody)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            if row.item.isEdited {
-                // B18: people's edits (mine included) say so.
-                // `.caption`, not `.caption2`: caption2 is already at its
-                // smallest at the default size, so it cannot follow a
-                // smaller text setting (the accessibility audit's
-                // Dynamic Type check).
-                Text(theme.copy.text(.edited))
-                    .font(.caption)
-                    .foregroundStyle(trailing
-                        ? theme.design.kit.color(.onBubbleOwn, scheme: scheme).opacity(0.72)
-                        : theme.quiet(scheme))
             }
         }
         .foregroundStyle(trailing ? theme.design.kit.color(.onBubbleOwn, scheme: scheme)

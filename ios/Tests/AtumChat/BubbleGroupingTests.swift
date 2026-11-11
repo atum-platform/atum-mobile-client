@@ -49,8 +49,15 @@ final class BubbleFaceGroupingTests: XCTestCase {
         let person = layout(timeline(F.friend), F.personRoom())
         let assistant = layout(timeline(F.agent), F.assistantRoom())
         let app = layout(timeline(F.bot), F.botRoom())
-        XCTAssertEqual(app, person, "names, faces, run breaks and time labels")
-        XCTAssertEqual(app, assistant)
+        XCTAssertEqual(app, person, "names, faces, run breaks and run times")
+        func shape(_ value: [RowGrouping]) -> [RowGrouping] {
+            value.map { RowGrouping(position: $0.position, showsSender: $0.showsSender, showsFace: $0.showsFace) }
+        }
+        XCTAssertEqual(shape(app), shape(assistant), "names, faces and run breaks")
+        // Desktop: every answer of my agent carries its time; an app's or a
+        // person's messages only at the end of a run (TL-4).
+        XCTAssertEqual(assistant.map(\.showsTime), [true, true, true, true, true, true])
+        XCTAssertEqual(app.map(\.showsTime), [false, true, true, true, true, true])
         XCTAssertEqual(app.map(\.showsSender), [false, false, false, false, false, false])
         XCTAssertEqual(app.map(\.position), [.first, .last, .single, .single, .single, .single])
     }

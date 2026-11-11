@@ -19,15 +19,43 @@ final class DeliveryS1Tests: XCTestCase {
 
     // MARK: B7
 
-    func testOnlyMyNewestSettledMessageShowsSentAndPendingOnesKeepTheirClock() {
+    /// Desktop `send-state.tsx`: Sent is `latest && message.sent`, `latest`
+    /// being my newest message whatever its state (`latestOwnId`).
+    func testOnlyMyNewestMessageShowsSentOnceSettledAndPendingOnesKeepTheirClock() {
         let items = [F.mine("q1"), F.echo("q2", delivery: .sent(eventID: "$q2")), F.echo("q3"), F.echo("q4")]
-        XCTAssertEqual(marks(items), [.none, .sent, .sending, .sending],
-                       "older settled messages show nothing; three quick sends would show three clocks")
+        XCTAssertEqual(marks(items), [.none, .none, .sending, .sending],
+                       "older settled messages show nothing while newer ones send; three quick sends show three clocks")
+        let settled = [F.mine("q1"), F.echo("q2", delivery: .sent(eventID: "$q2"))]
+        XCTAssertEqual(marks(settled), [.none, .sent])
     }
 
-    func testAFailedSendKeepsItsWarningNextToSent() {
+    func testAFailedNewestSendShowsOnlyItsWarning() {
         let items = [F.mine("q1"), F.echo("q2", delivery: .failed(isRecoverable: true))]
-        XCTAssertEqual(marks(items), [.sent, .failed])
+        XCTAssertEqual(marks(items), [.none, .failed], "desktop: no Sent above a failed newest message")
+    }
+
+    // MARK: §9.1 Seen faces
+
+    func testReadersComeInReceiptOrderWithTheProfileTheirMessagesCarry() {
+        var lan = F.text("t", from: F.other)
+        lan.senderName = "Lan"
+        lan.senderAvatarURI = "mxc://example.test/lan"
+        var item = F.mine("q")
+        item.receiptUserIDs = [F.friend, F.me, F.other, F.friend]
+        let group = RoomContext(kind: .group, ownUserID: F.me)
+        let rows = Projection.rows([lan, item], context: group, options: .s1)
+        let mine = rows.first { $0.id == "q" }
+        XCTAssertEqual(mine?.delivery, .seen(readerCount: 2))
+        XCTAssertEqual(mine?.readers, [ChatReader(userID: F.friend),
+                                       ChatReader(userID: F.other, name: "Lan",
+                                                  avatarURI: "mxc://example.test/lan")],
+                       "my own receipt is dropped, each reader once, in the SDK's order")
+        XCTAssertEqual(rows.first { $0.id == "t" }?.readers, [], "only a Seen row carries readers")
+    }
+
+    func testReceiptOrderIsDesktopsEarliestFirstThenByUserID() {
+        XCTAssertEqual(Delivery.receiptOrder(["@c:x": 30, "@a:x": 20, "@b:x": 20, "@d:x": nil]),
+                       ["@d:x", "@a:x", "@b:x", "@c:x"])
     }
 
     func testSeenSitsOnTheMessageWhoseReceiptItIs() {

@@ -42,14 +42,14 @@ final class ProjectionS1Tests: XCTestCase {
                        "the row's layout is Grouping's, on the display rows")
     }
 
-    func testWithRunsTheSenderLineIsTheLayoutsAndATimeLabelRidesOnItsRow() {
+    func testWithRunsTheSenderLineIsTheLayoutsAndTheRunTimeRidesOnItsRow() {
         let items = [F.text("b1", from: F.bot, minute: 0), F.text("b2", from: F.bot, minute: 2),
                      F.text("b3", from: F.bot, minute: 90)]
         let rows = Projection.rows(items, context: F.groupWithApp(), options: .s1, calendar: utc)
         XCTAssertEqual(rows.map(\.showsSender), rows.map(\.grouping.showsSender))
         XCTAssertEqual(rows.map(\.showsSender), [true, false, true])
         XCTAssertEqual(rows.map(\.grouping.position), [.first, .last, .single])
-        XCTAssertEqual(rows.map { $0.grouping.timeLabel != nil }, [false, false, true], "a 60-minute gap")
+        XCTAssertEqual(rows.map(\.grouping.showsTime), [false, true, true], "under each run's last bubble")
     }
 
     // MARK: TimelineProjector
