@@ -97,3 +97,10 @@ The selected SDK provides stock restore with filesystem preflight and a
 post-restore identity check, not an atomic existing-only restore API. Device
 proof must include missing-store/concurrent-removal behavior. No signing,
 provisioning, APNs credentials or SDK revision was changed by this port.
+
+## CI follow-up
+
+`tests/test_native_push_projection.py` asserted that the generated push
+localization held only the provider's generic key. It now also expects the seven
+rich-notification phrases (unnamed, image, video, audio, file, sticker, invite),
+each in all five locales.
