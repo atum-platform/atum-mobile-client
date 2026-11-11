@@ -164,3 +164,14 @@ Screenshots (scripted host, iPhone 17 simulator) are in the worktree's `.scratch
 
 - 2026-11-11, wave 3 TS worker: TS-11 (wire, model, invite sheet, links, join) and TS-13 (sections,
   create) with tests; TS-6's Invite entry wired; doc. Verified under the heavy-build lock (above).
+- 2026-11-11, `fix/main-ui-regressions`: `TeamSpaceDailyUITests.testChannelMarksRenderFromCountsAndMutedStaysQuiet`
+  failed on hosted CI (run 43010056490, iPhone 16e, 390×844 pt): no `company.channel.ops` button.
+  **Test drift, not a product regression.** The row's identifier and section are unchanged. The
+  failure's accessibility hierarchy shows the invitation card, then TS-13's Favorites section (`launch`,
+  added to the scripted host in `e617abc`, kept on there by `7e76dd8`), then the Channels header,
+  `general` and `random` (to y 752). The tab bar starts at 760, so the List never built `ops` or
+  `design`. Desktop also puts Favorites above Channels in C2 mode, so the order is right. The test now
+  scrolls each row into view (`reveal`) before reading its label; every label assertion is unchanged.
+  The unchanged test passed locally on iPhone 17 and on iPhone 17e (same 844 pt height, iOS 27), so the
+  fold depends on the runtime's row prefetch, not only on screen size. With the fix,
+  `TeamSpaceDailyUITests` passed 10/10 on iPhone 17e under the heavy-build lock.
