@@ -392,7 +392,8 @@ struct AppRoot: View {
                     inviteAbilities: model.companyWorkspace.inviteAbilities(
                         companyID: model.companyWorkspace.activeCompanyID),
                     canCreateChannel: model.companyWorkspace.channelCreationAllowed(
-                        companyID: model.companyWorkspace.activeCompanyID)
+                        companyID: model.companyWorkspace.activeCompanyID),
+                    sectionsChannels: model.companyWorkspace.teamSpaceProfile.channels
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },

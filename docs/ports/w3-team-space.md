@@ -22,11 +22,13 @@ TS-12 (members admin) was not started; see "Not done".
 
 ### Phone-better or deliberate differences
 
-- **Favorites and Archived on every wire.** The desktop draws its sectioned list only in C2 (channel
-  admission) and a flat list before it. The phone already offers "Add to favorites" on 1.1 (TS-9),
-  and the 1.1 directory already carries the archived state, so the phone sections both now instead of
-  showing a favourite nowhere and archived channels inline. "Channel invitations" and the lock on
-  private channels still need C2 (see below).
+- **Sections only in C2, like desktop (coordinator, 2026-11-11).** The desktop draws Favorites /
+  Channels / Archived only in its C2 channels mode (`company-workspace.tsx:1667-1669`: directory read
+  on 1.4 with channel admission) and one flat Channels list with archived channels inline before it.
+  The worker first sectioned on every wire; the owner's bar is desktop parity, so the phone now
+  sections only when `CompanyTeamSpaceProfile.channels` is true (`TeamSpacePresentation.sectionsChannels`)
+  and stays flat otherwise. The scripted host turns sections on for the captures. "Channel
+  invitations" and the lock on private channels still need C2 (see below).
 - **Both link forms paste.** The desktop's paste parser accepts only `https://<host>/j/<token>`, while
   the platform now issues `https://<host>/j#<token>` (the token stays out of server logs). The phone
   accepts both (`CompanyInviteLinkToken.parse`). Desktop follow-up: its paste parser rejects the

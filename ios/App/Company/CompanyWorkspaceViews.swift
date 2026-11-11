@@ -53,6 +53,9 @@ struct TeamSpacePresentation: Equatable {
     var inviteAbilities = CompanyInviteAbilities.none
     /// The viewer may create a channel in the open company (TS-13).
     var canCreateChannel = false
+    /// Favorites / Channels / Archived sections: only in the desktop's C2
+    /// channels mode (`CompanyTeamSpaceProfile.channels`); a flat list before it.
+    var sectionsChannels = false
 }
 
 struct TeamSpaceActions {
@@ -668,7 +671,8 @@ struct TeamSpaceScreen: View {
 
     private func channelPlan(_ workspace: CompanyWorkspacePresentation) -> CompanyChannelSectionPlan<CompanyChannelRow> {
         .split(workspace.channels, isFavourite: \.isFavourite, isArchived: \.isArchived,
-               matches: { TeamSpaceSearch.matches([$0.title], needle: needle, locale: locale) })
+               matches: { TeamSpaceSearch.matches([$0.title], needle: needle, locale: locale) },
+               sectioned: presentation.sectionsChannels)
     }
 
     private func channelListRow(_ channel: CompanyChannelRow) -> some View {

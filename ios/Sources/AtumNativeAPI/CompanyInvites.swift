@@ -592,8 +592,14 @@ public struct CompanyChannelSectionPlan<Row: Equatable>: Equatable {
     public var channels: [Row]
     public var archived: [Row]
 
+    /// `sectioned` is the desktop's C2 channels mode (the directory read on
+    /// 1.4 with channel admission on). Before it the desktop draws one flat
+    /// Channels list with archived channels inline, so the phone does too.
     public static func split(_ rows: [Row], isFavourite: (Row) -> Bool, isArchived: (Row) -> Bool,
-                             matches: (Row) -> Bool) -> CompanyChannelSectionPlan<Row> {
+                             matches: (Row) -> Bool, sectioned: Bool = true) -> CompanyChannelSectionPlan<Row> {
+        guard sectioned else {
+            return CompanyChannelSectionPlan(favorites: [], channels: rows.filter(matches), archived: [])
+        }
         let archived = rows.filter(isArchived)
         let live = rows.filter { !isArchived($0) && matches($0) }
         return CompanyChannelSectionPlan(favorites: live.filter(isFavourite),

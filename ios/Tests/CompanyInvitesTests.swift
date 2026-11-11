@@ -264,6 +264,22 @@ final class CompanyInvitesTests: XCTestCase {
         XCTAssertEqual(searched.archived.map(\.name), ["old"])
     }
 
+    func testBeforeChannelsModeTheListStaysFlatLikeDesktop() {
+        struct Row: Equatable { let name: String; let favourite: Bool; let archived: Bool }
+        let rows = [Row(name: "general", favourite: false, archived: false),
+                    Row(name: "launch", favourite: true, archived: false),
+                    Row(name: "old", favourite: true, archived: true)]
+        let flat = CompanyChannelSectionPlan.split(rows, isFavourite: \.favourite, isArchived: \.archived,
+                                                   matches: { _ in true }, sectioned: false)
+        XCTAssertEqual(flat.favorites, [])
+        XCTAssertEqual(flat.archived, [])
+        // Desktop order, archived inline.
+        XCTAssertEqual(flat.channels.map(\.name), ["general", "launch", "old"])
+        let searched = CompanyChannelSectionPlan.split(rows, isFavourite: \.favourite, isArchived: \.archived,
+                                                       matches: { $0.name.contains("o") }, sectioned: false)
+        XCTAssertEqual(searched.channels.map(\.name), ["old"])
+    }
+
     // MARK: Fixture
 
     private static let snapshot = """
