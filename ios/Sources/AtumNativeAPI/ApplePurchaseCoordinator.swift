@@ -27,10 +27,17 @@ public enum AppleStorePurchaseResult: Sendable {
 }
 
 @MainActor public protocol ApplePurchaseStore: AnyObject {
+    /// Verified runtime environment; nil means local testing or unknown.
+    func purchaseEnvironment() async throws -> ApplePurchaseEnvironment?
     func products(ids: Set<String>) async throws -> [AppleStoreProduct]
     func purchase(id: String, accountToken: UUID) async throws -> AppleStorePurchaseResult
     func updates() -> AsyncStream<AppleVerifiedTransaction>
     func unfinished() async -> [AppleVerifiedTransaction]
+}
+
+public extension ApplePurchaseStore {
+    /// Custom adapters without runtime evidence must keep checkout unavailable.
+    func purchaseEnvironment() async throws -> ApplePurchaseEnvironment? { nil }
 }
 
 /// No local crediting or persisted signed payloads. StoreKit owns the durable queue.
@@ -44,7 +51,7 @@ public enum AppleStorePurchaseResult: Sendable {
     @Published public private(set) var packs: [AppleProductsResponse.Pack] = []
     @Published public private(set) var products: [AppleStoreProduct] = []
     public var canPurchase: Bool {
-        guard checkoutOpen, !products.isEmpty,
+        guard checkoutOpen, let acceptedEnvironment, deviceEnvironment == acceptedEnvironment, !products.isEmpty,
               !purchaseStates.values.contains(where: { [.purchasing, .pending, .retrying].contains($0) })
         else { return false }
         switch state {
@@ -55,8 +62,8 @@ public enum AppleStorePurchaseResult: Sendable {
     public func purchaseState(for productID: String) -> State { purchaseStates[productID] ?? .idle }
 
     private let store: any ApplePurchaseStore
-    private let environment: ApplePurchaseEnvironment
-    /// Selected only by this account's catalogue, including on the production API.
+    private var deviceEnvironment: ApplePurchaseEnvironment?
+    /// The account's catalogue environment, admitted only after a runtime match.
     @Published public private(set) var acceptedEnvironment: ApplePurchaseEnvironment?
     private let sleep: @MainActor (UInt64) async throws -> Void
     private let refreshWallet: @MainActor () async -> Void
@@ -72,11 +79,13 @@ public enum AppleStorePurchaseResult: Sendable {
     private var submissions: [String: Task<Void, Never>] = [:]
     private var finished = Set<String>()
 
-    public init(store: any ApplePurchaseStore, environment: ApplePurchaseEnvironment,
+    /// `environment` is retained for source compatibility with build-origin callers.
+    /// Only the store's verified runtime environment authorizes purchases.
+    public init(store: any ApplePurchaseStore, environment _: ApplePurchaseEnvironment,
                 sleep: @escaping @MainActor (UInt64) async throws -> Void = { seconds in
                     try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
                 }, refreshWallet: @escaping @MainActor () async -> Void) {
-        self.store = store; self.environment = environment; self.sleep = sleep
+        self.store = store; self.sleep = sleep
         self.refreshWallet = refreshWallet
     }
 
@@ -120,9 +129,14 @@ public enum AppleStorePurchaseResult: Sendable {
         do {
             let catalog = try await api.appleProducts()
             guard isCurrent(scope) else { return }
-            // v1.2: TestFlight/App Review use the production origin. Only the
-            // server can select Sandbox for the authenticated allowlisted owner.
-            guard environment == .production || catalog.environment == environment else {
+            if deviceEnvironment == nil {
+                let detected = try await store.purchaseEnvironment()
+                guard isCurrent(scope) else { return }
+                deviceEnvironment = deviceEnvironment ?? detected
+            }
+            // API origin and account allowlisting cannot establish the device's
+            // StoreKit environment. TestFlight's verified environment is Sandbox.
+            guard let deviceEnvironment, catalog.environment == deviceEnvironment else {
                 acceptedEnvironment = nil; state = .unavailable; return
             }
             acceptedEnvironment = catalog.environment
@@ -152,10 +166,13 @@ public enum AppleStorePurchaseResult: Sendable {
             if let cached = tokens[key] { token = cached }
             else {
                 token = try await api.appleAccountToken().appAccountToken
-                guard isCurrent(scope) else { return }
-                tokens[key] = token
             }
             guard isCurrent(scope) else { return }
+            guard checkoutOpen, acceptedEnvironment == environment, deviceEnvironment == environment else {
+                purchaseStates[id] = .unavailable
+                return
+            }
+            tokens[key] = token
             let result = try await store.purchase(id: id, accountToken: token)
             guard isCurrent(scope) else { return }
             switch result {

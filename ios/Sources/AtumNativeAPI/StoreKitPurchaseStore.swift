@@ -6,6 +6,20 @@ import StoreKit
     private var loaded: [String: Product] = [:]
     public init() {}
 
+    public func purchaseEnvironment() async throws -> ApplePurchaseEnvironment? {
+        let result = try await AppTransaction.shared
+        guard case let .verified(transaction) = result else { return nil }
+        return Self.purchaseEnvironment(transaction.environment)
+    }
+
+    static func purchaseEnvironment(_ environment: AppStore.Environment) -> ApplePurchaseEnvironment? {
+        switch environment {
+        case .production: return .production
+        case .sandbox: return .sandbox
+        default: return nil // Xcode / unknown never reaches a deployed server.
+        }
+    }
+
     public func products(ids: Set<String>) async throws -> [AppleStoreProduct] {
         let products = try await Product.products(for: ids)
         guard products.allSatisfy({ $0.type == .consumable }) else { throw ContractViolation.invalidValue }
@@ -52,12 +66,7 @@ import StoreKit
     private static func verified(_ result: VerificationResult<Transaction>) -> AppleVerifiedTransaction? {
         guard case let .verified(transaction) = result, transaction.productType == .consumable,
               ApplePurchaseCoordinator.productIDs.contains(transaction.productID) else { return nil }
-        let environment: ApplePurchaseEnvironment?
-        switch transaction.environment {
-        case .production: environment = .production
-        case .sandbox: environment = .sandbox
-        default: environment = nil // Xcode / LocalTesting never reaches a deployed server.
-        }
+        let environment = purchaseEnvironment(transaction.environment)
         return .init(id: String(transaction.id), productID: transaction.productID,
                      environment: environment, accountToken: transaction.appAccountToken,
                      signedTransaction: result.jwsRepresentation,
