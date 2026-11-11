@@ -491,6 +491,36 @@ final class LiveConversationStore: ConversationStore {
         }
     }
 
+    /// HC-6: one older page for the chat's search (desktop
+    /// `loadTimelineHistoryPage` + `waitForTimelineProjection`). Waits, a
+    /// little, for a page scrolling already has in flight; then loads
+    /// `ChatHistorySearch.pageEvents` events and waits until they are rows.
+    func loadOlderPageForSearch() async -> ChatHistorySearch.Page {
+        for _ in 0..<40 {
+            if isClosed || Task.isCancelled { return .failed }
+            if core.reachedTimelineStart { return .loaded(hasMore: false) }
+            if core.startSearchPage(now: clock()) { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard let controller, !core.reachedTimelineStart else {
+            return core.reachedTimelineStart ? .loaded(hasMore: false) : .failed
+        }
+        let generation = generation
+        let before = snapshot.rows.count
+        let hitStart = try? await controller.paginateBackwards(events: ChatHistorySearch.pageEvents)
+        guard generation == self.generation, !isClosed else { return .failed }
+        run(core.paginationFinished(hitTimelineStart: hitStart, now: clock()))
+        sync()
+        guard let hitStart else { return .failed }
+        // The page's events reach the rows through the projector: wait for
+        // them (bounded), so the next match check reads them.
+        for _ in 0..<20 where snapshot.rows.count == before {
+            if Task.isCancelled { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return .loaded(hasMore: !hitStart)
+    }
+
     /// The parsed markdown for a row, if its body has not changed since.
     func parsedBody(for row: ChatRow) -> AttributedString? {
         guard let parsed = parsedBodies[row.id], parsed.body == row.item.body else { return nil }

@@ -217,6 +217,8 @@ struct ChatInfoActions {
     var sharedCollections: SharedCollectionsOpener?
     /// A company channel's own reads (intro facts, pinned messages; TS-9).
     var companyChannel: CompanyChannelActions?
+    /// HC-7: Rename a person or group chat (desktop conversation menu).
+    var rename: ChatRenameActions?
 }
 
 /// What the panel reads when it opens. Every field may be unknown; an unknown
@@ -359,6 +361,7 @@ struct ChatInfoHome: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmation: SheetConfirmation?
     @State private var reporting: ReportPersonRequest?
+    @State private var renameRequest: ChatRenameRequest?
 
     private enum SheetConfirmation: Equatable {
         case deleteApp
@@ -513,6 +516,7 @@ struct ChatInfoHome: View {
                 await actions.reportPerson?(request.userID, reason) ?? false
             }
         }
+
         .sensoryFeedback(.error, trigger: info.actionFailureToken)
         .onChange(of: info.actionFailureToken) { old, new in
             guard old != new else { return }
@@ -606,6 +610,10 @@ struct ChatInfoHome: View {
                               isOn: info.isLowPriority, isEnabled: true,
                               id: "info.low-priority") { actions.setLowPriority?(info.roomID, $0) }
                 }
+                if let rename = actions.rename, !info.isFounder {
+                    Divider().padding(.leading, 48)
+                    renameRow(rename)
+                }
             }
             .background(atum.color(.cell, scheme: scheme),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -621,6 +629,35 @@ struct ChatInfoHome: View {
         // plain stack the identifier is handed down and replaces theirs).
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("info.conversation")
+    }
+
+    /// HC-7: Rename (desktop conversation menu): your own name for the chat,
+    /// or the group's name for everyone when you may name it.
+    private func renameRow(_ rename: ChatRenameActions) -> some View {
+        Button {
+            let roomID = info.roomID
+            Task {
+                guard let request = await rename.request(roomID) else { return }
+                renameRequest = request
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(atum.symbol(.pencil))
+                Text(copy(.rename))
+                Spacer()
+            }
+            .foregroundStyle(atum.color(.ink, scheme: scheme))
+            .padding(.horizontal, 16)
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("info.rename")
+        // On the row, so the panel's own dialogs (Block, Delete) keep their
+        // presentation host to themselves.
+        .chatRenameAlert($renameRequest, design: design) { request, name in
+            await rename.save(request, name)
+        }
     }
 
     private func sectionTitle(_ text: String) -> some View {

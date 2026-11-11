@@ -80,6 +80,9 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     /// Review C1: my assistant keeps working on what I send and never
     /// answers, for the composer's working state and Stop.
     case chatTurnStop = "chat.turn-stop"
+    /// HC-6: an assistant chat whose one "Đà Lạt" is three older pages back,
+    /// for the in-chat search walking history.
+    case chatSearch = "chat.search"
 }
 
 #endif
