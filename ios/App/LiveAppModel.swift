@@ -221,6 +221,9 @@ final class LiveAppModel {
     /// the next readiness callback; it is never invented after a restart.
     @ObservationIgnored private var founderUnrecordedRoomID: String?
     private var appWorkspaces = [String: AppWorkspaceSnapshot]()
+    /// When each app's manifest was last read, so a panel opened again soon
+    /// reuses it instead of spending the platform's manifest rate limit.
+    @ObservationIgnored private var appWorkspaceReadAt = [String: Date]()
     private struct AppOnboardingAttempt {
         let id: UUID
         let slug: String
@@ -2730,7 +2733,8 @@ final class LiveAppModel {
               workspace.appVersionID == descriptor.appVersionID, workspace.supportsLaunch,
               workspace.routes.contains(where: {
                   $0.id == routeID && $0.session == .required
-              }), AppOnboardingPolicy.allowsLaunch(slug: descriptor.app, routeID: routeID),
+              }), routeID != descriptor.bot?.purchaseRouteID,
+              AppOnboardingPolicy.allowsLaunch(slug: descriptor.app, routeID: routeID),
               let request = try? AppLaunchRequest(appVersionID: descriptor.appVersionID,
                                                   routeID: routeID),
               case .signedIn = stage else { return false }
@@ -2749,6 +2753,102 @@ final class LiveAppModel {
             }
         }
         return true
+    }
+
+    // MARK: App side panel (AS-11; desktop `matrix/app-bots/panel.tsx`)
+
+    /// The catalog app behind a chat, by the room's bot.
+    private func appDescriptor(roomID: String) -> AppDescriptor? {
+        guard let room = liveMatrix?.rooms.first(where: { $0.roomID == roomID }),
+              let botUserID = botUserID(for: room) else { return nil }
+        return appsRead.value?.apps.first { $0.bot?.userID.rawValue == botUserID }
+    }
+
+    /// The catalog app a Home row stands for: `app:<id>` before its chat
+    /// exists, otherwise the room's bot.
+    private func appDescriptor(rowID: String) -> AppDescriptor? {
+        if rowID.hasPrefix("app:") {
+            let appID = String(rowID.dropFirst("app:".count))
+            return appsRead.value?.apps.first { $0.appID.rawValue == appID }
+        }
+        return appDescriptor(roomID: rowID)
+    }
+
+    /// The app chat's panel pages: what the phone holds now, a fresh manifest
+    /// read when the panel opens, and each page's signed launch.
+    func appPanelActions(roomID: String) -> AppPanelActions? {
+        guard let descriptor = appDescriptor(roomID: roomID) else { return nil }
+        let slug = descriptor.app
+        return AppPanelActions(
+            current: { [weak self] failed in
+                guard let self,
+                      let app = self.appsRead.value?.apps.first(where: { $0.app == slug }) else {
+                    return .unavailable(retry: false)
+                }
+                return AppPanelPagesPolicy.state(app: app, workspace: self.appWorkspaces[slug],
+                                                 readFailed: failed)
+            },
+            refresh: { [weak self] in await self?.refreshAppPanel(slug: slug) ?? false },
+            launch: { [weak self] routeID in await self?.launchAppPage(slug: slug, routeID: routeID) }
+        )
+    }
+
+    /// Reads the app's manifest (with its declared pages) again. A read within
+    /// the last minute for the same version stands; a failed read keeps the
+    /// last good one on screen, as desktop's panel does.
+    private func refreshAppPanel(slug: String) async -> Bool {
+        guard let client = domainClient, case .signedIn = stage,
+              let descriptor = appsRead.value?.apps.first(where: { $0.app == slug }),
+              descriptor.hasSurface else { return false }
+        if let readAt = appWorkspaceReadAt[slug], Date().timeIntervalSince(readAt) < 60,
+           appWorkspaces[slug]?.appVersionID == descriptor.appVersionID {
+            return true
+        }
+        let generation = appAccountGeneration
+        do {
+            let workspace = try await client.appWorkspace(slug: slug)
+            guard domainClient === client, appAccountGeneration == generation,
+                  workspace.appVersionID == descriptor.appVersionID else { return false }
+            appWorkspaces[slug] = workspace
+            appWorkspaceReadAt[slug] = Date()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// One panel page's signed launch URL, behind the same gate as the
+    /// composer's route (`AppPanelPagesPolicy.opens`). Nil when it cannot open.
+    private func launchAppPage(slug: String, routeID: String) async -> URL? {
+        guard let client = domainClient, case .signedIn = stage,
+              let descriptor = appsRead.value?.apps.first(where: { $0.app == slug }),
+              let workspace = appWorkspaces[slug],
+              workspace.appVersionID == descriptor.appVersionID,
+              let route = workspace.routes.first(where: { $0.id == routeID }),
+              route.placements.contains(.menu),
+              AppPanelPagesPolicy.opens(route, workspace: workspace, app: descriptor),
+              let request = try? AppLaunchRequest(appVersionID: descriptor.appVersionID,
+                                                  routeID: routeID) else { return nil }
+        let generation = appAccountGeneration
+        do {
+            let response = try await client.launchApp(slug: slug, value: request)
+            guard domainClient === client, appAccountGeneration == generation,
+                  case .signedIn = stage else { return nil }
+            return response.launchURL
+        } catch {
+            return nil
+        }
+    }
+
+    /// An official app's read-only card for a Home row's "Info" (desktop
+    /// `assistant-card/app-card.tsx`); nil for a row that is not an app.
+    func appCardPresentation(rowID: String) -> AppCardPresentation? {
+        guard let descriptor = appDescriptor(rowID: rowID) else { return nil }
+        let room = productRooms().first { $0.id == rowID }
+        return AppCardPresentation(app: descriptor, rowID: rowID, locale: appLanguage,
+                                   avatar: room?.avatar, matrixAvatarURI: room?.matrixAvatarURL,
+                                   avatarSHA256: room?.avatarSHA256,
+                                   avatarCandidates: room?.avatarCandidates ?? [])
     }
 
     func dismissAppContent() { appContentPage = nil }
@@ -4821,6 +4921,7 @@ final class LiveAppModel {
         appAccountGeneration &+= 1
         appAccountInstallationID = nextInstallationID
         appWorkspaces.removeAll()
+        appWorkspaceReadAt.removeAll()
         appShortcuts.removeAll()
         appShortcutWriteOperations.removeAll()
         appShortcutMutationRevisions.removeAll()
@@ -4932,6 +5033,7 @@ final class LiveAppModel {
         agentsRead.clear()
         appsRead.clear()
         appWorkspaces.removeAll()
+        appWorkspaceReadAt.removeAll()
         appShortcuts.removeAll()
         appShortcutWriteOperations.removeAll()
         appShortcutMutationRevisions.removeAll()
@@ -6684,10 +6786,7 @@ final class LiveAppModel {
             }
             return LiveProductStoreRead(
                 availability: .ready,
-                walletValue: walletRead.value.map {
-                    MicroProtonFormat.balance($0.balances.available,
-                                             locale: Locale.current.identifier)
-                },
+                walletMicroProtons: walletRead.value?.balances.available,
                 items: items,
                 apps: apps,
                 staleAvailability: staleAvailability

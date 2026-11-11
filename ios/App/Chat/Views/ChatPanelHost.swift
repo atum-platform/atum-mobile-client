@@ -7,7 +7,7 @@ import UIKit
 /// opened by the chat's title or its "…". `ChatScreen` presents it as a sheet
 /// with a medium and a large height (the iPad inspector column is deferred:
 /// see `ChatScreen`). Pages (a
-/// group's Members, later a shared section's See all and an app's page) push
+/// group's Members, a shared section's See all and an app's page) push
 /// inside it; the chat stays where it is.
 struct ChatPanelHost: View {
     let design: LiveDesign
@@ -52,9 +52,11 @@ struct ChatPanelHost: View {
                     case let .shared(section):
                         SharedCollectionPage(design: design, info: info, controller: shared,
                                              section: section.collection, close: close)
-                    case .appPage:
-                        // M5; nothing pushes it yet.
-                        EmptyView()
+                    case let .appPage(routeID):
+                        if let appPanel = actions.appPanel {
+                            AppPanelPageView(design: design, actions: appPanel, routeID: routeID,
+                                             close: close)
+                        }
                     }
                 }
         }
