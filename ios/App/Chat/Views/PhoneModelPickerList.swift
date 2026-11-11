@@ -292,6 +292,9 @@ struct PhoneModelPickerList: View {
             Text(verbatim: design.text("desktop.atum.discover.comingSoon"))
                 .font(.caption)
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
+        } else if row.unavailable != nil {
+            // The line under the name says why; "view only" would say something else.
+            EmptyView()
         } else if !row.selectable {
             Text(verbatim: design.text("src.matrix.workbench-copy.copy.viewOnly"))
                 .font(.caption)
@@ -534,6 +537,9 @@ struct PhoneModelPickerList: View {
     /// models are named by the line-up. Where a pick lands is said once, by the
     /// list's last line.
     private func detail(_ row: Row, withConnection: Bool) -> String? {
+        if let unavailable = row.unavailable {
+            return label(for: row.source) + " · " + copy.unavailable(unavailable)
+        }
         guard withConnection else { return nil }
         if let tagline = row.tagline { return copy.tagline(tagline) }
         if let connectionLabel = row.connectionLabel, row.source != .atum { return connectionLabel }

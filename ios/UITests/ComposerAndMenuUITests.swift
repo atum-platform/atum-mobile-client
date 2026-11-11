@@ -220,6 +220,35 @@ final class ComposerUITests: WS3UITestCase {
                           "agent field stays above the model selector")
     }
 
+    /// The composer's model sheet with the account's subscriptions
+    /// (`-AtumScriptedSubscriptions`, synthetic): captured for the port note,
+    /// then, with a relay up, a pick of another plan model moves the check.
+    /// `ATUM_SUBSCRIPTION_DEMO` (`ready`, `not-ready`) and `ATUM_CAPTURE_TAG`
+    /// name the run; pass them as `TEST_RUNNER_…` to `xcodebuild`.
+    @MainActor
+    func testTheModelSheetListsTheAccountSubscriptions() {
+        let environment = ProcessInfo.processInfo.environment
+        let demo = environment["ATUM_SUBSCRIPTION_DEMO"] ?? "ready"
+        let tag = environment["ATUM_CAPTURE_TAG"] ?? "capture"
+        let app = launchChat(.chatEmpty, extra: ["-AtumScriptedSubscriptions", demo])
+        let chip = element(app, AccessibilityID.composerModel)
+        XCTAssertTrue(chip.waitForExistence(timeout: Self.waitSeconds))
+        chip.tap()
+        let bar = app.navigationBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: Self.waitSeconds))
+        bar.swipeUp()
+        let section = element(app, "phone.model.section.subscriptions")
+        XCTAssertTrue(section.waitForExistence(timeout: Self.waitSeconds), "no Subscriptions section")
+        keepEvidence("subscriptions-\(demo)-\(tag)", of: app)
+
+        let mini = element(app, "phone.model.row.gpt-6.1-mini")
+        guard demo == "ready", mini.exists else { return }
+        mini.tap()
+        let moved = expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: mini)
+        wait(for: [moved], timeout: Self.waitSeconds)
+        keepEvidence("subscriptions-\(demo)-picked-\(tag)", of: app)
+    }
+
     /// The owner's ChatGPT-style row: + leading, model chip, mic, then the
     /// send circle once there is a draft; one row for every chat kind.
     @MainActor
