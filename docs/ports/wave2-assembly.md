@@ -57,4 +57,5 @@ Wave 2 introduced three, now fixed:
   when hidden, and the drag started in that gap. The notice now shares a
   zero-spacing stack with the composer and carries its own 4 pt when shown.
 - S6 U12: AC-3 folds Privacy into Account, so the recovery key row can be below
-  the fold. The test scrolls to `account.settings.privacy.recovery-key`.
+  the fold. The test scrolls to `account.settings.privacy.recovery-key`; U10 likewise
+  scrolls to `account.settings.help.legal` at AX5.

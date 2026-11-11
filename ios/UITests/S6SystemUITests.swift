@@ -607,7 +607,11 @@ final class S6SystemUITests: TranscriptUITestCase {
         closeSettingsPage(in: app, file: file, line: line)
 
         openSettingsPage("help", in: app, file: file, line: line)
-        XCTAssertTrue(app.buttons["Pháp lý"].exists, file: file, line: line)
+        // AC-3's Help page is longer; at AX5 Legal is below the fold.
+        let legal = element(app, "account.settings.help.legal")
+        XCTAssertTrue(scrollSettingsList(to: legal, in: app), "the Help page has no Legal row",
+                      file: file, line: line)
+        XCTAssertTrue(legal.label.contains("Pháp lý"), file: file, line: line)
         closeSettingsPage(in: app, file: file, line: line)
 
         openSettingsPage("privacy", in: app, file: file, line: line)
