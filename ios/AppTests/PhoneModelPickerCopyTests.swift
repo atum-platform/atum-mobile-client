@@ -28,6 +28,21 @@ final class PhoneModelPickerCopyTests: XCTestCase {
         }
     }
 
+    /// Cloud-only: a cloud assistant's last line comes from the pin in every
+    /// locale and no longer says the cloud can use Atum's models only.
+    func testTheCloudAssistantLineNamesTheAssistantWithoutAnAtumOnlyLimit() throws {
+        let pin = try AtumCopy()
+        let key = PhoneModelPickerList.contextKey(.cloudAssistant)
+        let conversation = PhoneModelPickerList.contextKey(.conversation)
+        XCTAssertTrue(pin.contains(key.rawValue))
+        for locale in pin.locales {
+            let line = try pin.text(key.rawValue, locale: locale)
+            XCTAssertFalse(line.isEmpty, locale)
+            XCTAssertNotEqual(line, try pin.text(conversation.rawValue, locale: locale), locale)
+        }
+        XCTAssertFalse(try pin.text(key.rawValue, locale: "en").contains("only"))
+    }
+
     func testPendingCopyIsWrittenInEveryLocaleThePinSupports() throws {
         let locales = try AtumCopy().locales
         XCTAssertEqual(Set(PhoneModelPickerPendingCopy.locales), locales)

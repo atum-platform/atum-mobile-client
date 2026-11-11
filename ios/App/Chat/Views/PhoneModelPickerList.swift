@@ -489,11 +489,15 @@ struct PhoneModelPickerList: View {
         return copy.text(.noModels)
     }
 
-    private var contextCopy: String {
+    private var contextCopy: String { copy.text(Self.contextKey(context)) }
+
+    /// The list's last line: what a pick changes. A cloud assistant's line names
+    /// the assistant only; plans work in the cloud too, so it sets no Atum-only limit.
+    nonisolated static func contextKey(_ context: Context) -> PhonePickerCopyKey {
         switch context {
-        case .conversation: copy.text(.changesConversation)
-        case .cloudAssistant: copy.text(.cloudAtumOnly)
-        case .mac: copy.text(.thisMac)
+        case .conversation: .changesConversation
+        case .cloudAssistant: .changesCloudAssistant
+        case .mac: .thisMac
         }
     }
 

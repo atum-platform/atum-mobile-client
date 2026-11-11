@@ -30,6 +30,39 @@ final class AssistantHomeDestinationTests: XCTestCase {
         }
     }
 
+    /// The card's Model page edits the cloud's model even when the 1.3
+    /// snapshot still carries choices for three Macs (kept for older desktops).
+    func testTheCardModelPageEditsTheCloudEvenWhenMacsHaveChoices() throws {
+        let snapshot = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                            from: Data(destinationsJSON.utf8))
+        XCTAssertEqual(snapshot.choices.filter { !$0.destination.isCloud }.count, 3)
+        XCTAssertTrue(snapshot.cardDestination.isCloud)
+        XCTAssertEqual(snapshot.choice(for: snapshot.cardDestination)?.model, "nguyet-thuc")
+    }
+
+    // Frozen model-choice 1.3 snapshot shape with synthetic destinations.
+    private let destinationsJSON = """
+    {
+      "profile": "atum.model-choice/1.3",
+      "agentPrincipal": "00000000-0000-4000-8000-bd7662a5eeb4",
+      "revision": 3,
+      "policyDigest": "489e82bcce6008fd0cae824623b3e323bf7a8820a18e34bf8bab815f7999d7a0",
+      "recommended": { "source": "atum", "model": "nguyet-thuc", "effort": "medium" },
+      "choices": [
+        { "destination": "mac:mini-b", "source": "atum", "model": "nhat-thuc", "effort": "medium" },
+        { "destination": "cloud", "source": "atum", "model": "nguyet-thuc", "effort": "medium" },
+        { "destination": "mac:mini-a", "source": "chatgpt_plan", "model": "gpt-6-luna", "effort": "medium" },
+        { "destination": "mac:book-a", "source": "own_key:openrouter", "model": "openai/gpt-6.1-sol",
+          "effort": "high" }
+      ],
+      "dailyCap": {
+        "dailyProtons": 200000, "timeZone": "Asia/Ho_Chi_Minh", "warningPercent": 80,
+        "counts": "atum_billed_only"
+      },
+      "spend": { "day": "2026-10-18", "usedProtons": 42000, "state": "normal", "notice": "none" }
+    }
+    """
+
     // Frozen agent-home snapshot shape with synthetic principals/devices.
     private let snapshotJSON = """
     {
