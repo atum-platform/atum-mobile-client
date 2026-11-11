@@ -510,9 +510,7 @@ struct ChatInfoHome: View {
                 await actions.reportPerson?(request.userID, reason) ?? false
             }
         }
-        .chatRenameAlert($renameRequest, design: design) { request, name in
-            await actions.rename?.save(request, name) ?? false
-        }
+
         .sensoryFeedback(.error, trigger: info.actionFailureToken)
         .onChange(of: info.actionFailureToken) { old, new in
             guard old != new else { return }
@@ -583,10 +581,6 @@ struct ChatInfoHome: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle(design.text(PersonInfoKey.conversation))
             VStack(spacing: 0) {
-                if let rename = actions.rename, !info.isFounder {
-                    renameRow(rename)
-                    Divider().padding(.leading, 48)
-                }
                 factRow(glyph: .shield,
                         text: design.text(info.roomIsEncrypted ? PersonInfoKey.encrypted : PersonInfoKey.notEncrypted),
                         id: "info.encryption")
@@ -609,6 +603,10 @@ struct ChatInfoHome: View {
                     switchRow(glyph: .chevronDown, title: design.text(PersonInfoKey.lowPriority),
                               isOn: info.isLowPriority, isEnabled: true,
                               id: "info.low-priority") { actions.setLowPriority?(info.roomID, $0) }
+                }
+                if let rename = actions.rename, !info.isFounder {
+                    Divider().padding(.leading, 48)
+                    renameRow(rename)
                 }
             }
             .background(atum.color(.cell, scheme: scheme),
@@ -649,6 +647,11 @@ struct ChatInfoHome: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("info.rename")
+        // On the row, so the panel's own dialogs (Block, Delete) keep their
+        // presentation host to themselves.
+        .chatRenameAlert($renameRequest, design: design) { request, name in
+            await rename.save(request, name)
+        }
     }
 
     private func sectionTitle(_ text: String) -> some View {

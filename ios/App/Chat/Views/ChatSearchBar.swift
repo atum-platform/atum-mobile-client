@@ -167,7 +167,15 @@ struct ChatSearchBar: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 8)
-        .onAppear { fieldFocused = true }
+        // Solid, so the transcript never reads through the field or the count.
+        .background(atum.color(.ground, scheme: scheme).ignoresSafeArea(edges: .bottom))
+        // Focus set while the bar is first appearing can be dropped: ask
+        // again once it is on screen.
+        .task {
+            fieldFocused = true
+            try? await Task.sleep(for: .milliseconds(150))
+            if !Task.isCancelled, !fieldFocused { fieldFocused = true }
+        }
         .onChange(of: announcement) { _, text in
             guard !text.isEmpty else { return }
             AccessibilityNotification.Announcement(text).post()

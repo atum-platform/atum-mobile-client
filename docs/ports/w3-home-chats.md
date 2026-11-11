@@ -33,7 +33,8 @@ App (`ios/App/Chat/Views/ChatSearchBar.swift`, `ChatScreen`, `TranscriptView`, `
 
 - A magnifier in the toolbar (`chat.search.open`) opens the search in every personal chat (assistant, person, group, app). Company channels and company conversations keep their own lane 2 headers, so it is not shown there.
 - While search is open, the search bar takes the composer's place, as iOS find bars sit above the keyboard. The bar has the field, Close, the count line ("2/5 · Searched 250 of 2200") and the older/newer chevrons. Return steps to the older match, as desktop's Enter does. The field wraps rather than clips at large sizes.
-- `ChatSearchSession` (`@Observable`) owns the query, the matches, the current match, the walk's progress and the row to bring into view. The transcript scrolls only when the person asks: typing, stepping, or a walk that found something. It never scrolls because rows changed (desktop's `revealNext`). The scroll is animated on purpose, so `FollowPolicy` reads it as leaving the bottom and does not pin the chat back.
+- `ChatSearchSession` (`@Observable`) owns the query, the matches, the current match, the walk's progress and the row to bring into view. The transcript scrolls only when the person asks: typing, stepping, or a walk that found something. It never scrolls because rows changed (desktop's `revealNext`).
+- Placing a match (`TranscriptView.showSearchMatch`): the chat first leaves the bottom, so `FollowPolicy` does not pin it back. The row then goes a third of the way down the visible area, from its measured top, and is placed again every 0.12 s until it stays (at most 14 tries; a drag ends it). One `scrollTo(id:)` was not enough: a walk's rows have only just landed and still change height, and the UI test caught "1/1" with the match off screen. The row-hold logic waits while a match is being placed.
 - `LiveConversationStore.loadOlderPageForSearch()` waits briefly for a page scrolling already has in flight. Then it loads `ChatHistorySearch.pageEvents`, reports through the core, and waits (bounded) for the projector to turn the page into rows.
 - Highlights: `ChatRowView` and `MessageBubbleRow` take a `searchHighlight` value, so only matched rows change and `.equatable()` still skips the rest. `ChatSearchPaint` paints every match with a 16% ink wash and the current match in ink with the on-ink colour (desktop `::highlight(atum-chat-search)`). In my own bubble, the bubble's text colour plays the ink.
 - VoiceOver: the count reads desktop's announcement ("Result 2 of 5. Searched …") and is posted whenever it changes.
@@ -53,7 +54,7 @@ Desktop `RosterRoomMenu` and the chat "…" menu (`m/roster-context-menu.tsx:315
 
 ### Chat panel
 
-- **Rename** is a new row at the top of the conversation section, in person and group chats only (not the Founder).
+- **Rename** is a new row at the end of the conversation section, after the switches, so the rows above it keep their places. Person and group chats only (not the Founder).
 - **Mark as unread** is not added. Desktop's own rule (`markable = unread || room.id !== snapshot.roomId`) never offers it on the chat being read, and the phone's read rule (B13) would clear the mark again at the bottom. It stays on the Home swipe and long-press.
 
 ### Rename (`ChatRenameAlert.swift`, `ChatMenuModel.swift`, `ChatRoomNaming.swift`)
@@ -92,7 +93,7 @@ Still blocked as the plan says: `goodAnswer` and `badAnswer` are not exported, a
 - `ios/Sources/AtumChat/ConversationCore.swift`: the search page request (`PageRequest.search`, `startSearchPage`, `reachedTimelineStart`).
 - `ios/Sources/AtumChat/LaunchArguments.swift`: the `chat.search` scenario name.
 - `ios/App/Debug/ScriptedHomeHost.swift` and `ios/App/Chat/Views/ScriptedChatHost.swift`: scripted Rename, Low priority and Block, recorded to `home-actions.txt` and `panel.txt`.
-- `ios/AtumMobile.xcodeproj/project.pbxproj`: six file references added by hand (`ChatSearchBar`, `ChatRenameAlert`, `ChatMenuModel`, `HomeChatsWave3UITests`, `HomeChatsWave3StateTests`), as wave 2 did.
+- `ios/AtumMobile.xcodeproj/project.pbxproj`: five file references added by hand (`ChatSearchBar`, `ChatRenameAlert`, `ChatMenuModel`, `HomeChatsWave3UITests`, `HomeChatsWave3StateTests`), as wave 2 did.
 
 ## PENDING-COPY
 
@@ -107,13 +108,24 @@ Still blocked as the plan says: `goodAnswer` and `badAnswer` are not exported, a
 
 `desktop.matrixShell.mainAgent` (from HC-1) is still missing too.
 
-## Verification
-
-See "Test results" below; the coordinator reruns under the assembly.
-
 ## Test results
 
-(filled in after the locked runs)
+Every heavy run used the shared lock (`lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`) on the iPhone 17 simulator (939B69F8), 2026-11-11, with `scripts/sim-content-size-runner.sh` running beside the UI tests.
+
+- `swift test -j 2` (whole package): AtumChatTests 616, AtumDesignTests 701, AtumDriveTests 22, AtumTelemetryTests 16, with 0 failures. New suites: `ChatSearchTests` (15), `ChatRoomNamingTests` (4). `ChatCopyContractTests` (3) now covers the search and menu keys.
+- `xcodebuild … -scheme AtumMobileStateTests -only-testing:AtumMobileTests test` (includes the app build): 328 tests, 0 failures. New: `HomeChatsWave3StateTests` (3).
+- UI tests:
+  - `HomeChatsWave3UITests` (7: search found three pages back, no-result walk in vi, search bar AX audit, group topic subtitle, panel Rename, Home long-press Rename + Low priority + Block, group menu without Block): all 7 passed in dark. In light, 5 passed in the same run; panel Rename then passed on rerun after a test fix (it swiped the chat behind the panel instead of the panel).
+  - `HomeShellUITests` (16) passed. `TranscriptUITests/testU10EmptyChatShowsTheGreeting` passed.
+  - `ChatPanelUITests`: 3 passed and 1 was skipped (iPad-only). `testPersonPanelShowsConversationFactsAndBlocksInPlace` was listed as failing on main in `wave2-assembly.md`; it now passes. Two fixes: its confirmation query no longer looks for an iOS 26 `Sheet` element, and its Low priority tap retries once the panel stops decelerating.
+- Bugs the UI runs caught and this branch fixes:
+  1. The first match placement (one `scrollTo(id:)`) left "1/1" with the match off screen; it is now placed and re-placed from the row's measured top.
+  2. The transcript showed through the search bar; the bar now has a solid ground.
+  3. Rename's alert on the panel body stopped the panel's Block confirmation from presenting at all; the alert now hangs on the Rename row.
+- On a loaded simulator the search field sometimes had no keyboard focus yet, so focus is asked for again 150 ms after the bar appears.
+- `bash scripts/pre-push-public dc0634b <head>`: PASS.
+
+Captures (simulator, scripted hosts), kept outside git in `.scratch/` of the worker's worktree: `hc6-search-found-{light,dark}-en`, `hc6-search-none-{light,dark}-vi`, `hc6-search-ax5-{light,dark}-en`, `hc6-group-topic-{light,dark}-vi`, `hc7-home-menu-{light,dark}-vi`, `hc7-rename-{light,dark}-en`.
 
 ## Not verified
 

@@ -235,7 +235,7 @@ struct TranscriptView: View {
     /// clamped.
     @discardableResult
     private func holdAnchor() -> Bool {
-        guard !store.follow.isFollowing, var anchor = scratch.anchor,
+        guard !store.follow.isFollowing, !scratch.placingSearchMatch, var anchor = scratch.anchor,
               let minY = scratch.rowMinY[anchor.id], abs(minY - anchor.minY) > 0.5 else { return false }
         let geometry = scratch.geometry
         let target = minY - geometry.insetTop - anchor.viewportY
@@ -388,12 +388,56 @@ struct TranscriptView: View {
 
     // MARK: HC-6: bringing a search match into view
 
-    /// Animated, so the follow rule reads it as a scroll away from the bottom
-    /// and does not pin the chat back (an `.idle` pass would).
+    /// The person asked for this match, so the chat leaves the bottom first
+    /// (the follow rule would otherwise pin it back). One scroll is not
+    /// enough: a walk's rows have only just landed, and they still change
+    /// height (layout, parsed markdown), so the row is placed from its
+    /// measured top and placed again until it stays. A drag ends it.
     private func showSearchMatch(_ rowID: String) {
         guard store.snapshot.rows.contains(where: { $0.id == rowID }) else { return }
-        withAnimation(.smooth(duration: 0.3)) { position.scrollTo(id: rowID, anchor: .center) }
+        let geometry = scratch.geometry
+        store.handle(.geometry(distanceFromBottom: max(geometry.distanceFromBottom, FollowPolicy.nearBottomPoints + 1),
+                               distanceFromTop: geometry.distanceFromTop,
+                               viewportHeight: geometry.viewportHeight, motion: .user))
+        syncFollowState()
+        scratch.pendingHold = nil
+        scratch.anchor = nil
+        scratch.searchGeneration &+= 1
+        scratch.placingSearchMatch = true
+        placeSearchMatch(rowID, generation: scratch.searchGeneration, attempt: 0)
     }
+
+    private func placeSearchMatch(_ rowID: String, generation: UInt64, attempt: Int) {
+        guard generation == scratch.searchGeneration else { return }
+        guard scratch.motion != .user, attempt < Self.searchPlacementAttempts else {
+            scratch.placingSearchMatch = false
+            return
+        }
+        let geometry = scratch.geometry
+        if let minY = scratch.rowMinY[rowID], geometry.viewportHeight > 0 {
+            // A third of the way down the visible area, so the start of a
+            // long message shows above the search bar.
+            let desired = max(0, minY - geometry.viewportHeight * 0.3)
+            let current = geometry.offsetY + geometry.insetTop
+            let atEnd = geometry.distanceFromBottom <= 0.5 && current < desired
+            if attempt > 0, abs(current - desired) <= 2 || atEnd {
+                scratch.placingSearchMatch = false
+                scheduleSettle(after: Self.settleSeconds)
+                return
+            }
+            scratch.pendingHold = nil
+            if attempt == 0 {
+                withAnimation(.smooth(duration: 0.25)) { position.scrollTo(y: desired) }
+            } else {
+                position.scrollTo(y: desired)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (attempt == 0 ? 0.3 : 0.12)) {
+            placeSearchMatch(rowID, generation: generation, attempt: attempt + 1)
+        }
+    }
+
+    private static let searchPlacementAttempts = 14
 
     // MARK: B3: VoiceOver announces incoming messages while following
 
@@ -508,6 +552,10 @@ private final class TranscriptScratch {
     var quietUntil: Date?
     /// The latest `scheduleSettle` (older ones do nothing).
     var settleGeneration: UInt64 = 0
+    /// HC-6: a search match is being placed; holds wait until it stays.
+    var placingSearchMatch = false
+    /// The latest `showSearchMatch` (older ones stop).
+    var searchGeneration: UInt64 = 0
     #if DEBUG
     /// `-AtumUITestProbeDir`: how each hold landed, for G-scroll check 4.
     var holdProbe: HoldProbe? = UITestProbe.folder == nil ? nil : HoldProbe()

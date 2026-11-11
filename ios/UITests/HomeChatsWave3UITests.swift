@@ -18,6 +18,13 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
 
     @MainActor private var appearanceTag: String { XCUIDevice.shared.appearance == .dark ? "dark" : "light" }
 
+    /// The field takes focus by itself; on a loaded simulator the keyboard
+    /// can be slow, and then a tap saves the test from timing out.
+    @MainActor
+    private func focusSearch(_ app: XCUIApplication, _ field: XCUIElement) {
+        if !app.keyboards.firstMatch.waitForExistence(timeout: 5) { field.tap() }
+    }
+
     // MARK: HC-6
 
     /// The magnifier opens the bar in the composer's place; "da lat" is not
@@ -32,6 +39,7 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let field = element(app, "chat.search.field")
         XCTAssertTrue(field.waitForExistence(timeout: 3), boundedHierarchy(app))
         XCTAssertFalse(element(app, AccessibilityID.composerField).exists, "the bar takes the composer's place")
+        focusSearch(app, field)
         field.typeText("da lat")
         let count = element(app, "chat.search.count")
         XCTAssertTrue(waitFor(15) { (count.label).hasPrefix("Result 1 of 1") }, "count: \(count.label)")
@@ -56,6 +64,7 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         open.tap()
         let field = element(app, "chat.search.field")
         XCTAssertTrue(field.waitForExistence(timeout: 3))
+        focusSearch(app, field)
         field.typeText("qqzzxx")
         let count = element(app, "chat.search.count")
         XCTAssertTrue(waitFor(20) { count.label.hasPrefix("Không có kết quả") && count.label.contains("Đã tìm") },
@@ -88,6 +97,7 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         open.tap()
         let field = element(app, "chat.search.field")
         XCTAssertTrue(field.waitForExistence(timeout: 3))
+        focusSearch(app, field)
         field.typeText("da lat")
         let count = element(app, "chat.search.count")
         XCTAssertTrue(waitFor(15) { count.label.hasPrefix("Result 1 of 1") }, "count: \(count.label)")
@@ -108,8 +118,13 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         element(app, "chat.title").tap()
         let rename = element(app, "info.rename")
         XCTAssertTrue(rename.waitForExistence(timeout: 5), boundedHierarchy(app))
-        if !rename.isHittable { app.swipeUp() }
-        XCTAssertTrue(waitFor(3) { rename.isHittable })
+        // The row sits under the switches: raise the panel (swipe the panel,
+        // not the chat behind it) until it is in view.
+        for _ in 0..<3 where !rename.isHittable {
+            element(app, "info.sheet").swipeUp()
+            _ = waitFor(2) { rename.isHittable }
+        }
+        XCTAssertTrue(waitFor(3) { rename.isHittable }, boundedHierarchy(app))
         rename.tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 3))
@@ -120,7 +135,7 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         field.tap()
         field.typeText(" ✿")
         keepScreenshot("hc7-rename-\(appearanceTag)-en", of: app)
-        alert.buttons["Save"].tap()
+        alert.buttons["Save"].firstMatch.tap()
         XCTAssertTrue(waitFor(3) { self.probeLines("panel.txt").map(\.text).contains("rename false Minh Anh ✿") },
                       "\(probeLines("panel.txt").map(\.text))")
     }
@@ -166,7 +181,7 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let field = alert.textFields.firstMatch
         field.tap()
         field.typeText(" 2")
-        alert.buttons["Lưu"].tap()
+        alert.buttons["Lưu"].firstMatch.tap()
 
         XCTAssertTrue(waitFor(3) { self.probeLines("home-actions.txt").count == 3 })
         XCTAssertEqual(probeLines("home-actions.txt").map(\.text), [
