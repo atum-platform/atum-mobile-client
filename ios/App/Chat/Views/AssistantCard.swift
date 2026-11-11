@@ -11,9 +11,9 @@ struct AssistantCardIdentity: Equatable {
     let roomID: String
     let name: String
     let title: String?
-    /// The platform's bot handle stem when `/agents` advertises one. The
-    /// phone has no alias editor yet; nil shows the exported "no handle" line
-    /// rather than inventing one.
+    /// The platform's bot handle stem when `/agents` advertises one, for
+    /// hosts without the directory editor (AS-5); nil shows the exported
+    /// "no handle" line rather than inventing one.
     let botHandle: String?
     let isPrimary: Bool
     let avatar: LiveProductAvatar?
@@ -73,6 +73,16 @@ struct AssistantCard: View {
     /// opens Skills, as desktop's `openShelf` does. Nil in hosts without a
     /// Store, and then the card has no Pet row (desktop: no Store, no row).
     let onOpenStore: ((StoreSectionKind) -> Void)?
+    /// The bot handle directory for this assistant (AS-5). Nil keeps the
+    /// read-only handle line.
+    let handles: AssistantHandleActions?
+    /// Desktop's "Delete {name}…" (AS-4). Nil for the primary and in hosts
+    /// that cannot reach the retire route.
+    let retire: AssistantRetireActions?
+    /// After the platform confirms the retirement: the host leaves the card.
+    let onRetired: (() -> Void)?
+    /// Opened from a "Rename…" entry: the name field takes focus at once.
+    let startsRenaming: Bool
 
     @State private var snapshot: AgentDefinitionSnapshot?
     @State private var persona: AssistantPersona?
@@ -104,7 +114,11 @@ struct AssistantCard: View {
     @State private var routinePhase: AgentRoutinesProbe.Phase = .idle
     @State private var routineProbed = false
     @State private var petName: String?
+    @State private var confirmsRetire = false
+    @State private var retiring = false
+    @State private var retireFailed = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// The session is offline or in error: desktop's card caption
     /// "You're offline. You can edit once you're connected."
     @Environment(\.showsConnectionGlyph) private var offline
@@ -125,7 +139,9 @@ struct AssistantCard: View {
          home: AssistantHomeActions?, modelDestinations: AssistantModelDestinationActions?,
          avatar: AssistantAvatarActions?, routines: AssistantRoutineActions?,
          loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil,
-         onMessage: (() -> Void)? = nil, onOpenStore: ((StoreSectionKind) -> Void)? = nil) {
+         onMessage: (() -> Void)? = nil, onOpenStore: ((StoreSectionKind) -> Void)? = nil,
+         handles: AssistantHandleActions? = nil, retire: AssistantRetireActions? = nil,
+         onRetired: (() -> Void)? = nil, startsRenaming: Bool = false) {
         self.design = design
         self.identity = identity
         self.entry = entry
@@ -138,6 +154,10 @@ struct AssistantCard: View {
         self.loadMatrixThumbnail = loadMatrixThumbnail
         self.onMessage = onMessage
         self.onOpenStore = onOpenStore
+        self.handles = handles
+        self.retire = identity.isPrimary ? nil : retire
+        self.onRetired = onRetired
+        self.startsRenaming = startsRenaming
         _nameEdit = State(initialValue: AssistantCardEdit(saved: identity.name,
                                                           requirement: .nonEmpty))
     }
@@ -161,7 +181,8 @@ struct AssistantCard: View {
             hasModel: models != nil || modelDestinations != nil,
             hasPet: AssistantCardLayout.showsPet(storeAvailable: onOpenStore != nil),
             hasSkills: AssistantCardLayout.showsSkills(count: skills.count),
-            hasRoutines: routines != nil
+            hasRoutines: routines != nil,
+            canRetire: retire != nil
         )
     }
 
@@ -179,6 +200,7 @@ struct AssistantCard: View {
                 handleSection
                 personaSection
                 rowsSection
+                retireSection
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -204,6 +226,19 @@ struct AssistantCard: View {
             }
         }
         .task { await load() }
+        .task {
+            // "Rename…": the field takes focus once the card has its name.
+            guard startsRenaming else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            if definition?.rename != nil { focused = .name }
+        }
+        .alert(retireCopy.text(.agentRetireTitle, name: displayName), isPresented: $confirmsRetire) {
+            Button(retireCopy.text(.agentCancel), role: .cancel) {}
+            Button(retireCopy.text(.agentRetireConfirm), role: .destructive) { retireNow() }
+                .accessibilityIdentifier("assistant.card.retire.confirm")
+        } message: {
+            Text(retireCopy.text(.agentRetireBody, name: displayName))
+        }
         .onChange(of: photoItem) { _, item in
             if let item { loadPhoto(item) }
         }
@@ -722,16 +757,33 @@ struct AssistantCard: View {
         }
     }
 
+    /// One line at ordinary sizes. At the accessibility sizes the value moves
+    /// under its label and wraps, so neither is clipped.
     private func cardRow(label: String, value: String?) -> some View {
         HStack(spacing: 8) {
-            Text(label)
-                .foregroundStyle(atum.color(.ink, scheme: scheme))
-            Spacer(minLength: 8)
-            if let value, !value.isEmpty {
-                Text(verbatim: value)
-                    .font(.footnote)
-                    .foregroundStyle(atum.color(.soft, scheme: scheme))
-                    .lineLimit(1)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label)
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let value, !value.isEmpty {
+                        Text(verbatim: value)
+                            .font(.footnote)
+                            .foregroundStyle(atum.color(.soft, scheme: scheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+            } else {
+                Text(label)
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                Spacer(minLength: 8)
+                if let value, !value.isEmpty {
+                    Text(verbatim: value)
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .lineLimit(1)
+                }
             }
             Image(atum.symbol(.chevronRight))
                 .font(.footnote.weight(.semibold))
@@ -801,11 +853,77 @@ struct AssistantCard: View {
         instructionsEdit = AssistantCardEdit(saved: parsed.instructions)
     }
 
-    private var handleSection: some View {
-        handleRow
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.bottom, 12)
+    @ViewBuilder private var handleSection: some View {
+        Group {
+            if let handles {
+                AssistantHandleEditor(design: design, assistantName: displayName, actions: handles,
+                                      disabled: offline)
+            } else {
+                handleRow
+            }
+        }
+        .background(atum.color(.cell, scheme: scheme),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.bottom, 12)
+    }
+
+    // MARK: Retire (AS-4)
+
+    private var retireCopy: AssistantRetireCopy { AssistantRetireCopy(design: design) }
+
+    /// Desktop's delete section: its own group after the rows, the one
+    /// destructive line, and a confirmation that says it is final. Nothing
+    /// changes on the phone until the platform confirms; a failure keeps the
+    /// card as it was and says so.
+    @ViewBuilder private var retireSection: some View {
+        if rows.contains(.retire), retire != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Button(role: .destructive) {
+                    retireFailed = false
+                    confirmsRetire = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(copy.text(.deleteRow, [.text(displayName)]))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        if retiring { ProgressView().controlSize(.small) }
+                    }
+                    .foregroundStyle(atum.color(.danger, scheme: scheme))
+                    .frame(minHeight: 52)
+                    .padding(.horizontal, 16)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(retiring || offline)
+                .background(atum.color(.cell, scheme: scheme),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .accessibilityIdentifier("assistant.card.retire")
+                if retireFailed {
+                    Text(retireCopy.text(.agentRetireFailed))
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.danger, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16)
+                        .accessibilityIdentifier("assistant.card.retire.failed")
+                }
+            }
+            .padding(.top, 12)
+        }
+    }
+
+    private func retireNow() {
+        guard let retire, !retiring else { return }
+        retiring = true
+        retireFailed = false
+        Task { @MainActor in
+            let result = await retire.retire()
+            retiring = false
+            switch result {
+            case .retired: onRetired?()
+            case .failed: retireFailed = true
+            }
+        }
     }
 
     private func revert(_ field: Field) {
@@ -1010,6 +1128,7 @@ struct AssistantCard: View {
 /// the coordinator can see exactly what the phone reads.
 enum AssistantCardCopyKey: String {
     case menuEdit = "src.matrix.assistant-card.copy.assistantCardCopies.menuEdit"
+    case deleteRow = "src.matrix.assistant-card.copy.assistantCardCopies.deleteRow"
     case sheetLabel = "src.matrix.assistant-card.copy.assistantCardCopies.sheetLabel"
     case done = "src.matrix.assistant-card.copy.assistantCardCopies.done"
     case message = "src.matrix.assistant-card.copy.assistantCardCopies.message"
@@ -1108,11 +1227,66 @@ struct AssistantCardCopy {
         return AssistantRoutinePendingCopy.text(key, locale: design.locale, name: name)
     }
 
+    /// An AS-6 routine word: the pin first, then desktop's own value in the
+    /// app language (`AssistantRoutinePolishCopy`).
+    func polish(_ key: AssistantRoutinePolishCopy.Key, _ arguments: [String] = []) -> String {
+        if design.copy.contains(key.exportKey) {
+            return design.text(key.exportKey, arguments: arguments.map { .text($0) })
+        }
+        return AssistantRoutinePolishCopy.text(key, locale: design.locale, arguments: arguments)
+    }
+
+    /// Desktop `matrixRoutineScheduleWords`: "Every day at 8:00".
+    func scheduleWords(_ routine: AgentRoutine) -> String {
+        AssistantRoutineWords.schedule(Self.shape(routine.schedule), timezone: routine.timezone,
+                                       locale: design.locale, resolve: { polish($0, $1) })
+    }
+
+    /// Desktop `matrixRoutineNextWords`, or nil for "Paused".
+    func nextWords(_ routine: AgentRoutine, now: Date = Date()) -> String? {
+        AssistantRoutineWords.next(
+            at: routine.nextRunAt.map { Date(timeIntervalSince1970: Double($0) / 1_000) },
+            enabled: routine.enabled, timezone: routine.timezone, deviceTimeZone: .current,
+            now: now, locale: design.locale, resolve: { polish($0, $1) })
+    }
+
+    static func shape(_ schedule: AgentRoutineSchedule) -> AssistantRoutineScheduleShape {
+        switch schedule {
+        case let .once(runAt): .once(runAt)
+        case let .daily(hour, minute): .daily(hour: hour, minute: minute)
+        case let .weekly(hour, minute, weekdays): .weekly(hour: hour, minute: minute, weekdays: weekdays)
+        case let .monthly(day, hour, minute): .monthly(day: day, hour: hour, minute: minute)
+        case .unsupported: .other
+        }
+    }
+
     /// The value beside "Routines": "3 routines", "No routines", "Chưa có".
     func routineCount(_ count: Int) -> String {
         let key = AssistantCardCopyKey.routineCount.rawValue
         if design.copy.contains(key) { return design.text(key, arguments: [.number(Int64(max(0, count)))]) }
         return AssistantRoutinePendingCopy.count(count, locale: design.locale)
+    }
+}
+
+enum AssistantRetireResult: Equatable { case retired, failed }
+
+/// Retiring one non-primary assistant (AS-4): the platform's one call, then
+/// the host takes its chat off the list.
+struct AssistantRetireActions {
+    let retire: @MainActor () async -> AssistantRetireResult
+}
+
+/// Desktop's delete and name-refusal words: the pin first, then desktop's
+/// own `t.matrixShell` values in the app language (`AssistantShellPendingCopy`).
+@MainActor
+struct AssistantRetireCopy {
+    let design: LiveDesign
+
+    func text(_ key: AssistantShellPendingCopy.Key, name: String? = nil) -> String {
+        if design.copy.contains(key.exportKey) {
+            return design.text(key.exportKey, arguments: name.map { [.text($0)] } ?? [])
+        }
+        return AssistantShellPendingCopy.text(key, locale: design.locale, name: name)
     }
 }
 
