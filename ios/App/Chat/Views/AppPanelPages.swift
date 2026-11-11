@@ -164,9 +164,13 @@ struct AppPanelPagesSection: View {
                     .buttonStyle(.atumPlain)
                     .accessibilityIdentifier("info.app.retry")
                 }
+                // Its own container: the section's `info.app.pages` id would
+                // otherwise replace this one on the notice's text.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("info.app.unavailable")
             } else {
                 AtumNotice(glyph: .info, title: design.text(AppPanelCopy.unavailable))
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("info.app.unavailable")
             }
         case .loading:

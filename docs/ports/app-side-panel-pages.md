@@ -147,3 +147,8 @@ CI fix (11 Nov, run 43019137755): `perform(...)` now admits `Atum-App-Panel-Prof
 `atum.app-panel/1` on a GET of `/apps/{slug}/manifest`; the AppTests card fixture no longer
 feeds a blank localized phrase (`AppLocalizedCopy` refuses it, as desktop's catalog parser does),
 and asserts the refusal instead.
+
+UI fix (11 Nov, run 43049204470, shard 0): `testAppPanelReadFailureOffersRetry` could not find
+`info.app.unavailable`. The section's own container id (`info.app.pages`) replaced the notice's id
+on its text, so the notice is now its own accessibility container in both retry and no-retry forms.
+Not compiled locally (build lock busy); hosted UI shard 0 is the verdict.
