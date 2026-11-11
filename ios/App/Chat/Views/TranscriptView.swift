@@ -29,6 +29,8 @@ struct TranscriptView: View {
     /// dialog over it): the bottom does not count as visible, so no receipt
     /// goes out (B13).
     var covered = false
+    /// HC-6: the open search's highlights and the match to bring into view.
+    var search: ChatSearchSession? = nil
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.scenePhase) private var scenePhase
@@ -78,7 +80,8 @@ struct TranscriptView: View {
             VStack(spacing: 0) {
                 ForEach(rows) { row in
                     ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
-                                parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID)
+                                parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
+                                searchHighlight: search?.highlights[row.id])
                         .equatable()
                         // Each row's top in the content (it changes only when
                         // something above it changes height, never on scroll).
@@ -107,6 +110,10 @@ struct TranscriptView: View {
         }
         .onScrollGeometryChange(for: TranscriptGeometry.self) { TranscriptGeometry($0) } action: { old, new in
             geometryChanged(from: old, to: new)
+        }
+        .onChange(of: search?.focus) { _, focus in
+            guard let focus else { return }
+            showSearchMatch(focus.rowID)
         }
         .onChange(of: store.scrollRequest) { _, request in
             apply(request.command)
@@ -377,6 +384,15 @@ struct TranscriptView: View {
     private func showOriginal(_ eventID: String) {
         guard let row = store.snapshot.rows.first(where: { $0.item.eventID == eventID }) else { return }
         withAnimation(.smooth(duration: 0.35)) { position.scrollTo(id: row.id, anchor: .center) }
+    }
+
+    // MARK: HC-6: bringing a search match into view
+
+    /// Animated, so the follow rule reads it as a scroll away from the bottom
+    /// and does not pin the chat back (an `.idle` pass would).
+    private func showSearchMatch(_ rowID: String) {
+        guard store.snapshot.rows.contains(where: { $0.id == rowID }) else { return }
+        withAnimation(.smooth(duration: 0.3)) { position.scrollTo(id: rowID, anchor: .center) }
     }
 
     // MARK: B3: VoiceOver announces incoming messages while following

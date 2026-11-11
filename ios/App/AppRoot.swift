@@ -779,7 +779,11 @@ struct AppRoot: View {
                     sharedCollections: model.sharedCollectionsOpener(roomID: roomID),
                     companyChannel: CompanyChannelActions(
                         loadFacts: { await model.companyChannelFacts(roomID: $0) },
-                        loadPinned: { await model.companyPinnedRows(roomID: $0) })
+                        loadPinned: { await model.companyPinnedRows(roomID: $0) }),
+                    // HC-7: Rename from the panel (desktop conversation menu).
+                    rename: model.offersPersonalExits(roomID: roomID)
+                        ? ChatRenameActions(request: { await model.renameRequest(roomID: $0) },
+                                            save: { await model.rename($0, to: $1) }) : nil
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),
@@ -830,7 +834,7 @@ struct AppRoot: View {
     }
 
     private var homeActions: HomeActions {
-        HomeActions(
+        var actions = HomeActions(
             openRoom: { requestRoomOpen($0) },
             joinInvitation: { await openRoomAndRoute($0) },
             refresh: { await model.refreshProduct() },
@@ -880,6 +884,14 @@ struct AppRoot: View {
             exitRoom: { model.exitRoom($0, $1) },
             viewerIsFounder: model.isFounderAccount
         )
+        // HC-7: the long-press's Low priority, Rename and Block.
+        actions.setLowPriority = { model.setRoomLowPriority($0, isLowPriority: $1) }
+        actions.rename = ChatRenameActions(request: { await model.renameRequest(roomID: $0) },
+                                           save: { await model.rename($0, to: $1) })
+        actions.blockablePeer = { model.blockablePeer(roomID: $0) }
+        actions.blockedUserIDs = { await model.blockedUserIDs() }
+        actions.setBlocked = { await model.setIgnored(userID: $0, ignored: $1) }
+        return actions
     }
 
     /// The Founder draft's one send: its first message makes the chat (or finds the one another
