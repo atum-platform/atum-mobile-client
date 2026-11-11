@@ -27,11 +27,14 @@ struct EmptyChatGreeting<Face: View>: View {
                 Text(theme.copy.text(EmptyChatPolicy.greetingKey(period)))
                     .font(.system(.title, weight: .semibold))
                     .foregroundStyle(theme.color("ink", scheme))
+                    // Never compressed to a clipped line at the largest sizes.
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 16)
                     .accessibilityAddTraits(.isHeader)
                 Text(theme.copy.text(.greetingPrompt))
                     .font(.body)
                     .foregroundStyle(theme.quiet(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 8)
                 if let onPickStarter {
                     StarterChips(theme: theme, onPick: onPickStarter)

@@ -50,7 +50,8 @@ block-in-place (flaky), S6 U7's "Mở" count, U16 and the Wave2MediaBot smoke.
 Wave 2 introduced three, now fixed:
 - S1 `testEmptyChat` "Text clipped": the HC-4 starter chips were one line. They
   now wrap (a rounded rectangle with an 18 pt radius, which is a capsule on one
-  line).
+  line). The rerun then flagged the greeting prompt as clipped, so the title and
+  prompt keep their full height (`fixedSize(vertical:)`).
 - Transcript U7 keyboard dismiss: the ST-5 chat top-up notice's empty host sat
   in the composer area's 4 pt-spaced stack, so it raised the composer 4 pt even
   when hidden, and the drag started in that gap. The notice now shares a
