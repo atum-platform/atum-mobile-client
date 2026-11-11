@@ -149,6 +149,8 @@ feeds a blank localized phrase (`AppLocalizedCopy` refuses it, as desktop's cata
 and asserts the refusal instead.
 
 UI fix (11 Nov, run 43049204470, shard 0): `testAppPanelReadFailureOffersRetry` could not find
-`info.app.unavailable`. The section's own container id (`info.app.pages`) replaced the notice's id
-on its text, so the notice is now its own accessibility container in both retry and no-retry forms.
-Not compiled locally (build lock busy); hosted UI shard 0 is the verdict.
+`info.app.unavailable`. The hosted tree shows the notice's text and `info.app.retry` inside
+`info.app.pages`, but no node with the notice's id. Giving the notice its own container (`d6cf2e0`)
+changed nothing, because `AtumNotice` is already one, so that was reverted. The test now waits on
+the notice's text and Retry instead. Not compiled locally (build lock busy); hosted UI shard 0 is
+the verdict.

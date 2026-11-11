@@ -84,13 +84,17 @@ final class AppSidePanelUITests: TranscriptUITestCase {
     func testAppPanelReadFailureOffersRetry() throws {
         try XCTSkipIf(isPad, "iPhone sheet")
         let app = launchMoonPanel("failed")
-        XCTAssertTrue(element(app, "info.app.unavailable").waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertTrue(app.staticTexts["Ứng dụng này hiện không khả dụng."].exists)
+        // The notice's own id doesn't reach XCUITest inside the `info.app.pages` section
+        // (hosted runs 43049204470, and d6cf2e0's): its text and Retry do.
+        XCTAssertTrue(app.staticTexts["Ứng dụng này hiện không khả dụng."].waitForExistence(timeout: 3),
+                      boundedHierarchy(app))
+        XCTAssertTrue(element(app, "info.app.retry").exists)
         XCTAssertTrue(waitFor(3) { self.probeLines("app-panel.txt").map(\.text) == ["refresh"] })
         element(app, "info.app.retry").tap()
         XCTAssertTrue(waitFor(3) { self.probeLines("app-panel.txt").map(\.text) == ["refresh", "refresh"] },
                       "Retry did not read the pages again")
-        XCTAssertTrue(element(app, "info.app.unavailable").waitForExistence(timeout: 3))
+        XCTAssertTrue(element(app, "info.app.retry").waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Ứng dụng này hiện không khả dụng."].exists)
     }
 
     /// An app whose account is not linked offers one action: back to the chat,
