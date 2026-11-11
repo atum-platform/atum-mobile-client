@@ -136,6 +136,13 @@ final class CompanyThreadsPolicyTests: XCTestCase {
                                   replyCount: 2, unread: true, followed: true)
         XCTAssertTrue(tapped.applied(to: newer).unread)
         XCTAssertTrue(CompanyThreadOverride.reconcile([thread.id: tapped], with: [newer]).isEmpty)
+        // Marking read clears its mentions too, until a newer reply.
+        var mentioned = thread
+        mentioned.highlights = 2
+        XCTAssertEqual(tapped.applied(to: mentioned).highlights, 0)
+        var newerMention = newer
+        newerMention.highlights = 1
+        XCTAssertEqual(tapped.applied(to: newerMention).highlights, 1)
         // A thread that is gone drops its override.
         XCTAssertTrue(CompanyThreadOverride.reconcile([thread.id: tapped], with: []).isEmpty)
     }

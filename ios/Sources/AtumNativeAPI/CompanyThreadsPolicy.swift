@@ -258,6 +258,8 @@ public struct CompanyThreadOverride: Equatable, Sendable {
         if let followed { shown.followed = followed }
         if let unread, thread.lastActivityAt <= (readAt ?? .max) {
             shown.unread = unread
+            // Read means its mentions are read too (they'd still badge the row).
+            if !unread { shown.highlights = 0 }
         }
         return shown
     }

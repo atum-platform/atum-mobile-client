@@ -36,12 +36,25 @@ extension LiveMatrixSession {
         }
     }
 
-    /// The person's follow choices in a room (`io.atum.thread_attention.v1`), from the local store.
+    /// The person's follow choices in a room (`io.atum.thread_attention.v1`):
+    /// the local store, or the record this phone wrote last while sync
+    /// hasn't caught up with it yet.
     func companyThreadAttention(roomID: String) async -> CompanyThreadAttention {
+        let synced = await companySyncedThreadAttention(roomID: roomID)
+        guard let key = companyThreadAttentionKey(roomID: roomID) else { return synced }
+        return await CompanyThreadAttentionWrites.shared.effective(key, synced: synced)
+    }
+
+    private func companySyncedThreadAttention(roomID: String) async -> CompanyThreadAttention {
         guard let room = try? room(id: roomID),
               let json = try? await room.accountDataRaw(eventType: CompanyThreadAttention.accountDataType)
         else { return CompanyThreadAttention() }
         return CompanyThreadAttention.parse(json)
+    }
+
+    private func companyThreadAttentionKey(roomID: String) -> String? {
+        guard let userID = try? runtime.client.userId() else { return nil }
+        return userID + "\u{0}" + roomID
     }
 
     /// Follow or unfollow one thread: the desktop's record, rewritten whole
@@ -49,10 +62,25 @@ extension LiveMatrixSession {
     /// SDK can read room account data but not write it, so this one write is
     /// `PUT /user/{me}/rooms/{room}/account_data/{type}` to the session's own
     /// homeserver with its bearer (HTTPS only, no cookies, no redirects).
+    ///
+    /// Writes to one room run one at a time, each built on the record the
+    /// previous one wrote (kept until sync says the same), so two quick taps
+    /// on different threads can't overwrite each other.
     func companySetThreadFollow(roomID: String, rootID: String, followed: Bool) async throws {
         try runtime.requireCurrent()
-        let current = await companyThreadAttention(roomID: roomID)
-        guard let next = current.setting(rootID, followed: followed) else { throw CompanyThreadsMatrixFailure.limit }
+        guard let key = companyThreadAttentionKey(roomID: roomID) else { throw CompanyThreadsMatrixFailure.invalid }
+        try await CompanyThreadAttentionWrites.shared.serialized(key) { @MainActor in
+            let current = await self.companyThreadAttention(roomID: roomID)
+            guard let next = current.setting(rootID, followed: followed) else {
+                throw CompanyThreadsMatrixFailure.limit
+            }
+            try await self.companyPutThreadAttention(next, roomID: roomID)
+            await CompanyThreadAttentionWrites.shared.remember(key, next)
+        }
+    }
+
+    private func companyPutThreadAttention(_ next: CompanyThreadAttention, roomID: String) async throws {
+        try runtime.requireCurrent()
         let session = try runtime.client.session()
         let userID = try runtime.client.userId()
         guard var components = URLComponents(string: session.homeserverUrl), components.scheme == "https",
@@ -115,6 +143,42 @@ extension LiveMatrixSession {
     private static func pathSegment(_ value: String) -> String {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+}
+
+/// Follow writes, one room at a time, and the record each one wrote. Kept
+/// until the synced copy matches it, or for `holdFor` at most so another
+/// device's later choice still wins.
+actor CompanyThreadAttentionWrites {
+    static let shared = CompanyThreadAttentionWrites()
+    static let holdFor: TimeInterval = 120
+
+    private var written = [String: (record: CompanyThreadAttention, at: Date)]()
+    private var tails = [String: Task<Void, Never>]()
+
+    /// The record to build on: the one written last, while sync hasn't caught up.
+    func effective(_ key: String, synced: CompanyThreadAttention) -> CompanyThreadAttention {
+        guard let entry = written[key] else { return synced }
+        if entry.record == synced || Date().timeIntervalSince(entry.at) > Self.holdFor {
+            written[key] = nil
+            return synced
+        }
+        return entry.record
+    }
+
+    func remember(_ key: String, _ record: CompanyThreadAttention) {
+        written[key] = (record, Date())
+    }
+
+    /// Runs `body` after every earlier body for `key` has finished.
+    func serialized(_ key: String, _ body: @escaping @Sendable () async throws -> Void) async throws {
+        let previous = tails[key]
+        let task = Task<Void, Error> {
+            await previous?.value
+            try await body()
+        }
+        tails[key] = Task { _ = await task.result }
+        try await task.value
     }
 }
 

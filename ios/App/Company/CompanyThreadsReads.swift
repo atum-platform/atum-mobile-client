@@ -67,6 +67,17 @@ extension LiveAppModel {
         }
     }
 
+    /// Whether one thread is followed (explicit choice, then the automatic
+    /// rule), for a thread opened without its list. Nil when unreadable.
+    func companyThreadFollowed(roomID: String, rootID: String) async -> Bool? {
+        guard offersCompanyThreads(roomID: roomID), let liveMatrix else { return nil }
+        if let thread = await roomThreads(roomID: roomID)?.first(where: { $0.root.eventID == rootID }) {
+            return thread.followed
+        }
+        // Older than the newest page: only an explicit choice is known.
+        return await liveMatrix.companyThreadAttention(roomID: roomID).isFollowed(rootID, automatic: false)
+    }
+
     /// Mark read (desktop `readMatrixThread`).
     func readCompanyThread(_ thread: CompanyThread) async -> Bool {
         guard offersCompanyThreads(roomID: thread.roomID), let liveMatrix,
@@ -106,6 +117,8 @@ extension LiveAppModel {
         return store
     }
 
+    private static let concurrentRoomReads = 4
+
     private func threads(in roomIDs: Set<String>) async -> [CompanyThread]? {
         guard let liveMatrix, let own = try? liveMatrix.companyOwnUserID() else { return nil }
         if roomIDs.isEmpty { return [] }
@@ -116,14 +129,21 @@ extension LiveAppModel {
             activity = CompanyActivityFeed.parse(notificationsJSON: data, ownUserID: own, roomIDs: roomIDs) ?? []
         }
         let session = liveMatrix
+        // At most `concurrentRoomReads` rooms at once, so a large workspace
+        // doesn't fire one `/threads` request per room together.
         let read = await withTaskGroup(of: (String, [CompanyThreadRoot]?).self) { group in
-            for roomID in roomIDs {
-                group.addTask { @MainActor in
-                    (roomID, await session.companyThreadRoots(roomID: roomID, ownUserID: own))
-                }
-            }
+            var pending = roomIDs.sorted()[...]
             var collected = [(String, [CompanyThreadRoot]?)]()
-            for await result in group { collected.append(result) }
+            while true {
+                while collected.count + Self.concurrentRoomReads > roomIDs.count - pending.count,
+                      let roomID = pending.popFirst() {
+                    group.addTask { @MainActor in
+                        (roomID, await session.companyThreadRoots(roomID: roomID, ownUserID: own))
+                    }
+                }
+                guard let result = await group.next() else { break }
+                collected.append(result)
+            }
             return collected
         }
         guard liveMatrix === self.liveMatrix else { return nil }

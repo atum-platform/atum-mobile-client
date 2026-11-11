@@ -292,6 +292,8 @@ struct CompanyThreadDetail: View {
     @State private var followed: Bool
     @State private var followPending = false
     @State private var followFailed = 0
+    /// Opened from its list the state is known; opened directly it's read first.
+    @State private var followLoaded: Bool
 
     init(model: LiveAppModel, design: LiveDesign, coordinator: CompanyThreadsCoordinator, roomID: String,
          rootID: String, initialFollowed: Bool, fromList: Bool) {
@@ -302,6 +304,7 @@ struct CompanyThreadDetail: View {
         self.rootID = rootID
         self.fromList = fromList
         _followed = State(initialValue: initialFollowed)
+        _followLoaded = State(initialValue: fromList)
     }
 
     private var copy: CompanyThreadsCopy { CompanyThreadsCopy(design: design) }
@@ -335,13 +338,19 @@ struct CompanyThreadDetail: View {
             guard available == nil else { return }
             available = await model.companyThreadRootAvailable(roomID: roomID, rootID: rootID)
         }
+        .task {
+            guard !followLoaded else { return }
+            if let known = await model.companyThreadFollowed(roomID: roomID, rootID: rootID) { followed = known }
+            followLoaded = true
+        }
         .onDisappear { close() }
         .sensoryFeedback(.error, trigger: followFailed)
     }
 
     private var chrome: ChatThreadChrome {
         ChatThreadChrome(title: copy.thread, place: model.companyThreadPlace(roomID: roomID) ?? "",
-                         composerPlaceholder: copy.reply, followed: followed, followPending: followPending,
+                         composerPlaceholder: copy.reply, followed: followed,
+                         followPending: followPending || !followLoaded,
                          followText: followed ? copy.following : copy.follow,
                          followHint: followed ? copy.unfollow : copy.follow,
                          toggleFollow: toggleFollow)
