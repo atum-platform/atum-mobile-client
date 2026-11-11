@@ -114,11 +114,15 @@ targets:
         product: AtumNativeAPI
       - package: AtumDesign
         product: AtumChat
+      # Linked, not embedded: an app extension may not carry its own
+      # Frameworks folder (App Store validation), and a second copy collides
+      # with the app's. The extension loads the app's copy at run time.
       - package: MatrixRustSDK
-        embed: true
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.notifications
+        LD_RUNPATH_SEARCH_PATHS: '$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks'
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: Apple Development
         CODE_SIGN_ENTITLEMENTS: Notifications/AtumNotifications.entitlements
