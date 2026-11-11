@@ -785,7 +785,8 @@ struct AppRoot: View {
                     sharedCollections: model.sharedCollectionsOpener(roomID: roomID),
                     companyChannel: CompanyChannelActions(
                         loadFacts: { await model.companyChannelFacts(roomID: $0) },
-                        loadPinned: { await model.companyPinnedRows(roomID: $0) })
+                        loadPinned: { await model.companyPinnedRows(roomID: $0) }),
+                    appPanel: model.appPanelActions(roomID: roomID)
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),
@@ -887,7 +888,8 @@ struct AppRoot: View {
             ) : nil,
             founderDraft: founderDraftActions(dismissAccountOnSent: false),
             exitRoom: { model.exitRoom($0, $1) },
-            viewerIsFounder: model.isFounderAccount
+            viewerIsFounder: model.isFounderAccount,
+            appInfo: { model.appCardPresentation(rowID: $0) }
         )
     }
 

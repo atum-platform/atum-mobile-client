@@ -240,8 +240,16 @@ public struct AgentsRead: Sendable {
                        maximumResponseBodyBytes: 32_768)
     }
 
+    /// The app's workspace manifest, with its declared panel pages. The
+    /// platform serves it at `/apps/{slug}/manifest` (desktop
+    /// `electron/matrix/account.ts` `appRequest`), and adds the optional
+    /// `app_panel` sibling only for the `atum.app-panel/1` negotiation header.
     public func appWorkspace(slug: String) async throws -> AppWorkspaceSnapshot {
-        let snapshot = try await read(AppWorkspaceSnapshot.self, url: try appURL(slug))
+        let snapshot = try await requestWithHeaders(
+            AppWorkspaceSnapshot.self, url: try appURL(slug, suffix: "manifest"),
+            method: "GET", body: nil, acceptsAssistantNameRefusal: false,
+            extraHeaders: [AppPanelContract.negotiationHeader: AppPanelContract.profile]
+        ).value
         guard snapshot.slug == slug else { throw NativeDomainClientFailure.invalidResponse }
         return snapshot
     }
@@ -1397,7 +1405,7 @@ public struct AgentsRead: Sendable {
         _ = try checkedString(slug, minimum: 1, maximum: 64, pattern: "[a-z][a-z0-9_-]{0,63}")
         let tail = suffix.map { "/" + $0 } ?? ""
         guard [nil, "bot", "bot/consent", "bot/intake", "bot/start", "connection", "connect",
-               "connect/confirm", "launch"].contains(suffix),
+               "connect/confirm", "launch", "manifest"].contains(suffix),
               let url = URL(string: Self.appsURL.absoluteString + "/" + slug + tail) else {
             throw NativeDomainClientFailure.invalidRequest
         }
@@ -1538,7 +1546,7 @@ public struct AgentsRead: Sendable {
                                   pattern: "[a-z][a-z0-9_-]{0,63}")) != nil else { return false }
         let suffix = parts.dropFirst().joined(separator: "/")
         return ["", "bot", "bot/consent", "bot/intake", "bot/start", "connection", "connect",
-                "connect/confirm", "launch"].contains(suffix)
+                "connect/confirm", "launch", "manifest"].contains(suffix)
     }
 
     private func isBearerToken(_ value: String) -> Bool {

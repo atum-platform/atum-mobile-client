@@ -217,6 +217,8 @@ struct ChatInfoActions {
     var sharedCollections: SharedCollectionsOpener?
     /// A company channel's own reads (intro facts, pinned messages; TS-9).
     var companyChannel: CompanyChannelActions?
+    /// An app chat's declared pages (AS-11, `AppPanelPagesSection`); nil hides them.
+    var appPanel: AppPanelActions?
 }
 
 /// What the panel reads when it opens. Every field may be unknown; an unknown
@@ -449,6 +451,11 @@ struct ChatInfoHome: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         header
+                        if case .app = info.kind, let appPanel = actions.appPanel {
+                            AppPanelPagesSection(design: design, appName: info.title, actions: appPanel,
+                                                 open: open, backToChat: close)
+                                .padding(.top, 24)
+                        }
                         actionTiles
                             .padding(.top, 20)
                         assistantAccessSection.padding(.top, 24)

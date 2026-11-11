@@ -509,15 +509,29 @@ public struct AppWorkspaceSnapshot: Decodable, Equatable, Sendable {
         public enum Placement: String, Decodable, Sendable { case menu, composer }
         public enum Session: String, Decodable, Sendable { case required, none }
         public let id: String
+        /// The route's own name (`label.vi` / `label.en`): what the app panel's
+        /// page capsule and its bar say. Data only, never a URL or authority.
+        public let label: RouteLabel
+        /// The manifest's glyph name (a Phosphor name or a legacy alias).
+        public let icon: String
         public let placements: [Placement]
         public let session: Session
+
+        public init(id: String, label: RouteLabel, icon: String,
+                    placements: [Placement], session: Session) {
+            self.id = id
+            self.label = label
+            self.icon = icon
+            self.placements = placements
+            self.session = session
+        }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
             try c.closed(["id", "label", "icon", "path", "placements", "session"])
             id = try c.string("id", minimum: 1, maximum: 64, pattern: "[a-z][a-z0-9_-]{0,63}")
-            _ = try c.value("label", as: LocalizedRouteLabel.self)
-            _ = try c.string("icon", minimum: 1, maximum: 64, pattern: "[a-z][a-z0-9-]{0,63}")
+            label = try c.value("label", as: RouteLabel.self)
+            icon = try c.string("icon", minimum: 1, maximum: 64, pattern: "[a-z][a-z0-9-]{0,63}")
             _ = try c.string("path", minimum: 1, maximum: 512)
             placements = try c.value("placements")
             session = try c.value("session")
@@ -532,10 +546,15 @@ public struct AppWorkspaceSnapshot: Decodable, Equatable, Sendable {
     public let appVersionID: AppCatalogID
     public let routes: [Route]
     public let supportsLaunch: Bool
+    /// The optional `atum.app-panel/1` sibling: the app's declared panel pages.
+    /// Present only when the read negotiated it; an invalid declaration is
+    /// dropped (nil) and never invalidates the manifest (desktop
+    /// `shared/app-panel.ts` `decodeAppPanel`).
+    public let panel: AppPanelDeclaration?
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
-        try c.closed(["profile", "descriptor", "manifest", "web_origin", "network_origins"])
+        try c.closed(["profile", "descriptor", "manifest", "web_origin", "network_origins", "app_panel"])
         guard try c.value("profile", as: String.self) == "atum.app-workspace/1" else {
             throw ContractViolation.invalidValue
         }
@@ -551,6 +570,20 @@ public struct AppWorkspaceSnapshot: Decodable, Equatable, Sendable {
               supportsLaunch || routes.allSatisfy({ $0.session == .none }) else {
             throw ContractViolation.invariant
         }
+        // The open route is checked where the catalog's bot is known
+        // (`AppPanelPagesPolicy`); here only the manifest's own routes.
+        let rawPanel = c.lossyNullable("app_panel", as: RawAppPanel.self)
+        panel = rawPanel.flatMap { AppPanelDeclaration(raw: $0, routes: manifest.routes) }
+    }
+
+    /// For tests and scripted hosts: a workspace built from typed parts.
+    public init(slug: String, appVersionID: AppCatalogID, routes: [Route],
+                supportsLaunch: Bool, panel: AppPanelDeclaration? = nil) {
+        self.slug = slug
+        self.appVersionID = appVersionID
+        self.routes = routes
+        self.supportsLaunch = supportsLaunch
+        self.panel = panel
     }
 
     private struct WorkspaceDescriptor: Decodable {
@@ -591,12 +624,26 @@ public struct AppWorkspaceSnapshot: Decodable, Equatable, Sendable {
         }
     }
 
-    private struct LocalizedRouteLabel: Decodable {
-        init(from decoder: Decoder) throws {
+    /// A route's two names. Desktop `appLocalizedCopy(route.label, locale, route.id)`:
+    /// Vietnamese for `vi`, English for every other locale.
+    public struct RouteLabel: Decodable, Equatable, Sendable {
+        public let vi: String
+        public let en: String
+
+        public init(vi: String, en: String) {
+            self.vi = vi
+            self.en = en
+        }
+
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
             try c.closed(["vi", "en"])
-            _ = try c.string("vi", minimum: 1, maximum: 120)
-            _ = try c.string("en", minimum: 1, maximum: 120)
+            vi = try c.string("vi", minimum: 1, maximum: 120)
+            en = try c.string("en", minimum: 1, maximum: 120)
+        }
+
+        public func localized(locale: String) -> String {
+            locale.lowercased().hasPrefix("vi") ? vi : en
         }
     }
 }
