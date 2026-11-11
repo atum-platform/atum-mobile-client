@@ -1,0 +1,130 @@
+name: UI tests (hosted)
+# Runs the scripted UI suite on standard GitHub-hosted macOS runners, split into
+# parallel shards, so UI verification does not wait on the one build Mac.
+# Classes that drive the simulator through the private content-size runner
+# (scripts/sim-content-size-runner.sh, release repo) stay on the build Mac.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Space-separated UITest class names (empty = all eligible)"
+        required: false
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: ui-tests-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SHARDS: 4
+  # Whole classes that stay on the build Mac: the private content-size runner,
+  # evidence capture, or scenario clocks the slower hosted runners miss.
+  LOCAL_ONLY: "GScrollDynamicTypeUITests S1MatrixUITests S6SystemUITests TranscriptUITests KitBoardCaptureUITests GScrollUITests"
+  # Single tests that need the simulator appearance/content-size runner, or
+  # whose sub-second scenario windows the slower hosted runners miss.
+  LOCAL_ONLY_TESTS: >-
+    Wave2MediaBotUITests/testWave2DarkLargestTypeEvidence
+    Wave2MediaBotUITests/testWave2AccessibilitySmoke
+    AssistantsWave3UITests/testNewAssistantReadsInDark
+    TeamSpaceInviteUITests/testInviteSheetAtAX5DarkHasNoClippedText
+    HomeShellUITests/testInvitationShowsJoinProgressThenPushes
+    HomeShellUITests/testPlusOpensStartChatWithRealRowsAndAvailableCreationActions
+    ChatKindsUITests/testLinksGoThroughLinkPolicyAndNothingIsReadWhileCovered
+  # Known failures on main, tracked in atum-platform/atum-mobile#50. Remove a line
+  # when its fix lands; never add one without a tracking entry.
+  QUARANTINE: >-
+    ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace
+    ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
+    ChatKindsUITests/testAccessibilityAuditKinds
+    HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning
+    TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: plan
+        env:
+          ONLY: ${{ github.event.inputs.only }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          local = set(os.environ["LOCAL_ONLY"].split())
+          only = os.environ.get("ONLY", "").split()
+          names = sorted(p.stem for p in pathlib.Path("ios/UITests").glob("*UITests.swift"))
+          names = [n for n in names if n not in local and (not only or n in only)]
+          n = max(1, min(int(os.environ["SHARDS"]), len(names)))
+          shards = [{"index": i, "classes": " ".join(names[i::n])} for i in range(n) if names[i::n]]
+          print(json.dumps(shards, indent=1))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("shards=" + json.dumps(shards) + "\n")
+          PY
+
+  ui:
+    needs: plan
+    if: needs.plan.outputs.shards != '[]'
+    name: UI shard ${{ matrix.shard.index }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Select a standard hosted iPhone simulator
+        run: |
+          set -euo pipefail
+          destination=$(python3 - <<'PY'
+          import json, subprocess
+          data = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j'], text=True))
+          phones = [d for ds in data['devices'].values() for d in ds if d['name'].startswith('iPhone') and d.get('isAvailable', True)]
+          if not phones:
+              raise SystemExit('standard hosted image has no available iPhone simulator')
+          print(f"platform=iOS Simulator,id={phones[-1]['udid']}")
+          PY
+          )
+          echo "IOS_DESTINATION=$destination" >> "$GITHUB_ENV"
+      - name: Build app and UI tests without signing
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/AtumMobile.xcodeproj -scheme AtumMobile -configuration Debug \
+            -destination "$IOS_DESTINATION" -destination-timeout 60 \
+            -derivedDataPath "$RUNNER_TEMP/dd" -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
+            -jobs 3 CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build-for-testing
+      - name: Run ${{ matrix.shard.classes }}
+        env:
+          CLASSES: ${{ matrix.shard.classes }}
+        run: |
+          set -euo pipefail
+          args=()
+          for c in $CLASSES; do args+=("-only-testing:AtumMobileUITests/$c"); done
+          for t in $LOCAL_ONLY_TESTS $QUARANTINE; do
+            case " $CLASSES " in *" ${t%%/*} "*) args+=("-skip-testing:AtumMobileUITests/$t");; esac
+          done
+          xcodebuild -project ios/AtumMobile.xcodeproj -scheme AtumMobile -configuration Debug \
+            -destination "$IOS_DESTINATION" -destination-timeout 60 \
+            -derivedDataPath "$RUNNER_TEMP/dd" -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
+            -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
+            -resultBundlePath "$RUNNER_TEMP/ui-${{ matrix.shard.index }}.xcresult" \
+            "${args[@]}" CODE_SIGNING_ALLOWED=NO test-without-building
+      - name: Upload result bundle
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-${{ matrix.shard.index }}-xcresult
+          path: ${{ runner.temp }}/ui-${{ matrix.shard.index }}.xcresult
+          retention-days: 7
+      - name: Shut down simulator
+        if: always()
+        run: xcrun simctl shutdown all || true
