@@ -12,6 +12,16 @@ public enum PhoneModelPickerProjection {
             case `default`
         }
 
+        /// Why a subscription's model is listed but cannot be chosen now, in
+        /// the desktop's two states for a cloud assistant (`model-picker.tsx`):
+        /// a ChatGPT plan no owner Mac relays to the cloud yet
+        /// (`chatgptCloudNotReady`), and an OpenCode Go connection that was
+        /// disconnected (`modelsSignedOut`).
+        public enum Unavailable: Equatable, Sendable {
+            case notReady
+            case signedOut
+        }
+
         public let favoriteID: String?
         public let source: ManagedModelDestinationSource
         public let model: String
@@ -33,6 +43,11 @@ public enum PhoneModelPickerProjection {
         /// A model that answers through an account subscription. It is drawn
         /// in the Subscriptions group, not in a connection's section.
         public let isSubscription: Bool
+        /// The level a pick of this subscription model writes. Nil for every
+        /// row the phone cannot write as a subscription.
+        public let subscriptionEffort: ManagedModelEffort?
+        /// Set when a subscription's model is drawn but cannot be chosen now.
+        public let unavailable: Unavailable?
 
         public init(favoriteID: String?,
                     source: ManagedModelDestinationSource,
@@ -45,7 +60,9 @@ public enum PhoneModelPickerProjection {
                     connectionLabel: String? = nil,
                     tagline: ManagedModelLineup.Tagline? = nil,
                     announced: Bool = false,
-                    isSubscription: Bool = false) {
+                    isSubscription: Bool = false,
+                    subscriptionEffort: ManagedModelEffort? = nil,
+                    unavailable: Unavailable? = nil) {
             self.favoriteID = favoriteID
             self.source = source
             self.model = model
@@ -58,6 +75,8 @@ public enum PhoneModelPickerProjection {
             self.tagline = tagline
             self.announced = announced
             self.isSubscription = isSubscription
+            self.subscriptionEffort = subscriptionEffort
+            self.unavailable = unavailable
         }
 
         /// The connection this row answers through. A section, the filter and a
@@ -88,7 +107,8 @@ public enum PhoneModelPickerProjection {
                 displayName: displayName, selected: selected, selectable: selectable,
                 badges: badges, connectionID: explicitConnectionID,
                 connectionLabel: connectionLabel, tagline: tagline, announced: announced,
-                isSubscription: isSubscription)
+                isSubscription: isSubscription, subscriptionEffort: subscriptionEffort,
+                unavailable: unavailable)
         }
     }
 
@@ -189,20 +209,72 @@ public enum PhoneModelPickerProjection {
                                 selectedAtumModel: selectedAtumModel)
     }
 
-    /// The subscriptions the person connected to this destination. The
-    /// contract records the choice, not the provider's whole catalogue, so the
-    /// phone draws exactly the connected choice it can prove and never invents
-    /// a model. Rows are read-only: the phone has no subscription write
-    /// contract for this destination.
+    /// The cloud's subscription rows, as the desktop lists them for a cloud
+    /// assistant (`cloudSubscriptionRoutes`, `model-picker.tsx`): ChatGPT first,
+    /// then OpenCode Go, each from the account's own status.
+    ///
+    /// - A relayed ChatGPT plan lists every model the relay serves, and a
+    ///   connected OpenCode Go every model it serves. Each is choosable; the
+    ///   saved one is current.
+    /// - A saved ChatGPT model with no relay up stays listed, not choosable,
+    ///   as not ready (the desktop keeps a plan the cloud cannot reach yet).
+    /// - A saved OpenCode Go model whose connection was disconnected stays
+    ///   listed, not choosable, as signed out (the desktop's Reconnect note).
+    /// - A status the phone could not read (`account` nil, or that provider
+    ///   nil) keeps the saved model read-only and current, never a guess.
+    ///
+    /// A Mac destination has no subscription write on the phone: its saved
+    /// choice stays read-only.
     public static func subscriptions(_ snapshot: ManagedModelDestinationSnapshot,
-                                     destination: ManagedModelDestinationID) -> [Row] {
-        snapshot.choices
-            .filter { $0.destination == destination && $0.source.isSubscription }
-            .map { choice in
-                Row(favoriteID: nil, source: choice.source, model: choice.model,
-                    displayName: choice.model, selected: true, selectable: false,
-                    isSubscription: true)
+                                     destination: ManagedModelDestinationID,
+                                     account: PhoneSubscriptionAccount? = nil) -> [Row] {
+        let saved = snapshot.choices.first { $0.destination == destination && $0.source.isSubscription }
+        guard destination.isCloud else { return saved.map { [savedRow($0, unavailable: nil)] } ?? [] }
+
+        func served(_ source: ManagedModelDestinationSource,
+                    _ models: [SubscriptionModelDescriptor]) -> [Row] {
+            models.map { model in
+                let current = saved?.source == source && saved?.model == model.id
+                return Row(favoriteID: nil, source: source, model: model.id,
+                           displayName: model.displayName, selected: current, selectable: !current,
+                           isSubscription: true, subscriptionEffort: model.writeEffort)
             }
+        }
+
+        var rows: [Row] = []
+        let savedPlan = saved?.source == .chatGPTPlan ? saved : nil
+        switch account?.chatGPT?.state {
+        case .enabled?: rows += served(.chatGPTPlan, account?.chatGPT?.models ?? [])
+        case .disabled?: rows += savedPlan.map { [savedRow($0, unavailable: .notReady)] } ?? []
+        case nil: rows += savedPlan.map { [savedRow($0, unavailable: nil)] } ?? []
+        }
+        let savedGo = saved?.source == .opencodeGo ? saved : nil
+        switch account?.openCodeGo?.state {
+        case .connected?: rows += served(.opencodeGo, account?.openCodeGo?.models ?? [])
+        case .disconnected?: rows += savedGo.map { [savedRow($0, unavailable: .signedOut)] } ?? []
+        case nil: rows += savedGo.map { [savedRow($0, unavailable: nil)] } ?? []
+        }
+        return rows
+    }
+
+    /// The saved subscription model when the phone cannot offer it: current
+    /// only while nothing says it stopped working, and never choosable.
+    private static func savedRow(_ choice: ManagedModelDestinationChoice, unavailable: Row.Unavailable?) -> Row {
+        Row(favoriteID: nil, source: choice.source, model: choice.model, displayName: choice.model,
+            selected: unavailable == nil, selectable: false, isSubscription: true,
+            unavailable: unavailable)
+    }
+
+    /// The write boundary for a subscription pick, as `canSelectAtumModel` is
+    /// for Atum's: the latest snapshot and account status still list the
+    /// model as choosable on the cloud.
+    public static func canSelectSubscription(_ row: Row,
+                                             snapshot: ManagedModelDestinationSnapshot,
+                                             account: PhoneSubscriptionAccount?) -> ManagedModelEffort? {
+        let destination = try! ManagedModelDestinationID("cloud")
+        return subscriptions(snapshot, destination: destination, account: account).first {
+            $0.source == row.source && $0.model == row.model && $0.selectable && !$0.selected
+        }?.subscriptionEffort
     }
 
     /// Atum's line-up in the owner's order; `state` answers for the served
