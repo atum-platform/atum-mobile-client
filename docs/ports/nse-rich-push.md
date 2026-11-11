@@ -220,7 +220,8 @@ pinned SDK's `MatrixSDKFFI.xcframework/Info.plist` declares only
 `ios-arm64-simulator` and `ios-arm64` slices. This is a build-invocation
 architecture mismatch, not evidence that the token-refresh code failed.
 
-Both affected builds are queued again with **`ARCHS=arm64`**, using
+The third batch completed successfully at **11:14:02 UTC on 2026-11-11**,
+using **`ARCHS=arm64`** and
 `/Volumes/AtumTestFlight/nse-refresh-arm64-checks.sh`:
 
 ```sh
@@ -232,9 +233,24 @@ The batch runs unsigned `xcodebuild -jobs 2 CODE_SIGNING_ALLOWED=NO ARCHS=arm64`
 with `generic/platform=iOS Simulator`. Its summary is
 `/Volumes/AtumTestFlight/nse-refresh-arm64-checks.log`; individual logs are
 `/Volumes/AtumTestFlight/nse-refresh-extension-r3.log` and
-`/Volumes/AtumTestFlight/nse-refresh-app-r3.log`. Final iOS build verification is
-pending both successful exit codes. The new iOS notification test assertions
-are scheduled for compilation, not simulator execution.
+`/Volumes/AtumTestFlight/nse-refresh-app-r3.log`.
+
+Final results for implementation commit
+`fd0f9596d198a6408b4848ac85e8c991e7cb623c` (based on `77ab08f`):
+
+- **115 selected Swift package tests passed**, zero failures.
+- **2 Python push projection/localization tests passed**.
+- **AtumNotifications: TEST BUILD SUCCEEDED**, exit 0. The actual extension
+  and notification test bundle compiled for the arm64 simulator.
+- **AtumMobile: BUILD SUCCEEDED**, exit 0, unsigned arm64 simulator build.
+- **`git diff --check` passed**.
+
+The iOS notification test assertions were compiled, not executed on a
+simulator. No simulator was booted by this task. The verification applies to
+this implementation commit, not to subsequent remote branch merges made
+elsewhere while the batch was running. This documentation-only follow-up
+preserves the tested implementation commit rather than amending it after it
+became an ancestor of the externally updated remote branch.
 
 Evidence retained on `/Volumes/AtumTestFlight`:
 
@@ -243,6 +259,8 @@ Evidence retained on `/Volumes/AtumTestFlight`:
   initial iOS argument-label failure.
 - `nse-refresh-build-checks.log`, `nse-refresh-extension-r2.log`,
   `nse-refresh-app-r2.log`: x86_64 SDK link failure after correcting the label.
+- `nse-refresh-arm64-checks.log`, `nse-refresh-extension-r3.log`,
+  `nse-refresh-app-r3.log`: final successful arm64 simulator builds.
 
 No simulator boot, signing, upload, push, PR or owner's-phone operation is part
 of this checkpoint. Physical APNs content, locked-phone store access and peak
