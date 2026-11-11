@@ -154,17 +154,20 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
-    func testAllowlistedSandboxCatalogueOnProductionSubmitsPromoCreditAndFinishes() async throws {
+    func testTestFlightSandboxCatalogueOnProductionBuildSubmitsPromoCreditAndFinishes() async throws {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         api.catalogData = try ApplePurchaseV12TestData.data("allowlisted-products.response")
         api.replyData = try ApplePurchaseV12TestData.data("sandbox-credited.response")
         var finishes = 0; var refreshes = 0
-        store.queue = [transaction { finishes += 1 }]
+        store.result = .verified(transaction { finishes += 1 })
         let c = await make(store, api, refresh: { refreshes += 1 })
+        XCTAssertTrue(c.canPurchase)
+        await c.purchase(id)
         await settled { c.state == .succeeded }
         XCTAssertEqual(c.acceptedEnvironment, .sandbox)
         XCTAssertEqual(c.packs.count, 2); XCTAssertEqual(store.productReads, 1)
         XCTAssertEqual(api.posts, 1); XCTAssertEqual(finishes, 1); XCTAssertEqual(refreshes, 1)
+        XCTAssertEqual(store.purchaseCalls, 1)
         XCTAssertTrue(c.canPurchase)
         c.bind(accountID: nil, api: nil)
     }
@@ -206,23 +209,23 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
-    func testAccountTokenCacheIsScopedToServerSelectedEnvironment() async {
+    func testRuntimeEnvironmentIsCachedAcrossReloadAndAccountSwitch() async {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
-        let sandboxToken = api.token
         let c = await make(store, api)
         await c.purchase(id)
-        api.catalogEnvironment = .production
-        api.token = UUID(uuidString: "00000000-0000-4000-8000-0000000000bb")!
         await c.load(); await c.purchase(id)
-        XCTAssertEqual(c.acceptedEnvironment, .production)
-        XCTAssertEqual(api.tokenReads, 2)
-        XCTAssertEqual(store.tokens, [sandboxToken, api.token])
-        api.catalogEnvironment = .sandbox
-        await c.load(); await c.purchase(id)
-        XCTAssertEqual(api.tokenReads, 2)
-        XCTAssertEqual(store.tokens.last, sandboxToken)
+        XCTAssertEqual(store.environmentReads, 1); XCTAssertEqual(api.tokenReads, 1)
+        XCTAssertEqual(store.tokens, [api.token, api.token])
+
+        // Account selection can change the catalogue, never the device environment.
+        let second = PurchaseAPIStub(); second.catalogEnvironment = .production
+        c.bind(accountID: "synthetic-account-b", api: second)
+        await settled { c.state == .unavailable }
+        await c.purchase(id)
+        XCTAssertEqual(store.environmentReads, 1)
+        XCTAssertNil(c.acceptedEnvironment); XCTAssertEqual(second.tokenReads, 0)
+        XCTAssertEqual(store.purchaseCalls, 2)
         c.bind(accountID: nil, api: nil)
-        XCTAssertNil(c.acceptedEnvironment)
     }
 
     func testCatalogueRefreshDoesNotStrandAnAdmittedTransaction() async throws {
@@ -248,7 +251,7 @@ import XCTest
 
     func testProductionCatalogueStillPurchasesCreditsAndFinishesProductionOnly() async {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
-        api.catalogEnvironment = .production
+        api.catalogEnvironment = .production; store.environment = .production
         var finishes = 0; var refreshes = 0
         store.queue = [transaction { finishes += 1 }]
         store.result = .verified(transaction(environment: .production) { finishes += 1 })
@@ -265,6 +268,7 @@ import XCTest
     func testNonAllowlistedProductionCatalogueRemainsClosedAndRejectsSandboxUpdates() async throws {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         api.catalogData = try ApplePurchaseV12TestData.data("production-closed.response")
+        store.environment = .production
         var finishes = 0
         store.queue = [transaction { finishes += 1 }]
         let c = await make(store, api)
@@ -276,12 +280,169 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
-    func testSandboxDeploymentCannotAcceptProductionCatalogue() async {
+    func testSandboxDeviceCannotAcceptProductionCatalogue() async {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         api.catalogEnvironment = .production
-        let c = await make(store, api, environment: .sandbox)
+        let c = await make(store, api)
         XCTAssertEqual(c.state, .unavailable); XCTAssertNil(c.acceptedEnvironment)
         XCTAssertEqual(store.productReads, 0); XCTAssertFalse(c.canPurchase)
+        await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 0); XCTAssertEqual(api.tokenReads, 0)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testAppStoreDeviceCannotBuyAllowlistedSandboxCatalogue() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.environment = .production
+        api.catalogData = try ApplePurchaseV12TestData.data("allowlisted-products.response")
+        let c = await make(store, api)
+        XCTAssertEqual(c.state, .unavailable); XCTAssertNil(c.acceptedEnvironment)
+        XCTAssertFalse(c.checkoutOpen); XCTAssertFalse(c.canPurchase)
+        XCTAssertTrue(c.products.isEmpty); XCTAssertTrue(c.packs.isEmpty)
+        c.clearSettledOutcomes()
+        await c.purchase(id)
+        XCTAssertEqual(store.productReads, 0); XCTAssertEqual(store.purchaseCalls, 0)
+        XCTAssertEqual(api.tokenReads, 0); XCTAssertEqual(api.posts, 0)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testRuntimeProductionMatchOverridesSandboxBuildConfiguration() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.environment = .production; api.catalogEnvironment = .production
+        let c = await make(store, api, environment: .sandbox)
+        XCTAssertTrue(c.canPurchase)
+        await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 1)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testEnvironmentLookupFailureKeepsCheckoutUnavailableAndCanRetry() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.failEnvironment = true
+        let c = await make(store, api)
+        XCTAssertEqual(c.state, .unavailable); XCTAssertNil(c.acceptedEnvironment)
+        XCTAssertFalse(c.checkoutOpen); XCTAssertFalse(c.canPurchase)
+        await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 0); XCTAssertEqual(store.productReads, 0)
+        XCTAssertEqual(api.tokenReads, 0)
+        store.failEnvironment = false
+        await c.load()
+        XCTAssertEqual(store.environmentReads, 2); XCTAssertTrue(c.canPurchase)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testUnknownEnvironmentNeverOffersBuyAndIsNotCached() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.environment = nil
+        let c = await make(store, api)
+        XCTAssertEqual(c.state, .unavailable); XCTAssertFalse(c.canPurchase)
+        XCTAssertNil(c.acceptedEnvironment); XCTAssertFalse(c.checkoutOpen)
+        c.clearSettledOutcomes(); await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 0); XCTAssertEqual(api.tokenReads, 0)
+        store.environment = .sandbox
+        await c.load()
+        XCTAssertEqual(store.environmentReads, 2); XCTAssertTrue(c.canPurchase)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testSlowEnvironmentLookupSuspendsWithoutOfferingBuy() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.blockEnvironment = true
+        let c = ApplePurchaseCoordinator(store: store, environment: .production, refreshWallet: {})
+        c.bind(accountID: "synthetic-account-a", api: api)
+        await settled { store.environmentBlocked != nil }
+        XCTAssertEqual(c.state, .loading); XCTAssertFalse(c.canPurchase)
+        await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 0); XCTAssertEqual(store.productReads, 0)
+        store.environmentBlocked?.resume(returning: .sandbox); store.environmentBlocked = nil
+        await settled { c.state == .ready }
+        XCTAssertTrue(c.canPurchase)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testAccountSwitchRejectsLateEnvironmentLookup() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.blockEnvironment = true
+        let c = ApplePurchaseCoordinator(store: store, environment: .production, refreshWallet: {})
+        c.bind(accountID: "synthetic-account-a", api: api)
+        await settled { store.environmentBlocked != nil }
+        c.bind(accountID: nil, api: nil)
+        store.environmentBlocked?.resume(returning: .sandbox); store.environmentBlocked = nil
+        await Task.yield()
+        XCTAssertEqual(c.state, .idle); XCTAssertNil(c.acceptedEnvironment)
+        XCTAssertFalse(c.canPurchase); XCTAssertEqual(store.productReads, 0)
+        store.blockEnvironment = false
+        c.bind(accountID: "synthetic-account-b", api: api)
+        await settled { c.state == .ready }
+        XCTAssertEqual(store.environmentReads, 2)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testOverlappingLookupCannotDiscardASuccessfullyCachedEnvironment() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.blockEnvironment = true
+        let c = ApplePurchaseCoordinator(store: store, environment: .production, refreshWallet: {})
+        c.bind(accountID: "synthetic-account-a", api: api)
+        await settled { store.environmentBlocked != nil }
+        let first = store.environmentBlocked; store.environmentBlocked = nil
+        let reload = Task { await c.load() }
+        await settled { store.environmentBlocked != nil }
+        let second = store.environmentBlocked; store.environmentBlocked = nil
+        first?.resume(returning: .sandbox)
+        await settled { c.state == .ready }
+        second?.resume(returning: nil)
+        await reload.value
+        XCTAssertTrue(c.canPurchase); XCTAssertEqual(c.acceptedEnvironment, .sandbox)
+        store.blockEnvironment = false
+        await c.load()
+        XCTAssertEqual(store.environmentReads, 2); XCTAssertTrue(c.canPurchase)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testMismatchingRefreshRevokesPreviouslyAvailableCheckout() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        let c = await make(store, api)
+        XCTAssertTrue(c.canPurchase)
+        api.catalogEnvironment = .production
+        await c.load()
+        c.clearSettledOutcomes(); await c.purchase(id)
+        XCTAssertEqual(c.state, .unavailable); XCTAssertNil(c.acceptedEnvironment)
+        XCTAssertFalse(c.canPurchase); XCTAssertFalse(c.checkoutOpen)
+        XCTAssertEqual(store.purchaseCalls, 0); XCTAssertEqual(api.tokenReads, 0)
+        XCTAssertEqual(store.environmentReads, 1)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testCatalogueMismatchWhileTokenLoadsCannotReachStorePurchase() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        let c = await make(store, api)
+        api.blockToken = true
+        let purchase = Task { await c.purchase(id) }
+        await settled { api.tokenBlocked != nil }
+        api.catalogEnvironment = .production
+        await c.load()
+        api.tokenBlocked?.resume(); api.tokenBlocked = nil
+        await purchase.value
+        XCTAssertEqual(c.state, .unavailable); XCTAssertFalse(c.canPurchase)
+        XCTAssertEqual(store.purchaseCalls, 0)
+        api.catalogEnvironment = .sandbox
+        await c.load()
+        XCTAssertTrue(c.canPurchase)
+        api.blockToken = false
+        await c.purchase(id)
+        XCTAssertEqual(api.tokenReads, 2); XCTAssertEqual(store.purchaseCalls, 1)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testPostPurchaseEnvironmentCheckStillRejectsWrongTransaction() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        var finishes = 0
+        store.result = .verified(transaction(environment: .production) { finishes += 1 })
+        let c = await make(store, api)
+        await c.purchase(id)
+        XCTAssertEqual(c.state, .unavailable)
+        XCTAssertEqual(store.purchaseCalls, 1); XCTAssertEqual(api.posts, 0)
+        XCTAssertEqual(finishes, 0)
         c.bind(accountID: nil, api: nil)
     }
 
@@ -413,6 +574,15 @@ import XCTest
     var result: AppleStorePurchaseResult = .cancelled
     var tokens: [UUID] = []
     var purchaseCalls = 0; var productReads = 0; var failProducts = false
+    var environment: ApplePurchaseEnvironment? = .sandbox
+    var environmentReads = 0; var failEnvironment = false; var blockEnvironment = false
+    var environmentBlocked: CheckedContinuation<ApplePurchaseEnvironment?, Never>?
+    func purchaseEnvironment() async throws -> ApplePurchaseEnvironment? {
+        environmentReads += 1
+        if failEnvironment { throw ContractViolation.invalidValue }
+        if blockEnvironment { return await withCheckedContinuation { environmentBlocked = $0 } }
+        return environment
+    }
     func products(ids: Set<String>) async throws -> [AppleStoreProduct] {
         productReads += 1
         if failProducts { throw ContractViolation.invalidValue }
@@ -429,6 +599,8 @@ import XCTest
 
 @MainActor private final class PurchaseAPIStub: ApplePurchasesAPI {
     var posts = 0; var tokenReads = 0; var closed = false
+    var blockToken = false
+    var tokenBlocked: CheckedContinuation<Void, Never>?
     var token = UUID(uuidString: "00000000-0000-4000-8000-0000000000aa")!
     var sample = ApplePurchaseTestData.Case.transactionCredited
     var catalogData: Data?
@@ -450,6 +622,7 @@ import XCTest
     }
     func appleAccountToken() async throws -> AppleAccountTokenResponse {
         tokenReads += 1
+        if blockToken { await withCheckedContinuation { tokenBlocked = $0 } }
         return try NativeAPI.decode(AppleAccountTokenResponse.self,
             from: JSONSerialization.data(withJSONObject: ["appAccountToken": token.uuidString.lowercased()]))
     }
