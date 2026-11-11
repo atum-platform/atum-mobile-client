@@ -1333,7 +1333,7 @@ private struct HomeStartChatSheet: View {
     @ViewBuilder private var creationActionViews: some View {
         if let newAssistant = actions.newAssistant {
             NavigationLink {
-                HomeNewAssistantView(design: design, actions: newAssistant) { roomID in
+                AssistantNewSheet(design: design, actions: newAssistant) { roomID in
                     close()
                     actions.openRoom(roomID)
                 }
@@ -1921,127 +1921,6 @@ private struct HomeNewGroupView: View {
                       _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key.rawValue, arguments: arguments)
     }
-}
-
-private struct HomeNewAssistantView: View {
-    let design: LiveDesign
-    let actions: HomeAssistantActions
-    let openRoom: (String) -> Void
-
-    private enum Presentation: Equatable {
-        case idle, creating, starting, unavailable, failed
-        case name(AssistantNameRefusal)
-    }
-
-    @State private var name = ""
-    @State private var presentation: Presentation = .idle
-    @State private var task: Task<Void, Never>?
-    @FocusState private var focused: Bool
-    @Environment(\.colorScheme) private var scheme
-
-    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
-    private var normalizedName: String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    private var canCreate: Bool {
-        presentation != .creating && (actions.pending ||
-            (1...40).contains(normalizedName.count)
-                && !normalizedName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains))
-    }
-
-    var body: some View {
-        Form {
-            Section {
-                Text(copy(.assistantIntro))
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                TextField(copy(.assistantNamePlaceholder), text: $name)
-                    .focused($focused)
-                    .disabled(actions.pending || presentation == .starting)
-                    .accessibilityLabel(copy(.assistantName))
-                    .accessibilityIdentifier("home.newAssistant.name")
-            } header: {
-                Text(copy(.assistantName))
-            }
-            Section {
-                Text(copy(.assistantCloudDisclosure))
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .accessibilityIdentifier("home.newAssistant.disclosure")
-            }
-            if let notice {
-                Section {
-                    Text(notice)
-                        .foregroundStyle(presentation == .starting
-                            ? atum.color(.muted, scheme: scheme)
-                            : atum.color(.danger, scheme: scheme))
-                        .accessibilityIdentifier("home.newAssistant.notice")
-                }
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .background(atum.color(.ground, scheme: scheme))
-        .navigationTitle(copy(.newAssistant))
-        .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button { create() } label: {
-                HStack(spacing: 8) {
-                    if presentation == .creating { ProgressView() }
-                    Text(presentation == .creating ? copy(.assistantStarting)
-                         : presentation == .starting ? copy(.retry) : copy(.createAssistant))
-                }
-                .frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!canCreate)
-            .accessibilityIdentifier("home.newAssistant.create")
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(atum.color(.ground, scheme: scheme))
-            .overlay(alignment: .top) {
-                Rectangle().fill(atum.color(.frame, scheme: scheme)).frame(height: 0.5)
-            }
-        }
-        .onAppear {
-            if actions.pending { presentation = .starting }
-            else { focused = true }
-        }
-        .onChange(of: name) { _, _ in
-            if !actions.pending && presentation != .creating && presentation != .starting {
-                presentation = .idle
-            }
-        }
-        .onDisappear { task?.cancel(); task = nil }
-    }
-
-    private var notice: String? {
-        switch presentation {
-        case .idle, .creating: nil
-        case .starting: copy(.assistantStarting)
-        case .unavailable: copy(.assistantUnavailable)
-        case .failed: copy(.assistantCreateFailed)
-        case .name: copy(.assistantCreateFailed)
-        }
-    }
-
-    private func create() {
-        guard canCreate else { return }
-        task?.cancel()
-        presentation = .creating
-        let submitted = normalizedName
-        task = Task { @MainActor in
-            let result = await actions.create(submitted)
-            guard !Task.isCancelled else { return }
-            task = nil
-            switch result {
-            case let .openRoom(roomID): openRoom(roomID)
-            case .starting: presentation = .starting
-            case .unavailable: presentation = .unavailable
-            case let .name(reason): presentation = .name(reason)
-            case .failed: presentation = .failed
-            }
-        }
-    }
-
-    private func copy(_ key: StartChatCopyKey) -> String { design.text(key.rawValue) }
 }
 
 private struct HomeDebugBadgeValue: ViewModifier {

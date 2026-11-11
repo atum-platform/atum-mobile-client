@@ -115,10 +115,21 @@ struct ScriptedHomeHost: View {
                                 return .openRoom("!gia-dinh:atum.test")
                             }
                         ),
-                        newAssistant: HomeAssistantActions(pending: false, create: { name in
-                            UITestProbe.append("newAssistant \(name)", to: "home-actions.txt")
-                            return .starting
-                        }),
+                        newAssistant: HomeAssistantActions(
+                            pending: false,
+                            create: { name in
+                                UITestProbe.append("newAssistant \(name)", to: "home-actions.txt")
+                                return .starting
+                            },
+                            // AS-3: a second "Alfred" is refused before
+                            // anything is created; handles with "taken" are taken.
+                            names: ["Atum", "Alfred"],
+                            checkHandle: { handle in
+                                let taken = handle.rawValue.contains("taken")
+                                return AgentAliasCheck(handle: handle, available: !taken,
+                                                       code: taken ? .unavailable : nil)
+                            }
+                        ),
                         exitRoom: { roomID, action in
                             rows.removeAll { $0.id == roomID }
                             UITestProbe.append("\(action.rawValue) \(roomID)", to: "home-actions.txt")

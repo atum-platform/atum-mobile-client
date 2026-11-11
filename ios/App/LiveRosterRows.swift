@@ -70,6 +70,14 @@ enum HomeAssistantCreateResult: Equatable, Sendable {
 struct HomeAssistantActions {
     let pending: Bool
     let create: (String) async -> HomeAssistantCreateResult
+    /// The owner's assistants' names, so a second "Lan" is refused before
+    /// anything is created (desktop `checkAssistantName`).
+    var names: [String] = []
+    /// Checks a bot handle before the assistant exists; nil hides the field
+    /// (desktop draws it only where the directory is reachable).
+    var checkHandle: (@MainActor (NativeHandle) async throws -> AgentAliasCheck)?
+    /// The persona, handle and photo writes for the new assistant's room.
+    var followUp: (@MainActor (String) -> AssistantCreateFollowUp?)?
 }
 
 /// The lifecycle endpoint identifies the operation, assistant and canonical

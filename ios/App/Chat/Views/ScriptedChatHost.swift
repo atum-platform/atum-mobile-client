@@ -35,6 +35,7 @@ struct ScriptedChatHost: View {
     @State private var scriptedPresentation: AgentPresentationSnapshot
     @State private var scriptedRoutines: AgentRoutinesSnapshot
     @State private var scriptedOpeningPhase: AppBotRoomOpeningPhase?
+    @State private var scriptedHandle: NativeHandle?
     @Environment(\.colorScheme) private var scheme
     private let design: LiveDesign
 
@@ -80,6 +81,13 @@ struct ScriptedChatHost: View {
     static let teamChannelFlag = "-AtumScriptedTeamChannel"
     private static let isTeamChannel = ProcessInfo.processInfo.arguments.contains(teamChannelFlag)
     private static let showsConnectionGlyph = ProcessInfo.processInfo.arguments.contains(connectionGlyphFlag)
+    /// `-AtumScriptedOtherAssistant`: the scripted assistant is not the
+    /// primary, so its card offers "Delete {name}…" and has no handle yet
+    /// (AS-4, AS-5). `-AtumScriptedRetireFails` makes the retire call fail.
+    static let otherAssistantFlag = "-AtumScriptedOtherAssistant"
+    private static let isOtherAssistant = ProcessInfo.processInfo.arguments.contains(otherAssistantFlag)
+    private static let retireFails = ProcessInfo.processInfo.arguments.contains("-AtumScriptedRetireFails")
+    private static let scriptedAssistantID = try! NativeID("14600000-0000-4000-8000-0000000000a2")
     private static let pinsAreFull = ProcessInfo.processInfo.arguments
         .contains(AtumLaunchArguments.scriptedPinsFullFlag)
 
@@ -234,6 +242,16 @@ struct ScriptedChatHost: View {
                                         },
                                         runs: { id in .value(Self.runs(id)) }
                                     ) : nil,
+                                assistantHandles: script.context.kind == .assistant && Self.isOtherAssistant
+                                    ? scriptedHandleActions : nil,
+                                assistantRetire: script.context.kind == .assistant && Self.isOtherAssistant
+                                    ? AssistantRetireActions(retire: {
+                                        try? await Task.sleep(for: .milliseconds(300))
+                                        UITestProbe.append(Self.retireFails ? "retire failed" : "retired",
+                                                           to: "assistant-retire.txt")
+                                        return Self.retireFails ? .failed : .retired
+                                    }) : nil,
+                                onAssistantRetired: { path = [] },
                                 exitRoom: { _, _ in path = [] },
                                 setIgnored: { userID, ignored in
                                     if ignored { scriptedIgnored.insert(userID) } else { scriptedIgnored.remove(userID) }
@@ -307,6 +325,35 @@ struct ScriptedChatHost: View {
         }
     }
 
+    /// A scripted directory: handles containing "taken" are taken, claims
+    /// and renames succeed and are logged (`assistant-handle.txt`).
+    private var scriptedHandleActions: AssistantHandleActions {
+        AssistantHandleActions(
+            assistantID: Self.scriptedAssistantID,
+            current: {
+                scriptedHandle.map { .assigned(handle: $0, generation: 1) } ?? AliasCurrentResponse.none
+            },
+            check: { handle in
+                let taken = handle.rawValue.contains("taken")
+                return AgentAliasCheck(handle: handle, available: !taken,
+                                       code: taken ? .unavailable : nil)
+            },
+            claim: { request in
+                scriptedHandle = request.handle
+                UITestProbe.append("claim \(request.handle.rawValue)", to: "assistant-handle.txt")
+                return AgentAliasAssignment(handle: request.handle, principal: Self.scriptedAssistantID,
+                                            generation: 1)
+            },
+            rename: { request in
+                scriptedHandle = request.handle
+                UITestProbe.append("rename \(request.from.rawValue) \(request.handle.rawValue)",
+                                   to: "assistant-handle.txt")
+                return AgentAliasAssignment(handle: request.handle, principal: Self.scriptedAssistantID,
+                                            generation: 2, previous: request.from)
+            }
+        )
+    }
+
     private func seedWave2State() {
         if script.name == ScriptedScenario.chatMediaSend.rawValue,
            store.mediaComposer.items.isEmpty {
@@ -377,8 +424,8 @@ struct ScriptedChatHost: View {
             isMuted: infoMuted, roomIsEncrypted: store.roomIsEncrypted != false,
             pinLimitReached: !infoPinned && Self.pinsAreFull,
             members: scriptedMembers,
-            isPrimaryAssistant: script.context.kind == .assistant,
-            botHandle: script.context.kind == .assistant ? "atum" : nil,
+            isPrimaryAssistant: script.context.kind == .assistant && !Self.isOtherAssistant,
+            botHandle: script.context.kind == .assistant && !Self.isOtherAssistant ? "atum" : nil,
             topic: script.context.kind == .group ? "Lên kế hoạch cuối tuần" : nil,
             isLowPriority: infoLowPriority,
             offersLowPriority: !infoPinned
