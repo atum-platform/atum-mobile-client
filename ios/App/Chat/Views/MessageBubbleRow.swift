@@ -29,6 +29,8 @@ struct MessageBubbleRow: View {
     let parsedBody: AttributedString?
     /// The newest answer in an assistant or app chat: copy sits under it.
     var isLatestAnswer = false
+    /// HC-6: the open search's matches in this message.
+    var searchHighlight: ChatSearchHighlight? = nil
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.chatActions) private var actions
@@ -314,8 +316,19 @@ struct MessageBubbleRow: View {
         VStack(alignment: .leading, spacing: 6) {
             if row.item.isOwn {
                 // B6: what I type is sent and shown as plain text.
-                Text(verbatim: row.item.body)
-                    .font(.body)
+                if let searchHighlight {
+                    Text(searchPainted(AttributedString(row.item.body), searchHighlight, theme))
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(verbatim: row.item.body)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if let searchHighlight {
+                NativeRichText(bodyText: row.item.body,
+                               parsed: searchPainted(parsedBody ?? MessageMarkup.parse(row.item.body),
+                                                     searchHighlight, theme))
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 NativeRichText(bodyText: row.item.body, parsed: parsedBody)
@@ -336,6 +349,17 @@ struct MessageBubbleRow: View {
         }
         .foregroundStyle(trailing ? theme.design.kit.color(.onBubbleOwn, scheme: scheme)
                                   : theme.color("ink", scheme))
+    }
+
+    /// HC-6: desktop paints every match as a 16% ink wash and the current
+    /// one in ink with the on-accent colour; in my own bubble the bubble's
+    /// text colour plays the ink.
+    private func searchPainted(_ text: AttributedString, _ highlight: ChatSearchHighlight,
+                               _ theme: ChatTheme) -> AttributedString {
+        let ink = trailing ? theme.design.kit.color(.onBubbleOwn, scheme: scheme) : theme.color("ink", scheme)
+        let onInk = trailing ? theme.design.kit.color(.bubbleOwn, scheme: scheme)
+                             : theme.design.kit.color(.onInk, scheme: scheme)
+        return ChatSearchPaint.paint(text, highlight: highlight, wash: ink.opacity(0.16), current: ink, onCurrent: onInk)
     }
 
     static let avatarSize: CGFloat = 24

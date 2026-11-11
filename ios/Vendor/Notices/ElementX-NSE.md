@@ -19,10 +19,12 @@ app and notification extension. The historical source files' copyright and
 license attribution is retained above and in the adapted Swift file headers.
 
 Modifications: Copyright 2026 Anka Ventures Vietnam Company Limited.
-The adaptation uses Atum's fixed single-account read-only custody record,
-per-request SDK lifetime, overlapping-fetch refusal, a cancellation/deadline
+The adaptation uses Atum's fixed single-account custody record, a read-only
+SDK session delegate, per-request SDK lifetime, overlapping-fetch refusal, a cancellation/deadline
 completion gate, current generated Swift SDK APIs, exported Atum copy, safe
 person names and badge-only suppression. It omits media downloads, intents,
-calls, payload logging and token persistence. It does not copy Element X UI or
+calls, payload logging and SDK token persistence. Atum's own journaled OIDC
+coordinator now renews the shared Matrix grant under an App Group file lock
+before SDK construction; that renewal code is not copied from Element X. It does not copy Element X UI or
 its user-facing strings. The source pattern is used in
 `Notifications/NotificationService.swift` and `Notifications/MatrixNotificationFetcher.swift`.

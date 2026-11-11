@@ -147,7 +147,8 @@ final class StrandedSessionArchiveTests: XCTestCase {
         let keychain = Keychain()
         let operations = Operations(keychain)
         let custody = MatrixSessionKeychain(generation: generation, clients: try Self.clients(),
-                                            metadata: try Self.metadata(), operations: operations)
+            metadata: try Self.metadata(), operations: operations,
+            refreshLockURL: directory.appendingPathComponent("refresh.lock"))
         let domain = OIDCDomainKeychain(generation: generation, clients: try Self.clients(),
                                         metadata: try Self.metadata(), operations: operations)
         return Phone(keychain: keychain, operations: operations, marker: marker, directory: directory,
@@ -293,7 +294,8 @@ final class StrandedSessionArchiveTests: XCTestCase {
         let generation = UUID()
         _ = try phone.marker.createForExplicitSignIn(generation: generation)
         let fresh = MatrixSessionKeychain(generation: generation, clients: try Self.clients(),
-                                          metadata: try Self.metadata(), operations: phone.operations)
+                                          metadata: try Self.metadata(), operations: phone.operations,
+                                          refreshLockURL: phone.directory.appendingPathComponent("refresh.lock"))
         let prepared = try fresh.prepare(device: device("P2-FRESH"), marker: phone.marker,
                                          requestStartedAt: Date(timeIntervalSince1970: 500))
         let ready = try fresh.commitPrepared(prepared, marker: phone.marker, curve25519: Self.key, ed25519: Self.key)

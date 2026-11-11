@@ -6013,7 +6013,7 @@ final class LiveAppModel {
             if grant == .spend {
                 let matrixResume = try current.sessionStore.resumeGrantForRefresh(marker: marker)
                 let matrixRefresh = try OIDCGrantRefresh(resuming: matrixResume)
-                _ = try await matrixRefresh.refresh(now: now) { request in
+                _ = try await matrixRefresh.accessToken(now: Date(), minimumValidity: requiredLifetimeSeconds) { request in
                     try await self.transport.refresh(request, metadata: metadata)
                 }
             }

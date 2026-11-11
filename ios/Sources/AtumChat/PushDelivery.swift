@@ -14,23 +14,25 @@ public final class PushDelivery<Value: Sendable>: @unchecked Sendable {
 
     public func start(
         waitForDeadline: @escaping @Sendable () async throws -> Void,
+        onDeadline: @escaping @Sendable () -> Void = {},
+        onFailure: @escaping @Sendable (any Error) -> Void = { _ in },
         fetch: @escaping @Sendable () async throws -> Value
     ) {
         let deadline = Task { [weak self] in
-            do { try await waitForDeadline(); self?.expire() }
+            do { try await waitForDeadline(); self?.expire(onDelivery: onDeadline) }
             catch { /* Cancellation after delivery. */ }
         }
         retain(deadline)
         let work = Task { [weak self] in
             do { self?.finish(try await fetch()) }
-            catch { self?.expire() }
+            catch { self?.expire(onDelivery: { onFailure(error) }) }
         }
         retain(work)
     }
 
-    public func expire() { finish(fallback) }
+    public func expire(onDelivery: () -> Void = {}) { finish(fallback, onDelivery: onDelivery) }
 
-    public func finish(_ value: Value) {
+    public func finish(_ value: Value, onDelivery: () -> Void = {}) {
         let completion = lock.withLock { () -> (((Value) -> Void), [Task<Void, Never>])? in
             guard let handler else { return nil }
             self.handler = nil
@@ -39,6 +41,7 @@ public final class PushDelivery<Value: Sendable>: @unchecked Sendable {
         }
         guard let (handler, pending) = completion else { return }
         pending.forEach { $0.cancel() }
+        onDelivery()
         handler(value)
     }
 

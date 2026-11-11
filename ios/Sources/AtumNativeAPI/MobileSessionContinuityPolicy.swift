@@ -39,6 +39,8 @@ public enum MobileSessionContinuityPolicy {
     public static func custodyGrant(reading read: () throws -> Date) -> CustodyGrant {
         do {
             return .ready(expiresAt: try read())
+        } catch let failure as MatrixRefreshFailure where failure != .recordChanged {
+            return .unreadable
         } catch MatrixCustodyFailure.storageUnavailable {
             return .unreadable
         } catch OIDCGrantFailure.storageUnavailable {

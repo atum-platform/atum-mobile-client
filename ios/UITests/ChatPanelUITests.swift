@@ -79,13 +79,23 @@ final class ChatPanelUITests: TranscriptUITestCase {
         let low = element(app, "info.low-priority")
         XCTAssertTrue(low.waitForExistence(timeout: 3), boundedHierarchy(app))
         XCTAssertEqual(low.value as? String, "0")
-        low.switches.firstMatch.exists ? low.switches.firstMatch.tap() : low.tap()
+        // The swipe can leave the panel still decelerating, and a tap then
+        // only stops the scroll: tap again once it has settled.
+        for _ in 0..<3 where low.value as? String != "1" {
+            _ = waitFor(2) { low.isHittable }
+            low.switches.firstMatch.exists ? low.switches.firstMatch.tap() : low.tap()
+            _ = waitFor(2) { low.value as? String == "1" }
+        }
         XCTAssertTrue(waitFor(3) { low.value as? String == "1" }, "low priority did not turn on")
 
         let block = element(app, "info.block")
         XCTAssertTrue(block.waitForExistence(timeout: 3))
         block.tap()
-        app.sheets.buttons["Chặn người này"].firstMatch.tap()
+        // iOS 26 no longer presents the dialog as a sheet element.
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@",
+                                                       "Chặn người này", "info.block")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 3), boundedHierarchy(app))
+        confirm.tap()
         XCTAssertTrue(element(app, "info.unblock").waitForExistence(timeout: 3), "Block did not become Unblock")
         keepScreenshot("m2-person-blocked-\(appearanceTag)-vi", of: app)
         element(app, "info.unblock").tap()
