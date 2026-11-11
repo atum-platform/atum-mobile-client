@@ -125,7 +125,14 @@ final class CompanyInvitesTests: XCTestCase {
     func testAListNeverCarriesALinkOrToken() throws {
         XCTAssertEqual(try CompanyInviteWire.decodeLinkList(fixture("invite-link.list.response.json")).isEmpty, false)
         XCTAssertThrowsError(try CompanyInviteWire.decodeLinkList(fixture("invite-link.list-url.response.json")))
-        XCTAssertThrowsError(try CompanyInviteWire.decodeLinkList(fixture("invite-link.list-token.response.json")))
+        // The pack's list-with-a-token case (`invite-link.list-token`), built here: the repo ignores
+        // `*token*.json` files.
+        var withToken = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: fixture("invite-link.list.response.json")) as? [String: Any])
+        var links = try XCTUnwrap(withToken["links"] as? [[String: Any]])
+        links[0]["token"] = "PUBLIC_FIXTURE_ONLY_61818fe4de417671d243876c2279bbbe"
+        withToken["links"] = links
+        XCTAssertThrowsError(try CompanyInviteWire.decodeLinkList(JSONSerialization.data(withJSONObject: withToken)))
     }
 
     func testRevokeNamesTheLink() throws {
