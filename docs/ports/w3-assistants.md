@@ -222,7 +222,39 @@ Results: see "Verification" below.
 
 ## Verification
 
-(filled in after the locked runs)
+Every heavy run held the shared lock (`TMPDIR=/Volumes/AtumTestFlight/tmp
+lockf -k /Volumes/AtumTestFlight/.heavy-build.lock …`) on simulator iPhone 17
+(`939B69F8`, iOS 27), derived data `/Volumes/AtumTestFlight/dd-w3-as`, SwiftPM
+scratch `/Volumes/AtumTestFlight/swiftbuild-w3-as`, with
+`sim-content-size-runner.sh` beside every UI run. 2026-11-11:
+
+- `swift test -j 2`: **611 tests, 0 failures** (AtumChat, AtumDesign/NativeAPI,
+  AtumDrive, AtumTelemetry targets).
+- `xcodebuild build-for-testing -scheme AtumMobile`: TEST BUILD SUCCEEDED.
+- App unit tests (`AtumMobileTests`): **325 tests, 0 failures** (twice, before
+  and after the button and AX fixes).
+- `AssistantsWave3UITests`: **13/13 passed** on the final build (run 4).
+- `ChatInfoUITests`: 11/12 on the final build. See the open item below on
+  `testGroupInfoShowsMembersRowAndOptimisticSwitches`.
+- Earlier runs: `HomeShellUITests.testPlusOpensStartChat…` passed;
+  `KitBoardCaptureUITests` 3/3 passed.
+- `bash scripts/pre-push-public dc0634b <head>`: PASS.
+- `tests/test_copy_keys_in_pin.py`: 55 missing keys, **the same 55 on `main`
+  `dc0634b`** (Team space pending copy and `desktop.matrixShell.mainAgent`);
+  this branch adds none (its pending keys are read behind
+  `design.copy.contains`).
+
+Defects the screenshots caught and that are fixed here: the new sheet's
+Create button and the handle editor's Save drew dark words on the ink fill
+(`.borderedProminent` under the root's ink foreground); they now use
+`AtumPrimaryButtonStyle` / an explicit on-ink foreground, and a UI check
+measures the label contrast in light and dark. Card row values (model,
+routines) clipped to "Nguyệt…" at AX5; at accessibility sizes the value now
+sits under its label and wraps. Same `.borderedProminent` pattern exists
+elsewhere in `HomeScreen.swift` (HC) and was not checked here.
+
+Screenshots: `.scratch/w3-as/` (light, dark, AX5; new assistant, taken handle,
+handle editor, delete row and confirmation, routines list and editor).
 
 ## Not verified
 

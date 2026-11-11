@@ -59,8 +59,9 @@ final class AssistantsWave3UITests: TranscriptUITestCase {
         assertPrimaryLabelIsReadable(app.buttons.matching(identifier: "home.newAssistant.create").firstMatch, in: app)
     }
 
-    /// A solid ink button must draw its words in a contrasting colour: the
-    /// brightest point across its middle is far from the fill at its edge.
+    /// A solid ink button must draw its words in a contrasting colour: some
+    /// point across its middle is far from the fill at its edge. Light words
+    /// on a dark fill in light mode, dark words on a light fill in dark mode.
     @MainActor
     private func assertPrimaryLabelIsReadable(_ button: XCUIElement, in app: XCUIApplication,
                                               file: StaticString = #filePath, line: UInt = #line) {
@@ -68,15 +69,15 @@ final class AssistantsWave3UITests: TranscriptUITestCase {
         let shot = app.screenshot()
         let frame = button.frame
         let fill = luminance(of: shot, at: CGPoint(x: frame.minX + 24, y: frame.midY))
-        var brightest: CGFloat = 0
+        var contrast: CGFloat = 0
         var x = frame.midX - 60
         while x <= frame.midX + 60 {
             for offset: CGFloat in [-4, -2, 0, 2, 4] {
-                brightest = max(brightest, luminance(of: shot, at: CGPoint(x: x, y: frame.midY + offset)))
+                contrast = max(contrast, abs(luminance(of: shot, at: CGPoint(x: x, y: frame.midY + offset)) - fill))
             }
             x += 1
         }
-        XCTAssertGreaterThan(brightest - fill, 0.5, "button words are not readable on their fill",
+        XCTAssertGreaterThan(contrast, 0.5, "button words are not readable on their fill",
                              file: file, line: line)
     }
 
@@ -84,7 +85,9 @@ final class AssistantsWave3UITests: TranscriptUITestCase {
     @MainActor
     func testNewAssistantReadsInDark() {
         XCTAssertTrue(requestRunner("appearance dark"), "no content-size runner beside the run")
-        defer { requestRunner("appearance light") }
+        // A teardown block runs even after a failed assertion stops the test,
+        // so a dark simulator never leaks into the next one.
+        addTeardownBlock { [self] in requestRunner("appearance light") }
         let app = launchHome()
         openNewAssistant(app)
         let name = element(app, "home.newAssistant.name")
