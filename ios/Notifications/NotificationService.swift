@@ -2,6 +2,7 @@
 // Copyright 2022 New Vector Ltd. Modifications Copyright 2026 Anka Ventures Vietnam Company Limited.
 // Licensed under the Apache License, Version 2.0; see Vendor/Notices/ElementX-NSE.md.
 import Foundation
+import os
 import UserNotifications
 import AtumNativeAPI
 import AtumChat
@@ -15,6 +16,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
                              withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
         let generic = NotificationSnapshot(Self.genericContent(userInfo: request.content.userInfo, bundle: .main))
         guard let payload = Self.payload(request.content.userInfo) else {
+            Self.log(.invalidPayload)
             contentHandler(generic.content)
             return
         }
@@ -28,9 +30,13 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
             pending[id] = delivery
             return true
         }
-        guard shouldStart else { delivery.expire(); return }
+        guard shouldStart else { delivery.expire(onDelivery: { Self.log(.systemExpiry) }); return }
         let copy = Self.copy(bundle: .main)
-        delivery.start(waitForDeadline: { try await Task.sleep(for: .seconds(20)) }) {
+        delivery.start(waitForDeadline: {
+            try await Task.sleep(for: .seconds(20))
+        }, onDeadline: { Self.log(.fetchTimeout) }, onFailure: {
+            Self.log(NotificationFallbackReason.classify($0))
+        }) {
             let result = try await MatrixNotificationFetcher.shared.fetch(
                 roomID: payload.roomID.rawValue, eventID: payload.eventID.rawValue, copy: copy)
             return NotificationSnapshot(Self.content(result, generic: generic.content))
@@ -42,7 +48,12 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
             expired = true
             return Array(pending.values)
         }
-        deliveries.forEach { $0.expire() }
+        deliveries.forEach { $0.expire(onDelivery: { Self.log(.systemExpiry) }) }
+    }
+
+    private static let logger = Logger(subsystem: "com.atum.mobile.notifications", category: "rich-push")
+    private static func log(_ reason: NotificationFallbackReason) {
+        logger.notice("generic_alert reason=\(reason.rawValue, privacy: .public)")
     }
 
     static func payload(_ userInfo: [AnyHashable: Any]) -> MobilePushPayload? {

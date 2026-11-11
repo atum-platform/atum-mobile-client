@@ -125,6 +125,15 @@ enum LiveAuthDiagnostics {
             case .invalidIdentity: "grant_invalid_identity"
             }
         }
+        if let value = error as? MatrixRefreshFailure {
+            return switch value {
+            case .busy: "matrix_refresh_busy"
+            case .unavailable: "matrix_refresh_lock_unavailable"
+            case .recordChanged: "matrix_refresh_record_changed"
+            case .timedOut: "matrix_refresh_timeout"
+            case .keychainLocked: "matrix_keychain_locked"
+            }
+        }
         if let value = error as? MatrixCustodyFailure {
             return switch value {
             case .storageUnavailable: "matrix_storage_unavailable"
