@@ -105,9 +105,17 @@ targets:
         excludes: [Info.plist, AtumNotifications.entitlements]
       - path: App/PushLocalizations
         buildPhase: resources
+      - path: Vendor/Notices/ElementX-NSE.md
+        buildPhase: resources
+      - path: App/Resources/MatrixRustSDK-LICENSE.txt
+        buildPhase: resources
     dependencies:
       - package: AtumDesign
         product: AtumNativeAPI
+      - package: AtumDesign
+        product: AtumChat
+      - package: MatrixRustSDK
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.notifications
@@ -117,6 +125,26 @@ targets:
         PROVISIONING_PROFILE_SPECIFIER: Atum Mobile Notifications Development
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: '1'
+  AtumNotificationsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Notifications
+        excludes: [Info.plist, AtumNotifications.entitlements]
+      - path: NotificationsTests
+      - path: App/PushLocalizations
+        buildPhase: resources
+    dependencies:
+      - package: AtumDesign
+        product: AtumNativeAPI
+      - package: AtumDesign
+        product: AtumChat
+      - package: MatrixRustSDK
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.notifications.tests
+        GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: '1'
   # XCUITests for the chat revamp (plan §2.10). Simulator only: no device
   # test runner profile (coordinator default C3). Built for testing only, so
@@ -155,6 +183,15 @@ targets:
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: '1'
 schemes:
+  AtumNotifications:
+    build:
+      targets:
+        AtumNotifications: all
+        AtumNotificationsTests: [test]
+    test:
+      config: Debug
+      targets:
+        - AtumNotificationsTests
   AtumMobile:
     build:
       targets:

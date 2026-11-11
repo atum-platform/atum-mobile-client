@@ -156,13 +156,16 @@ def build(args):
                 "NSExtensionPrincipalClass": "AtumNotifications.NotificationService"}):
             raise ValueError("signed extension entry point mismatch")
         catalog = ROOT / "ios/App/PushLocalizations/Localizable.xcstrings"
-        alerts = json.loads(catalog.read_bytes())["strings"]["ATUM_NEW_MESSAGE"]["localizations"]
+        alert_strings = json.loads(catalog.read_bytes())["strings"]
+        alerts = alert_strings["ATUM_NEW_MESSAGE"]["localizations"]
         compiled_alerts = {}
         extension_alerts = {}
         for locale, unit in alerts.items():
             localized = app / (locale + ".lproj") / "Localizable.strings"
             actual = json.loads(subprocess.check_output(["plutil", "-convert", "json", "-o", "-", str(localized)], timeout=10))
-            if actual != {"ATUM_NEW_MESSAGE": unit["stringUnit"]["value"]}:
+            expected = {key: entry["localizations"][locale]["stringUnit"]["value"]
+                        for key, entry in alert_strings.items()}
+            if actual != expected:
                 raise ValueError("signed generic notification localization mismatch")
             compiled_alerts[str(localized.relative_to(app))] = digest(localized)
             extension_localized = extension / (locale + ".lproj") / "Localizable.strings"
