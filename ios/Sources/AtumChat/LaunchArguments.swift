@@ -86,4 +86,9 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     /// message, then Atum typing (the atom alone), then a live working line
     /// with its checklist that stays until the turn ends.
     case chatTimelineParity = "chat.timeline-parity"
+    /// Bubble width, tight hug and the long-message fold (2026-11-11): my
+    /// assistant's chat with short and long answers, the long one folded.
+    case chatBubbles = "chat.bubbles"
+    /// The same in a group with faces.
+    case chatBubblesGroup = "chat.bubbles-group"
 }

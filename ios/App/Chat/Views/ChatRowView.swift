@@ -1,5 +1,6 @@
 import AtumChat
 import SwiftUI
+import UIKit
 
 /// One display row (plan §2.2): picks the row view for the row's kind and
 /// the room's kind (§2.7), and adds the spacing grouping decided (B16; the
@@ -17,6 +18,8 @@ struct ChatRowView: View, Equatable {
     var isLatestAnswer = false
     /// HC-6: the open search's matches in this row's words, if any.
     var searchHighlight: ChatSearchHighlight? = nil
+    /// The agent may still be writing this message: it never folds.
+    var isGrowing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,7 +33,8 @@ struct ChatRowView: View, Equatable {
         switch row.item.kind {
         case .message, .image, .file, .placeholder:
             MessageBubbleRow(row: row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody,
-                             isLatestAnswer: isLatestAnswer, searchHighlight: searchHighlight)
+                             isLatestAnswer: isLatestAnswer, searchHighlight: searchHighlight,
+                             isGrowing: isGrowing)
         case .notice:
             if row.item.isProgressLine || Self.isRetiredWaitLine(row.item) {
                 WorkingLineRow(row: row)
@@ -127,9 +131,9 @@ extension ChatRowView {
 
 enum ChatLayout {
     static let sideMargin: CGFloat = 16
-    /// Bubbles are at most 78% of the row (desktop geometry, B17), and hug
-    /// their content below that (`BubbleGeometry`, `BubbleStack`).
-    static let bubbleFraction = CGFloat(BubbleGeometry.maxFraction)
+    /// The widest bubble stops `BubbleGeometry.farSideGap` short of the
+    /// screen's far edge (Telegram's geometry, owner 2026-11-11), and hugs its
+    /// content below that (`BubbleGeometry`, `BubbleStack`).
     static let bubbleRadius: CGFloat = 20
     /// The inner corner between two bubbles of one run.
     static let runRadius: CGFloat = 6
@@ -222,12 +226,11 @@ extension View {
     }
 }
 
-/// Places one bubble at most `fraction` of the row wide, on the leading or
-/// trailing side (B17: 78%). A `Layout`, so no geometry reader sits in the
-/// lazy stack.
+/// Places one bubble at most the widest bubble wide
+/// (`BubbleGeometry.maxWidth`), on the leading or trailing side. A `Layout`,
+/// so no geometry reader sits in the lazy stack.
 struct BubbleColumn: Layout {
     var trailing: Bool
-    var fraction: CGFloat = ChatLayout.bubbleFraction
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? 360
@@ -244,7 +247,8 @@ struct BubbleColumn: Layout {
     }
 
     private func childProposal(_ width: CGFloat) -> ProposedViewSize {
-        ProposedViewSize(width: (width * fraction).rounded(.down), height: nil)
+        ProposedViewSize(width: CGFloat(BubbleGeometry.maxWidth(row: Double(width), margin: Double(ChatLayout.sideMargin))),
+                         height: nil)
     }
 }
 
@@ -256,9 +260,14 @@ struct BubbleColumn: Layout {
 /// the offered width and its natural width (`BubbleGeometry.hugWidth`), then
 /// every part is laid out at the result, so stretchy parts fill the bubble the
 /// text set. A `Layout`: no geometry feedback in the lazy transcript (G-scroll).
+///
+/// With `tightens` (a bubble's own stack), wrapped text also loses the one
+/// trailing space SwiftUI counts in its longest line, so the bubble ends at
+/// the words (`BubbleGeometry.tightWidth`): Telegram's tight hug.
 struct BubbleStack: Layout {
     var alignment: HorizontalAlignment = .leading
     var spacing: CGFloat = 0
+    var tightens = false
 
     /// The width worked out for the last offered width: the transcript lays
     /// every row out eagerly, so each part is measured once per width, not on
@@ -300,11 +309,31 @@ struct BubbleStack: Layout {
         let width: CGFloat
         if let limit, limit.isFinite {
             let fitted = subviews.map { Double($0.sizeThatFits(ProposedViewSize(width: limit, height: nil)).width) }
-            width = CGFloat(BubbleGeometry.hugWidth(fitted: fitted, natural: natural, limit: Double(limit)))
+            let hug = BubbleGeometry.hugWidth(fitted: fitted, natural: natural, limit: Double(limit))
+            let wrapped = zip(fitted, natural).contains { $0 + 0.5 < $1 }
+            width = CGFloat(tightens && wrapped ? tight(hug, subviews: subviews) : hug)
         } else {
             width = CGFloat(natural.max() ?? 0)
         }
         cache = Cache(limit: limit, width: width)
         return width
+    }
+
+    /// The narrowest width, at most one space below `width`, at which every
+    /// part keeps its height.
+    private func tight(_ width: Double, subviews: Subviews) -> Double {
+        func heights(_ width: Double) -> [CGFloat] {
+            subviews.map { $0.sizeThatFits(ProposedViewSize(width: CGFloat(width), height: nil)).height }
+        }
+        let reference = heights(width)
+        return BubbleGeometry.tightWidth(from: width, slack: Double(Self.spaceSlack)) { candidate in
+            zip(heights(candidate), reference).allSatisfy { abs($0 - $1) < 0.5 }
+        }
+    }
+
+    /// One space of body text at the current text size, and a point over.
+    static var spaceSlack: CGFloat {
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        return (" " as NSString).size(withAttributes: [.font: font]).width.rounded(.up) + 1
     }
 }

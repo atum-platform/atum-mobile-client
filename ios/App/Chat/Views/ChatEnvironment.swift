@@ -43,6 +43,9 @@ struct ChatRowInteractions {
     /// B21: a quote was tapped; the transcript scrolls to the original if it
     /// is loaded.
     var showOriginal: @MainActor (String) -> Void = { _ in }
+    /// A long message was folded with Show less (`MessageFold`); the
+    /// transcript brings its top back if it had scrolled away.
+    var folded: @MainActor (String) -> Void = { _ in }
 }
 
 extension EnvironmentValues {

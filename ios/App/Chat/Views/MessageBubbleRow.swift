@@ -6,7 +6,8 @@ import SwiftUI
 /// `bubble-own` (ink in light, a lifted grey in dark) with `on-bubble-own`
 /// text, people's on the left on `surface` with `shadow-1`, with
 /// first/middle/last corner shapes inside a sender run. A bubble hugs its
-/// content and grows with longer text up to 78% of the row, then wraps
+/// content and grows with longer text up to the widest bubble (the row less a
+/// 48 pt far-side gap, `BubbleGeometry`), then wraps
 // Preserve user-visible identity, state and recovery behavior across connection changes.
 /// placeholders share it.
 ///
@@ -31,6 +32,8 @@ struct MessageBubbleRow: View {
     var isLatestAnswer = false
     /// HC-6: the open search's matches in this message.
     var searchHighlight: ChatSearchHighlight? = nil
+    /// The agent may still be writing this message: it never folds.
+    var isGrowing = false
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.chatActions) private var actions
@@ -38,6 +41,10 @@ struct MessageBubbleRow: View {
     @Environment(\.chatRoomFace) private var roomFace
     @Environment(\.chatMembers) private var members
     @Environment(\.chatFlatRuns) private var flat
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.chatRowInteractions) private var interactions
+    /// Bumped by the fold toggle: the session's fold book is not observed.
+    @State private var foldTick = 0
 
     /// Mine sit on the right in a bubble, except in a team space's flat runs,
     /// where everyone's sit on the left.
@@ -156,10 +163,15 @@ struct MessageBubbleRow: View {
                 if row.showsQuote {
                     QuoteView(row: row, roomTitle: roomTitle)
                 }
+                let fold = foldState()
                 messageText(theme)
+                    .messageFold(fold.folded, lineHeight: foldLineHeight)
                     .spokenMessage(speech, links: links, actions: actions)
                     .accessibilityIdentifier("message.body.\(row.id)")
                     .accessibilitySortPriority(1)
+                if fold.showsToggle {
+                    foldToggle(theme, folded: fold.folded)
+                }
                 botAPIKeyboard(theme)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,34 +244,80 @@ struct MessageBubbleRow: View {
             if row.showsQuote {
                 // The quote and the message are two elements in one bubble;
                 // the message is read first (B16), then the quote (B21).
-                BubbleStack {
+                let fold = foldState()
+                BubbleStack(tightens: true) {
                     VStack(alignment: .leading, spacing: 6) {
                         QuoteView(row: row, roomTitle: roomTitle)
                         messageText(theme)
+                            .messageFold(fold.folded, lineHeight: foldLineHeight)
                             .spokenMessage(speech, links: links, actions: actions)
                             .accessibilityIdentifier("message.body.\(row.id)")
                             .accessibilitySortPriority(1)
                     }
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
+                    .padding(.top, 9)
+                    .padding(.bottom, fold.showsToggle ? 0 : 9)
+                    if fold.showsToggle {
+                        foldToggle(theme, folded: fold.folded)
+                            .padding(.horizontal, 14)
+                    }
                     botAPIKeyboard(theme)
                 }
                 .background(fill, in: shape)
                 .modifier(IncomingElevation(trailing: trailing, shape: shape))
                 .accessibilityElement(children: .contain)
             } else {
-                BubbleStack {
+                let fold = foldState()
+                BubbleStack(tightens: true) {
                     messageText(theme)
+                        .messageFold(fold.folded, lineHeight: foldLineHeight)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
+                        .padding(.top, 9)
+                        .padding(.bottom, fold.showsToggle ? 0 : 9)
                         .spokenMessage(speech, links: links, actions: actions)
                         .accessibilityIdentifier("message.body.\(row.id)")
+                    if fold.showsToggle {
+                        foldToggle(theme, folded: fold.folded)
+                            .padding(.horizontal, 14)
+                    }
                     botAPIKeyboard(theme)
                 }
                 .background(fill, in: shape)
                 .modifier(IncomingElevation(trailing: trailing, shape: shape))
             }
         }
+    }
+
+    // MARK: Long messages fold (`MessageFold`)
+
+    private struct FoldState {
+        var folded = false
+        var showsToggle = false
+    }
+
+    /// Whether this message folds now, and whether it shows its toggle. Only
+    /// text messages fold, and never while the open search marks words in
+    /// them (a match could sit under the fold).
+    private func foldState() -> FoldState {
+        _ = foldTick
+        guard case .message = row.item.kind, searchHighlight == nil else { return FoldState() }
+        let width = MessageFoldMeasure.textWidth(gutter: avatarSlot, flat: flat)
+        let long = MessageFoldMeasure.isLong(id: row.id, body: row.item.body, parsed: parsedBody,
+                                             isOwn: row.item.isOwn, textWidth: width, size: dynamicTypeSize)
+        return FoldState(folded: MessageFoldStore.session.isFolded(row.id, isLong: long, isGrowing: isGrowing),
+                         showsToggle: MessageFoldBook.showsToggle(isLong: long, isGrowing: isGrowing))
+    }
+
+    private var foldLineHeight: CGFloat { MessageFoldMeasure.lineHeight(dynamicTypeSize) }
+
+    private func foldToggle(_ theme: ChatTheme, folded: Bool) -> some View {
+        MessageFoldToggle(rowID: row.id, folded: folded) {
+            MessageFoldStore.session.toggle(row.id, wasFolded: folded)
+            foldTick &+= 1
+            if !folded { interactions.folded(row.id) }
+        }
+        .foregroundStyle(trailing ? theme.design.kit.color(.onBubbleOwn, scheme: scheme)
+                                  : theme.color("ink", scheme))
     }
 
     /// Native URL-only buttons from authenticated per-message Bot API
@@ -474,8 +532,9 @@ private extension View {
 // Preserve user-visible identity, state and recovery behavior across connection changes.
 /// do the same). The face gutter is reserved for every incoming bubble in a
 /// group so the run never jumps sideways; a 1:1 chat reserves none. The
-/// bubble is offered the widest-bubble width (`BubbleGeometry.maxWidth`,
-/// gutter outside it) and takes only what its content needs. My own bubbles
+/// bubble is offered the widest-bubble width (`BubbleGeometry.maxWidth`:
+/// the row less the gutter and the far-side gap) and takes only what its
+/// content needs. My own bubbles
 /// keep the trailing edge with no gutter.
 struct BubbleWithAvatarLayout: Layout {
     var trailing: Bool
@@ -505,7 +564,8 @@ struct BubbleWithAvatarLayout: Layout {
     private var inset: CGFloat { reservesAvatar ? avatarSize + gap : 0 }
 
     private func childProposal(row: CGFloat) -> ProposedViewSize {
-        let width = BubbleGeometry.maxWidth(row: Double(row), gutter: Double(inset))
+        let width = BubbleGeometry.maxWidth(row: Double(row), gutter: Double(inset),
+                                            margin: Double(ChatLayout.sideMargin))
         return ProposedViewSize(width: CGFloat(width).rounded(.down), height: nil)
     }
 }
