@@ -57,6 +57,9 @@ struct LiveMatrixRoomRow: Equatable, Identifiable, Sendable {
     var isLowPriority: Bool = false
     /// The room's `m.room.topic`, from the SDK's room info.
     var topic: String? = nil
+    /// HC-7: your own name for this chat (`io.atum.title`, desktop's private
+    /// Rename). It goes before the room's own name, as on desktop.
+    var privateTitle: String? = nil
 
     var id: String { roomID }
 }
@@ -743,6 +746,103 @@ final class LiveMatrixSession {
         } catch {
             return false
         }
+    }
+
+    // MARK: HC-7: names and topics
+
+    /// Your own name for a chat (desktop's private Rename): the room account
+    /// data event `io.atum.title`, `{}` to clear it. The pinned SDK has no
+    /// room account data write, so this one request goes to the session's own
+    /// homeserver with the session's bearer (HTTPS only, no cookies, no
+    /// redirects), as Team Space's notification read does. The row shows the
+    /// new name at once; sync brings the event back into the SDK's cache.
+    func setPrivateTitle(roomID: String, title: String) async -> Bool {
+        do {
+            try runtime.requireCurrent()
+            let session = try runtime.client.session()
+            let userID = try runtime.client.userId()
+            guard var components = URLComponents(string: session.homeserverUrl), components.scheme == "https",
+                  components.host?.isEmpty == false,
+                  let user = Self.pathSegment(userID), let room = Self.pathSegment(roomID),
+                  let type = Self.pathSegment(ChatPrivateTitle.eventType) else { return false }
+            let base = components.percentEncodedPath.hasSuffix("/")
+                ? String(components.percentEncodedPath.dropLast()) : components.percentEncodedPath
+            components.percentEncodedPath = base + "/_matrix/client/v3/user/\(user)/rooms/\(room)/account_data/\(type)"
+            guard let url = components.url else { return false }
+            let content = ChatPrivateTitle.content(title)
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+            request.httpMethod = "PUT"
+            request.httpShouldHandleCookies = false
+            request.setValue("Bearer " + session.accessToken, forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: content)
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpCookieStorage = nil
+            configuration.urlCache = nil
+            let transport = URLSession(configuration: configuration, delegate: LiveMatrixNoRedirect(),
+                                       delegateQueue: nil)
+            defer { transport.finishTasksAndInvalidate() }
+            let (_, response) = try await transport.data(for: request)
+            try runtime.requireCurrent()
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return false }
+            patchPrivateTitle(roomID: roomID, title: content["title"])
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// A group's name for everyone in it (`m.room.name`, never empty). Your
+    /// own private name would hide the new one from you, so it goes too
+    /// (desktop `groupName`).
+    func setGroupName(roomID: String, name: String) async -> Bool {
+        let name = ChatPrivateTitle.normalized(name)
+        guard !name.isEmpty, name.count <= ChatPrivateTitle.maximumLength else { return false }
+        do {
+            let room = try room(id: roomID)
+            try await room.setName(name: name)
+            try runtime.requireCurrent()
+        } catch {
+            return false
+        }
+        if rooms.first(where: { $0.roomID == roomID })?.privateTitle != nil {
+            _ = await setPrivateTitle(roomID: roomID, title: "")
+        }
+        return true
+    }
+
+    /// A group's topic for everyone in it (`m.room.topic`).
+    func setGroupTopic(roomID: String, topic: String) async -> Bool {
+        do {
+            let room = try room(id: roomID)
+            try await room.setTopic(topic: ChatGroupTopic.normalized(topic))
+            try runtime.requireCurrent()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Whether this account may name the group and set its topic (desktop
+    /// `room.canName` / `room.canTopic`, from the power levels).
+    func groupDetailsPowers(roomID: String) async -> (name: Bool, topic: Bool) {
+        guard let room = try? room(id: roomID), let levels = try? await room.getPowerLevels() else {
+            return (false, false)
+        }
+        let own = room.ownUserId()
+        return ((try? levels.canUserSendState(userId: own, stateEvent: .roomName)) ?? false,
+                (try? levels.canUserSendState(userId: own, stateEvent: .roomTopic)) ?? false)
+    }
+
+    private func patchPrivateTitle(roomID: String, title: String?) {
+        guard let index = rooms.firstIndex(where: { $0.roomID == roomID }) else { return }
+        rooms[index].privateTitle = title
+    }
+
+    nonisolated private static func pathSegment(_ value: String) -> String? {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed)
     }
 
     /// The side panel's facts, from the local store: when the room began, its
@@ -1436,6 +1536,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         // company conversation of any size must be recognised so it never reads as a Personal chat.
         async let roomTypeValue = roomTypeIfChatCandidate(from: room, isChatCandidate: true)
         async let botData = appBotAccountDataIfChatCandidate(from: room, isChatCandidate: isChatCandidate)
+        async let privateTitleData = try? await room.accountDataRaw(eventType: ChatPrivateTitle.eventType)
         let preview = latestText(from: await latest)
         // A delivery-outcome notice is not something a person said. Keep the
         // row's last real message (the snapshot merge supplies it) instead of
@@ -1479,7 +1580,8 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
                                  legacyAppBotMove: bot.move,
                                  memberProfiles: members,
                                  isLowPriority: info.isLowPriority,
-                                 topic: info.topic)
+                                 topic: info.topic,
+                                 privateTitle: ChatPrivateTitle.title(eventJSON: await privateTitleData))
     }
 
     /// The other joined member's photo, including named DMs with no heroes.
@@ -1629,4 +1731,11 @@ private func text(from content: TimelineItemContent) -> String? {
     case .text, .notice: return message.body
     default: return nil
     }
+}
+
+/// HC-7: the private Rename's one request never follows a redirect.
+private final class LiveMatrixNoRedirect: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async
+        -> URLRequest? { nil }
 }

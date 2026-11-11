@@ -396,11 +396,13 @@ enum LiveRosterRows {
                     return room.memberCount <= 2
                         && (room.memberUserIDs.isEmpty || room.memberUserIDs.contains(founderUserID))
                 }()
+                // HC-7: your own name for the chat comes first (desktop
+                // `matrixChatTitle`); the Founder's and your notes' are the app's.
                 let title = isFounder
                     ? (input.founderName ?? room.displayName)
                     : input.notesSelfRoomIDs.contains(room.roomID)
                         ? (input.notesSelfTitle ?? room.displayName)
-                        : room.displayName
+                        : (room.privateTitle ?? room.displayName)
                 let previewContent: RowPreview.Content = if isFounder,
                                                            room.latestPreviewContent == .none,
                                                            let subtitle = input.founderSubtitle {

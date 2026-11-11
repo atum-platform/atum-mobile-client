@@ -72,6 +72,8 @@ final class ChatCopyContractTests: XCTestCase {
             [.text("Lan")]
         case .infoMemberCount:
             [.number(3)]
+        case .searchResult, .searchSearching, .searchSearched:
+            [.number(2), .number(5)]
         case .incomingAnnouncement:
             [.text("Lan"), .text("xin chào")]
         default:

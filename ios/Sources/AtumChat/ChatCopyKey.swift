@@ -170,4 +170,30 @@ public enum ChatCopyKey: String, CaseIterable, Sendable {
     case turnRunning = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesTurnRunningText"
     case turnStopRequested = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesStopRequestedText"
     case turnStopped = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesStoppedText"
+
+    // In-chat search (HC-6): desktop `chat-search-copy.ts`.
+    case searchChat = "src.matrix.chat-search-copy.copies.search"
+    case searchOlder = "src.matrix.chat-search-copy.copies.older"
+    case searchNewer = "src.matrix.chat-search-copy.copies.newer"
+    case searchClose = "src.matrix.chat-search-copy.copies.close"
+    case searchNoResults = "src.matrix.chat-search-copy.copies.noResults"
+    case searchResult = "src.matrix.chat-search-copy.copies.result"
+    case searchSearching = "src.matrix.chat-search-copy.copies.searching"
+    case searchSearched = "src.matrix.chat-search-copy.copies.searched"
+
+    // Row and chat menus (HC-7): desktop `roster-context-menu.tsx`,
+    // `conversation-menu.tsx`, `person-info-panel.tsx`, `group-details.tsx`.
+    case markRead = "src.matrix.chat-copy.copies.markRead"
+    case markUnread = "src.matrix.chat-copy.copies.markUnread"
+    case rename = "src.matrix.chat-copy.copies.rename"
+    case renameTitle = "src.matrix.chat-copy.copies.renameTitle"
+    case renameHelp = "src.matrix.chat-copy.copies.renameHelp"
+    case renameLabel = "src.matrix.chat-copy.copies.renameLabel"
+    case save = "src.matrix.chat-copy.copies.save"
+    case lowPriority = "src.matrix.person-info-copy.copy.lowPriority"
+    case blockPerson = "src.matrix.chat-copy.copies.blockPerson"
+    case blockPersonTitle = "src.matrix.chat-copy.copies.blockPersonTitle"
+    case blockPersonBody = "src.matrix.chat-copy.copies.blockPersonBody"
+    case unblockPerson = "src.matrix.chat-copy.copies.unblockPerson"
+    case addMembers = "src.matrix.group-picker-copy.copies.addMembers"
 }
