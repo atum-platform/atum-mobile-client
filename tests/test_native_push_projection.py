@@ -16,7 +16,13 @@ class NativePushProjectionTests(unittest.TestCase):
         generated = json.loads(binding["generate"]())
         fixture = json.loads((PACK / "fixtures/pusher-set-prod.request.json").read_bytes())
         key = fixture["data"]["default_payload"]["aps"]["alert"]["loc-key"]
-        self.assertEqual(set(generated["strings"]), {key})
+        # The provider's generic key, plus the rich-notification phrases the
+        # extension shows once it has decrypted the event (all pinned desktop copy).
+        rich = {"ATUM_PUSH_" + kind for kind in
+                ["UNNAMED", "IMAGE", "VIDEO", "AUDIO", "FILE", "STICKER", "INVITE"]}
+        self.assertEqual(set(generated["strings"]), {key} | rich)
+        for rich_key in rich:
+            self.assertEqual(set(generated["strings"][rich_key]["localizations"]), set(binding["LOCALES"].values()))
         source = json.loads((ROOT / "ios/Vendor/AtumDesign/Localizable.xcstrings").read_bytes())["strings"][binding["COPY_KEY"]]
         target = generated["strings"][key]["localizations"]
         self.assertEqual(set(target), set(binding["LOCALES"].values()))

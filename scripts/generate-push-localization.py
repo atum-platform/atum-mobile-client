@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind the frozen APNs localization key to imported desktop-owned generic copy."""
+"""Bind APNs and rich notification keys to imported desktop-owned copy."""
 import argparse
 import hashlib
 import json
@@ -36,6 +36,25 @@ def generate():
     result = {"sourceLanguage": "en", "version": "1.0", "strings": {key: {
         "comment": "Generated from pinned desktop copy: " + COPY_KEY,
         "extractionState": "manual", "localizations": localizations}}}
+    rich_keys = {
+        "ATUM_PUSH_UNNAMED": "src.matrix.conversation-copy.copies.unnamed",
+        **{"ATUM_PUSH_" + kind.upper(): "src.matrix.mobile-copy.mobileChatCopy.home.preview." + source
+           for kind, source in {"image": "photo", "video": "video", "audio": "audio", "file": "file",
+                                "sticker": "sticker", "invite": "invite"}.items()},
+    }
+    catalog = json.loads((VENDOR / "Localizable.xcstrings").read_bytes())["strings"]
+    parameters = json.loads((VENDOR / "copy-contract.json").read_bytes())["parameters"]
+    for key, source_key in rich_keys.items():
+        if parameters[source_key] != []:
+            raise ValueError("Rich notification copy must need no arguments")
+        translations = {}
+        for original, native in LOCALES.items():
+            unit = catalog[source_key]["localizations"][original]["stringUnit"]
+            if unit["state"] != "translated" or not unit["value"] or "%" in unit["value"]:
+                raise ValueError("Rich notification copy is incomplete or parameterized")
+            translations[native] = {"stringUnit": unit}
+        result["strings"][key] = {"comment": "Generated from pinned desktop copy: " + source_key,
+                                  "extractionState": "manual", "localizations": translations}
     return (json.dumps(result, ensure_ascii=False, indent=2) + "\n").encode()
 
 

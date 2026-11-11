@@ -11,7 +11,16 @@ public struct MatrixSessionReader: Sendable {
         self.init(clients: clients, metadata: metadata, operations: SystemMatrixKeychainReader())
     }
     init(clients: MASPublicClients, metadata: MASMetadata, operations: any MatrixKeychainReading) {
-        issuer = metadata.issuer; clientID = clients.matrix; self.operations = operations
+        self.init(issuer: metadata.issuer, clientID: clients.matrix, operations: operations)
+    }
+    /// Notification processes need only the deployed public issuer/client ID,
+    /// not OIDC discovery or any domain credential. Uses the same record validation.
+    public static func notificationReader() throws -> Self {
+        Self(issuer: MASProduction.issuer, clientID: try MASProduction.clients().matrix,
+             operations: SystemMatrixKeychainReader())
+    }
+    private init(issuer: String, clientID: String, operations: any MatrixKeychainReading) {
+        self.issuer = issuer; self.clientID = clientID; self.operations = operations
     }
     /// Preflight for an explicit first sign-in. Absence is the only accepted
     /// state; a ready, prepared, malformed, legacy or coexisting record is a
