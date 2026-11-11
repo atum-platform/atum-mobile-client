@@ -66,6 +66,15 @@ final class SessionContinuityTests: XCTestCase {
 
     // MARK: Automatic retries
 
+    func testLiveNotificationRefreshIsTransientInsteadOfExpiredSession() {
+        for failure in [MatrixRefreshFailure.busy, .unavailable, .keychainLocked] {
+            XCTAssertEqual(MobileSessionContinuityPolicy.custodyGrant { throw failure }, .unreadable)
+        }
+        XCTAssertEqual(MobileSessionContinuityPolicy.custodyGrant {
+            throw OIDCGrantFailure.refreshInterrupted
+        }, .refused)
+    }
+
     func testFailedRenewalsBackOffInsteadOfRetryingEvery30Seconds() {
         var retry = Policy.RenewalRetry()
         XCTAssertEqual(retry.automaticWait(now: now), 0)

@@ -24,6 +24,8 @@ struct ScriptedChatHost: View {
     @State private var infoPinned = false
     @State private var infoMuted = false
     @State private var infoLowPriority = false
+    /// HC-7: the name Rename gave the scripted chat.
+    @State private var scriptedTitle: String?
     @State private var scriptedIgnored = Set<String>()
     @State private var scriptedRemoved = Set<String>()
     @State private var scriptedBanned: Set<String> = [ScriptedCast.anhKhoa]
@@ -277,7 +279,21 @@ struct ScriptedChatHost: View {
                                 },
                                 assistantTurnStop: script.context.kind == .assistant
                                     ? Self.scriptedTurnStop : nil,
-                                sharedCollections: ScriptedSharedCollectionsScope.opener()
+                                sharedCollections: ScriptedSharedCollectionsScope.opener(),
+                                // HC-7: Rename names a group for everyone (the
+                                // scripted admin may), a person chat privately.
+                                rename: script.context.kind == .person || script.context.kind == .group
+                                    ? ChatRenameActions(
+                                        request: { roomID in
+                                            ChatRenameRequest(roomID: roomID, current: scriptedTitle ?? script.title,
+                                                              shared: script.context.kind == .group)
+                                        },
+                                        save: { request, name in
+                                            let title = ChatPrivateTitle.normalized(name)
+                                            scriptedTitle = title.isEmpty ? nil : title
+                                            UITestProbe.append("rename \(request.shared) \(title)", to: "panel.txt")
+                                            return true
+                                        }) : nil
                             ),
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,
@@ -399,7 +415,7 @@ struct ScriptedChatHost: View {
         case .group: .group(memberCount: scriptedMembers.count)
         }
         return ChatInfoPresentation(
-            roomID: script.name, title: script.title,
+            roomID: script.name, title: scriptedTitle ?? script.title,
             subtitle: script.context.kind == .assistant ? scriptedPresentation.title : nil,
             kind: kind,
             avatar: scriptedAppBot.map { .photo(url: $0.avatarURL, fallback: $0.name) }

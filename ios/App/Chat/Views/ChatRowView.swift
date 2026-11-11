@@ -14,6 +14,8 @@ struct ChatRowView: View, Equatable {
     let parsedBody: AttributedString?
     /// The newest answer in an assistant or app chat carries its actions.
     var isLatestAnswer = false
+    /// HC-6: the open search's matches in this row's words, if any.
+    var searchHighlight: ChatSearchHighlight? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,7 +32,7 @@ struct ChatRowView: View, Equatable {
         switch row.item.kind {
         case .message, .image, .file, .placeholder:
             MessageBubbleRow(row: row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody,
-                             isLatestAnswer: isLatestAnswer)
+                             isLatestAnswer: isLatestAnswer, searchHighlight: searchHighlight)
         case .notice:
             if row.item.isProgressLine || Self.isRetiredWaitLine(row.item) {
                 WorkingLineRow(row: row)

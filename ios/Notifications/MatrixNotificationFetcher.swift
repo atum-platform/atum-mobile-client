@@ -13,41 +13,49 @@ actor MatrixNotificationFetcher {
     private var busy = false
 
     func fetch(roomID: String, eventID: String, copy: RichPushPresentation.Copy) async throws -> RichPushPresentation.Result {
-        guard !busy else { throw FetchFailure.unavailable }
+        guard !busy else { throw NotificationFallbackReason.fetchBusy }
         busy = true
         defer { busy = false }
         try Task.checkCancellation()
         let reader = try MatrixSessionReader.notificationReader()
-        let ticket = try reader.loadCurrent()
-        let paths = try MatrixStoreDirectory().requireExisting(generation: ticket.generation)
+        let ticket = try await MatrixNotificationSession.current()
+        let paths: MatrixStorePaths
+        do { paths = try MatrixStoreDirectory().requireExisting(generation: ticket.generation) }
+        catch let error as MatrixStoreFailure { throw error }
+        catch { throw NotificationFallbackReason.storeUnavailable }
         let oauth = try JSONSerialization.data(withJSONObject: ["client_id": ticket.session.clientID])
         guard let oauthData = String(data: oauth, encoding: .utf8) else { throw FetchFailure.unavailable }
-        // Deliberately do not give the SDK a refresh credential. Only the app rotates it.
+        // Custody already refreshed under the shared lock. The SDK must never spend a token.
         let session = Session(accessToken: ticket.session.accessToken, refreshToken: nil,
                               userId: ticket.session.userID, deviceId: ticket.session.deviceID,
                               homeserverUrl: ticket.session.homeserver, oauthData: oauthData,
                               slidingSyncVersion: .native)
         let delegate = ReadOnlyNotificationSession(reader: reader, ticket: ticket, session: session)
-        let client = try await ClientBuilder()
-            .homeserverUrl(url: ticket.session.homeserver)
-            .disableWellKnownLookup(disableWellKnownLookup: true)
-            .sqliteStore(config: SqliteStoreBuilder(dataPath: paths.data.path, cachePath: paths.cache.path)
-                .passphrase(passphrase: ticket.passphrase))
-            .disableAutomaticTokenRefresh()
-            .autoEnableCrossSigning(autoEnableCrossSigning: false)
-            .autoEnableBackups(autoEnableBackups: false)
-            .slidingSyncVersionBuilder(versionBuilder: .native)
-            .crossProcessLockConfig(crossProcessLockConfig: .multiProcess(holderName: "atum-nse-" + UUID().uuidString))
-            .setSessionDelegate(sessionDelegate: delegate)
-            .requestConfig(config: RequestConfig(retryLimit: 0, timeout: 5_000,
-                                                  maxConcurrentRequests: 2, maxRetryTime: 5_000))
-            .build()
+        let client: Client
+        do {
+            client = try await ClientBuilder()
+                .homeserverUrl(url: ticket.session.homeserver)
+                .disableWellKnownLookup(disableWellKnownLookup: true)
+                .sqliteStore(config: SqliteStoreBuilder(dataPath: paths.data.path, cachePath: paths.cache.path)
+                    .passphrase(passphrase: ticket.passphrase)
+                    .systemIsMemoryConstrained())
+                .disableAutomaticTokenRefresh()
+                .autoEnableCrossSigning(autoEnableCrossSigning: false)
+                .autoEnableBackups(autoEnableBackups: false)
+                .slidingSyncVersionBuilder(versionBuilder: .native)
+                .crossProcessLockConfig(crossProcessLockConfig: .multiProcess(holderName: "atum-nse-" + UUID().uuidString))
+                .setSessionDelegate(sessionDelegate: delegate)
+                .requestConfig(config: RequestConfig(retryLimit: 0, timeout: 5_000,
+                                                      maxConcurrentRequests: 2, maxRetryTime: 5_000))
+                .build()
+        } catch { throw NotificationFallbackReason.sdkBuildFailed }
         do {
             try Task.checkCancellation()
             try delegate.requireCurrent()
             // No SyncService, room list, verification, backup or encryption setup.
             await client.enableAllSendQueues(enable: false)
-            try await client.restoreSessionWith(session: session, roomLoadSettings: .one(roomId: roomID))
+            do { try await client.restoreSessionWith(session: session, roomLoadSettings: .one(roomId: roomID)) }
+            catch { throw NotificationFallbackReason.sdkRestoreFailed }
             guard try client.userId() == session.userId, try client.deviceId() == session.deviceId,
                   let curve = await client.encryption().curve25519Key(),
                   let ed = await client.encryption().ed25519Key() else { throw FetchFailure.unavailable }
@@ -75,14 +83,14 @@ actor MatrixNotificationFetcher {
                              copy: RichPushPresentation.Copy) throws -> RichPushPresentation.Result {
         switch status {
         case .eventFilteredOut, .eventRedacted: return .suppress
-        case .eventNotFound: return .generic
+        case .eventNotFound: throw NotificationFallbackReason.eventNotFound
         case let .event(item):
             let sender: String
             let kind: RichPushItem.Kind
             switch item.event {
             case let .invite(userID): sender = userID; kind = .invite
             case let .timeline(event):
-                guard event.eventId() == eventID else { return .generic }
+                guard event.eventId() == eventID else { throw NotificationFallbackReason.eventMismatch }
                 sender = event.senderId()
                 switch try event.content() {
                 case let .messageLike(content):
@@ -106,9 +114,11 @@ actor MatrixNotificationFetcher {
                 case .state: kind = .unsupported
                 }
             }
-            return RichPushPresentation.map(RichPushItem(senderID: sender,
+            let result = RichPushPresentation.map(RichPushItem(senderID: sender,
                 senderName: item.senderInfo.displayName, roomName: item.roomInfo.displayName,
                 isDirect: item.roomInfo.isDirect, kind: kind), ownUserID: ownUserID, copy: copy)
+            if case .generic = result { throw NotificationFallbackReason.presentationUnavailable }
+            return result
         }
     }
 
@@ -137,5 +147,44 @@ private final class ReadOnlyNotificationSession: ClientSessionDelegate, @uncheck
     func requireCurrent() throws {
         guard !lock.withLock({ changed }) else { throw MatrixCustodyFailure.recoveryRequired }
         try reader.recheck(ticket)
+    }
+}
+
+/// Closed public reason codes only: never interpolate errors or account/event data.
+enum NotificationFallbackReason: String, Error {
+    case invalidPayload = "invalid_payload", fetchBusy = "fetch_busy"
+    case refreshBusy = "refresh_busy", refreshFailed = "refresh_failed"
+    case refreshInterrupted = "refresh_interrupted", refreshTimeout = "refresh_timeout"
+    case recordChanged = "record_changed", keychainLocked = "keychain_locked"
+    case custodyUnavailable = "custody_unavailable", expired
+    case storeLocked = "store_locked", storeUnavailable = "store_unavailable"
+    case fetchTimeout = "fetch_timeout", fetchFailed = "fetch_failed"
+    case sdkBuildFailed = "sdk_build_failed", sdkRestoreFailed = "sdk_restore_failed"
+    case eventNotFound = "event_not_found", eventMismatch = "event_mismatch"
+    case presentationUnavailable = "presentation_unavailable"
+    case systemExpiry = "system_expiry"
+
+    static func classify(_ error: any Error) -> Self {
+        if let reason = error as? Self { return reason }
+        if let failure = error as? MatrixRefreshFailure {
+            switch failure {
+            case .busy: return .refreshBusy
+            case .unavailable: return .custodyUnavailable
+            case .recordChanged: return .recordChanged
+            case .timedOut: return .refreshTimeout
+            case .keychainLocked: return .keychainLocked
+            }
+        }
+        if let failure = error as? OIDCGrantFailure {
+            return failure == .refreshInterrupted ? .refreshInterrupted : .refreshFailed
+        }
+        if error is MASHTTPFailure { return .refreshFailed }
+        if let failure = error as? MatrixStoreFailure {
+            return failure == .locked ? .storeLocked : .storeUnavailable
+        }
+        if let failure = error as? MatrixCustodyFailure {
+            return failure == .expired ? .expired : .custodyUnavailable
+        }
+        return .fetchFailed
     }
 }

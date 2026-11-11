@@ -187,6 +187,8 @@ public struct ConversationCore: Sendable {
     private enum PageRequest: Equatable, Sendable {
         case scroll
         case background
+        /// HC-6: a page the chat's search asked for (`startSearchPage`).
+        case search
     }
 
     public struct PendingSend: Equatable, Sendable {
@@ -289,7 +291,7 @@ public struct ConversationCore: Sendable {
     @discardableResult
     public mutating func paginationChanged(_ state: PaginationState, now: Date) -> [ConversationEffect] {
         pagination = state
-        guard usesPager, pageInFlight != .background else { return [] }
+        guard usesPager, pageInFlight != .background, pageInFlight != .search else { return [] }
         return pageEffects(pager.statusChanged(state, now: Self.seconds(now)))
     }
 
@@ -314,12 +316,29 @@ public struct ConversationCore: Sendable {
         case .background?:
             pageFailedAt = hitTimelineStart == nil ? now : nil
             if usesPager { effects = pageEffects(pager.statusChanged(pagination, now: Self.seconds(now))) }
+        case .search?:
+            if usesPager { effects = pageEffects(pager.statusChanged(pagination, now: Self.seconds(now))) }
         case nil:
             break
         }
         if effects.isEmpty, let page = backgroundPage(now: now) { effects.append(page) }
         return effects
     }
+
+    /// HC-6: the chat's search may load one older page now: a timeline is
+    /// attached, no other page is in flight and the start is not reached.
+    /// True claims the page; the caller runs `paginateBackwards` itself and
+    /// reports through `paginationFinished`. Scrolling's policy is held at
+    /// `.paginating` meanwhile, so it never asks at the same time.
+    public mutating func startSearchPage(now: Date) -> Bool {
+        guard isAttached, pageInFlight == nil, pagination == .idle(hitTimelineStart: false) else { return false }
+        pageInFlight = .search
+        if usesPager { _ = pager.statusChanged(.paginating, now: Self.seconds(now)) }
+        return true
+    }
+
+    /// The room's first event is loaded: no older page exists.
+    public var reachedTimelineStart: Bool { pagination == .idle(hitTimelineStart: true) }
 
     /// A `wakePagination` time came: the throttle or a backoff step ended.
     public mutating func paginationWakeDue(now: Date) -> [ConversationEffect] {

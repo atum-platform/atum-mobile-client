@@ -82,6 +82,14 @@ struct HomeRow: Identifiable, Equatable {
     /// A group's joined-and-invited members, for Start chat's "N members"
     /// caption. Live only, like `isWorking`.
     var memberCount: Int?
+    /// HC-7: the room's `m.lowpriority` tag, for the long-press toggle. Live
+    /// rows only (a cached row reads false until the live list arrives).
+    var isLowPriority = false
+
+    /// HC-7: Low priority, Rename and Block apply to ordinary person and
+    /// group chats (desktop `lowPriorityEligible`, `personalChatActions`);
+    /// the Founder chat is the app's.
+    var isPersonalChat: Bool { (kind == .person || kind == .group) && !isFounder }
 
     init(id: String, roomID: String? = nil, kind: Kind, name: String,
          avatarURL: URL? = nil, matrixAvatarURL: String? = nil,
@@ -292,6 +300,7 @@ struct HomeRow: Identifiable, Equatable {
             isWaitingForRoom: room.isAwaitingRoom, isComingSoon: room.isComingSoon,
             awaitsStart: room.awaitsStart, isFounder: room.isFounder
         )
+        isLowPriority = room.isLowPriority
     }
 
 }
@@ -367,6 +376,14 @@ struct HomeActions {
     var exitRoom: ((String, ChatExitAction) -> Void)?
     /// The signed-in account is the Founder: the Founder chat is kept.
     var viewerIsFounder: Bool
+    /// HC-7: the long-press's Low priority, Rename and Block (desktop
+    /// `RosterRoomMenu`). Nil hides each.
+    var setLowPriority: ((String, Bool) -> Void)?
+    var rename: ChatRenameActions?
+    /// The other person of a person chat, the one Block applies to.
+    var blockablePeer: ((String) -> String?)?
+    var blockedUserIDs: (() async -> Set<String>)?
+    var setBlocked: ((String, Bool) async -> Bool)?
 
     init(openRoom: @escaping (String) -> Void,
          joinInvitation: ((String) async -> Bool)? = nil,
@@ -447,6 +464,10 @@ struct HomeScreen: View {
     @State private var actionFailure = 0
     @State private var pendingDeleteRoomID: String?
     @State private var pendingExit: HomePendingExit?
+    /// HC-7: Rename's alert, Block's confirmation and who is blocked now.
+    @State private var renameRequest: ChatRenameRequest?
+    @State private var pendingBlock: HomePendingBlock?
+    @State private var blockedUserIDs = Set<String>()
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -583,9 +604,65 @@ struct HomeScreen: View {
                 Text(copy(.deleteBotChatBody, [.text(row.name)]))
             }
         }
+        // HC-7: Block (desktop `blockPersonTitle` / `blockPersonBody`) and Rename.
+        .confirmationDialog(design.text(ChatCopyKey.blockPersonTitle.rawValue),
+                            isPresented: Binding(get: { pendingBlock != nil },
+                                                 set: { if !$0 { pendingBlock = nil } }),
+                            titleVisibility: .visible, presenting: pendingBlock) { block in
+            Button(design.text(ChatCopyKey.blockPerson.rawValue), role: .destructive) {
+                pendingBlock = nil
+                Task {
+                    if await actions.setBlocked?(block.userID, true) == true {
+                        blockedUserIDs.insert(block.userID)
+                    } else {
+                        actionFailure &+= 1
+                    }
+                }
+            }
+            Button(copy(.cancel), role: .cancel) { pendingBlock = nil }
+        } message: { _ in
+            Text(design.text(ChatCopyKey.blockPersonBody.rawValue))
+        }
+        .chatRenameAlert($renameRequest, design: design) { request, name in
+            await actions.rename?.save(request, name) ?? false
+        }
+        .task(id: presentation.state == .ready) {
+            guard presentation.state == .ready, let load = actions.blockedUserIDs else { return }
+            blockedUserIDs = await load()
+        }
     }
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+
+    /// HC-7: the long-press's personal-chat items for one row.
+    private func personalMenu(for row: HomeRow) -> HomeRowPersonalMenu {
+        guard row.isPersonalChat, !row.isInvitation, !row.isFounderDraft else { return HomeRowPersonalMenu() }
+        let peer = row.kind == .person ? actions.blockablePeer?(row.roomID) : nil
+        return HomeRowPersonalMenu(
+            setLowPriority: actions.setLowPriority,
+            rename: actions.rename.map { rename in
+                { roomID in
+                    Task {
+                        guard let request = await rename.request(roomID) else { return }
+                        renameRequest = request
+                    }
+                }
+            },
+            block: peer.flatMap { peer in
+                actions.setBlocked.map { setBlocked in
+                    HomeRowPersonalMenu.Block(isBlocked: blockedUserIDs.contains(peer)) {
+                        if blockedUserIDs.contains(peer) {
+                            // Unblock needs no confirmation (desktop).
+                            Task {
+                                if await setBlocked(peer, false) { blockedUserIDs.remove(peer) }
+                            }
+                        } else {
+                            pendingBlock = HomePendingBlock(roomID: row.roomID, userID: peer)
+                        }
+                    }
+                }
+            })
+    }
 
     private func exitText(_ action: ChatExitAction, delete: String, leave: String) -> String {
         design.text(action == .deleteChat ? delete : leave)
@@ -816,7 +893,8 @@ struct HomeScreen: View {
                                          },
                                          requestExit: actions.exitRoom == nil ? nil : { roomID, action in
                                              pendingExit = HomePendingExit(roomID: roomID, action: action)
-                                         }))
+                                         },
+                                         personal: personalMenu(for: row)))
     }
 
     @ViewBuilder private var emptyContent: some View {
@@ -2321,6 +2399,27 @@ enum HomeRowActionPolicy {
     }
 }
 
+/// HC-7: a Home row's personal-chat menu items, built by the screen (which
+/// holds the Rename alert, the Block confirmation and who is blocked).
+struct HomeRowPersonalMenu {
+    struct Block {
+        let isBlocked: Bool
+        let toggle: () -> Void
+    }
+
+    var setLowPriority: ((String, Bool) -> Void)?
+    var rename: ((String) -> Void)?
+    var block: Block?
+
+    var hasItems: Bool { setLowPriority != nil || rename != nil || block != nil }
+}
+
+private struct HomePendingBlock: Identifiable, Equatable {
+    let roomID: String
+    let userID: String
+    var id: String { roomID }
+}
+
 private struct HomeRowActionsModifier: ViewModifier {
     let design: LiveDesign
     let row: HomeRow
@@ -2328,6 +2427,7 @@ private struct HomeRowActionsModifier: ViewModifier {
     let actions: HomeActions
     let requestDeleteAppRoom: ((String) -> Void)?
     var requestExit: ((String, ChatExitAction) -> Void)? = nil
+    var personal = HomeRowPersonalMenu()
 
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -2346,7 +2446,7 @@ private struct HomeRowActionsModifier: ViewModifier {
     private var hasMenuAction: Bool {
         if row.isInvitation { return actions.declineInvitation != nil }
         return actions.setUnread != nil || actions.setPinned != nil || actions.setMuted != nil
-            || offersDelete || exitAction != nil
+            || offersDelete || exitAction != nil || personal.hasItems
     }
 
     @ViewBuilder func body(content: Content) -> some View {
@@ -2518,6 +2618,12 @@ private struct HomeRowActionsModifier: ViewModifier {
                           image: atum.symbol(hasBadge ? .mailOpened : .mail))
                 }
             }
+            if let rename = personal.rename {
+                Button { rename(row.roomID) } label: {
+                    Label(design.text(ChatCopyKey.rename.rawValue), image: atum.symbol(.pencil))
+                }
+                .accessibilityIdentifier("home.row.rename")
+            }
             if let setPinned = actions.setPinned {
                 if canOfferPin {
                     Button { setPinned(row.roomID, !row.isPinned) } label: {
@@ -2536,11 +2642,28 @@ private struct HomeRowActionsModifier: ViewModifier {
                     .accessibilityValue(design.text(HomeCopyKey.pinLimit.rawValue))
                 }
             }
+            if let setLowPriority = personal.setLowPriority {
+                // A checkmark toggle, as iOS menus show a state: no separate
+                // "Remove low priority" words are needed.
+                Toggle(isOn: Binding(get: { row.isLowPriority },
+                                     set: { setLowPriority(row.roomID, $0) })) {
+                    Label(design.text(ChatCopyKey.lowPriority.rawValue), image: atum.symbol(.chevronDown))
+                }
+                .accessibilityIdentifier("home.row.lowPriority")
+            }
             if let setMuted = actions.setMuted {
                 Button { setMuted(row.roomID, !row.isMuted) } label: {
                     Label(design.text(row.isMuted ? HomeCopyKey.unmute.rawValue : HomeCopyKey.mute.rawValue),
                           image: atum.symbol(row.isMuted ? .bell : .bellOff))
                 }
+            }
+            if let block = personal.block {
+                Button(role: block.isBlocked ? nil : .destructive) { block.toggle() } label: {
+                    Label(design.text(block.isBlocked ? ChatCopyKey.unblockPerson.rawValue
+                                                      : ChatCopyKey.blockPerson.rawValue),
+                          image: atum.symbol(.userCircle))
+                }
+                .accessibilityIdentifier("home.row.block")
             }
             if offersDelete, let requestDeleteAppRoom {
                 Divider()
