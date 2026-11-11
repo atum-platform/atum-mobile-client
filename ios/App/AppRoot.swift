@@ -577,7 +577,8 @@ struct AppRoot: View {
             founderContactAvailable: model.founderContactAvailable,
             founderContactTitle: model.founderContactTitle,
             avatarURL: account.avatarURL,
-            connection: model.accountConnection
+            connection: model.accountConnection,
+            recoveryStatus: model.accountRecoveryStatus
         )
     }
 
@@ -617,7 +618,9 @@ struct AppRoot: View {
                 await model.avatarThumbnail(uri: uri, pixelSide: pixelSide)
             },
             ignoredPeople: { await model.ignoredPeople() },
-            setIgnored: { await model.setIgnored(userID: $0, ignored: $1) }
+            setIgnored: { await model.setIgnored(userID: $0, ignored: $1) },
+            loadDevices: { await model.ownDevices() },
+            deviceSignOutURL: { await model.deviceSignOutURL(deviceID: $0) }
         )
     }
 

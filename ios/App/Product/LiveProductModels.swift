@@ -350,20 +350,22 @@ struct LiveProductStoreApp: Identifiable, Equatable {
 /// confirmed commands live in LiveStoreCommerce; card metadata is never authority.
 struct LiveProductStoreRead: Equatable {
     let availability: LiveProductAvailability
-    let walletValue: String?
+    /// The wallet's available balance in micro-Protons, formatted only where
+    /// it is drawn (`ProtonAmountFormat`), in the app's display language.
+    let walletMicroProtons: Int64?
     let items: [LiveProductStoreItem]
     let apps: [LiveProductStoreApp]
     let detail: String?
     let staleAvailability: LiveProductAvailability?
 
     init(availability: LiveProductAvailability,
-         walletValue: String? = nil,
+         walletMicroProtons: Int64? = nil,
          items: [LiveProductStoreItem] = [],
          apps: [LiveProductStoreApp] = [],
          detail: String? = nil,
          staleAvailability: LiveProductAvailability? = nil) {
         self.availability = availability
-        self.walletValue = walletValue
+        self.walletMicroProtons = walletMicroProtons
         self.items = items
         self.apps = apps
         self.detail = detail
@@ -371,4 +373,10 @@ struct LiveProductStoreRead: Equatable {
     }
 
     static let unavailable = LiveProductStoreRead(availability: .unavailable)
+
+    /// The balance as every Store and Settings surface shows it: whole
+    /// Protons, floored, in `locale`'s digit grouping. Nil while unread.
+    func walletText(locale: String) -> String? {
+        walletMicroProtons.map { ProtonAmountFormat.balance($0, locale: locale) }
+    }
 }

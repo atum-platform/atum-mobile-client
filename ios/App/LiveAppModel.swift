@@ -6785,10 +6785,7 @@ final class LiveAppModel {
             }
             return LiveProductStoreRead(
                 availability: .ready,
-                walletValue: walletRead.value.map {
-                    MicroProtonFormat.balance($0.balances.available,
-                                             locale: Locale.current.identifier)
-                },
+                walletMicroProtons: walletRead.value?.balances.available,
                 items: items,
                 apps: apps,
                 staleAvailability: staleAvailability

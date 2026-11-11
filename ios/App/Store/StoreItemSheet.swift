@@ -388,7 +388,7 @@ struct StoreItemSheet: View {
     private var actionContent: AnyView? {
         switch phase {
         case .ready(let value):
-            let amount = StoreOutcomePresentation.protons(value.price)
+            let amount = StoreOutcomePresentation.protons(value.price, locale: design.locale)
             return AnyView(
                 Button {
                     quote = value
@@ -784,8 +784,8 @@ struct StoreProtonsText: View {
 
     var body: some View {
         let value = isBalance
-            ? MicroProtonFormat.balance(microProtons, locale: Locale.current.identifier)
-            : StoreOutcomePresentation.protons(microProtons)
+            ? ProtonAmountFormat.balance(microProtons, design: design)
+            : ProtonAmountFormat.price(microProtons, design: design)
         HStack(spacing: 3) {
             ProtonMark(.small)
             Text(verbatim: value).monospacedDigit()
