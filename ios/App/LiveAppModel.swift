@@ -1860,6 +1860,96 @@ final class LiveAppModel {
         })
     }
 
+    // MARK: AS-4 retire, AS-5 handle, AS-3 create follow-ups
+
+    /// Desktop's "Delete {name}…" (AS-4): non-primary only. Retiring is one
+    /// platform transaction; only after it succeeds does the phone take this
+    /// chat off the list (desktop `retired-agent-rooms.ts`: leave + forget, an
+    /// account-wide Delete chat that keeps history on the server). A failure
+    /// changes nothing here.
+    func assistantRetireActions(roomID: String) -> AssistantRetireActions? {
+        guard domainClient != nil, let agent = agentForRoom(roomID), !agent.isDefault else { return nil }
+        let assistantID = agent.id
+        return AssistantRetireActions(retire: { [weak self] in
+            guard let self else { return .failed }
+            return await self.retireAssistant(roomID: roomID, assistantID: assistantID)
+        })
+    }
+
+    private func retireAssistant(roomID: String, assistantID: NativeID) async -> AssistantRetireResult {
+        guard let client = domainClient, let agent = agentForRoom(roomID),
+              agent.id == assistantID, !agent.isDefault else { return .failed }
+        let oneToOne: Bool = (liveMatrix?.rooms.first(where: { $0.roomID == roomID })?.memberCount ?? 3) <= 2
+        do {
+            _ = try await client.retireAgent(assistantID: assistantID)
+        } catch {
+            LiveFlowLog.creation(.assistant, outcome: "retire_failed")
+            return .failed
+        }
+        LiveFlowLog.creation(.assistant, outcome: "retired")
+        guard domainClient === client else { return .retired }
+        if let response = try? await client.agents(), domainClient === client {
+            agentsRead.receive(response)
+        }
+        // Only the owner's one-to-one chat with it leaves the list; a room
+        // with anyone else in it stays, as on desktop.
+        if oneToOne, let matrix = liveMatrix {
+            if await matrix.exit(roomID: roomID, forget: true) == false, liveMatrix === matrix {
+                _ = await matrix.exit(roomID: roomID, forget: true)
+            }
+        }
+        return .retired
+    }
+
+    /// The card's bot handle editor (AS-5): the directory calls for this
+    /// assistant, by its directory ID. Every call goes through the current
+    /// domain client; a replaced session refuses rather than writing as the
+    /// old one.
+    func assistantHandleActions(roomID: String) -> AssistantHandleActions? {
+        guard domainClient != nil, let agent = agentForRoom(roomID) else { return nil }
+        return assistantHandleActions(assistantID: agent.id)
+    }
+
+    private func assistantHandleActions(assistantID: NativeID) -> AssistantHandleActions {
+        let client: @MainActor () throws -> NativeDomainClient = { [weak self] in
+            guard let client = self?.domainClient else { throw NativeDomainClientFailure.transportUnavailable }
+            return client
+        }
+        return AssistantHandleActions(
+            assistantID: assistantID,
+            current: { try await client().aliasCurrent(assistantID: assistantID) },
+            check: { try await client().aliasCheck(handle: $0, assistantID: assistantID) },
+            claim: { try await client().aliasClaim($0) },
+            rename: { try await client().aliasRename($0) }
+        )
+    }
+
+    /// Checks a handle before the new assistant exists: the directory answers
+    /// for "an assistant of this account", so the primary (or any of the
+    /// owner's assistants) asks, as desktop's create sheet does. The platform
+    /// checks again at claim time.
+    var newAssistantHandleCheck: (@MainActor (NativeHandle) async throws -> AgentAliasCheck)? {
+        let agents = agentsRead.value?.agents.filter { $0.status == .active } ?? []
+        guard domainClient != nil,
+              let checker = agents.first(where: \.isDefault) ?? agents.first else { return nil }
+        let actions = assistantHandleActions(assistantID: checker.id)
+        return { try await actions.check($0) }
+    }
+
+    /// The owner's assistants' names, for the create sheet's duplicate check.
+    var assistantNames: [String] {
+        (agentsRead.value?.agents ?? []).filter { $0.status == .active }.map(\.displayName)
+    }
+
+    /// What the create sheet finishes once the new assistant's room is open:
+    /// its persona, its handle and its photo, each retried on its own.
+    func assistantCreateFollowUp(roomID: String) -> AssistantCreateFollowUp? {
+        guard agentForRoom(roomID) != nil else { return nil }
+        return AssistantCreateFollowUp(definition: assistantDefinitionActions(roomID: roomID),
+                                       avatar: assistantAvatarActions(roomID: roomID),
+                                       handles: assistantHandleActions(roomID: roomID))
+    }
+
     func assistantPresentationActions(roomID: String) -> AssistantPresentationActions? {
         guard domainClient != nil, agentForRoom(roomID) != nil else { return nil }
         return AssistantPresentationActions(

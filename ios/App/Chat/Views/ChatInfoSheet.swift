@@ -183,6 +183,12 @@ struct ChatInfoActions {
     var assistantAvatar: AssistantAvatarActions?
     var assistantPresentation: AssistantPresentationActions?
     var assistantRoutines: AssistantRoutineActions?
+    /// The card's bot handle editor (AS-5); nil keeps the read-only line.
+    var assistantHandles: AssistantHandleActions?
+    /// "Delete {name}…" for a non-primary assistant (AS-4).
+    var assistantRetire: AssistantRetireActions?
+    /// After a confirmed retirement: the host leaves the chat.
+    var onAssistantRetired: (() -> Void)?
     /// Opens the Store on the shelf the card's Pet and Skills rows lead to
     /// (desktop's `openShelf`). Nil in hosts without a Store.
     var openStore: ((StoreSectionKind) -> Void)?
@@ -806,7 +812,13 @@ struct ChatInfoHome: View {
             routines: actions.assistantRoutines,
             loadMatrixThumbnail: loadMatrixThumbnail,
             onMessage: { close() },
-            onOpenStore: actions.openStore.map { openStore in { shelf in close(); openStore(shelf) } }
+            onOpenStore: actions.openStore.map { openStore in { shelf in close(); openStore(shelf) } },
+            handles: actions.assistantHandles,
+            retire: actions.assistantRetire,
+            onRetired: {
+                close()
+                actions.onAssistantRetired?()
+            }
         )
     }
 

@@ -3130,3 +3130,96 @@ extension NativeDomainClientTests {
         XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
     }
 }
+
+// MARK: AS-3/AS-4/AS-5: aliases and retire
+
+extension NativeDomainClientTests {
+    func testRetireIsABodilessDeleteOnTheAgentAlone() async throws {
+        let assistantID = try NativeID(agentID)
+        let value = client(TestAuthorization(first: "retire-token"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/matrix/v1/agents/\(self.agentID)")
+            XCTAssertNil(request.url?.query)
+            XCTAssertEqual(self.body(of: request) ?? Data(), Data())
+            return .json(Data(#"{"id":"\#(self.agentID)","status":"retired","sessionCleanup":"complete"}"#.utf8))
+        }
+        let retired = try await value.retireAgent(assistantID: assistantID)
+        XCTAssertEqual(retired.id, assistantID)
+        XCTAssertEqual(retired.sessionCleanup, .complete)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1)
+    }
+
+    func testRetireRefusesAnAnswerForAnotherAssistant() async throws {
+        let value = client(TestAuthorization(first: "retire-token"))
+        NativeDomainProtocol.state.handler = { _ in
+            .json(Data(#"{"id":"00000000-0000-4000-8000-000000000001","status":"retired","sessionCleanup":"pending"}"#.utf8))
+        }
+        do {
+            _ = try await value.retireAgent(assistantID: try NativeID(agentID))
+            XCTFail("Another assistant's retirement must not read as this one's")
+        } catch let failure as NativeDomainClientFailure {
+            XCTAssertEqual(failure, .invalidResponse)
+        }
+    }
+
+    func testAliasCallsUseTheirOwnRoutesAndShapes() async throws {
+        let assistantID = try NativeID(agentID)
+        let value = client(TestAuthorization(first: "alias-token"))
+        NativeDomainProtocol.state.handler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+            switch request.url?.path {
+            case "/api/matrix/v1/aliases/check":
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(components.queryItems, [URLQueryItem(name: "handle", value: "lan_bot"),
+                                                       URLQueryItem(name: "assistantId", value: self.agentID)])
+                return .json(Data(#"{"handle":"lan_bot","available":false,"code":"alias_unavailable"}"#.utf8))
+            case "/api/matrix/v1/aliases/current":
+                XCTAssertEqual(components.queryItems, [URLQueryItem(name: "assistantId", value: self.agentID)])
+                return .json(Data("null".utf8))
+            case "/api/matrix/v1/aliases/claim":
+                XCTAssertEqual(request.httpMethod, "POST")
+                let sent = try! JSONSerialization.jsonObject(with: self.body(of: request)!) as! [String: String]
+                XCTAssertEqual(Set(sent.keys), ["handle", "requestId", "assistantId"])
+                XCTAssertEqual(sent["handle"], "lan10_bot")
+                return .json(Data(#"{"handle":"lan10_bot","state":"assigned","principal":"\#(self.agentID)","generation":1}"#.utf8))
+            case "/api/matrix/v1/aliases/rename":
+                let sent = try! JSONSerialization.jsonObject(with: self.body(of: request)!) as! [String: String]
+                XCTAssertEqual(sent["from"], "lan10_bot")
+                return .json(Data(#"{"handle":"lan_ai_bot","state":"assigned","principal":"\#(self.agentID)","generation":2,"previous":"lan10_bot"}"#.utf8))
+            default:
+                XCTFail("Unexpected path \(request.url?.path ?? "")")
+                return .init(status: 404)
+            }
+        }
+        let check = try await value.aliasCheck(handle: try NativeHandle("lan_bot"), assistantID: assistantID)
+        XCTAssertFalse(check.available)
+        XCTAssertEqual(check.code, .unavailable)
+        let current = try await value.aliasCurrent(assistantID: assistantID)
+        XCTAssertEqual(current, .none)
+        let requestID = try NativeID("00000000-0000-4000-8000-0000000000c1")
+        let claimed = try await value.aliasClaim(AgentAliasClaimRequest(
+            handle: try NativeHandle("lan10_bot"), requestId: requestID, assistantId: assistantID))
+        XCTAssertEqual(claimed.handle.rawValue, "lan10_bot")
+        let renamed = try await value.aliasRename(try AgentAliasRenameRequest(
+            handle: try NativeHandle("lan_ai_bot"), from: try NativeHandle("lan10_bot"),
+            requestId: requestID, assistantId: assistantID))
+        XCTAssertEqual(renamed.previous?.rawValue, "lan10_bot")
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 4)
+    }
+
+    func testClaimsClosedIsItsOwnRefusal() async throws {
+        let value = client(TestAuthorization(first: "alias-token"))
+        NativeDomainProtocol.state.handler = { _ in
+            .init(status: 403, chunks: [Data(#"{"error":"matrix_403","details":{"reason":"alias_claims_closed"}}"#.utf8)])
+        }
+        do {
+            _ = try await value.aliasClaim(AgentAliasClaimRequest(
+                handle: try NativeHandle("lan_bot"), requestId: try NativeID("00000000-0000-4000-8000-0000000000c2"),
+                assistantId: try NativeID(agentID)))
+            XCTFail("expected a refusal")
+        } catch {
+            XCTAssertEqual(AgentAliasRefusal.from(error), .closed)
+        }
+    }
+}

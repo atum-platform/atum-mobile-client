@@ -496,7 +496,10 @@ struct AppRoot: View {
                                   onOpenStore: { shelf in
                                       router.dismissAccount()
                                       router.openStore(shelf: shelf)
-                                  }
+                                  },
+                                  handles: model.assistantHandleActions(roomID: assistant.roomID),
+                                  retire: model.assistantRetireActions(roomID: assistant.roomID),
+                                  onRetired: { router.dismissAccount() }
                               ))
                           })
         }
@@ -763,6 +766,9 @@ struct AppRoot: View {
                     assistantAvatar: model.assistantAvatarActions(roomID: roomID),
                     assistantPresentation: model.assistantPresentationActions(roomID: roomID),
                     assistantRoutines: model.assistantRoutineActions(roomID: roomID),
+                    assistantHandles: model.assistantHandleActions(roomID: roomID),
+                    assistantRetire: model.assistantRetireActions(roomID: roomID),
+                    onAssistantRetired: { router.popHomeToRoot() },
                     openStore: { router.openStore(shelf: $0) },
                     // The Chief of Staff and "You" offer no Delete chat, Leave or Ignore (lane 2 D5).
                     exitRoom: model.offersPersonalExits(roomID: roomID) ? { roomID, action in
@@ -874,7 +880,10 @@ struct AppRoot: View {
             ) : nil,
             newAssistant: model.canCreateAssistant ? HomeAssistantActions(
                 pending: model.hasPendingAssistantLifecycle,
-                create: { name in await model.createAssistant(name) }
+                create: { name in await model.createAssistant(name) },
+                names: model.assistantNames,
+                checkHandle: model.newAssistantHandleCheck,
+                followUp: { model.assistantCreateFollowUp(roomID: $0) }
             ) : nil,
             founderDraft: founderDraftActions(dismissAccountOnSent: false),
             exitRoom: { model.exitRoom($0, $1) },
