@@ -282,3 +282,18 @@ handle editor, delete row and confirmation, routines list and editor).
   responses only.
 - Physical iPhone, VoiceOver and the desktop side-by-side captures.
 - The Home long-press "Rename…" / "Delete" entries (HC-7).
+
+## Session log
+
+- 2026-11-11, `fix/main-ui-regressions`: `HomeShellUITests.testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`
+  failed on hosted CI (`HomeShellUITests.swift:349`, run 43010056490). **Test drift, not a product
+  regression.** AS-3 (`462a900`) added `names: ["Atum", "Alfred"]` to the scripted roster's
+  `HomeAssistantActions` (`ScriptedHomeHost.swift`) so `AssistantsWave3UITests` can prove a duplicate is
+  refused before create, as desktop does (`isDuplicateAssistantName`, `matrix-assistant-name.ts`). The
+  older HomeShell test still typed "Alfred", so the sheet stopped at the duplicate line and never reached
+  the scripted `.starting` answer ("Thử lại", name locked). The test now types "Mây". Its assertions are
+  unchanged: Retry and the locked name after a held create, and the same setup sent twice. Under the
+  heavy-build lock it passed alone on iPhone 17 and inside the full `HomeShellUITests` class on
+  iPhone 17e. That class run was 14/16: `testAccountStoreRowOpensStore` (a UI-query timeout on the
+  first test after a cold boot, 406 s) and `testPinLimitMenuKeepsDeleteAndDisablesPin` (the Moon
+  long-press retry lost its row) failed. Neither is touched here, and both passed on hosted shard 1.
