@@ -40,6 +40,9 @@ struct ChatComposer: View {
     /// Stop for my assistant's turn; nil where the stop route is not
     /// reachable, and then no Stop is drawn.
     let turnStopActions: AssistantTurnStopActions?
+    /// The field's prompt when the host names its own (a thread says "Reply",
+    /// desktop `MatrixComposer` with `threadRootId`); nil keeps "Message {chat}".
+    var placeholder: String? = nil
 
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var scheme
@@ -61,7 +64,8 @@ struct ChatComposer: View {
          modelDestinations: AssistantModelDestinationActions? = nil,
          modelRefreshToken: UInt64,
          modelPickerPresented: Binding<Bool>,
-         turnStopActions: AssistantTurnStopActions? = nil) {
+         turnStopActions: AssistantTurnStopActions? = nil,
+         placeholder: String? = nil) {
         self.store = store
         self.design = design
         self.haptics = haptics
@@ -70,6 +74,7 @@ struct ChatComposer: View {
         self.modelRefreshToken = modelRefreshToken
         self._modelPickerPresented = modelPickerPresented
         self.turnStopActions = turnStopActions
+        self.placeholder = placeholder
         self._dictation = State(initialValue: ComposerDictation(
             engine: SpeechDictationEngine(localeIdentifier: design.locale)
         ))
@@ -217,7 +222,7 @@ struct ChatComposer: View {
     /// B25: plain multi-line text. Return inserts a newline (no
     /// `submitLabel`, no `onSubmit`); only the circle sends.
     private var field: some View {
-        TextField(ChatCopy.text(design, ChatCopy.Key.composerPlaceholder, [.text(store.title)]),
+        TextField(placeholder ?? ChatCopy.text(design, ChatCopy.Key.composerPlaceholder, [.text(store.title)]),
                   text: Binding(get: { store.draft }, set: { store.draft = $0 }),
                   axis: .vertical)
             .lineLimit(1...ComposerRules.maximumLines)

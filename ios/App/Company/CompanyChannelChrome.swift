@@ -115,6 +115,8 @@ struct CompanyChannelMenu: View {
     let info: ChatInfoPresentation
     let setPinned: ((String, Bool) -> Void)?
     let setMuted: ((String, Bool) -> Void)?
+    /// TS-6b "Open threads" (desktop `onThreads`, the menu's first entry); nil hides it.
+    var openThreads: (() -> Void)? = nil
     let openDetails: () -> Void
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -123,6 +125,14 @@ struct CompanyChannelMenu: View {
 
     var body: some View {
         Menu {
+            if let openThreads {
+                Button(action: openThreads) {
+                    Label { Text(verbatim: CompanyThreadsCopy(design: design).openThreads) } icon: {
+                        Image(atum.symbol(.messageCircle))
+                    }
+                }
+                .accessibilityIdentifier("chat.company.threads")
+            }
             Button(action: openDetails) {
                 Label { Text(verbatim: team.channelDetails) } icon: { Image(atum.symbol(.hash)) }
             }
