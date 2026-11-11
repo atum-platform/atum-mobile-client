@@ -800,6 +800,7 @@ struct AppRoot: View {
                     companyChannel: CompanyChannelActions(
                         loadFacts: { await model.companyChannelFacts(roomID: $0) },
                         loadPinned: { await model.companyPinnedRows(roomID: $0) }),
+                    appPanel: model.appPanelActions(roomID: roomID),
                     // HC-7: Rename from the panel (desktop conversation menu).
                     rename: model.offersPersonalExits(roomID: roomID)
                         ? ChatRenameActions(request: { await model.renameRequest(roomID: $0) },
@@ -910,7 +911,8 @@ struct AppRoot: View {
             ) : nil,
             founderDraft: founderDraftActions(dismissAccountOnSent: false),
             exitRoom: { model.exitRoom($0, $1) },
-            viewerIsFounder: model.isFounderAccount
+            viewerIsFounder: model.isFounderAccount,
+            appInfo: { model.appCardPresentation(rowID: $0) }
         )
         // HC-7: the long-press's Low priority, Rename and Block.
         actions.setLowPriority = { model.setRoomLowPriority($0, isLowPriority: $1) }

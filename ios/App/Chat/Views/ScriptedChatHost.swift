@@ -280,6 +280,7 @@ struct ScriptedChatHost: View {
                                 assistantTurnStop: script.context.kind == .assistant
                                     ? Self.scriptedTurnStop : nil,
                                 sharedCollections: ScriptedSharedCollectionsScope.opener(),
+                                appPanel: ScriptedAppPanel.actions(isAppChat: script.context.kind == .appBot),
                                 // HC-7: Rename names a group for everyone (the
                                 // scripted admin may), a person chat privately.
                                 rename: script.context.kind == .person || script.context.kind == .group

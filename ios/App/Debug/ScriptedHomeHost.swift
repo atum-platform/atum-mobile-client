@@ -133,6 +133,21 @@ struct ScriptedHomeHost: View {
                         exitRoom: { roomID, action in
                             rows.removeAll { $0.id == roomID }
                             UITestProbe.append("\(action.rawValue) \(roomID)", to: "home-actions.txt")
+                        },
+                        appInfo: { rowID in
+                            // The scripted catalog's app by the row's name: the same
+                            // descriptor the rows were composed from.
+                            guard let row = rows.first(where: { $0.id == rowID }),
+                                  row.isAppBotRoom || rowID.hasPrefix("app:"),
+                                  let app = Self.catalog(roster.apps).first(where: {
+                                      $0.name.localized(locale: Self.locale) == row.title
+                                  }) else { return nil }
+                            UITestProbe.append("appInfo \(rowID)", to: "home-actions.txt")
+                            return AppCardPresentation(app: app, rowID: rowID, locale: Self.locale,
+                                                       avatar: row.avatar,
+                                                       matrixAvatarURI: row.matrixAvatarURL,
+                                                       avatarSHA256: row.avatarSHA256,
+                                                       avatarCandidates: row.avatarCandidates)
                         }
                     ))
                 )
