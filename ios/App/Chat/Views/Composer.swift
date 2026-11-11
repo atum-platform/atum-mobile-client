@@ -64,7 +64,8 @@ struct ChatComposer: View {
          modelDestinations: AssistantModelDestinationActions? = nil,
          modelRefreshToken: UInt64,
          modelPickerPresented: Binding<Bool>,
-         turnStopActions: AssistantTurnStopActions? = nil) {
+         turnStopActions: AssistantTurnStopActions? = nil,
+         placeholder: String? = nil) {
         self.store = store
         self.design = design
         self.haptics = haptics
@@ -73,6 +74,7 @@ struct ChatComposer: View {
         self.modelRefreshToken = modelRefreshToken
         self._modelPickerPresented = modelPickerPresented
         self.turnStopActions = turnStopActions
+        self.placeholder = placeholder
         self._dictation = State(initialValue: ComposerDictation(
             engine: SpeechDictationEngine(localeIdentifier: design.locale)
         ))

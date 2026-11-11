@@ -166,3 +166,4 @@ thread data or thread-capable timeline source, so a capture would need a new scr
 - **Mark read clears the thread's mentions** in the optimistic override until a newer reply arrives, so a read thread no longer badges `@N`.
 - Verified by `swiftc -parse` and the hosted checks; the build lock was busy.
 - Hosted compile: adding the thread `placeholder:` to the inline `ChatComposer(...)` call in `ChatScreen.body` hit "unable to type-check this expression in reasonable time". The composer is now a separate `composer` property, built the same way.
+- Hosted compile (`97fe63f`): with the type-checker timeout gone, the real error showed. `ChatComposer` has an explicit `init` that never took `placeholder`, so the call failed with "extra argument". The init now takes `placeholder: String? = nil` and stores it.
