@@ -41,3 +41,19 @@ row. The assembly now matches desktop:
   the same way (the build showed "8,000" next to "90.000").
 - Still open: the balance chip ("105.449 Protons") uses its own formatter, and
   "Get" needs a desktop export.
+
+## Baseline against main (`dd26d6e`, same 26 UI tests, same runner)
+
+10 failures also fail on main and predate wave 2: the accessibility audits
+(avatar monograms at fixed size, one contrast case), ChatPanel
+block-in-place (flaky), S6 U7's "Mở" count, U16 and the Wave2MediaBot smoke.
+Wave 2 introduced three, now fixed:
+- S1 `testEmptyChat` "Text clipped": the HC-4 starter chips were one line. They
+  now wrap (a rounded rectangle with an 18 pt radius, which is a capsule on one
+  line).
+- Transcript U7 keyboard dismiss: the ST-5 chat top-up notice's empty host sat
+  in the composer area's 4 pt-spaced stack, so it raised the composer 4 pt even
+  when hidden, and the drag started in that gap. The notice now shares a
+  zero-spacing stack with the composer and carries its own 4 pt when shown.
+- S6 U12: AC-3 folds Privacy into Account, so the recovery key row can be below
+  the fold. The test scrolls to `account.settings.privacy.recovery-key`.

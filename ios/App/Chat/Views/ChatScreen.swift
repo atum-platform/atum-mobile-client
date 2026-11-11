@@ -158,21 +158,25 @@ struct ChatScreen: View {
                                 .accessibilityIdentifier("chat.conversation.note")
                         }
                         JumpPillHost(store: store, chrome: chrome)
-                        // ST-5 (lane 4 W7): out of Protons, the same top-up as the Store.
-                        if store.kind == .assistant, conversationChat?.banner == nil {
-                            ProtonTopUpChatNotice(design: design)
-                        }
-                        if let banner = conversationChat?.banner {
-                            // Read-only is the platform's word: no composer, only the banner.
-                            ConversationReadOnlyBanner(text: banner, design: design)
-                        } else {
-                            ChatComposer(store: store, design: design, haptics: haptics,
-                                         modelActions: infoActions.assistantModels,
-                                         modelDestinations: infoActions.assistantModelDestinations,
-                                         modelRefreshToken: composerModelRefreshToken,
-                                         modelPickerPresented: $composerModelPresented,
-                                         turnStopActions: store.kind == .assistant
-                                             ? infoActions.assistantTurnStop : nil)
+                        // The notice shares the composer's stack (spacing 0) so its
+                        // empty host, kept for the sheet, adds no gap above the composer.
+                        VStack(spacing: 0) {
+                            // ST-5 (lane 4 W7): out of Protons, the same top-up as the Store.
+                            if store.kind == .assistant, conversationChat?.banner == nil {
+                                ProtonTopUpChatNotice(design: design)
+                            }
+                            if let banner = conversationChat?.banner {
+                                // Read-only is the platform's word: no composer, only the banner.
+                                ConversationReadOnlyBanner(text: banner, design: design)
+                            } else {
+                                ChatComposer(store: store, design: design, haptics: haptics,
+                                             modelActions: infoActions.assistantModels,
+                                             modelDestinations: infoActions.assistantModelDestinations,
+                                             modelRefreshToken: composerModelRefreshToken,
+                                             modelPickerPresented: $composerModelPresented,
+                                             turnStopActions: store.kind == .assistant
+                                                 ? infoActions.assistantTurnStop : nil)
+                            }
                         }
                     }
                 }

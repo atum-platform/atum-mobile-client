@@ -64,11 +64,16 @@ private struct StarterChips: View {
                     Text(theme.copy.text(starter.label))
                         .font(.subheadline)
                         .foregroundStyle(theme.color("soft", scheme))
-                        .lineLimit(1)
+                        // Wraps instead of clipping at the largest text sizes
+                        // (the audit's "Text clipped"); one line is a capsule.
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
                         .frame(minHeight: 36)
-                        .overlay(Capsule().strokeBorder(theme.color("frame", scheme), lineWidth: 1))
-                        .contentShape(Capsule())
+                        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(theme.color("frame", scheme), lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("chat.starter.\(index)")
@@ -107,7 +112,7 @@ private struct CenteredChipFlow: Layout {
         var height: CGFloat = 0
     }
 
-    /// A chip never grows past the line (a long translation truncates).
+    /// A chip never grows past the line (a long translation wraps).
     private func fitted(_ subview: LayoutSubview, width: CGFloat) -> CGSize {
         let natural = subview.sizeThatFits(.unspecified)
         guard natural.width > width else { return natural }

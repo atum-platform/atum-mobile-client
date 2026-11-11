@@ -127,6 +127,7 @@ struct ProtonTopUpChatNotice: View {
                     ProtonTopUpButton(design: design, present: { presented = true })
                 }
                 .padding(.horizontal, 16)
+                .padding(.bottom, 4)
                 .accessibilityIdentifier("chat.protons.out")
             }
         }

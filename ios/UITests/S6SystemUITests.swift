@@ -627,8 +627,11 @@ final class S6SystemUITests: TranscriptUITestCase {
                                  file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element(app, "account.screen").waitForExistence(timeout: 15), file: file, line: line)
         openSettingsPage("privacy", in: app, file: file, line: line)
-        let row = app.buttons["Khóa khôi phục"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 3), file: file, line: line)
+        // AC-3 folds Privacy into Account, so the row can sit below the fold.
+        let row = element(app, "account.settings.privacy.recovery-key")
+        XCTAssertTrue(scrollSettingsList(to: row, in: app),
+                      "the Account page has no recovery key row", file: file, line: line)
+        XCTAssertTrue(row.label.contains("Khóa khôi phục"), file: file, line: line)
         row.tap()
         XCTAssertTrue(element(app, "account.recovery.key").waitForExistence(timeout: 3), file: file, line: line)
     }
