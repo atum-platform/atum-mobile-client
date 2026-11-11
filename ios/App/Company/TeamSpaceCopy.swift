@@ -17,14 +17,35 @@ struct TeamSpaceCopy {
     /// The exported value, else the pending desktop value, else English.
     func text(_ key: String) -> String {
         if design.copy.contains(key) { return design.text(key) }
-        let table = TeamSpacePendingCopy.tables[key]
+        let table = Self.pending(key)
         return table?[locale] ?? table?["en"] ?? key
+    }
+
+    /// The wave 2 and wave 3 generated desktop tables.
+    private static func pending(_ key: String) -> [String: String]? {
+        TeamSpacePendingCopy.tables[key] ?? TeamSpaceWave3PendingCopy.tables[key]
+    }
+
+    /// A two-argument phrase ({0}, {1} in the pending table, `%1$@`, `%2$@` in the export).
+    func text(_ key: String, _ first: String, _ second: String) -> String {
+        if design.copy.contains(key) {
+            return design.text(key, arguments: [.text(first), .text(second)])
+        }
+        let table = Self.pending(key)
+        return (table?[locale] ?? table?["en"] ?? key)
+            .replacingOccurrences(of: "{0}", with: first)
+            .replacingOccurrences(of: "{1}", with: second)
+    }
+
+    /// A count phrase: `.one` for 1, `.other` with the count, as the desktop function says it.
+    func count(_ key: String, _ value: Int) -> String {
+        text(key + (value == 1 ? ".one" : ".other"), value.formatted())
     }
 
     /// A one-argument phrase ({0} in the pending table, `%1$@` in the export).
     func text(_ key: String, _ argument: String) -> String {
         if design.copy.contains(key) { return design.text(key, arguments: [.text(argument)]) }
-        let table = TeamSpacePendingCopy.tables[key]
+        let table = Self.pending(key)
         return (table?[locale] ?? table?["en"] ?? key).replacingOccurrences(of: "{0}", with: argument)
     }
 
@@ -107,4 +128,83 @@ struct TeamSpaceCopy {
         text(Self.pinned + (count == 1 ? "pinnedMessageCount.one" : "pinnedMessageCount.other"),
              count.formatted())
     }
+
+    // MARK: Invite people (TS-11, `shared/matrix-team-space-copy.ts` `inviteSheet`)
+
+    private static let sheet = team + "inviteSheet."
+    func inviteSheetTitle(company: String) -> String { text(Self.sheet + "title", company) }
+    var inviteSearch: String { text(Self.sheet + "search") }
+    var inviteAdd: String { text(Self.sheet + "add") }
+    var inviteInvite: String { text(Self.sheet + "invite") }
+    var inviteAlreadyMember: String { text(Self.sheet + "alreadyMember") }
+    var inviteAlreadyInvited: String { text(Self.sheet + "alreadyInvited") }
+    func inviteInvited(_ name: String) -> String { text(Self.sheet + "invited", name) }
+    var inviteNotAllowed: String { text(Self.sheet + "notAllowed") }
+    var inviteCantInvite: String { text(Self.sheet + "cantInvite") }
+    var inviteEmailOff: String { text(Self.sheet + "emailOff") }
+    var peopleNoMatch: String { text(Self.team + "peopleNoMatch") }
+    var working: String { text(Self.team + "working") }
+    func refusal(_ reason: String) -> String? {
+        let key = Self.team + "refusal." + reason
+        return design.copy.contains(key) || TeamSpaceWave3PendingCopy.tables[key] != nil ? text(key) : nil
+    }
+
+    // MARK: Invite links (TS-11)
+
+    var inviteLinkSection: String { text(Self.team + "inviteLinkSection") }
+    var copyInviteLink: String { text(Self.team + "copyInviteLink") }
+    var inviteLinkCreating: String { text(Self.team + "inviteLinkCreating") }
+    var inviteLinkCopied: String { text(Self.team + "inviteLinkCopied") }
+    var inviteLinkAudience: String { text(Self.team + "inviteLinkAudience") }
+    func inviteLinkDuration(days: Int) -> String { count(Self.team + "inviteLinkDuration", days) }
+    func inviteLinkCapacity(uses: Int) -> String { count(Self.team + "inviteLinkCapacity", uses) }
+    var inviteLinkReplayed: String { text(Self.team + "inviteLinkReplayed") }
+    var inviteLinksActive: String { text(Self.team + "inviteLinksActive") }
+    func inviteLinkUsage(used: Int, max: Int) -> String {
+        text(Self.team + "inviteLinkUsage", used.formatted(), max.formatted())
+    }
+    func inviteLinkExpires(days: Int) -> String { count(Self.team + "inviteLinkExpires", days) }
+    var inviteLinkRevoke: String { text(Self.team + "inviteLinkRevoke") }
+    var inviteLinkRevoked: String { text(Self.team + "inviteLinkRevoked") }
+
+    // MARK: Join with an invite link (`src/matrix/team-space/layout-copy.ts`)
+
+    var joinWithInviteLink: String { text(Self.layout + "joinWithInviteLink") }
+    var joinInviteTitle: String { text(Self.layout + "joinInviteTitle") }
+    var inviteLinkLabel: String { text(Self.layout + "inviteLinkLabel") }
+    var inviteLinkHint: String { text(Self.layout + "inviteLinkHint") }
+    var previewInvite: String { text(Self.layout + "previewInvite") }
+    var previewingInvite: String { text(Self.layout + "previewingInvite") }
+    func invitedTo(_ company: String) -> String { text(Self.layout + "invitedTo", company) }
+    func inviteFrom(_ inviter: String) -> String { text(Self.layout + "inviteFrom", inviter) }
+    func inviteExpires(_ when: String) -> String { text(Self.layout + "inviteExpires", when) }
+    var joinInvite: String { text(Self.layout + "joinInvite") }
+    var joiningInvite: String { text(Self.layout + "joiningInvite") }
+    func joinFailure(_ failure: CompanyInviteJoinFailure) -> String {
+        switch failure {
+        case .invalid: text(Self.layout + "invalidInviteLink")
+        case .expired: text(Self.layout + "expiredInviteLink")
+        case .revoked: text(Self.layout + "revokedInviteLink")
+        case .exhausted: text(Self.layout + "exhaustedInviteLink")
+        case .unavailable: text(Self.layout + "inviteUnavailable")
+        }
+    }
+    func joinCompletion(_ completion: CompanyInviteJoinCompletion) -> String {
+        completion == .alreadyMember ? text(Self.layout + "alreadyMemberInvite") : text(Self.layout + "inviteJoined")
+    }
+
+    // MARK: Channel sections and create (TS-13)
+
+    var favorites: String { text(Self.team + "favorites") }
+    var archivedSection: String { text(Self.team + "archivedSection") }
+    var addChannels: String { text(Self.team + "addChannels") }
+    var createChannelItem: String { text(Self.team + "createChannelItem") }
+    var createChannelTitle: String { text(Self.team + "createChannelTitle") }
+    var createChannelBody: String { text(Self.team + "createChannelBody") }
+    var channelNameLabel: String { text(Self.team + "channelNameLabel") }
+    var channelNamePlaceholder: String { text(Self.team + "channelNamePlaceholder") }
+    var channelNameRequired: String { text(Self.team + "channelNameRequired") }
+    var channelNameTooLong: String { text(Self.team + "channelNameTooLong") }
+    var createChannelSubmit: String { text(Self.team + "createChannelSubmit") }
+    var creatingChannel: String { text(Self.team + "creatingChannel") }
 }

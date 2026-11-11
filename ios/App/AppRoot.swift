@@ -374,16 +374,25 @@ struct AppRoot: View {
                     invitations: model.companyWorkspace.invitationRows(),
                     workspace: model.companyWorkspace.activeCompanyID.flatMap {
                         model.companyWorkspace.workspace(companyID: $0, signals: companySignals,
-                                                         activity: roomActivity)
+                                                         activity: roomActivity,
+                                                         favourites: model.companyWorkspace.favouriteChannelRooms(
+                                                             from: presentation.rooms.rooms))
                     },
                     switcher: model.companyWorkspace.switcherEntries(signals: companySignals),
                     canCreate: model.companyWorkspace.canCreate,
                     appIconCount: home.appIconCount,
                     logos: model.companyWorkspace.logoURIs(from: presentation.rooms.rooms),
-                    menu: model.companyWorkspace.menuAllowed(companyID: model.companyWorkspace.activeCompanyID),
+                    menu: model.companyWorkspace.menuAllowed(
+                        companyID: model.companyWorkspace.activeCompanyID,
+                        inviteAvailable: model.companyWorkspace.inviteAbilities(
+                            companyID: model.companyWorkspace.activeCompanyID).invite),
                     viewerRole: model.companyWorkspace.activeCompanyID.flatMap {
                         model.companyWorkspace.viewerRole(companyID: $0)
-                    }
+                    },
+                    inviteAbilities: model.companyWorkspace.inviteAbilities(
+                        companyID: model.companyWorkspace.activeCompanyID),
+                    canCreateChannel: model.companyWorkspace.channelCreationAllowed(
+                        companyID: model.companyWorkspace.activeCompanyID)
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },
@@ -417,7 +426,8 @@ struct AppRoot: View {
                     directMessages: directMessagesActions,
                     loadActivity: { await model.companyActivity(companyID: $0) },
                     loadSavedPointers: { await model.companySavedPointers() },
-                    loadSavedRows: { await model.companySavedRows($0) }
+                    loadSavedRows: { await model.companySavedRows($0) },
+                    invites: companyInviteActions
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -890,6 +900,20 @@ struct AppRoot: View {
                 }
             )
         }
+    }
+
+    /// TS-11/TS-13: the invite sheet, invite links, join with a link and channel create.
+    private var companyInviteActions: CompanyInviteActions {
+        let company = model.companyWorkspace
+        return CompanyInviteActions(
+            standing: { company.inviteStanding(companyID: $0, handle: $1) },
+            invite: { await company.invite(companyID: $0, handle: $1) },
+            loadLinks: { await company.inviteLinks(companyID: $0) },
+            createLink: { await company.createInviteLink(companyID: $0) },
+            revokeLink: { await company.revokeInviteLink(companyID: $0, linkID: $1) },
+            preview: { await company.previewInviteLink($0) },
+            redeem: { await company.redeemInviteLink($0, requestID: $1, preview: $2) },
+            createChannel: { await company.createChannel(companyID: $0, named: $1) })
     }
 
     /// Direct messages on the Workplace list. Every call goes to the company

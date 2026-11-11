@@ -163,7 +163,8 @@ struct ScriptedHomeHost: View {
                         loadMatrixThumbnail: { uri, _ in
                             uri == Self.scriptedLogoURI
                                 ? try? AtumDesign.data(for: "app-icon/atum-app-icon-1024.png") : nil
-                        }
+                        },
+                        invites: scriptedInvites
                     )
                 )
                 .navigationDestination(for: String.self) { roomID in
@@ -233,6 +234,8 @@ struct ScriptedHomeHost: View {
         let title: String
         let isDefault: Bool
         let input: Badge.Input
+        var isFavourite = false
+        var isArchived = false
     }
 
     private static let scriptedChannels: [String: [ScriptedChannel]] = [
@@ -244,6 +247,11 @@ struct ScriptedHomeHost: View {
             ScriptedChannel(id: "ops", title: "ops", isDefault: false,
                             input: Badge.Input(notifications: 5, hasUnreadActivity: true, isMuted: true)),
             ScriptedChannel(id: "design", title: "design", isDefault: false, input: Badge.Input()),
+            // Wave 3 TS-13: a favourite and an archived channel for the section captures.
+            ScriptedChannel(id: "launch", title: "launch", isDefault: false, input: Badge.Input(),
+                            isFavourite: true),
+            ScriptedChannel(id: "retro-2025", title: "retro-2025", isDefault: false, input: Badge.Input(),
+                            isArchived: true),
         ],
         "studio": [
             ScriptedChannel(id: "studio-general", title: "general", isDefault: true,
@@ -270,7 +278,8 @@ struct ScriptedHomeHost: View {
             let input = scriptedInput(channel)
             return CompanyChannelRow(id: channel.id, title: channel.title, state: "Ready",
                                      roomID: "!" + channel.id + ":atum.test", memberCount: 3,
-                                     canOpen: true, badge: Badge.mark(for: input), isMuted: input.isMuted)
+                                     canOpen: true, badge: Badge.mark(for: input), isMuted: input.isMuted,
+                                     isFavourite: channel.isFavourite, isArchived: channel.isArchived)
         }
         let entries = ["anka": "Anka", "studio": "Studio"].sorted { $0.key < $1.key }.map { key, title in
             CompanySwitcherEntry(
@@ -293,7 +302,60 @@ struct ScriptedHomeHost: View {
             canCreate: true,
             // Studio has a logo (served by the scripted media below); Anka has
             // none and shows the Kit monogram.
-            logos: ["studio": Self.scriptedLogoURI])
+            logos: ["studio": Self.scriptedLogoURI],
+            menu: CompanyMenuAllowed(overview: true, invite: true, create: true, leave: true),
+            inviteAbilities: CompanyInviteAbilities(invite: true, method: .admin, inviteLink: true,
+                                                    revokeInviteLink: true),
+            canCreateChannel: true)
+    }
+
+    /// TS-11/TS-13 with synthetic answers (the desktop public pack's fixture shapes): "@nobody"
+    /// is refused, "@minh" is already in, "@lan" already invited; every press is probed.
+    private var scriptedInvites: CompanyInviteActions {
+        func decode<T: Decodable>(_ type: T.Type, _ json: String) -> T? {
+            try? NativeAPI.decode(type, from: Data(json.utf8))
+        }
+        let link = #"{"id":"00000000-0000-4000-8000-507f79cf6e24","role":"member","state":"active","#
+            + #""createdAt":1792540800,"expiresAt":4102444800,"maxUses":5,"uses":2}"#
+        let preview = #"{"schemaVersion":3,"company":{"id":"00000000-0000-4000-8000-68ce1b921bf1","#
+            + #""displayName":"Labs"},"role":"member","inviter":{"handle":"minh","displayName":"Minh"},"#
+            + #""expiresAt":4102444800,"maxUses":5,"usesRemaining":3}"#
+        return CompanyInviteActions(
+            standing: { _, handle in handle == "minh" ? .member : handle == "lan" ? .invited : .none },
+            invite: { _, handle in
+                UITestProbe.append("invite \(handle)", to: "team-actions.txt")
+                return handle == "nobody" ? .refused(.missing, reason: "invite_target_unavailable") : .invited
+            },
+            loadLinks: { _ in decode(CompanyInviteLinkSummary.self, link).map { [$0] } ?? [] },
+            createLink: { _ in
+                UITestProbe.append("invite-link create", to: "team-actions.txt")
+                let created = #"{"schemaVersion":3,"replayed":false,"link":{"id":"00000000-0000-4000-8000-7d72ef2bd9bc","#
+                    + #""companyId":"00000000-0000-4000-8000-68ce1b921bf1","role":"member","state":"active","#
+                    + #""createdAt":1792540800,"expiresAt":1793145600,"maxUses":5,"uses":0,"#
+                    + #""url":"https://atum.app/j/PUBLIC_FIXTURE_ONLY_61818fe4de417671d243876c2279bbbe"}}"#
+                guard case let .created(secret)? = try? CompanyInviteWire.decodeLinkCreated(Data(created.utf8)) else {
+                    return .failed(nil)
+                }
+                return .created(secret)
+            },
+            revokeLink: { _, _ in
+                UITestProbe.append("invite-link revoke", to: "team-actions.txt")
+                return nil
+            },
+            preview: { _ in
+                guard let value = decode(CompanyInviteLinkPreview.self, preview) else {
+                    return CompanyInviteJoinState.failure(.unavailable, preview: nil)
+                }
+                return CompanyInviteJoinState.preview(value)
+            },
+            redeem: { _, _, value in
+                UITestProbe.append("invite-link redeem", to: "team-actions.txt")
+                return .complete(value, .joined, companyID: value.companyId.rawValue)
+            },
+            createChannel: { _, name in
+                UITestProbe.append("create-channel \(name)", to: "team-actions.txt")
+                return .created(roomID: nil)
+            })
     }
 
     static let scriptedLogoURI = "mxc://atum.test/studio-logo"

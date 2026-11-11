@@ -81,6 +81,9 @@ final class CompanyConversationStore {
     /// Whether the last probe authorizes 1.5 requests and writes right now. Separate from whether the
     /// rows are visible: a failed probe keeps the last rows on screen (stale) but sends nothing.
     private(set) var discoveryAuthorizes = false
+    /// The last 1.3 capability answer (TS-11, TS-13 read its team-admin and channel-admission
+    /// profile). A refused or unreadable probe drops it; a transport failure keeps it.
+    private(set) var capabilities: CompanyCapabilities?
     private(set) var directories = [String: CompanyConversationDirectory]()
     private(set) var loading = Set<String>()
     private(set) var readFailed = Set<String>()
@@ -125,6 +128,7 @@ final class CompanyConversationStore {
         do {
             let capabilities = try await client.companyCapabilities()
             guard started == epoch else { return }
+            self.capabilities = capabilities
             availability = capabilities.offersConversations ? .available : .unavailable
             discoveryAuthorizes = capabilities.offersConversations
         } catch let error as CompanyAPIError {
@@ -132,12 +136,15 @@ final class CompanyConversationStore {
             discoveryAuthorizes = false
             switch error {
             case .transport, .unavailable: break   // rows stay, stale; nothing is sent
-            case .refused, .invalid: availability = .unavailable
+            case .refused, .invalid:
+                availability = .unavailable
+                capabilities = nil
             }
         } catch {
             guard started == epoch else { return }
             discoveryAuthorizes = false
             availability = .unavailable
+            capabilities = nil
         }
         if availability != .available { dropLists() }
         if before != discoveryAuthorizes { revision &+= 1 }
@@ -273,6 +280,7 @@ final class CompanyConversationStore {
         epoch &+= 1
         availability = .unknown
         discoveryAuthorizes = false
+        capabilities = nil
         dropLists(notify: notify)
         tracker.clear()
         revision &+= 1

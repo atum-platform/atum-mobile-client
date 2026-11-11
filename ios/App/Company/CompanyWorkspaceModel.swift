@@ -29,6 +29,10 @@ struct CompanyChannelRow: Identifiable, Equatable {
     /// Unread and mention mark from the Matrix room, by Home's `Badge` rule.
     var badge: Badge = .none
     var isMuted = false
+    /// The person's own Matrix `m.favourite` tag on the channel room (TS-13 Favorites).
+    var isFavourite = false
+    /// The platform's channel state is archived (TS-13 Archived, collapsed).
+    var isArchived = false
 
     var isBold: Bool { TeamSpaceBadges.isBold(badge) }
 }
@@ -190,6 +194,15 @@ final class CompanyWorkspaceModel {
     @ObservationIgnored var privateCosRoomTitle: (String) -> String? = { _ in nil }
     /// The same client's 1.3 discovery and 1.5 conversation calls; nil keeps Direct messages off.
     @ObservationIgnored var conversationsProvider: () -> CompanyConversationsAPI? = { nil }
+    /// The same client's invite, invite-link and channel-create calls (TS-11, TS-13).
+    @ObservationIgnored var invitesProvider: () -> CompanyInvitesAPI? = { nil }
+    /// Invite readiness profile 1, read after each probe that says team admin is on.
+    var inviteReadiness: CompanyInviteReadiness?
+    /// A channel create in flight or whose answer was lost, by company and name, so the
+    /// same press replays the same request instead of making a second channel.
+    @ObservationIgnored var channelCreateRequests = [String: String]()
+    /// Bumped with every account scope; an invite or create answer from an older scope is dropped.
+    @ObservationIgnored var inviteEpoch: UInt64 = 0
     @ObservationIgnored var presence: (String) -> CompanyRoomPresence = { _ in .unknown }
     @ObservationIgnored var join: (String) async -> Bool = { _ in false }
     /// The one join a company conversation's room may have: its invitation is accepted only by the
@@ -219,7 +232,7 @@ final class CompanyWorkspaceModel {
     @ObservationIgnored private var noticeCompanies = Set<String>()
     @ObservationIgnored private var actionError: String?
     @ObservationIgnored private var actionErrorCompany: String?
-    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private(set) var generation: UInt64 = 0
     @ObservationIgnored private var leaveTasks = [String: Task<Void, Never>]()
     @ObservationIgnored private var hasLoadedJournal = false
     @ObservationIgnored private var knownPersonalRoomIDs = Set<String>()
@@ -335,6 +348,8 @@ final class CompanyWorkspaceModel {
         var directoriesComplete = true
         // One probe per refresh: Direct messages exist only while the server says so.
         await conversations.probe()
+        guard scope == generation, self.client() === client else { return }
+        await readInviteReadiness(scope: scope)
         guard scope == generation, self.client() === client else { return }
         for company in value.companies {
             let directory = await readChannels(id: company.id, companyID: company.id.rawValue,
@@ -616,6 +631,9 @@ final class CompanyWorkspaceModel {
         privateCosVisited.removeAll()
         notesSelfRooms.removeAll()
         conversations.reset()
+        inviteReadiness = nil
+        channelCreateRequests.removeAll()
+        inviteEpoch &+= 1
         conversationTypeClaims.removeAll()
         classificationComplete = false
         knownPersonalRoomIDs.removeAll()
@@ -1134,7 +1152,8 @@ final class CompanyWorkspaceModel {
     /// The company's Workplace root. `signals` carries the Matrix unread state
     /// of its channel rooms; a channel the SDK does not know yet has no mark.
     func workspace(companyID: String, signals: CompanyRoomSignals = [:],
-                   activity: [String: Date] = [:]) -> CompanyWorkspacePresentation? {
+                   activity: [String: Date] = [:],
+                   favourites: Set<String> = []) -> CompanyWorkspacePresentation? {
         guard let copy, let companyIDValue = try? NativeID(companyID),
               let company = list?.companies.first(where: { $0.id == companyIDValue })
         else { return nil }
@@ -1157,7 +1176,9 @@ final class CompanyWorkspaceModel {
                     memberCount: Int(entry.memberCount),
                     canOpen: entry.room.state == "ready" && entry.room.roomId != nil,
                     badge: input.map(Badge.mark(for:)) ?? .none,
-                    isMuted: input?.isMuted ?? false)
+                    isMuted: input?.isMuted ?? false,
+                    isFavourite: entry.room.roomId.map(favourites.contains) ?? false,
+                    isArchived: entry.channel.state == .archived)
             }
         let members = members(companyID: companyID, copy: copy)
         let conversations = conversationSection(companyID: companyID, signals: signals, activity: activity,
