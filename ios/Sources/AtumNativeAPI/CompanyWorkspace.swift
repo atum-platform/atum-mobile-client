@@ -8,6 +8,8 @@ import Foundation
 public enum CompanyWire: String, Sendable, Equatable {
     case v1 = "1"
     case v1_1 = "1.1"
+    /// Invite links (`CompanyInvites.swift`).
+    case v1_2 = "1.2"
     /// Capability discovery (`GET /company-capabilities`).
     case v1_3 = "1.3"
     /// Company DMs and group DMs (`CompanyConversations.swift`).

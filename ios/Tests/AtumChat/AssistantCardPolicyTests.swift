@@ -17,11 +17,25 @@ final class AssistantCardPolicyTests: XCTestCase {
                                  .home, .model, .pet, .skills, .routines])
     }
 
-    func testNeitherRoleEverOffersRetirementOnThePhone() {
+    func testWithoutTheRetireRouteNeitherRoleOffersDelete() {
         for role in [AssistantCardRole.primary, .other] {
             XCTAssertFalse(AssistantCardLayout.rows(for: role, capabilities: capabilities())
                 .contains(.retire))
         }
+    }
+
+    /// AS-4: desktop's "Delete {name}…" ends a non-primary card; the primary
+    /// never has it, even where the host can retire.
+    func testOnlyANonPrimaryAssistantEndsWithDelete() {
+        var retiring = capabilities()
+        retiring.canRetire = true
+        let other = AssistantCardLayout.rows(for: .other, capabilities: retiring)
+        XCTAssertEqual(other.last, .retire)
+        XCTAssertEqual(other.filter { $0 == .retire }.count, 1)
+        XCTAssertFalse(AssistantCardLayout.rows(for: .primary, capabilities: retiring).contains(.retire))
+        XCTAssertTrue(AssistantRetirePolicy.offersDelete(isPrimary: false, canRetire: true))
+        XCTAssertFalse(AssistantRetirePolicy.offersDelete(isPrimary: true, canRetire: true))
+        XCTAssertFalse(AssistantRetirePolicy.offersDelete(isPrimary: false, canRetire: false))
     }
 
     func testACustomPersonaIsOneInstructionsFieldOnBothRoles() {

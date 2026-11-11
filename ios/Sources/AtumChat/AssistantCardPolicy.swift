@@ -2,8 +2,9 @@ import Foundation
 
 /// One assistant's card, as the phone draws it: the same rows for every
 /// assistant, the primary included. The primary is not a different card; its
-/// only difference is the face the roster gives it (`isPrimary`), and it never
-/// offers retirement on the phone.
+/// differences are the face the roster gives it (`isPrimary`) and that it is
+/// never retired. Every other assistant ends with desktop's "Delete {name}…"
+/// row where the host can reach the retire route (AS-4, plan D3).
 public enum AssistantCardRow: String, CaseIterable, Hashable, Sendable {
     case photo
     case name
@@ -17,8 +18,8 @@ public enum AssistantCardRow: String, CaseIterable, Hashable, Sendable {
     case pet
     case skills
     case routines
-    /// Kept in the vocabulary so "no retire for the primary" is an explicit
-    /// decision, not an omission. The phone never draws it for either role.
+    /// Desktop's "Delete {name}…" (`assistant-card.tsx:445-461`): last, and
+    /// only for a non-primary assistant (`AssistantRetirePolicy`).
     case retire
 }
 
@@ -35,9 +36,12 @@ public struct AssistantCardCapabilities: Equatable, Sendable {
     public var hasPet: Bool
     public var hasSkills: Bool
     public var hasRoutines: Bool
+    /// The host can reach the platform's retire route.
+    public var canRetire: Bool
 
     public init(canMessage: Bool, persona: AssistantPersona.Kind, hasHome: Bool,
-                hasModel: Bool, hasPet: Bool, hasSkills: Bool, hasRoutines: Bool) {
+                hasModel: Bool, hasPet: Bool, hasSkills: Bool, hasRoutines: Bool,
+                canRetire: Bool = false) {
         self.canMessage = canMessage
         self.persona = persona
         self.hasHome = hasHome
@@ -45,6 +49,7 @@ public struct AssistantCardCapabilities: Equatable, Sendable {
         self.hasPet = hasPet
         self.hasSkills = hasSkills
         self.hasRoutines = hasRoutines
+        self.canRetire = canRetire
     }
 }
 
@@ -57,10 +62,8 @@ public enum AssistantCardLayout {
     /// (`assistant-card.tsx:754-758`, `SkillsRow` returns null at zero).
     public static func showsSkills(count: Int) -> Bool { count > 0 }
 
-    /// The card's row order. `role` is deliberately not a branch: the primary
-    /// shows the same rows as every other assistant, and neither has a retire
-    /// row on the phone. Callers pass it so that parity is part of the API and
-    /// of the test, not a comment.
+    /// The card's row order. `role` decides one thing only: the primary never
+    /// gets the retire row. Every other row is the same for both roles.
     public static func rows(for role: AssistantCardRole,
                             capabilities: AssistantCardCapabilities) -> [AssistantCardRow] {
         var rows: [AssistantCardRow] = [.photo, .name]
@@ -78,6 +81,10 @@ public enum AssistantCardLayout {
         if capabilities.hasPet { rows.append(.pet) }
         if capabilities.hasSkills { rows.append(.skills) }
         if capabilities.hasRoutines { rows.append(.routines) }
+        if AssistantRetirePolicy.offersDelete(isPrimary: role == .primary,
+                                              canRetire: capabilities.canRetire) {
+            rows.append(.retire)
+        }
         return rows
     }
 }
