@@ -36,7 +36,11 @@ per run on 2026-11-11 with six lanes active).
   (the thinking level never reaches the scripted save, still under investigation) and
   `ChatKindsUITests/testAccessibilityAuditKinds` ("Dynamic Type font sizes are
   partially unsupported": the known avatar-monogram Dynamic Type debt, wave 2
-  carry-over). Remove a line when its fix lands.
+  carry-over). Third hosted run (after #28 and #31 merged):
+  `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`
+  (Retry state not reached after a failed create, line 349) and
+  `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`
+  (`company.channel.ops` row not found); both under diagnosis. Remove a line when its fix lands.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

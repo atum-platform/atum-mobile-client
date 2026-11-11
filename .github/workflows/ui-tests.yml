@@ -37,6 +37,8 @@ env:
     ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace
     ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
     ChatKindsUITests/testAccessibilityAuditKinds
+    HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning
+    TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet
 jobs:
   plan:
     runs-on: ubuntu-latest
