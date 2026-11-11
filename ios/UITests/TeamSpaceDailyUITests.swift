@@ -20,6 +20,15 @@ final class TeamSpaceDailyUITests: TranscriptUITestCase {
         return app
     }
 
+    /// Scrolls the channel list until `target` is on screen; false if it never is.
+    @MainActor
+    private func reveal(_ target: XCUIElement, in app: XCUIApplication, attempts: Int = 6) -> Bool {
+        for _ in 0..<attempts where !(target.exists && target.isHittable) {
+            app.swipeUp(velocity: .slow)
+        }
+        return target.exists && target.isHittable
+    }
+
     @MainActor
     func testWorkplaceRootIsTheChannelListAndAChannelPushesAndPopsBack() {
         let app = launchWorkplace()
@@ -46,9 +55,15 @@ final class TeamSpaceDailyUITests: TranscriptUITestCase {
         let design = app.buttons.matching(identifier: "company.channel.design").firstMatch
         XCTAssertTrue(general.waitForExistence(timeout: 3))
         XCTAssertTrue(general.label.contains("Nhắc đến bạn"), "mention: \(general.label)")
+        // Since TS-13 the invitation card and Favorites sit above Channels, so
+        // on a 6.1" phone (hosted CI's iPhone 16e) the later rows start below
+        // the fold, where the List has not made them yet.
+        XCTAssertTrue(reveal(random, in: app), boundedHierarchy(app))
         XCTAssertTrue(random.label.contains("3"), "unread count: \(random.label)")
         XCTAssertFalse(random.label.contains("Nhắc đến bạn"))
+        XCTAssertTrue(reveal(ops, in: app), boundedHierarchy(app))
         XCTAssertTrue(ops.label.contains("Đã tắt thông báo"), "muted: \(ops.label)")
+        XCTAssertTrue(reveal(design, in: app), boundedHierarchy(app))
         XCTAssertFalse(design.label.contains("Nhắc đến bạn"))
         XCTAssertFalse(design.label.contains("Đã tắt thông báo"))
 
