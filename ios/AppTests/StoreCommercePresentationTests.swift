@@ -81,6 +81,19 @@ final class StoreCommercePresentationTests: XCTestCase {
         XCTAssertEqual(StoreOutcomePresentation.purchaseKey(.reversed), StoreCopyKey.deliveryRefunded)
     }
 
+    /// REL-15: Protons are spent on a paid item only while Apple checkout is
+    /// open; free items never wait on it.
+    func testStoreGateHidesPaidSpendWhileCheckoutIsClosed() throws {
+        XCTAssertFalse(StorePurchaseGate.allowsSpend(priceMicroProtons: 90_000_000, checkoutOpen: false))
+        XCTAssertFalse(StorePurchaseGate.allowsSpend(priceMicroProtons: 1, checkoutOpen: false))
+        XCTAssertTrue(StorePurchaseGate.allowsSpend(priceMicroProtons: 90_000_000, checkoutOpen: true))
+        XCTAssertTrue(StorePurchaseGate.allowsSpend(priceMicroProtons: 0, checkoutOpen: false))
+        XCTAssertTrue(StorePurchaseGate.allowsSpend(priceMicroProtons: 0, checkoutOpen: true))
+        // The closed line is the pack sheet's existing export, plain in English.
+        XCTAssertEqual(try AtumCopy().text(StoreCopyKey.purchasesClosed, locale: "en", arguments: []),
+                       "Purchases are not available yet")
+    }
+
     func testStoreTimestampsParseWithMicroseconds() throws {
         let data = Data(#"["2026-10-04T08:00:00.123456+00:00"]"#.utf8)
         let value = try JSONDecoder().decode([NativeTimestamp].self, from: data)[0]
