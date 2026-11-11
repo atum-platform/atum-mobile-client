@@ -18,14 +18,23 @@ per run on 2026-11-11 with six lanes active).
   is not a check. Also `GScrollUITests`: its scenario clock is too tight for the
   slower hosted runners (first hosted run, 2026-11-11: checks 3 and 9 timed out).
   These are listed in `LOCAL_ONLY` in the workflow. `LOCAL_ONLY_TESTS` holds the
-  two `Wave2MediaBotUITests` tests that need the appearance/content-size runner.
+  two `Wave2MediaBotUITests` tests that need the appearance/content-size runner,
+  plus three tests whose scenario windows hosted runners miss (second hosted run,
+  2026-11-11): `HomeShellUITests/testInvitationShowsJoinProgressThenPushes`
+  (the 0.8 s "joining" window passes before the poll sees it),
+  `HomeShellUITests/testPlusOpensStartChatWithRealRowsAndAvailableCreationActions`
+  (3 s push window) and
+  `ChatKindsUITests/testLinksGoThroughLinkPolicyAndNothingIsReadWhileCovered`
+  (UI query timed out after 195 s). All three pass on the build Mac.
 - **Quarantine:** `QUARANTINE` lists tests that fail on `main` today, each
   tracked in atum-mobile#50. As of the first hosted run (PR #29):
   `ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace` (the
   Block button isn't found in the sheet; the wave 3 chats lane is fixing it) and
   `ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel`
-  (the thinking level never reaches the scripted save, still under investigation). Remove a line when its fix
-  lands.
+  (the thinking level never reaches the scripted save, still under investigation) and
+  `ChatKindsUITests/testAccessibilityAuditKinds` ("Dynamic Type font sizes are
+  partially unsupported": the known avatar-monogram Dynamic Type debt, wave 2
+  carry-over). Remove a line when its fix lands.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

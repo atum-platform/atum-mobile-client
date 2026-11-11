@@ -21,15 +21,20 @@ env:
   # Whole classes that stay on the build Mac: the private content-size runner,
   # evidence capture, or scenario clocks the slower hosted runners miss.
   LOCAL_ONLY: "GScrollDynamicTypeUITests S1MatrixUITests S6SystemUITests TranscriptUITests KitBoardCaptureUITests GScrollUITests"
-  # Single tests that need the simulator appearance/content-size runner.
+  # Single tests that need the simulator appearance/content-size runner, or
+  # whose sub-second scenario windows the slower hosted runners miss.
   LOCAL_ONLY_TESTS: >-
     Wave2MediaBotUITests/testWave2DarkLargestTypeEvidence
     Wave2MediaBotUITests/testWave2AccessibilitySmoke
+    HomeShellUITests/testInvitationShowsJoinProgressThenPushes
+    HomeShellUITests/testPlusOpensStartChatWithRealRowsAndAvailableCreationActions
+    ChatKindsUITests/testLinksGoThroughLinkPolicyAndNothingIsReadWhileCovered
   # Known failures on main, tracked in atum-platform/atum-mobile#50. Remove a line
   # when its fix lands; never add one without a tracking entry.
   QUARANTINE: >-
     ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace
     ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
+    ChatKindsUITests/testAccessibilityAuditKinds
 jobs:
   plan:
     runs-on: ubuntu-latest
