@@ -57,6 +57,11 @@ public struct OIDCStoredGrant: Codable, Sendable, Equatable, CustomStringConvert
 @MainActor public protocol OIDCGrantStore: AnyObject {
     func load() throws -> OIDCStoredGrant?
     func save(_ record: OIDCStoredGrant) throws
+    func acquireRefreshLease() throws -> MatrixRefreshLease?
+}
+
+extension OIDCGrantStore {
+    public func acquireRefreshLease() throws -> MatrixRefreshLease? { nil }
 }
 
 public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
@@ -75,7 +80,7 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
     public var debugDescription: String { description }
 }
 
-/// Main process only. Each instance owns exactly one grant/generation and its
+/// Each instance owns exactly one grant/generation and its
 /// own flight; it has no operation capable of closing the other grant.
 @MainActor public final class OIDCGrantRefresh {
     public typealias Exchange = @MainActor @Sendable (URLRequest) async throws -> OIDCRefreshReply
@@ -86,6 +91,7 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
     private let clientID, subject, expectedScope: String
     private let initialResponse: OIDCTokenResponse?
     private var flight: (id: UUID, task: Task<String, any Error>)?
+    private var cancelOnCallerCancellation = false
 
     public init(store: any OIDCGrantStore, metadata: MASMetadata, grant: OIDCVerifiedGrant,
                 generation: UUID, kind: OIDCFlow.Kind, clients: MASPublicClients) throws {
@@ -131,6 +137,7 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
     }
 
     public init(resuming resume: OIDCMatrixResume) throws {
+        cancelOnCallerCancellation = resume.cancelOnCallerCancellation
         guard let record = try resume.store.load(), record == resume.record,
               record.phase == .ready else {
             throw OIDCGrantFailure.reauthenticationRequired
@@ -159,14 +166,14 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
         catch { throw OIDCGrantFailure.storageUnavailable }
     }
 
-    public func accessToken(now: Date, preflight: @escaping Preflight = {},
+    public func accessToken(now: Date, minimumValidity: TimeInterval = 0, preflight: @escaping Preflight = {},
                             exchange: @escaping Exchange) async throws -> String {
         try Task.checkCancellation()
         if let flight { return try await flight.task.value }
         let current = try load()
         guard current.phase == .ready else { throw OIDCGrantFailure.reauthenticationRequired }
-        if current.expiresAt > now { return current.accessToken }
-        return try await refresh(now: now, preflight: preflight, exchange: exchange)
+        if current.expiresAt > now.addingTimeInterval(minimumValidity) { return current.accessToken }
+        return try await startRefresh(expected: current, now: now, preflight: preflight, exchange: exchange)
     }
 
     /// Explicit 401 retry uses this even before the response-derived expiry.
@@ -174,15 +181,31 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
                         exchange: @escaping Exchange) async throws -> String {
         try Task.checkCancellation()
         if let flight { return try await flight.task.value }
+        return try await startRefresh(expected: load(), now: now, preflight: preflight, exchange: exchange)
+    }
+
+    private func startRefresh(expected: OIDCStoredGrant, now: Date, preflight: @escaping Preflight,
+                              exchange: @escaping Exchange) async throws -> String {
         let id = UUID()
-        let task = Task { try await rotate(now: now, preflight: preflight, exchange: exchange) }
+        let task = Task { try await rotate(expected: expected, now: now, preflight: preflight, exchange: exchange) }
         flight = (id, task)
         defer { if flight?.id == id { flight = nil } }
+        // App/domain flights retain the established behavior of finishing a
+        // one-time spend even if a UI caller goes away. Only the NSE's bounded
+        // authority forwards cancellation to the transport.
+        if cancelOnCallerCancellation {
+            return try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: { task.cancel() }
+        }
         return try await task.value
     }
 
-    private func rotate(now: Date, preflight: Preflight, exchange: Exchange) async throws -> String {
+    private func rotate(expected: OIDCStoredGrant, now: Date, preflight: Preflight, exchange: Exchange) async throws -> String {
+        let lease = try store.acquireRefreshLease()
+        defer { withExtendedLifetime(lease) {} }
         let current = try load()
+        guard current == expected else { throw MatrixRefreshFailure.recordChanged }
         guard current.phase == .ready else { throw OIDCGrantFailure.reauthenticationRequired }
         // Match Matrix renewal: prove the issuer is reachable before writing
         // the one-way spending journal. This avoids stranding a ready grant on
@@ -190,7 +213,7 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
         // still remains closed and requires domain-only reauthorization.
         try await preflight()
         try Task.checkCancellation()
-        guard try load() == current else { throw OIDCGrantFailure.reauthenticationRequired }
+        guard try load() == current else { throw MatrixRefreshFailure.recordChanged }
         let pending = OIDCStoredGrant(generation: generation, issuer: current.issuer, clientID: clientID, subject: subject,
             accessToken: current.accessToken, refreshToken: current.refreshToken, expiresAt: current.expiresAt,
             phase: .spending, attempt: UUID())
@@ -232,6 +255,7 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
                   !record.accessToken.isEmpty, !record.refreshToken.isEmpty else { throw OIDCGrantFailure.reauthenticationRequired }
             return record
         } catch let error as OIDCGrantFailure { throw error }
+        catch let error as MatrixRefreshFailure { throw error }
         catch { throw OIDCGrantFailure.storageUnavailable }
     }
     private func persist(_ record: OIDCStoredGrant) throws {

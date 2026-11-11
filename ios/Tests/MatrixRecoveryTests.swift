@@ -65,7 +65,8 @@ final class MatrixRecoveryTests: XCTestCase {
             "revocation_endpoint": "https://auth.atum.test/revoke", "id_token_signing_alg_values_supported": ["ES256"],
             "code_challenge_methods_supported": ["S256"]]), expectedIssuer: "https://auth.atum.test/")
         let operations = Operations(), clients = try MASPublicClients(matrix: "01JPHNMXPQ7R8S9T0V2W3X4Y5Z", domain: "01JPHNDXPQ7R8S9T0V2W3X4Y5Z")
-        let sessions = MatrixSessionKeychain(generation: generation, clients: clients, metadata: metadata, operations: operations)
+        let sessions = MatrixSessionKeychain(generation: generation, clients: clients, metadata: metadata,
+            operations: operations, refreshLockURL: directory.appendingPathComponent("refresh.lock"))
         let whoami = try JSONSerialization.data(withJSONObject: ["user_id": "@p2-synthetic:atum.invalid", "device_id": "P2-SYNTHETIC", "is_guest": false])
         let device = try MatrixAuthenticatedDevice.delivered(whoami, grant: MatrixCustodyTests.grant(), requested: "P2-SYNTHETIC")
         let prepared = try sessions.prepare(device: device, marker: marker, requestStartedAt: Date(timeIntervalSince1970: 100))
