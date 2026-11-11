@@ -22,3 +22,22 @@ sheet) and Store shelf scrolling (AS vs ST).
     (`discover-view.tsx`) hides the header balance until the wallet loads; that
     string belongs to the retired legacy wallet. The test now checks that the
     balance chip is absent.
+
+## Store row price (owner feedback on the wave 1 TestFlight build, 2026-11-11)
+
+The owner found the Store rows clunky: a monthly hire put "8,000 Protons first
+month · then 39,000/mo" in the row, and rows had no price button. Desktop
+(`store-card.tsx`) shows one small button per row with the Proton mark and the
+first price, "Open" once owned and "Get" when free. The full monthly terms
+appear only in the item sheet. Parity plan v2 ST-2 had put the long form in the
+row. The assembly now matches desktop:
+- `StoreItemRow` trailing is a quiet capsule (`fill-quiet`, as the kit's
+  secondary button): Proton mark and first price, "Mở"/"Open" when owned, or
+  "Miễn phí"/"Free" (desktop's "Get" is not exported yet, `PENDING-COPY`). The
+  whole row still opens the sheet. VoiceOver still reads the full monthly
+  terms.
+- Every row with an offer formats its amount with
+  `StoreOutcomePresentation.protons`, so pet and assistant prices group digits
+  the same way (the build showed "8,000" next to "90.000").
+- Still open: the balance chip ("105.449 Protons") uses its own formatter, and
+  "Get" needs a desktop export.

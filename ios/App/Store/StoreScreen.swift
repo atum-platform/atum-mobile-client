@@ -435,6 +435,24 @@ private struct StoreRowButtonStyle: ButtonStyle {
 }
 
 /// The trailing value's one style, shared by every row in the Store.
+/// The row's price button (desktop `ak-btn--sm`): a quiet capsule. The
+/// whole row is the tap target and opens the item sheet, as on desktop.
+private struct StoreRowPill<Label: View>: View {
+    let design: LiveDesign
+    @ViewBuilder let label: Label
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        label
+            .font(design.kit.font(.callout).weight(.semibold))
+            .foregroundStyle(design.kit.color(.ink, scheme: scheme))
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(design.kit.color(.fillQuiet, scheme: scheme), in: Capsule())
+    }
+}
+
 private struct StoreTrailingText: View {
     let design: LiveDesign
     let text: String
@@ -509,41 +527,51 @@ struct StoreItemRow: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    /// Desktop `store-card.tsx`: one small button per row, the Proton mark
+    /// and the first price ("Open" once owned, "Free" when it costs
+    /// nothing). A monthly hire's "first month · then …/mo" terms belong to
+    /// the item sheet, not the row; VoiceOver still reads them here.
     @ViewBuilder private var trailing: some View {
         switch status {
         case .owned:
-            StoreTrailingText(design: design, text: design.text(StoreCopyKey.owned), quiet: true)
+            StoreRowPill(design: design) { Text(design.text(StoreCopyKey.open)) }
         case .pending:
             Image(AtumVisualSystem(design: design).symbol(.clock))
                 .font(design.kit.font(.callout))
                 .accessibilityHidden(true)
         case .price:
-            if let offer = item.offer, offer.billingInterval == .month {
-                StoreTrailingText(design: design, text: StorePricePresentation.text(offer, design: design),
-                                  lineLimit: nil)
-            } else if let value = item.price {
-                if value == "0" {
-                    StoreTrailingText(design: design, text: design.text(StoreCopyKey.free), quiet: true)
-                } else {
-                    // A price, not a purchase button: the sheet holds the review.
-                    VStack(alignment: .trailing, spacing: 1) {
+            if let amount = firstPrice {
+                VStack(alignment: .trailing, spacing: 2) {
+                    StoreRowPill(design: design) {
                         HStack(spacing: 3) {
                             ProtonMark(.small)
-                            Text(verbatim: value).monospacedDigit()
-                        }
-                        .font(design.kit.font(.callout).weight(.semibold))
-                        if let regularOffer {
-                            // PENDING-COPY:store-copy.ts firstHatch / regularPrice labels.
-                            Text(verbatim: StoreOutcomePresentation.protons(regularOffer.priceMicroProtons))
-                                .font(design.kit.font(.caption))
-                                .monospacedDigit()
-                                .strikethrough()
-                                .foregroundStyle(design.kit.color(.ink3, scheme: scheme))
+                            Text(verbatim: amount).monospacedDigit()
                         }
                     }
+                    if let regularOffer {
+                        // PENDING-COPY:store-copy.ts firstHatch / regularPrice labels.
+                        Text(verbatim: StoreOutcomePresentation.protons(regularOffer.priceMicroProtons))
+                            .font(design.kit.font(.caption))
+                            .monospacedDigit()
+                            .strikethrough()
+                            .foregroundStyle(design.kit.color(.ink3, scheme: scheme))
+                    }
                 }
+            } else if item.offer != nil || item.price == "0" {
+                // PENDING-COPY: desktop says "Get" (store-copy.ts `get`), not yet exported.
+                StoreRowPill(design: design) { Text(design.text(StoreCopyKey.free)) }
             }
         }
+    }
+
+    /// The first price, formatted the same way as every other amount on the
+    /// screen; nil when the item is free or has no price.
+    private var firstPrice: String? {
+        if let offer = item.offer {
+            return offer.priceMicroProtons > 0 ? StoreOutcomePresentation.protons(offer.priceMicroProtons) : nil
+        }
+        guard let value = item.price, value != "0" else { return nil }
+        return value
     }
 
     private var accessibilityLabel: String {
