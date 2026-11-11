@@ -92,6 +92,14 @@ struct StoreScreen: View {
             catalogList
                 .task(id: ShelfScroll(shelf: shelfRequest, itemCount: store.items.count)) {
                     guard let shelf = shelfRequest else { return }
+                    // A card opening a shelf lands on the unfiltered Store:
+                    // drop a leftover search, then let the full list draw
+                    // before scrolling to it.
+                    if !query.isEmpty {
+                        query = ""
+                        try? await Task.sleep(for: .milliseconds(50))
+                        guard !Task.isCancelled else { return }
+                    }
                     if let first = firstItemID(on: shelf) {
                         withAnimation { proxy.scrollTo(first, anchor: .top) }
                     }
@@ -108,7 +116,7 @@ struct StoreScreen: View {
     /// The first row of a shelf as `catalogList` draws it (no search query:
     /// a card opening a shelf lands on the unfiltered Store).
     private func firstItemID(on shelf: StoreSectionKind) -> String? {
-        let plan = StoreShelfPlan(items: store.items, apps: store.apps, query: query)
+        let plan = StoreShelfPlan(items: store.items, apps: store.apps, query: "")
         switch shelf {
         case .featured: return plan.featured.first?.id
         case .apps: return plan.apps.first?.id
@@ -345,15 +353,16 @@ struct StoreScreen: View {
         guard let commerce else {
             return item.kind != .skill && item.ownership?.state == .owned ? .owned : .price
         }
-        if commerce.purchases.contains(where: { $0.itemID == item.id && $0.state == .deliveryPending }) {
+        let ids = StoreShelfPlan.itemIDs(for: item.id)
+        if commerce.purchases.contains(where: { ids.contains($0.itemID) && $0.state == .deliveryPending }) {
             return .pending
         }
         // A skill is owned per assistant: its row keeps the price.
-        guard item.kind != .skill,
-              let catalogItem = commerce.catalog.first(where: { $0.itemID == item.id }) else {
-            return item.kind != .skill && item.ownership?.state == .owned ? .owned : .price
-        }
-        return commerce.owned(catalogItem, assistant: nil) ? .owned : .price
+        guard item.kind != .skill else { return .price }
+        // The folded Hatch card carries the regular card's ownership.
+        if item.ownership?.state == .owned { return .owned }
+        let catalogItems = commerce.catalog.filter { ids.contains($0.itemID) }
+        return catalogItems.contains { commerce.owned($0, assistant: nil) } ? .owned : .price
     }
 
     private func sectionKey(_ kind: StoreSectionKind) -> String {

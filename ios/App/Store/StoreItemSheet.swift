@@ -302,10 +302,14 @@ struct StoreItemSheet: View {
     }
 
     private func ownedFor(_ assistant: NativeID?) -> Bool {
-        guard let commerce, let catalogItem else {
-            return item.kind != .skill && item.ownership?.state == .owned
-        }
-        return commerce.owned(catalogItem, assistant: assistant)
+        // The folded Hatch card carries the regular card's ownership.
+        if item.kind != .skill, item.ownership?.state == .owned { return true }
+        guard let commerce, let catalogItem else { return false }
+        if commerce.owned(catalogItem, assistant: assistant) { return true }
+        // A held credit for the other Hatch item counts too.
+        return commerce.catalog
+            .filter { StoreShelfPlan.itemIDs(for: item.id).contains($0.itemID) && $0.itemID != catalogItem.itemID }
+            .contains { commerce.owned($0, assistant: assistant) }
     }
 
     private var phase: Phase {

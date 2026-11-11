@@ -1,3 +1,4 @@
+import AtumChat
 import AtumNativeAPI
 import Foundation
 import MatrixRustSDK
@@ -83,18 +84,19 @@ extension LiveMatrixSession {
         case let .other(_, value): body = value
         }
         let sender = event.senderId()
-        let name = (try? await room.memberDisplayName(userId: sender)) ?? nil
-        return CompanyEventSummary(senderID: sender, senderName: name.flatMap { $0.isEmpty ? nil : $0 },
+        // Never a Matrix ID, localpart or SDK " (@id)" suffix as a name.
+        let name = MatrixPersonName.name((try? await room.memberDisplayName(userId: sender)) ?? nil,
+                                         userID: sender)
+        return CompanyEventSummary(senderID: sender, senderName: name,
                                    body: body, sentAt: Int64(clamping: event.timestamp()),
                                    threadRootID: event.threadRootEventId())
     }
 
     /// A sender's room display name, for Activity rows.
     func companyMemberName(roomID: String, userID: String) async -> String? {
-        guard let room = try? room(id: roomID),
-              let name = (try? await room.memberDisplayName(userId: userID)) ?? nil,
-              !name.isEmpty else { return nil }
-        return name
+        guard let room = try? room(id: roomID) else { return nil }
+        return MatrixPersonName.name((try? await room.memberDisplayName(userId: userID)) ?? nil,
+                                     userID: userID)
     }
 }
 

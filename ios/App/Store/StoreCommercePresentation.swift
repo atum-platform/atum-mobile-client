@@ -246,6 +246,12 @@ struct StoreShelfPlan: Equatable {
     static let regularHatchID = "pet/hatch"
     static let firstHatchID = "pet/hatch-first"
 
+    /// The catalog IDs one row stands for: the folded Hatch card is both
+    /// Hatch items, so ownership and pending purchases count across both.
+    static func itemIDs(for id: String) -> Set<String> {
+        id == firstHatchID || id == regularHatchID ? [firstHatchID, regularHatchID] : [id]
+    }
+
     let featured: [StoreListing]
     let skills: [StoreListing]
     let assistants: [StoreListing]

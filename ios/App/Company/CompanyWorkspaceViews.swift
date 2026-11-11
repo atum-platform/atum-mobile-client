@@ -93,8 +93,16 @@ struct TeamSpaceScreen: View {
     /// The page per company (desktop keeps it in the company's space preferences).
     @State private var pages = [String: CompanySpaceTab]()
     @State private var query = ""
-    @State private var activity: [CompanyActivityRow]?
+    /// Activity for one company: rows read for another company are never shown.
+    @State private var activityRead: (companyID: String, rows: [CompanyActivityRow]?)?
     @State private var activityLoading = false
+    /// Bumped by every Activity read; only the latest read may land.
+    @State private var activityGeneration: UInt64 = 0
+
+    private var activity: [CompanyActivityRow]? {
+        guard let activityRead, activityRead.companyID == presentation.workspace?.id else { return nil }
+        return activityRead.rows
+    }
     @State private var savedPointers: [CompanySavedMessagePointer] = []
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
@@ -254,16 +262,22 @@ struct TeamSpaceScreen: View {
     }
 
     private func reloadActivity() async {
+        activityGeneration &+= 1
+        let generation = activityGeneration
         guard let companyID = presentation.workspace?.id, let load = actions.loadActivity else {
-            activity = nil
+            activityRead = nil
+            activityLoading = false
             return
         }
+        if activityRead?.companyID != companyID { activityRead = nil }
         activityLoading = true
         let rows = await load(companyID)
+        // `presentation` here is this view's copy from before the await, so
+        // the fence is the shared generation: a newer read (a company switch
+        // starts one) or a cancelled task drops this answer.
+        guard generation == activityGeneration, !Task.isCancelled else { return }
         activityLoading = false
-        // A company switch while reading drops the stale answer.
-        guard presentation.workspace?.id == companyID else { return }
-        activity = rows
+        activityRead = (companyID, rows)
     }
 
     private func reloadSaved() async {

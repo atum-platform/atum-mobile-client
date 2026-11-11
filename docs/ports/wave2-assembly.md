@@ -59,3 +59,21 @@ Wave 2 introduced three, now fixed:
 - S6 U12: AC-3 folds Privacy into Account, so the recovery key row can be below
   the fold. The test scrolls to `account.settings.privacy.recovery-key`; U10 likewise
   scrolls to `account.settings.help.legal` at AX5.
+
+## Cross-family review (GPT-6.1 Sol, Codex), 2026-11-11
+
+Four findings, all confirmed and fixed:
+1. Team space Activity kept company A's rows after a switch, and its stale-read
+   guard compared against the view's pre-await copy of `presentation`.
+   Activity is now stored with its company ID and fenced by a shared request
+   generation and task cancellation.
+2. The folded Hatch card carried the regular Hatch item's ownership, but the
+   row status and item sheet looked up only `pet/hatch-first`, so a held
+   `pet/hatch` credit read as unowned (and could offer Top up).
+   `StoreShelfPlan.itemIDs(for:)` resolves both IDs. Rows and the sheet honour
+   the folded ownership and check pending purchases across both.
+3. Saved/Pinned summaries and Activity used raw `memberDisplayName`. Both now go
+   through `MatrixPersonName.name(_:userID:)`, so a Matrix ID, opaque localpart
+   or SDK " (@id)" suffix is never shown as a name.
+4. A shelf jump kept a leftover Store search and could land on filtered results.
+   It now clears the search, lets the full list draw, then scrolls.
