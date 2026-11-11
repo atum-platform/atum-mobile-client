@@ -2,6 +2,8 @@ import Foundation
 
 /// The encrypted SDK owns database contents and locking. This type only gates
 /// directory creation/presence before the SDK can silently create missing files.
+public enum MatrixStoreFailure: Error { case locked, unavailable }
+
 public struct MatrixStorePaths: Sendable {
     public let data, cache: URL
 }
@@ -55,11 +57,26 @@ public struct MatrixStoreDirectory: Sendable {
                       (a[.size] as? NSNumber)?.intValue ?? 0 > 0 else { throw MatrixCustodyFailure.recoveryRequired }
                 #if os(iOS)
                 guard a[.protectionKey] as? String == FileProtectionType.completeUntilFirstUserAuthentication.rawValue else {
-                    throw MatrixCustodyFailure.recoveryRequired
+                    throw MatrixStoreFailure.locked
                 }
                 #endif
             }
+            // SQLite journals/WAL/SHM and cache files must share the directory's
+            // locked-phone accessibility. Never repair protection from the NSE.
+            #if os(iOS)
+            for directory in [paths.data, paths.cache] {
+                for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+                    let a = try FileManager.default.attributesOfItem(atPath: file.path)
+                    guard a[.protectionKey] as? String == FileProtectionType.completeUntilFirstUserAuthentication.rawValue else {
+                        throw MatrixStoreFailure.locked
+                    }
+                }
+            }
+            #endif
             return paths
+        } catch let failure as MatrixStoreFailure { throw failure }
+        catch let error as CocoaError where error.code == .fileReadNoPermission {
+            throw MatrixStoreFailure.locked
         } catch { throw MatrixCustodyFailure.recoveryRequired }
     }
 
@@ -142,7 +159,7 @@ public struct MatrixStoreDirectory: Sendable {
         }
         #if os(iOS)
         guard a[.protectionKey] as? String == FileProtectionType.completeUntilFirstUserAuthentication.rawValue else {
-            throw MatrixCustodyFailure.recoveryRequired
+            throw MatrixStoreFailure.locked
         }
         #endif
     }

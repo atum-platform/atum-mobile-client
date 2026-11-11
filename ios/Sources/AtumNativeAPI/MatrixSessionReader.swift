@@ -32,19 +32,26 @@ public struct MatrixSessionReader: Sendable {
         }
     }
     public func loadCurrent(now: Date = Date()) throws -> MatrixCustodyTicket {
-        guard let envelope = try MatrixCustodyRecord.load(issuer: issuer, clientID: clientID, copy: operations.copy) else {
-            throw MatrixCustodyFailure.recoveryRequired
-        }
-        guard envelope.phase == .ready else { throw MatrixCustodyFailure.interruptedPreparation }
-        guard envelope.refreshAttempt == nil else { throw MatrixCustodyFailure.refreshRequired }
+        let ticket: MatrixCustodyTicket
+        do { ticket = try loadForRefresh() }
+        catch OIDCGrantFailure.refreshInterrupted { throw MatrixCustodyFailure.refreshRequired }
+        let envelope = ticket.envelope
         guard now.timeIntervalSince1970.isFinite, now.timeIntervalSince1970 >= 0 else {
             throw MatrixCustodyFailure.storageUnavailable
         }
         guard now < envelope.session.expiresAt else { throw MatrixCustodyFailure.expired }
         return MatrixCustodyTicket(envelope: envelope)
     }
+    func loadForRefresh() throws -> MatrixCustodyTicket {
+        guard let envelope = try MatrixCustodyRecord.load(issuer: issuer, clientID: clientID, copy: operations.copy) else {
+            throw MatrixCustodyFailure.recoveryRequired
+        }
+        guard envelope.phase == .ready else { throw MatrixCustodyFailure.interruptedPreparation }
+        guard envelope.refreshAttempt == nil else { throw OIDCGrantFailure.refreshInterrupted }
+        return MatrixCustodyTicket(envelope: envelope)
+    }
     public func recheck(_ ticket: MatrixCustodyTicket, now: Date = Date()) throws {
-        guard try loadCurrent(now: now).envelope == ticket.envelope else { throw MatrixCustodyFailure.recoveryRequired }
+        guard try loadCurrent(now: now).envelope == ticket.envelope else { throw MatrixRefreshFailure.recordChanged }
     }
 }
 
@@ -83,6 +90,7 @@ enum MatrixCustodyRecord {
         inventory[kSecReturnData as String] = false
         let (presence, items) = copy(inventory)
         if presence == errSecItemNotFound { return nil }
+        if presence == errSecInteractionNotAllowed { throw MatrixRefreshFailure.keychainLocked }
         guard presence == errSecSuccess, let attributes = items as? [[String: Any]], attributes.count == 1 else {
             throw MatrixCustodyFailure.storageUnavailable
         }
@@ -91,6 +99,7 @@ enum MatrixCustodyRecord {
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecReturnAttributes as String] = true; query[kSecReturnData as String] = true
         let (status, value) = copy(query)
+        if status == errSecInteractionNotAllowed { throw MatrixRefreshFailure.keychainLocked }
         guard status == errSecSuccess, let item = value as? [String: Any],
               let data = item[kSecValueData as String] as? Data, data.count <= 65_536 else {
             throw MatrixCustodyFailure.storageUnavailable

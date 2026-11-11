@@ -46,8 +46,8 @@ public struct MatrixStoredSession: Codable, Sendable, Equatable, CustomStringCon
     public var debugDescription: String { description }
 }
 
-/// Main-process writer. The shared group holds only Matrix credentials/store
-/// passphrase; no domain, recovery or deletion material enters this envelope.
+/// Matrix-only custody writer (app and controlled notification refresh).
+/// The shared group holds only Matrix credentials/store passphrase; no domain, recovery or deletion material enters this envelope.
 /// Refresh journaling preserves the same identity, store and device keys.
 @MainActor public final class MatrixSessionKeychain {
     public static let accessGroup = MatrixCustodyRecord.accessGroup
@@ -55,10 +55,12 @@ public struct MatrixStoredSession: Codable, Sendable, Equatable, CustomStringCon
     private let clients: MASPublicClients
     private let metadata: MASMetadata
     private let operations: any OIDCKeychainOperations
+    private let refreshLockURL: URL?
     public convenience init(generation: UUID, clients: MASPublicClients, metadata: MASMetadata) {
         self.init(generation: generation, clients: clients, metadata: metadata, operations: SystemOIDCKeychain())
     }
-    init(generation: UUID, clients: MASPublicClients, metadata: MASMetadata, operations: any OIDCKeychainOperations) {
+    init(generation: UUID, clients: MASPublicClients, metadata: MASMetadata, operations: any OIDCKeychainOperations, refreshLockURL: URL? = nil) {
+        self.refreshLockURL = refreshLockURL
         self.generation = generation; self.clients = clients; self.metadata = metadata; self.operations = operations
     }
 
@@ -103,23 +105,50 @@ public struct MatrixStoredSession: Codable, Sendable, Equatable, CustomStringCon
         guard let installation = try marker.load(), installation.generation == generation, let envelope = try load(),
               envelope.installationID == installation.id else { throw MatrixCustodyFailure.recoveryRequired }
         guard envelope.phase == .ready else { throw MatrixCustodyFailure.interruptedPreparation }
-        guard envelope.refreshAttempt == nil else { throw MatrixCustodyFailure.refreshRequired }
+        if envelope.refreshAttempt != nil {
+            // A live owner is transient, not an abandoned spend/sign-out signal.
+            let lease = try MatrixRefreshLease.acquire(at: refreshLockURL)
+            defer { withExtendedLifetime(lease) {} }
+            guard try marker.load() == installation, let current = try load(),
+                  current.installationID == installation.id, current.phase == .ready else {
+                throw MatrixCustodyFailure.recoveryRequired
+            }
+            guard current.refreshAttempt == nil else { throw MatrixCustodyFailure.refreshRequired }
+            return MatrixCustodyTicket(envelope: current)
+        }
         return MatrixCustodyTicket(envelope: envelope)
     }
 
     /// Resumes only the original ready Matrix grant. Expiry is intentionally
     /// allowed so controlled refresh can complete before SDK construction.
     public func resumeGrantForRefresh(marker: OIDCInstallationMarker) throws -> OIDCMatrixResume {
+        let lease = try MatrixRefreshLease.acquire(at: refreshLockURL)
+        defer { withExtendedLifetime(lease) {} }
         guard let installation = try marker.load(), installation.generation == generation,
               let envelope = try load(), envelope.installationID == installation.id,
               envelope.phase == .ready, envelope.deviceKeys != nil else {
             throw OIDCGrantFailure.reauthenticationRequired
         }
-        guard envelope.refreshAttempt == nil else { throw OIDCGrantFailure.reauthenticationRequired }
-        let store = RefreshStore(keychain: self, marker: marker, installation: installation)
+        guard envelope.refreshAttempt == nil else { throw OIDCGrantFailure.refreshInterrupted }
+        let store = RefreshStore(keychain: self, marker: marker, installation: installation, identity: envelope)
         return OIDCMatrixResume(store: store, metadata: metadata,
                                 record: Self.grantRecord(envelope),
                                 expectedScope: Self.scope(deviceID: envelope.session.deviceID))
+    }
+
+    /// Extension authority is restricted to this exact shared Matrix envelope.
+    /// No private installation marker or domain/recovery Keychain group is read.
+    func resumeGrantForNotificationRefresh(ticket: MatrixCustodyTicket) throws -> OIDCMatrixResume {
+        let lease = try MatrixRefreshLease.acquire(at: refreshLockURL)
+        defer { withExtendedLifetime(lease) {} }
+        guard let envelope = try load(), envelope == ticket.envelope,
+              envelope.phase == .ready, envelope.deviceKeys != nil else { throw MatrixRefreshFailure.recordChanged }
+        guard envelope.refreshAttempt == nil else { throw OIDCGrantFailure.refreshInterrupted }
+        let installation = OIDCInstallation(id: envelope.installationID, generation: envelope.generation)
+        return OIDCMatrixResume(store: RefreshStore(keychain: self, marker: nil, installation: installation, identity: envelope, strictSnapshot: true),
+                               metadata: metadata, record: Self.grantRecord(envelope),
+                               expectedScope: Self.scope(deviceID: envelope.session.deviceID),
+                               cancelOnCallerCancellation: true)
     }
 
     /// Called only after the SDK has restored the exact session and read actual
@@ -162,9 +191,9 @@ public struct MatrixStoredSession: Codable, Sendable, Equatable, CustomStringCon
                         attempt: envelope.refreshAttempt)
     }
     private func saveRefresh(_ record: OIDCStoredGrant,
-                             marker: OIDCInstallationMarker,
+                             marker: OIDCInstallationMarker?,
                              installation: OIDCInstallation) throws {
-        guard try marker.load() == installation,
+        guard try marker.map({ try $0.load() == installation }) ?? true,
               let current = try load(), current.installationID == installation.id,
               current.phase == .ready, current.deviceKeys != nil else {
             throw OIDCGrantFailure.reauthenticationRequired
@@ -220,23 +249,40 @@ public struct MatrixStoredSession: Codable, Sendable, Equatable, CustomStringCon
     }
     @MainActor private final class RefreshStore: OIDCGrantStore {
         let keychain: MatrixSessionKeychain
-        let marker: OIDCInstallationMarker
+        let marker: OIDCInstallationMarker?
         let installation: OIDCInstallation
-        init(keychain: MatrixSessionKeychain, marker: OIDCInstallationMarker,
-             installation: OIDCInstallation) {
+        let identity: MatrixCustodyRecord.Envelope
+        var expectedEnvelope: MatrixCustodyRecord.Envelope?
+        init(keychain: MatrixSessionKeychain, marker: OIDCInstallationMarker?,
+             installation: OIDCInstallation, identity: MatrixCustodyRecord.Envelope, strictSnapshot: Bool = false) {
             self.keychain = keychain; self.marker = marker; self.installation = installation
+            self.identity = identity
+            expectedEnvelope = strictSnapshot ? identity : nil
         }
         func load() throws -> OIDCStoredGrant? {
-            guard try marker.load() == installation,
+            guard try marker.map({ try $0.load() == installation }) ?? true,
                   let envelope = try keychain.load(),
                   envelope.installationID == installation.id,
                   envelope.phase == .ready, envelope.deviceKeys != nil else {
                 throw OIDCGrantFailure.reauthenticationRequired
             }
+            if let expectedEnvelope, envelope != expectedEnvelope { throw MatrixRefreshFailure.recordChanged }
+            guard envelope.session.userID == identity.session.userID,
+                  envelope.session.deviceID == identity.session.deviceID,
+                  envelope.session.homeserver == identity.session.homeserver,
+                  envelope.passphrase == identity.passphrase,
+                  envelope.deviceKeys == identity.deviceKeys else { throw MatrixRefreshFailure.recordChanged }
             return MatrixSessionKeychain.grantRecord(envelope)
+        }
+        func acquireRefreshLease() throws -> MatrixRefreshLease? {
+            try MatrixRefreshLease.acquire(at: keychain.refreshLockURL)
         }
         func save(_ record: OIDCStoredGrant) throws {
             try keychain.saveRefresh(record, marker: marker, installation: installation)
+            if expectedEnvelope != nil {
+                guard let updated = try keychain.load() else { throw MatrixRefreshFailure.recordChanged }
+                expectedEnvelope = updated
+            }
         }
     }
 }
@@ -265,17 +311,19 @@ public struct MatrixCustodyTicket: Sendable, CustomStringConvertible, CustomDebu
     public var debugDescription: String { description }
 }
 
-/// Opaque main-process authority for rotating only the existing Matrix grant.
+/// Opaque authority for rotating only the existing Matrix grant.
 /// It cannot create or switch the local Matrix identity or SDK store.
 @MainActor public struct OIDCMatrixResume: CustomStringConvertible, CustomDebugStringConvertible {
     let store: any OIDCGrantStore
     let metadata: MASMetadata
     let record: OIDCStoredGrant
     let expectedScope: String
+    let cancelOnCallerCancellation: Bool
     fileprivate init(store: any OIDCGrantStore, metadata: MASMetadata,
-                     record: OIDCStoredGrant, expectedScope: String) {
+                     record: OIDCStoredGrant, expectedScope: String, cancelOnCallerCancellation: Bool = false) {
         self.store = store; self.metadata = metadata; self.record = record
         self.expectedScope = expectedScope
+        self.cancelOnCallerCancellation = cancelOnCallerCancellation
     }
     public nonisolated var description: String { "OIDCMatrixResume(<secrets redacted>)" }
     public nonisolated var debugDescription: String { description }
