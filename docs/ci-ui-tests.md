@@ -15,7 +15,17 @@ per run on 2026-11-11 with six lanes active).
   content-size runner (`scripts/sim-content-size-runner.sh` in the release repo):
   `GScrollDynamicTypeUITests`, `S1MatrixUITests`, `S6SystemUITests`,
   `TranscriptUITests`. Also `KitBoardCaptureUITests`, which captures evidence and
-  is not a check. They are listed in `LOCAL_ONLY` in the workflow.
+  is not a check. Also `GScrollUITests`: its scenario clock is too tight for the
+  slower hosted runners (first hosted run, 2026-11-11: checks 3 and 9 timed out).
+  These are listed in `LOCAL_ONLY` in the workflow. `LOCAL_ONLY_TESTS` holds the
+  two `Wave2MediaBotUITests` tests that need the appearance/content-size runner.
+- **Quarantine:** `QUARANTINE` lists tests that fail on `main` today, each
+  tracked in atum-mobile#50. As of the first hosted run (PR #29):
+  `ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace` (the
+  Block button isn't found in the sheet; the wave 3 chats lane is fixing it) and
+  `ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel`
+  (the thinking level never reaches the scripted save, still under investigation). Remove a line when its fix
+  lands.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

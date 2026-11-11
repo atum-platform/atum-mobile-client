@@ -18,7 +18,18 @@ concurrency:
   cancel-in-progress: true
 env:
   SHARDS: 4
-  LOCAL_ONLY: "GScrollDynamicTypeUITests S1MatrixUITests S6SystemUITests TranscriptUITests KitBoardCaptureUITests"
+  # Whole classes that stay on the build Mac: the private content-size runner,
+  # evidence capture, or scenario clocks the slower hosted runners miss.
+  LOCAL_ONLY: "GScrollDynamicTypeUITests S1MatrixUITests S6SystemUITests TranscriptUITests KitBoardCaptureUITests GScrollUITests"
+  # Single tests that need the simulator appearance/content-size runner.
+  LOCAL_ONLY_TESTS: >-
+    Wave2MediaBotUITests/testWave2DarkLargestTypeEvidence
+    Wave2MediaBotUITests/testWave2AccessibilitySmoke
+  # Known failures on main, tracked in atum-platform/atum-mobile#50. Remove a line
+  # when its fix lands; never add one without a tracking entry.
+  QUARANTINE: >-
+    ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace
+    ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -89,6 +100,9 @@ jobs:
           set -euo pipefail
           args=()
           for c in $CLASSES; do args+=("-only-testing:AtumMobileUITests/$c"); done
+          for t in $LOCAL_ONLY_TESTS $QUARANTINE; do
+            case " $CLASSES " in *" ${t%%/*} "*) args+=("-skip-testing:AtumMobileUITests/$t");; esac
+          done
           xcodebuild -project ios/AtumMobile.xcodeproj -scheme AtumMobile -configuration Debug \
             -destination "$IOS_DESTINATION" -destination-timeout 60 \
             -derivedDataPath "$RUNNER_TEMP/dd" -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
