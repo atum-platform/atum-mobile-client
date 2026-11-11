@@ -377,7 +377,7 @@ struct ScriptedHomeHost: View {
     private var scriptedStore: LiveProductStoreRead {
         LiveProductStoreRead(
             availability: .ready,
-            walletValue: "12.400",
+            walletMicroProtons: 12_400_000_000,
             items: [LiveProductStoreItem(
                 id: "featured", kind: .skill,
                 title: design.text("desktop.atum.discover.featuredSection"),

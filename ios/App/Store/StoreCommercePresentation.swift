@@ -171,8 +171,9 @@ enum StoreOutcomePresentation {
         }
     }
 
-    static func protons(_ microProtons: Int64) -> String {
-        MicroProtonFormat.string(microProtons, locale: Locale.current.identifier)
+    /// A price in the Store's one Proton format (`ProtonAmountFormat`).
+    static func protons(_ microProtons: Int64, locale: String) -> String {
+        ProtonAmountFormat.price(microProtons, locale: locale)
     }
 
     /// Store timestamps are RFC 3339 with up to six fractional digits; a date
@@ -202,7 +203,7 @@ enum StorePricePresentation {
 
     static func parts(_ offer: StoreCatalogOffer, locale: String,
                       copy: (String, [String]) -> String) -> [String] {
-        func amount(_ value: Int64) -> String { MicroProtonFormat.string(value, locale: locale) }
+        func amount(_ value: Int64) -> String { ProtonAmountFormat.price(value, locale: locale) }
         return offer.priceParts.map { part in
             switch part {
             case .free: return copy(StoreCopyKey.free, [])
