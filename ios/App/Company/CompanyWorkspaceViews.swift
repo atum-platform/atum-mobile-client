@@ -18,6 +18,12 @@ import SwiftUI
 // menu (Company overview, Add company, Leave company; entries the phone cannot
 // open yet are not drawn), and the Invite teammates footer once an invite
 // sheet exists.
+//
+// Wave 3 (TS-11, TS-13, docs/ports/w3-team-space.md): Invite teammates and
+// Invite people open "Add people to {company}" (with the share link where the
+// server has links on), "Join with invite link" sits in the empty state and the
+// create form, and the channel list has Favorites, Channels with "+" (Create a
+// channel, for admins) and a collapsed Archived.
 
 struct TeamSpacePresentation: Equatable {
     var isLoading: Bool
@@ -43,6 +49,13 @@ struct TeamSpacePresentation: Equatable {
     /// The company Store answers with something to get (Marketplace page). The
     /// phone has no company Store read yet, so this stays false.
     var marketplaceAvailable = false
+    /// What the invite sheet may do in the open company (TS-11).
+    var inviteAbilities = CompanyInviteAbilities.none
+    /// The viewer may create a channel in the open company (TS-13).
+    var canCreateChannel = false
+    /// Favorites / Channels / Archived sections: only in the desktop's C2
+    /// channels mode (`CompanyTeamSpaceProfile.channels`); a flat list before it.
+    var sectionsChannels = false
 }
 
 struct TeamSpaceActions {
@@ -70,8 +83,9 @@ struct TeamSpaceActions {
     /// The account's Saved pointers (TS-6); nil when unreadable.
     var loadSavedPointers: (() async -> [CompanySavedMessagePointer]?)?
     var loadSavedRows: (([CompanySavedMessagePointer]) async -> [CompanySavedRow])?
-    /// The invite sheet (TS-11). Nil until it exists, so Invite teammates is not drawn.
-    var invite: ((String) -> Void)?
+    /// The invite sheet, invite links, join with a link and channel create (TS-11, TS-13).
+    /// Nil keeps all of them undrawn.
+    var invites: CompanyInviteActions?
 }
 
 /// Workplace is a separate mode from Personal Home. It reuses the existing
@@ -90,6 +104,10 @@ struct TeamSpaceScreen: View {
     @State private var showsOverview = false
     @State private var showsActivity = false
     @State private var showsSaved = false
+    @State private var showsInvite = false
+    @State private var showsJoin = false
+    @State private var showsCreateChannel = false
+    @State private var archivedExpanded = false
     /// The page per company (desktop keeps it in the company's space preferences).
     @State private var pages = [String: CompanySpaceTab]()
     @State private var query = ""
@@ -214,7 +232,8 @@ struct TeamSpaceScreen: View {
                 CompanyCreateForm(design: design, canCreate: presentation.canCreate,
                                   create: actions.createCompany,
                                   nameEdited: { actions.createNameEdited?() },
-                                  onCreated: { showsCreate = false })
+                                  onCreated: { showsCreate = false },
+                                  invites: actions.invites)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(design.text("src.matrix.chat-copy.copies.cancel")) { showsCreate = false }
@@ -228,6 +247,45 @@ struct TeamSpaceScreen: View {
         // The right to create can be taken away while the form is open.
         .onChange(of: presentation.canCreate) { _, canCreate in
             if !canCreate { showsCreate = false }
+        }
+        .sheet(isPresented: $showsInvite) {
+            if let workspace = presentation.workspace, let invites = actions.invites {
+                CompanyInviteSheet(design: design, companyID: workspace.id, companyName: workspace.title,
+                                   abilities: presentation.inviteAbilities, actions: invites,
+                                   loadMatrixThumbnail: actions.loadMatrixThumbnail)
+                    .id(workspace.id)
+                    .atumDesign(visual: atum)
+            }
+        }
+        // An invite sheet for a company the viewer may no longer invite to closes.
+        .onChange(of: presentation.inviteAbilities.invite) { _, allowed in
+            if !allowed { showsInvite = false }
+        }
+        .onChange(of: presentation.workspace?.id) { _, _ in
+            showsInvite = false
+            showsCreateChannel = false
+        }
+        .sheet(isPresented: $showsJoin) {
+            if let invites = actions.invites {
+                CompanyInviteJoinSheet(design: design, actions: invites,
+                                       onJoined: { _ in showsJoin = false })
+                    .atumDesign(visual: atum)
+            }
+        }
+        .sheet(isPresented: $showsCreateChannel) {
+            if let workspace = presentation.workspace, let invites = actions.invites {
+                CompanyChannelCreateSheet(design: design, companyID: workspace.id,
+                                          create: invites.createChannel,
+                                          onCreated: { roomID in
+                                              if let roomID { actions.openRoom(roomID) }
+                                          })
+                    .id(workspace.id)
+                    .atumDesign(visual: atum)
+                    .presentationDetents([.medium, .large])
+            }
+        }
+        .onChange(of: presentation.canCreateChannel) { _, allowed in
+            if !allowed { showsCreateChannel = false }
         }
         .confirmationDialog(copy.leaveTitle(company: presentation.workspace?.title ?? ""),
                             isPresented: $confirmsLeave, titleVisibility: .visible) {
@@ -320,25 +378,37 @@ struct TeamSpaceScreen: View {
                 .listSectionSeparator(.hidden)
             }
             if let workspace = presentation.workspace {
+                let plan = channelPlan(workspace)
+                if !plan.favorites.isEmpty {
+                    Section {
+                        ForEach(plan.favorites) { channel in channelListRow(channel) }
+                    } header: {
+                        sectionHeader(team.favorites, id: "company.channels.favorites")
+                    }
+                    .listSectionSeparator(.hidden)
+                }
                 Section {
                     if workspace.channelsLoading {
                         note(copy.text(CompanyCopyKey("loadingChannels")))
                     } else if workspace.channels.isEmpty {
                         note(copy.text(CompanyCopyKey("noChannels")))
                     } else {
-                        ForEach(workspace.channels.filter {
-                            TeamSpaceSearch.matches([$0.title], needle: needle, locale: locale)
-                        }) { channel in
-                            channelRow(channel)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                        }
+                        ForEach(plan.channels) { channel in channelListRow(channel) }
                     }
                 } header: {
-                    sectionHeader(copy.channelsTitle, id: "company.section")
+                    channelsHeader
                 }
                 .listSectionSeparator(.hidden)
+                if !plan.archived.isEmpty {
+                    Section {
+                        if archivedExpanded {
+                            ForEach(plan.archived) { channel in channelListRow(channel) }
+                        }
+                    } header: {
+                        archivedHeader(count: plan.archived.count)
+                    }
+                    .listSectionSeparator(.hidden)
+                }
                 // Direct messages is always there for a loaded company (desktop
                 // `company-workspace.tsx:2996`): You and the Chief of Staff come first;
                 // only the conversation rows and "+" wait for the conversations family.
@@ -348,9 +418,9 @@ struct TeamSpaceScreen: View {
                                         rowActions: actions.directMessages,
                                         loadMatrixThumbnail: actions.loadMatrixThumbnail,
                                         needle: needle)
-                if presentation.menu.invite, let invite = actions.invite {
+                if presentation.menu.invite, actions.invites != nil {
                     Section {
-                        Button { invite(workspace.id) } label: {
+                        Button { showsInvite = true } label: {
                             Label { Text(verbatim: team.inviteTeammates) } icon: { Image(atum.symbol(.plus)) }
                                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                                 .frame(minHeight: 44)
@@ -419,6 +489,17 @@ struct TeamSpaceScreen: View {
                     .font(.subheadline)
                     .foregroundStyle(atum.color(.soft, scheme: scheme))
                     .multilineTextAlignment(.center)
+            }
+            // A person with no company joins one with a link, whether or not they may create.
+            if actions.invites != nil {
+                Button { showsJoin = true } label: {
+                    Text(verbatim: team.joinWithInviteLink)
+                        .font(.body.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("company.join.open")
             }
         }
         .padding(.horizontal, 32)
@@ -521,8 +602,8 @@ struct TeamSpaceScreen: View {
                     }
                     .accessibilityIdentifier("company.overview.open")
                 }
-                if allowed.invite, let invite = actions.invite {
-                    Button { invite(workspace.id) } label: {
+                if allowed.invite, actions.invites != nil {
+                    Button { showsInvite = true } label: {
                         Label { Text(verbatim: team.invitePeople) } icon: { Image(atum.symbol(.mail)) }
                     }
                     .accessibilityIdentifier("company.invite")
@@ -584,6 +665,70 @@ struct TeamSpaceScreen: View {
         .accessibilityHint(Text(verbatim: copy.companiesTitle))
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("company.header")
+    }
+
+    // MARK: Channel sections (TS-13)
+
+    private func channelPlan(_ workspace: CompanyWorkspacePresentation) -> CompanyChannelSectionPlan<CompanyChannelRow> {
+        .split(workspace.channels, isFavourite: \.isFavourite, isArchived: \.isArchived,
+               matches: { TeamSpaceSearch.matches([$0.title], needle: needle, locale: locale) },
+               sectioned: presentation.sectionsChannels)
+    }
+
+    private func channelListRow(_ channel: CompanyChannelRow) -> some View {
+        channelRow(channel)
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+
+    /// "Channels" and, for those who may create one, the desktop's "+" Add channels menu.
+    private var channelsHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            sectionHeader(copy.channelsTitle, id: "company.section")
+            Spacer(minLength: 8)
+            if presentation.canCreateChannel, actions.invites != nil {
+                Menu {
+                    Button { showsCreateChannel = true } label: {
+                        Label { Text(verbatim: team.createChannelItem) } icon: { Image(atum.symbol(.plus)) }
+                    }
+                    .accessibilityIdentifier("company.channel.create.open")
+                } label: {
+                    Image(atum.symbol(.plus))
+                        .font(.body)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(Text(verbatim: team.addChannels))
+                .accessibilityIdentifier("company.channel.add")
+            }
+        }
+    }
+
+    /// "Archived", collapsed until opened (desktop `defaultOpen={false}`).
+    private func archivedHeader(count: Int) -> some View {
+        Button { archivedExpanded.toggle() } label: {
+            HStack(spacing: 6) {
+                Image(atum.symbol(archivedExpanded ? .chevronDown : .chevronRight))
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .accessibilityHidden(true)
+                Text(verbatim: team.archivedSection)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .textCase(nil)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(Text(verbatim: count.formatted()))
+        .accessibilityIdentifier("company.channels.archived")
     }
 
     // MARK: Channel row
@@ -784,7 +929,8 @@ struct CompanySwitcherSheet: View {
                             CompanyCreateForm(design: design, canCreate: presentation.canCreate,
                                               create: actions.createCompany,
                                               nameEdited: { actions.createNameEdited?() },
-                                              onCreated: { dismiss() })
+                                              onCreated: { dismiss() },
+                                              invites: actions.invites)
                         } label: {
                             HStack(spacing: 12) {
                                 Image(atum.symbol(.plus))
@@ -883,7 +1029,10 @@ struct CompanyCreateForm: View {
     let create: (String) async -> CompanyCreateFailure?
     let nameEdited: () -> Void
     let onCreated: () -> Void
+    /// "Join with invite link" (desktop create dialog step 1); nil hides it.
+    var invites: CompanyInviteActions? = nil
 
+    @State private var showsJoin = false
     @State private var name = ""
     /// The shaped name of the last try, so an edit of it can be told from the
     /// first typing.
@@ -940,6 +1089,25 @@ struct CompanyCreateForm: View {
                 }
                 .disabled(!canSubmit)
                 .accessibilityIdentifier("company.create.submit")
+            }
+            if invites != nil {
+                Section {
+                    Button { showsJoin = true } label: {
+                        Label { Text(verbatim: TeamSpaceCopy(design: design).joinWithInviteLink) }
+                            icon: { Image(atum.symbol(.link)) }
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityIdentifier("company.join.open")
+                }
+            }
+        }
+        .sheet(isPresented: $showsJoin) {
+            if let invites {
+                CompanyInviteJoinSheet(design: design, actions: invites, onJoined: { _ in
+                    showsJoin = false
+                    onCreated()
+                })
+                .atumDesign(visual: AtumVisualSystem(design: design))
             }
         }
         .navigationTitle(copy.newCompanyTitle)
