@@ -28,6 +28,7 @@ let package = Package(
                                 .copy("Fixtures/company-workspace-v1.1"),
                                 .copy("Fixtures/company-private-cos"),
                                 .copy("Fixtures/company-workspace-v1.5"),
+                                .copy("Fixtures/company-workspace-v1.2"),
                                 .copy("Fixtures/company-workspace-v1.3-capabilities"),
                                 .copy("Fixtures/mobile-drive-v1"),
                                 .copy("Fixtures/opencloud-drive-graph"),

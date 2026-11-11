@@ -35,7 +35,7 @@ public struct AgentsRead: Sendable {
 /// Main-process-only client for explicit operations on the fixed native domain API. The
 /// refresh coordinator remains the only authority that can expose a bearer;
 /// SwiftUI receives typed domain values and safe failures only.
-@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, ApplePurchasesAPI {
+@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, CompanyInvitesAPI, ApplePurchasesAPI {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
     private static let agentLifecycleURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents/lifecycle")!
@@ -49,6 +49,8 @@ public struct AgentsRead: Sendable {
     private static let cloudDisclosureURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/cloud/disclosure")!
     private static let companiesURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/companies")!
     private static let companyCapabilitiesURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/company-capabilities")!
+    private static let inviteLinkPreviewURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/invite-links/preview")!
+    private static let inviteLinkRedeemURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/invite-links/redeem")!
     private static let privateCosCapabilityURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/cloud/controller/company-private-cos")!
     private static let driveAccountURL = DriveContract.accountURL
 
@@ -493,6 +495,97 @@ public struct AgentsRead: Sendable {
         return try CompanyWorkspaceWire.decodeSnapshotV11(data)
     }
 
+    // MARK: Company invitations, invite links and channel create (TS-11, TS-13)
+
+    /// `GET /company-capabilities` under wire 1.3 with `Atum-Company-Invites: 1`.
+    public func companyInviteReadiness() async throws -> CompanyInviteReadiness {
+        try decodeConversationAnswer(
+            try await companyData(url: Self.companyCapabilitiesURL, method: "GET", body: nil, wire: .v1_3,
+                                  extraHeaders: [CompanyInviteReadiness.profileHeader: CompanyInviteReadiness.profile])
+        ) { try NativeAPI.decode(CompanyInviteReadiness.self, from: $0) }
+    }
+
+    /// One invitation by handle: the 1.1 `invite` (answered with the company's
+    /// snapshot) or, on C1, the 1.3 durable invitation.
+    public func inviteToCompany(companyID: NativeID, requestID: NativeID, handle: String,
+                                method: CompanyInviteMethod) async throws {
+        let checked: String
+        do { checked = try CompanyHandle.checked(handle) } catch { throw CompanyAPIError.invalid }
+        switch method {
+        case .legacy:
+            let body = try conversationBody(CompanyLegacyInviteRequest(requestId: requestID, memberHandle: checked))
+            let data = try await companyData(url: try companyURL(companyID, suffix: "invite"),
+                                             method: "POST", body: body)
+            let snapshot = try CompanyWorkspaceWire.decodeSnapshotV11(data)
+            guard snapshot.company.id == companyID else { throw CompanyAPIError.invalid }
+        case .admin:
+            let body = try conversationBody(CompanyInvitationCreateRequest(requestId: requestID, memberHandle: checked))
+            let answer = try decodeConversationAnswer(
+                try await companyData(url: try companyURL(companyID, suffix: "invitations"),
+                                      method: "POST", body: body, wire: .v1_3)
+            ) { try NativeAPI.decode(CompanyInvitationCreateAnswer.self, from: $0) }
+            guard answer.companyId == companyID, answer.targetHandle == checked else {
+                throw CompanyAPIError.invalid
+            }
+        }
+    }
+
+    public func companyInviteLinks(companyID: NativeID) async throws -> [CompanyInviteLinkSummary] {
+        try decodeConversationAnswer(
+            try await companyData(url: try companyURL(companyID, suffix: "invite-links"),
+                                  method: "GET", body: nil, wire: .v1_2)
+        ) { try CompanyInviteWire.decodeLinkList($0) }
+    }
+
+    public func createCompanyInviteLink(companyID: NativeID, requestID: NativeID) async throws
+        -> CompanyInviteLinkCreated {
+        let body = try conversationBody(CompanyInviteLinkCreateRequest(requestId: requestID))
+        let created = try decodeConversationAnswer(
+            try await companyData(url: try companyURL(companyID, suffix: "invite-links"),
+                                  method: "POST", body: body, wire: .v1_2)
+        ) { try CompanyInviteWire.decodeLinkCreated($0) }
+        if case let .created(secret) = created, secret.companyId != companyID { throw CompanyAPIError.invalid }
+        return created
+    }
+
+    public func revokeCompanyInviteLink(companyID: NativeID, linkID: NativeID, requestID: NativeID) async throws {
+        let body = try conversationBody(CompanyInviteLinkRevokeRequest(requestId: requestID))
+        let data = try await companyData(url: try companyURL(companyID, suffix: "invite-links/" + linkID.rawValue + "/revoke"),
+                                         method: "POST", body: body, wire: .v1_2)
+        try decodeConversationAnswer(data) { try CompanyInviteWire.decodeRevoked($0, linkID: linkID) }
+    }
+
+    public func previewCompanyInviteLink(token: CompanyInviteLinkToken) async throws -> CompanyInviteLinkPreview {
+        let body = try conversationBody(CompanyInviteLinkPreviewRequest(token: token))
+        return try decodeConversationAnswer(
+            try await companyData(url: Self.inviteLinkPreviewURL, method: "POST", body: body, wire: .v1_2)
+        ) { try NativeAPI.decode(CompanyInviteLinkPreview.self, from: $0) }
+    }
+
+    public func redeemCompanyInviteLink(requestID: NativeID, token: CompanyInviteLinkToken) async throws
+        -> CompanyInviteLinkRedeemed {
+        let body = try conversationBody(CompanyInviteLinkRedeemRequest(requestId: requestID, token: token))
+        return try decodeConversationAnswer(
+            try await companyData(url: Self.inviteLinkRedeemURL, method: "POST", body: body, wire: .v1_2)
+        ) { try NativeAPI.decode(CompanyInviteLinkRedeemed.self, from: $0) }
+    }
+
+    /// `POST /companies/{id}/channels` under wire 1.1 (the desktop's flat create).
+    public func createCompanyChannel(companyID: NativeID, requestID: NativeID,
+                                     displayName: String) async throws -> CompanyChannelEntry {
+        guard let name = CompanyChannelName.normalized(displayName), name == displayName else {
+            throw CompanyAPIError.invalid
+        }
+        let body = try conversationBody(CompanyChannelCreateRequest(requestId: requestID, displayName: name))
+        let data = try await companyData(url: try companyURL(companyID, suffix: "channels"),
+                                         method: "POST", body: body)
+        guard case let .v1_1(entry) = try CompanyWorkspaceWire.decodeChannelSnapshot(data) else {
+            throw CompanyWireRefusal.v1Answer
+        }
+        guard entry.channel.companyId == companyID else { throw CompanyAPIError.invalid }
+        return entry
+    }
+
     // MARK: Company conversations (wire 1.5)
 
     /// `GET /company-capabilities` under `Atum-Company-Wire: 1.3`: whether this
@@ -607,13 +700,15 @@ public struct AgentsRead: Sendable {
 
     private func companyData(url: URL, method: String, body: Data?,
                              wire: CompanyWire = .v1_1,
-                             acceptedStatuses: Set<Int> = [200]) async throws -> Data {
+                             acceptedStatuses: Set<Int> = [200],
+                             extraHeaders: [String: String] = [:]) async throws -> Data {
         do {
-            return try await requestData(url: url, method: method, body: body,
-                                         acceptsAssistantNameRefusal: false, companyWire: wire,
-                                         maximumRequestBodyBytes: 4_096,
-                                         maximumResponseBodyBytes: CompanyWorkspaceWire.maximumBytes,
-                                         acceptedStatuses: acceptedStatuses)
+            return try await response(url: url, method: method, body: body,
+                                      acceptsAssistantNameRefusal: false, companyWire: wire,
+                                      maximumRequestBodyBytes: 4_096,
+                                      maximumResponseBodyBytes: CompanyWorkspaceWire.maximumBytes,
+                                      extraHeaders: extraHeaders,
+                                      acceptedStatuses: acceptedStatuses).body
         } catch let failure as NativeDomainClientFailure {
             throw CompanyAPIError(failure)
         } catch let refusal as CompanyWireRefusal {
@@ -1147,6 +1242,10 @@ public struct AgentsRead: Sendable {
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
                   }
+                  if name == CompanyInviteReadiness.profileHeader {
+                      return value == CompanyInviteReadiness.profile && method == "GET"
+                          && url.path == Self.companyCapabilitiesURL.path && companyWire == .v1_3
+                  }
                   return name == AgentHomeContract.wireHeader && value == AgentHomeContract.wireVersion
               })
         else { throw NativeDomainClientFailure.invalidRequest }
@@ -1246,6 +1345,7 @@ public struct AgentsRead: Sendable {
                             Self.walletURL.path, Self.walletHistoryURL.path, Self.aliasLookupURL.path,
                             Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
+                            Self.inviteLinkPreviewURL.path, Self.inviteLinkRedeemURL.path,
                             Self.driveAccountURL.path, Self.privateCosCapabilityURL.path]
         let storeRoot = Self.baseURL.path + "/store/"
         let storeTail = String(url.path.dropFirst(storeRoot.count))
@@ -1292,7 +1392,14 @@ public struct AgentsRead: Sendable {
             .split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard let first = parts.first, (try? NativeID(first)) != nil else { return false }
         if parts.count == 1 { return true }
-        if parts.count == 2 { return ["accept", "leave", "channels", "conversations", "private-cos"].contains(parts[1]) }
+        if parts.count == 2 {
+            return ["accept", "leave", "channels", "conversations", "private-cos", "invite", "invitations",
+                    "invite-links"].contains(parts[1])
+        }
+        // invite-links/{id}/revoke (wire 1.2)
+        if parts[1] == "invite-links" {
+            return parts.count == 4 && (try? NativeID(parts[2])) != nil && parts[3] == "revoke"
+        }
         // conversations/{id} and conversations/{id}/expand|hidden
         guard parts[1] == "conversations", (try? NativeID(parts[2])) != nil else { return false }
         if parts.count == 3 { return true }

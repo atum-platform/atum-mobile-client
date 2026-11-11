@@ -3596,6 +3596,7 @@ final class LiveAppModel {
                 ?? self?.liveMatrix?.invites.first(where: { $0.roomID == roomID })?.displayName
         }
         companyWorkspace.conversationsProvider = { [weak self] in self?.domainClient }
+        companyWorkspace.invitesProvider = { [weak self] in self?.domainClient }
         companyWorkspace.presence = { [weak self] roomID in
             guard let self, let matrix = self.liveMatrix else { return .unknown }
             if matrix.rooms.contains(where: { $0.roomID == roomID }) { return .joined }

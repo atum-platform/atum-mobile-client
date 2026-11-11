@@ -19,6 +19,13 @@ public struct CompanyCapabilities: Decodable, Equatable, Sendable {
     public let supportedWireVersions: [String]
     public let companyConversationsFeature: Bool
     public let companyConversationsActive: Bool
+    /// Team administration (C1) is on for this tenant.
+    public let teamAdminActive: Bool
+    public let channelAdmissionFeature: Bool
+    /// Channel admission (C2) is on for this tenant.
+    public let channelAdmissionActive: Bool
+    /// The hosted room controller is ready, so a new channel can become a room.
+    public let roomReconciliationReady: Bool
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
@@ -42,25 +49,28 @@ public struct CompanyCapabilities: Decodable, Equatable, Sendable {
         for key in ["ownership", "invitationLifecycle", "capabilityDiscovery"] {
             guard try features.value(key, as: Bool.self) else { throw ContractViolation.invalidValue }
         }
-        _ = try features.value("channelAdmission", as: Bool.self)
+        channelAdmissionFeature = try features.value("channelAdmission", as: Bool.self)
         companyConversationsFeature = try features.value("companyConversations", as: Bool.self)
 
         let activation = try c.nestedContainer(keyedBy: Field.self, forKey: Field("activation"))
         try activation.closed(["teamAdmin", "channelAdmission", "companyConversations"])
+        var active = [String: Bool]()
         for key in ["teamAdmin", "channelAdmission"] {
-            guard ["inactive", "active"].contains(try activation.value(key, as: String.self)) else {
-                throw ContractViolation.invalidValue
-            }
+            let value = try activation.value(key, as: String.self)
+            guard ["inactive", "active"].contains(value) else { throw ContractViolation.invalidValue }
+            active[key] = value == "active"
         }
+        teamAdminActive = active["teamAdmin"] ?? false
+        channelAdmissionActive = active["channelAdmission"] ?? false
         let conversations = try activation.value("companyConversations", as: String.self)
         guard ["inactive", "active"].contains(conversations) else { throw ContractViolation.invalidValue }
         companyConversationsActive = conversations == "active"
 
         let controller = try c.nestedContainer(keyedBy: Field.self, forKey: Field("controller"))
         try controller.closed(["roomReconciliation"])
-        guard ["not_ready", "ready"].contains(try controller.value("roomReconciliation", as: String.self)) else {
-            throw ContractViolation.invalidValue
-        }
+        let reconciliation = try controller.value("roomReconciliation", as: String.self)
+        guard ["not_ready", "ready"].contains(reconciliation) else { throw ContractViolation.invalidValue }
+        roomReconciliationReady = reconciliation == "ready"
     }
 
     /// "Direct messages" is offered only when all three say so: the wire is
