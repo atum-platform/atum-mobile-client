@@ -219,7 +219,9 @@ final class S6SystemUITests: TranscriptUITestCase {
 
         let partial = launchS6("store.partial")
         XCTAssertTrue(element(partial, "store.catalog").waitForExistence(timeout: 15))
-        XCTAssertTrue(partial.staticTexts["Chưa có số dư"].exists)
+        // Desktop `discover-view.tsx` drops the header balance when the wallet
+        // has not loaded; "Chưa có số dư" belongs to the retired legacy wallet.
+        XCTAssertFalse(element(partial, "store.balance").exists)
         XCTAssertFalse(partial.buttons["Mở"].exists)
         keepScreenshot("U-S6-8-store-partial-light-vi", of: partial)
         partial.terminate()
@@ -576,7 +578,7 @@ final class S6SystemUITests: TranscriptUITestCase {
         // where the name is edited in place.
         let card = element(app, "account.settings.index.account")
         XCTAssertTrue(card.waitForExistence(timeout: 3), file: file, line: line)
-        XCTAssertTrue(card.label.contains("An") && card.label.contains("@an"), file: file, line: line)
+        XCTAssertTrue(card.label.contains("An") && card.label.contains("@an_nguyen"), file: file, line: line)
         // The desktop's pages less Advanced (desktop-only tools); Protons,
         // Privacy and this phone fold into Account.
         for page in ["account", "assistants", "connections", "general", "help"] {
