@@ -31,6 +31,7 @@ struct ScriptedHomeHost: View {
     @State private var scriptedCompany = "anka"
     @State private var scriptedMuted = [String: Bool]()
     @State private var scriptedLater = Set<String>()
+    @State private var scriptedBlocked = Set<String>()
     @Environment(\.colorScheme) private var scheme
     private let design: LiveDesign
 
@@ -62,7 +63,7 @@ struct ScriptedHomeHost: View {
                     accountName: Self.accountName,
                     presentation: HomePresentation(state: rows.isEmpty ? .empty : .ready,
                                                    rows: Self.workingRows(Self.testHomeRows(roster, productRows: rows))),
-                    actions: HomeActions(
+                    actions: personalMenu(HomeActions(
                         openRoom: { router.open(roomId: $0) },
                         joinInvitation: { roomID in
                             try? await Task.sleep(for: .seconds(1))
@@ -133,7 +134,7 @@ struct ScriptedHomeHost: View {
                             rows.removeAll { $0.id == roomID }
                             UITestProbe.append("\(action.rawValue) \(roomID)", to: "home-actions.txt")
                         }
-                    )
+                    ))
                 )
                 .navigationDestination(for: String.self) { roomID in
                     ZStack {
@@ -384,6 +385,36 @@ struct ScriptedHomeHost: View {
                 glyph: "◉", featured: true, price: "24"
             )]
         )
+    }
+
+    /// HC-7: the long-press's Low priority, Rename and Block, recorded in
+    /// `home-actions.txt`. A person row's peer is a fixed scripted ID.
+    private func personalMenu(_ base: HomeActions) -> HomeActions {
+        var actions = base
+        actions.setLowPriority = { roomID, value in
+            update(roomID) { $0.withRosterState(lowPriorityOverride: value) }
+            UITestProbe.append("lowPriority \(roomID) \(value)", to: "home-actions.txt")
+        }
+        actions.rename = ChatRenameActions(
+            request: { roomID in
+                guard let room = rows.first(where: { $0.id == roomID }) else { return nil }
+                return ChatRenameRequest(roomID: roomID, current: room.title, shared: false)
+            },
+            save: { request, name in
+                UITestProbe.append("rename \(request.roomID) \(ChatPrivateTitle.normalized(name))",
+                                   to: "home-actions.txt")
+                return true
+            })
+        actions.blockablePeer = { roomID in
+            rows.first(where: { $0.id == roomID && $0.kind == .people }) == nil ? nil : "@peer:" + roomID
+        }
+        actions.blockedUserIDs = { scriptedBlocked }
+        actions.setBlocked = { userID, blocked in
+            if blocked { scriptedBlocked.insert(userID) } else { scriptedBlocked.remove(userID) }
+            UITestProbe.append("blocked \(userID) \(blocked)", to: "home-actions.txt")
+            return true
+        }
+        return actions
     }
 
     private func update(_ roomID: String, transform: (LiveProductRoom) -> LiveProductRoom) {
