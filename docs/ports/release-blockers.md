@@ -191,3 +191,10 @@ extension, Swift unit/UI tests, actual resource bundle layout, and final archive
 privacy aggregation. The resource-layout change and newly absent Release-only
 scenario/probe types are the main compile/integration boundaries for CI to
 exercise. Parse/lint success is not a successful build claim.
+
+Coordinator addition (11 Nov, 11:15 UTC): hosted CI built only Debug, so the
+`App target and AppTests` job now also builds the Release configuration for a
+generic iOS device without signing. It fails if the Release `.app` contains any
+`fixtures` path or lacks `PrivacyInfo.xcprivacy`. That is the build of record
+for the Release-only exclusions above; it is not an archive or privacy-report
+check.
