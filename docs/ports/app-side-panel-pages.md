@@ -142,3 +142,8 @@ secrets, metadata).
 
 Pending hosted CI: `swift test` (package tests above), AppTests, the UI test class
 `AppSidePanelUITests` (iPhone only), and the native build. Nothing here was compiled.
+
+CI fix (11 Nov, run 43019137755): `perform(...)` now admits `Atum-App-Panel-Profile` only as
+`atum.app-panel/1` on a GET of `/apps/{slug}/manifest`; the AppTests card fixture no longer
+feeds a blank localized phrase (`AppLocalizedCopy` refuses it, as desktop's catalog parser does),
+and asserts the refusal instead.

@@ -38,8 +38,9 @@ final class AppSidePanelStateTests: XCTestCase {
 
         XCTAssertEqual(AppCardPresentation(app: try descriptor(description: nil), rowID: "!moon",
                                            locale: "en").about, "Listens")
-        XCTAssertEqual(AppCardPresentation(app: try descriptor(description: ["vi": " ", "en": " "]),
-                                           rowID: "!moon", locale: "en").about, "Listens")
+        // A blank phrase is not representable: `AppLocalizedCopy` (the desktop
+        // catalog parser's rule) refuses it and the whole catalog with it.
+        XCTAssertThrowsError(try descriptor(description: ["vi": " ", "en": " "]))
         XCTAssertNil(AppCardPresentation(app: try descriptor(description: nil, subtitle: nil),
                                          rowID: "!moon", locale: "en").about)
         let closed = AppCardPresentation(app: try descriptor(verified: false, availability: "unavailable"),

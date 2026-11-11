@@ -1355,6 +1355,10 @@ public struct AgentsRead: Sendable {
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
                   }
+                  if name == AppPanelContract.negotiationHeader {
+                      return value == AppPanelContract.profile && method == "GET"
+                          && isAppPath(url.path) && url.path.hasSuffix("/manifest")
+                  }
                   if name == CompanyInviteReadiness.profileHeader {
                       return value == CompanyInviteReadiness.profile && method == "GET"
                           && url.path == Self.companyCapabilitiesURL.path && companyWire == .v1_3
