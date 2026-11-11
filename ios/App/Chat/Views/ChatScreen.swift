@@ -83,6 +83,8 @@ struct ChatScreen: View {
     @State private var composerModelPresented = false
     @State private var composerModelRefreshToken: UInt64 = 0
     @State private var addPeoplePresented = false
+    /// HC-6: the chat's own search (desktop header search).
+    @State private var search = ChatSearchSession()
     /// Today, for the day dividers (B14): updated at midnight and when the
     /// app comes back, so a chat left open overnight relabels its days.
     @State private var today = Calendar.current.startOfDay(for: Date())
@@ -105,7 +107,7 @@ struct ChatScreen: View {
                                      candidates: info?.avatarCandidates ?? [],
                                      name: info?.title ?? store.title,
                                      kind: Self.avatarKind(store.kind))
-        TranscriptView(store: store, chrome: chrome, covered: covered)
+        TranscriptView(store: store, chrome: chrome, covered: covered, search: search)
             .overlay {
                 if Self.isEmptyChat(rows: store.snapshot.rows, pagination: store.pagination) {
                     if let founderIntro {
@@ -158,24 +160,29 @@ struct ChatScreen: View {
                                 .accessibilityIdentifier("chat.conversation.note")
                         }
                         JumpPillHost(store: store, chrome: chrome)
-                        // The notice shares the composer's stack (spacing 0) so its
-                        // empty host, kept for the sheet, adds no gap above the composer.
-                        VStack(spacing: 0) {
-                            // ST-5 (lane 4 W7): out of Protons, the same top-up as the Store.
-                            if store.kind == .assistant, conversationChat?.banner == nil {
-                                ProtonTopUpChatNotice(design: design)
-                            }
-                            if let banner = conversationChat?.banner {
-                                // Read-only is the platform's word: no composer, only the banner.
-                                ConversationReadOnlyBanner(text: banner, design: design)
-                            } else {
-                                ChatComposer(store: store, design: design, haptics: haptics,
-                                             modelActions: infoActions.assistantModels,
-                                             modelDestinations: infoActions.assistantModelDestinations,
-                                             modelRefreshToken: composerModelRefreshToken,
-                                             modelPickerPresented: $composerModelPresented,
-                                             turnStopActions: store.kind == .assistant
-                                                 ? infoActions.assistantTurnStop : nil)
+                        if search.isOpen {
+                            // HC-6: the search bar takes the composer's place while open.
+                            ChatSearchBar(session: search, store: store, design: design)
+                        } else {
+                            // The notice shares the composer's stack (spacing 0) so its
+                            // empty host, kept for the sheet, adds no gap above the composer.
+                            VStack(spacing: 0) {
+                                // ST-5 (lane 4 W7): out of Protons, the same top-up as the Store.
+                                if store.kind == .assistant, conversationChat?.banner == nil {
+                                    ProtonTopUpChatNotice(design: design)
+                                }
+                                if let banner = conversationChat?.banner {
+                                    // Read-only is the platform's word: no composer, only the banner.
+                                    ConversationReadOnlyBanner(text: banner, design: design)
+                                } else {
+                                    ChatComposer(store: store, design: design, haptics: haptics,
+                                                 modelActions: infoActions.assistantModels,
+                                                 modelDestinations: infoActions.assistantModelDestinations,
+                                                 modelRefreshToken: composerModelRefreshToken,
+                                                 modelPickerPresented: $composerModelPresented,
+                                                 turnStopActions: store.kind == .assistant
+                                                     ? infoActions.assistantTurnStop : nil)
+                                }
                             }
                         }
                     }
@@ -210,6 +217,18 @@ struct ChatScreen: View {
                     }
                     .sharedBackgroundVisibility(.hidden)
                     ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+                // HC-6: the chat's search (desktop's header magnifier), in
+                // personal chats. Company and conversation chats keep their
+                // own header (lane 2).
+                if Self.offersSearch(info: info, conversation: conversationChat), !search.isOpen {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { openSearch() } label: {
+                            AtumVisualSystem(design: design).barIcon(.search)
+                        }
+                        .accessibilityLabel(ChatCopy.text(design, .searchChat))
+                        .accessibilityIdentifier("chat.search.open")
+                    }
                 }
                 // FlowPhone: a glass "…" on the trailing side opens the chat's
                 // info and actions. Company and conversation chats keep their
@@ -337,6 +356,9 @@ struct ChatScreen: View {
             .onChange(of: infoPresented) { wasPresented, isPresented in
                 if wasPresented, !isPresented { composerModelRefreshToken &+= 1 }
             }
+            .onChange(of: store.snapshot.generation) { _, _ in
+                search.rowsChanged(store.snapshot.rows)
+            }
             .onChange(of: dismissPresentationRequest) { _, _ in
                 dismissPresentations()
             }
@@ -437,6 +459,17 @@ struct ChatScreen: View {
         infoPresented = true
     }
 
+    /// Search is offered in every personal chat; a company channel or
+    /// conversation has its own header (lane 2).
+    static func offersSearch(info: ChatInfoPresentation?, conversation: ConversationChatPresentation?) -> Bool {
+        info?.company == nil && conversation == nil
+    }
+
+    private func openSearch() {
+        presenter.actionsOverlay = nil
+        search.open()
+    }
+
     private func refreshToday() {
         let now = Calendar.current.startOfDay(for: Date())
         if now != today { today = now }
@@ -521,29 +554,64 @@ struct ChatTitleCapsule: View {
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
     let onOpen: () -> Void
 
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
+        let subtitle = Self.subtitle(info)
         Button(action: onOpen) {
             HStack(spacing: 8) {
                 ChatInfoAvatar(info: info, size: 32, loadMatrixThumbnail: loadMatrixThumbnail)
-                HStack(spacing: 4) {
-                    Text(verbatim: info.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    if case let .app(verification) = info.kind {
-                        AppSeal(tier: verification, placement: .chatTitle)
-                    } else if info.isFounder {
-                        AppSeal(tier: .official, placement: .chatTitle, label: .officialAccount)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 4) {
+                        Text(verbatim: info.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        if case let .app(verification) = info.kind {
+                            AppSeal(tier: verification, placement: .chatTitle)
+                        } else if info.isFounder {
+                            AppSeal(tier: .official, placement: .chatTitle, label: .officialAccount)
+                        }
+                    }
+                    // HC-6 (desktop `data-matrix-agent-title`, the group
+                    // header topic): one quiet line under the name. At the
+                    // accessibility sizes the bar has no room for it; the
+                    // panel and the large content viewer still show it.
+                    if let subtitle, !typeSize.isAccessibilitySize {
+                        Text(verbatim: subtitle)
+                            .font(.caption)
+                            .foregroundStyle(AtumVisualSystem(design: design).color(.muted, scheme: scheme))
+                            .lineLimit(1)
+                            .accessibilityIdentifier("chat.title.subtitle")
                     }
                 }
             }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(info.title)
+        .accessibilityValue(subtitle ?? "")
         .accessibilityHint(ChatCopy.text(design, .infoOpen))
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("chat.title")
         // The navigation bar caps its text size; a long press shows the name
         // large instead, as system bar titles do.
-        .accessibilityShowsLargeContentViewer()
+        .accessibilityShowsLargeContentViewer {
+            Text(verbatim: [info.title, subtitle].compactMap { $0 }.joined(separator: "\n"))
+        }
+    }
+
+    /// Desktop's header line under the name: an assistant's title (what it
+    /// is for), the Founder's line, a group's topic. One line, never empty;
+    /// people chats have none.
+    static func subtitle(_ info: ChatInfoPresentation) -> String? {
+        let raw: String? = switch info.kind {
+        case .assistant: info.subtitle
+        case .group: info.topic
+        case .person: info.isFounder ? info.subtitle : nil
+        case .app: nil
+        }
+        let line = raw?.components(separatedBy: .newlines).joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return line?.isEmpty == false ? line : nil
     }
 }
