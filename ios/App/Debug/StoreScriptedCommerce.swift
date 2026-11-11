@@ -211,6 +211,9 @@ import SwiftUI
     ]
     private var next = 2_000_000_000_000_001
 
+    /// Matches the scripted catalogue, as a TestFlight device would.
+    func purchaseEnvironment() async throws -> ApplePurchaseEnvironment? { .sandbox }
+
     func products(ids: Set<String>) async throws -> [AppleStoreProduct] {
         ids.compactMap { id in
             Self.prices[id].map {

@@ -90,3 +90,8 @@ No signing, live purchase, push, pull request, CI or deployment was performed.
 The iOS app build was not run. Unit tests cannot prove Apple's environment reporting, payment-sheet behavior,
 server allowlist configuration or real-device delivery. No physical-device or
 live StoreKit purchase verification was performed by this implementation worker.
+
+## Debug scripted store
+
+`ScriptedApplePurchaseStore` reports Sandbox, matching its scripted catalogue, so
+the scripted Store and top-up UI tests keep an open checkout under the new guard.
