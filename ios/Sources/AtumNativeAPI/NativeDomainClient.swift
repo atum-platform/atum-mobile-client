@@ -56,6 +56,9 @@ public struct AgentsRead: Sendable {
     private static let inviteLinkPreviewURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/invite-links/preview")!
     private static let inviteLinkRedeemURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/invite-links/redeem")!
     private static let privateCosCapabilityURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/cloud/controller/company-private-cos")!
+    /// The subscription status reads desktop's model picker uses (owner-scoped GETs).
+    private static let chatGPTRelayURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/chatgpt-relay")!
+    private static let providerConnectionsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/provider-connections")!
     private static let driveAccountURL = DriveContract.accountURL
 
     typealias Authorization = @MainActor @Sendable (_ forceRefresh: Bool) async throws -> String
@@ -990,6 +993,39 @@ public struct AgentsRead: Sendable {
         return snapshot
     }
 
+    /// Switches the cloud destination to one subscription model (1.4 / 1.5),
+    /// fenced like the Atum write. The platform accepts only a connected
+    /// subscription and a model it serves now; a refusal changes nothing.
+    public func writeManagedModelSubscription(agentPrincipal: NativeID,
+                                              value: ManagedModelSubscriptionWrite) async throws
+        -> ManagedModelDestinationSnapshot {
+        let body: Data
+        do { body = try JSONEncoder().encode(value) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let snapshot = try await request(
+            ManagedModelDestinationSnapshot.self,
+            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
+            method: "PUT", body: body,
+            acceptsAssistantNameRefusal: false
+        )
+        guard snapshot.agentPrincipal == agentPrincipal else {
+            throw NativeDomainClientFailure.invalidResponse
+        }
+        return snapshot
+    }
+
+    /// `atum.chatgpt-relay/1`: whether an owner Mac relays its ChatGPT plan
+    /// to the cloud now, and the models it relays. Owner-scoped by the bearer.
+    public func chatGPTRelayStatus() async throws -> ChatGPTRelayStatus {
+        try await read(ChatGPTRelayStatus.self, url: Self.chatGPTRelayURL)
+    }
+
+    /// `atum.provider-connections/1`: the account-wide OpenCode Go connection.
+    /// The status never carries the key.
+    public func providerConnectionsStatus() async throws -> ProviderConnectionsStatus {
+        try await read(ProviderConnectionsStatus.self, url: Self.providerConnectionsURL)
+    }
+
     // MARK: Agent home (`atum.agent-home/2.5`)
 
     /// The narrow owner projection: authoritative home, current reachability,
@@ -1425,7 +1461,8 @@ public struct AgentsRead: Sendable {
                             Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
                             Self.inviteLinkPreviewURL.path, Self.inviteLinkRedeemURL.path,
-                            Self.driveAccountURL.path, Self.privateCosCapabilityURL.path]
+                            Self.driveAccountURL.path, Self.privateCosCapabilityURL.path,
+                            Self.chatGPTRelayURL.path, Self.providerConnectionsURL.path]
         let storeRoot = Self.baseURL.path + "/store/"
         let storeTail = String(url.path.dropFirst(storeRoot.count))
         let storeParts = storeTail.split(separator: "/", omittingEmptySubsequences: false)

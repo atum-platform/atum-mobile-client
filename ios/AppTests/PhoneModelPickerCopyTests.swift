@@ -101,6 +101,24 @@ final class PhoneModelPickerCopyTests: XCTestCase {
         }
     }
 
+    /// A subscription row that cannot be chosen says why in the pin's words.
+    /// The desktop's `chatgptCloudNotReady` is not exported yet; until it is,
+    /// the pinned `switchProblem.unavailable` stands in, and nothing is typed here.
+    @MainActor
+    func testAnUnavailableSubscriptionSaysWhyFromThePin() throws {
+        let design = try LiveDesign()
+        let copy = PhoneModelPickerCopy(design: design)
+        let pin = try AtumCopy()
+        if pin.contains(PhoneModelPickerCopy.chatgptCloudNotReady) {
+            XCTAssertEqual(copy.unavailable(.notReady), design.text(PhoneModelPickerCopy.chatgptCloudNotReady))
+        } else {
+            XCTAssertEqual(copy.unavailable(.notReady), copy.text(.switchProblemUnavailable))
+        }
+        XCTAssertEqual(copy.unavailable(.signedOut), design.text(PhonePickerCopyKey.modelsSignedOut.rawValue))
+        XCTAssertTrue(pin.contains(PhonePickerCopyKey.modelsSignedOut.rawValue))
+        XCTAssertTrue(pin.contains(PhonePickerCopyKey.switchProblemUnavailable.rawValue))
+    }
+
     @MainActor
     func testTheLiveCopyResolvesEveryKeyWithoutStoppingTheApp() throws {
         let design = try LiveDesign()

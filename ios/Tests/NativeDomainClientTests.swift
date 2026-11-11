@@ -946,6 +946,75 @@ import AtumChat
         XCTAssertEqual(step, 2)
     }
 
+    /// The phone reads the same two account routes the desktop reads for a
+    /// cloud assistant and writes a ChatGPT plan pick as 1.5 on the cloud.
+    func testSubscriptionStatusReadsAndThePlanWriteUseTheDesktopRoutes() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let requestID = try NativeID("00000000-0000-4000-8000-303617b97303")
+        let value = client(TestAuthorization(first: "p2-subscription-token"))
+        var paths: [String] = []
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer p2-subscription-token")
+            let path = request.url?.path ?? ""
+            paths.append(request.httpMethod! + " " + path)
+            switch path {
+            case "/api/matrix/v1/chatgpt-relay":
+                return .json(try! JSONSerialization.data(withJSONObject: [
+                    "profile": "atum.chatgpt-relay/1", "revision": 2, "state": "enabled",
+                    "deviceServiceId": "00000000-0000-4000-8000-0000000000d1", "selectedAt": 1_700_000_000,
+                    "models": [["id": "gpt-6.1", "displayName": "GPT-6.1", "efforts": ["low", "medium", "high"],
+                                "defaultEffort": "medium", "contextBudget": 200_000, "outputBudget": 32_000]],
+                ]))
+            case "/api/matrix/v1/provider-connections":
+                return .json(try! JSONSerialization.data(withJSONObject: [
+                    "profile": "atum.provider-connections/1", "revision": 1,
+                    "connections": [["provider": "opencode_go", "state": "disconnected", "revision": 1,
+                                     "models": [], "modelPolicy": "none"]],
+                ]))
+            case "/api/matrix/v1/agents/\(self.agentPrincipal)/model-destinations":
+                if request.httpMethod == "GET" { return .json(try! self.managedModelDestinationsBody()) }
+                XCTAssertEqual(request.httpMethod, "PUT")
+                let data = try! XCTUnwrap(self.body(of: request))
+                let body = try! XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                XCTAssertEqual(Set(body.keys), ["profile", "requestId", "expectedRevision", "policyDigest", "choice"])
+                XCTAssertEqual(body["profile"] as? String, "atum.model-choice/1.5")
+                XCTAssertEqual(body["requestId"] as? String, requestID.rawValue)
+                XCTAssertEqual(body["expectedRevision"] as? Int, 3)
+                XCTAssertEqual(body["choice"] as? [String: String],
+                               ["destination": "cloud", "source": "chatgpt_plan",
+                                "model": "gpt-6.1", "effort": "medium"])
+                var saved = try! XCTUnwrap(JSONSerialization.jsonObject(
+                    with: self.managedModelDestinationsBody(revision: 4)) as? [String: Any])
+                saved["profile"] = "atum.model-choice/1.5"
+                saved["choices"] = [["destination": "cloud", "source": "chatgpt_plan",
+                                     "model": "gpt-6.1", "effort": "medium"]]
+                return .json(try! JSONSerialization.data(withJSONObject: saved))
+            default:
+                XCTFail("unexpected \(path)")
+                return .json(Data("{}".utf8))
+            }
+        }
+
+        let relay = try await value.chatGPTRelayStatus()
+        XCTAssertEqual(relay.state, .enabled)
+        XCTAssertEqual(relay.models.map(\.id), ["gpt-6.1"])
+        let connections = try await value.providerConnectionsStatus()
+        XCTAssertEqual(connections.state, .disconnected)
+        let snapshot = try await value.managedModelDestinations(agentPrincipal: principal)
+        let write = try ManagedModelSubscriptionWrite(requestId: requestID, snapshot: snapshot,
+                                                      source: .chatGPTPlan, model: "gpt-6.1",
+                                                      effort: relay.models[0].writeEffort)
+        let saved = try await value.writeManagedModelSubscription(agentPrincipal: principal, value: write)
+        XCTAssertEqual(saved.revision, 4)
+        XCTAssertEqual(saved.choice(for: try ManagedModelDestinationID("cloud"))?.source, .chatGPTPlan)
+        XCTAssertEqual(paths, [
+            "GET /api/matrix/v1/chatgpt-relay",
+            "GET /api/matrix/v1/provider-connections",
+            "GET /api/matrix/v1/agents/\(agentPrincipal)/model-destinations",
+            "PUT /api/matrix/v1/agents/\(agentPrincipal)/model-destinations",
+        ])
+    }
+
     func testAgentAvatarWriteBindsCanonicalTargetAndUsesBoundedImageBody() async throws {
         let target = try NativeID(agentPrincipal)
         let image = try AgentAvatarImage(type: .jpeg, data: Data([0xff, 0xd8, 0xff, 0xd9]))
