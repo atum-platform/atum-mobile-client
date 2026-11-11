@@ -370,7 +370,9 @@ final class MobileFounderTests: XCTestCase {
     @MainActor
     func testPinnedDesktopFounderFixtureDrivesThePhoneCreationFlow() async throws {
         let raw = try XCTUnwrap(JSONSerialization.jsonObject(
-            with: AtumDesign.data(for: "fixtures/playground.json")
+            with: Data(contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Vendor/AtumDesign/fixtures/playground.json"))
         ) as? [String: Any])
         let scenarios = try XCTUnwrap(raw["scenarios"] as? [String: Any])
         let roster = try XCTUnwrap(scenarios["founder-roster"] as? [String: Any])

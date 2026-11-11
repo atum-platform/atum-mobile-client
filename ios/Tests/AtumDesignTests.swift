@@ -6,6 +6,8 @@ final class AtumDesignTests: XCTestCase {
         let manifest = try AtumDesign.manifest()
         XCTAssertEqual(manifest.developmentLanguage, "vi")
         XCTAssertEqual(Set(manifest.locales), Set(["en", "vi", "ja", "zh", "zh-Hant"]))
+        XCTAssertFalse(manifest.files.keys.contains { $0.hasPrefix("fixtures/") })
+        XCTAssertThrowsError(try AtumDesign.data(for: "fixtures/playground.json"))
         for path in manifest.files.keys {
             XCTAssertFalse(try AtumDesign.data(for: path).isEmpty, path)
         }

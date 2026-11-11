@@ -1,6 +1,28 @@
 // swift-tools-version: 5.10
 import PackageDescription
 
+// Keep the producer export intact, but never ship its scenario fixtures.
+// Explicit resource membership also preserves fonts/marks/store subdirectories.
+let productionDesignResources: [Resource] = [
+    .copy("Vendor/AtumDesign/ATTRIBUTION.md"),
+    .copy("Vendor/AtumDesign/Localizable.xcstrings"),
+    .copy("Vendor/AtumDesign/app-icon"),
+    .copy("Vendor/AtumDesign/atum-kit-tokens.json"),
+    .copy("Vendor/AtumDesign/colors.json"),
+    .copy("Vendor/AtumDesign/copy-contract.json"),
+    .copy("Vendor/AtumDesign/copy-inventory.json"),
+    .copy("Vendor/AtumDesign/fonts"),
+    .copy("Vendor/AtumDesign/glyphs.json"),
+    .copy("Vendor/AtumDesign/manifest.json"),
+    .copy("Vendor/AtumDesign/marks"),
+    .copy("Vendor/AtumDesign/native-font-source.json"),
+    .copy("Vendor/AtumDesign/phone-copy-map.json"),
+    .copy("Vendor/AtumDesign/phone-design.json"),
+    .copy("Vendor/AtumDesign/store"),
+    .copy("Vendor/AtumDesign/store-art.json"),
+    .copy("Vendor/AtumDesign/tokens.json"),
+]
+
 let package = Package(
     name: "AtumDesign",
     platforms: [.macOS(.v13), .iOS("26.0")],
@@ -11,8 +33,8 @@ let package = Package(
                .library(name: "AtumChat", targets: ["AtumChat"]),
                .library(name: "AtumTelemetry", targets: ["AtumTelemetry"])],
     targets: [
-        .target(name: "AtumDesign", path: ".", exclude: ["StoreKit", "Tests", "App", "AppTests", "Notifications", "UITests", "Sources/AtumPrototype", "Sources/AtumNativeAPI", "Sources/AtumDrive", "Sources/AtumChat", "ExportOptions.plist", "project.yml", "AtumMobile.xcodeproj", "DerivedData", "sdk-baseline.json", "Vendor/AtumKitIcons"],
-                sources: ["Sources/AtumDesign"], resources: [.copy("Vendor/AtumDesign")]),
+        .target(name: "AtumDesign", path: ".", exclude: ["StoreKit", "Tests", "App", "AppTests", "Notifications", "UITests", "Sources/AtumPrototype", "Sources/AtumNativeAPI", "Sources/AtumDrive", "Sources/AtumChat", "ExportOptions.plist", "project.yml", "AtumMobile.xcodeproj", "DerivedData", "sdk-baseline.json", "Vendor/AtumKitIcons", "Vendor/AtumDesign/fixtures"],
+                sources: ["Sources/AtumDesign"], resources: productionDesignResources),
         .target(name: "AtumPrototype", dependencies: ["AtumDesign", "AtumNativeAPI"], path: "Sources/AtumPrototype", resources: [.copy("Fixtures")]),
         .target(name: "AtumNativeAPI", dependencies: ["AtumChat"], path: "Sources/AtumNativeAPI"),
         .target(name: "AtumDrive", dependencies: ["AtumNativeAPI"],
