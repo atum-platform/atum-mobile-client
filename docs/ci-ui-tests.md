@@ -48,3 +48,14 @@ per run on 2026-11-11 with six lanes active).
 
 Run one class against a branch:
 `gh workflow run ui-tests.yml --ref <branch> -f only="ChatPanelUITests"`
+
+## Local-only failure: `ComposerUITests/testTheModelSheetListsTheAccountSubscriptions` (2026-11-12)
+
+Failed locally ("no Subscriptions section", iOS 27.0 simulator, iPhone 16e and iPhone 17) while hosted
+`macos-26` shards passed it. Cause was in the test, not the app or the environment: it waited for
+`app.navigationBars.firstMatch`, which is the chat's own bar behind the model sheet, then swiped up on it.
+The swipe lands on the dimmed area and dismisses the half sheet (the recording shows the sheet open, then the bare
+chat). The test also never scrolled the sheet, whose list is lazy and opens at the medium detent. The test now waits
+for the sheet's `composer.model.close` button and scrolls inside the sheet until the header exists.
+Which bar `firstMatch` returns differs between the hosted runtime and the local iOS 27.0 runtime; that is the likely
+reason hosted passed, but it was not verified on a hosted runner. After the fix the test passes locally on both devices.

@@ -234,11 +234,21 @@ final class ComposerUITests: WS3UITestCase {
         let chip = element(app, AccessibilityID.composerModel)
         XCTAssertTrue(chip.waitForExistence(timeout: Self.waitSeconds))
         chip.tap()
-        let bar = app.navigationBars.firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: Self.waitSeconds))
-        bar.swipeUp()
+        // The sheet's own close button, not `navigationBars.firstMatch`: that is
+        // the chat's bar behind the sheet, and a swipe on it hits the dimmed
+        // area and dismisses the sheet (iOS 27 simulator).
+        XCTAssertTrue(element(app, "composer.model.close").waitForExistence(timeout: Self.waitSeconds),
+                      "the model sheet did not open")
+        // The sheet opens at the medium detent and the list is lazy, so the
+        // Subscriptions header may be below the fold: scroll inside the sheet.
         let section = element(app, "phone.model.section.subscriptions")
-        XCTAssertTrue(section.waitForExistence(timeout: Self.waitSeconds), "no Subscriptions section")
+        var scrolls = 0
+        while !section.waitForExistence(timeout: 1), scrolls < 4 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)))
+            scrolls += 1
+        }
+        XCTAssertTrue(section.exists, "no Subscriptions section")
         keepEvidence("subscriptions-\(demo)-\(tag)", of: app)
 
         let mini = element(app, "phone.model.row.gpt-6.1-mini")
