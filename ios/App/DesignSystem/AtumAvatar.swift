@@ -332,7 +332,11 @@ enum AtumAvatarCandidateLoader {
 
     static func load(matrixURI: String?, pixelSide: Int,
                      loadMatrixThumbnail: ((String, Int) async -> Data?)?,
-                     remoteCandidates: [LiveProductRemoteArt]) async -> AtumAvatarArt? {
+                     remoteCandidates: [LiveProductRemoteArt], prefersRemote: Bool = false) async -> AtumAvatarArt? {
+        guard !Task.isCancelled else { return nil }
+        if prefersRemote, let art = await load(remoteCandidates: remoteCandidates, pixelSide: pixelSide) {
+            return Task.isCancelled ? nil : art
+        }
         guard !Task.isCancelled else { return nil }
         if let matrixURI, let loadMatrixThumbnail,
            let data = await loadMatrixThumbnail(matrixURI, pixelSide) {
@@ -342,6 +346,7 @@ enum AtumAvatarCandidateLoader {
             }
         }
         guard !Task.isCancelled else { return nil }
+        if prefersRemote { return nil }
         return await load(remoteCandidates: remoteCandidates, pixelSide: pixelSide)
     }
 

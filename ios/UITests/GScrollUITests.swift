@@ -114,20 +114,20 @@ final class GScrollUITests: TranscriptUITestCase {
 
         // Check 7: a status line edited in place at the bottom stays pinned.
         wait(until: at(41))
-        assertVisible(latest(app), in: app, "check 7 working line")
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Đang xử lý'")).firstMatch.exists,
-                      "check 7: the working line is not shown")
+        if let footer = assertSingleWorkingRow(app, containing: ["Đang xử lý"]) {
+            assertVisible(footer, in: app, "check 7 working line")
+        }
         keepScreenshot("g7-working-\(tag)", of: app)
         wait(until: at(44))
-        assertVisible(latest(app), in: app, "check 7 edited line")
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'sắp xong'")).firstMatch.exists,
-                      "check 7: the edit is not shown")
+        if let footer = assertSingleWorkingRow(app, containing: ["Đang xử lý", "sắp xong"]) {
+            assertVisible(footer, in: app, "check 7 edited line")
+        }
         XCTAssertEqual(followValue(app), "following")
         keepScreenshot("g7-edited-\(tag)", of: app)
         wait(until: at(47.5))
         assertVisible(latest(app), in: app, "check 7 answer")
-        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'sắp xong'")).firstMatch.exists,
-                       "B17: the superseded working line still shows")
+        XCTAssertFalse(workingRow(app).exists, "the working footer must disappear when the turn ends")
+        XCTAssertFalse(row(app, "chat.long.step-06").exists, "progress is never its own transcript row")
         XCTAssertEqual(followValue(app), "following")
         keepScreenshot("g7-answer-\(tag)", of: app)
 

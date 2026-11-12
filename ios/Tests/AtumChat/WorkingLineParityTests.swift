@@ -169,4 +169,31 @@ final class WorkingLineParityTests: XCTestCase {
         XCTAssertEqual(AssistantTurnSignal.read(rows, kind: .assistant), .init(unanswered: "$q", working: true))
         XCTAssertEqual(MessageFold.growingIDs(in: rows), ["interim"])
     }
+    func testLateAgentIdentityRebuildRecognizesTheSameCachedEvent() throws {
+        let raw = #"{"type":"m.room.message","sender":"@agent:example.test","content":{"msgtype":"m.notice","body":"Đang chạy tác vụ…","io.atum.progress":{"phase":"working","revision":0}}}"#
+        let cold = RoomContext(kind: .person, ownUserID: F.me, knownAgentUserIDs: [])
+        let ready = RoomContext(kind: .assistant, ownUserID: F.me, agentUserIDs: [F.agent],
+                                knownAgentUserIDs: [F.agent])
+        func mapped(_ context: RoomContext) -> ChatItem {
+            let markers = context.transientAgentUserIDs.contains(F.agent)
+                ? AtumTurnMarkers.parse(json: raw) : AtumTurnMarkers()
+            return ChatItem(id: "work", kind: .notice, sender: F.agent, body: "Đang chạy tác vụ…",
+                            progress: markers.progress)
+        }
+        let before = mapped(cold)
+        XCTAssertNil(before.progress)
+        XCTAssertEqual(Projection.rows([before], context: cold).first?.item.kind, .notice)
+        // Merely changing projection context cannot recover discarded markers.
+        XCTAssertEqual(Projection.rows([before], context: ready).first?.item.kind, .notice)
+        let after = Projection.rows([mapped(ready)], context: ready)
+        XCTAssertEqual(after.map(\.id), [Projection.typingRowID])
+        XCTAssertEqual(after.first?.item.body, "Đang chạy tác vụ…")
+        var core = ConversationCore(context: cold, draft: "Unsent draft")
+        core.updateContext(ready)
+        XCTAssertEqual(core.kind, .assistant)
+        XCTAssertEqual(core.draft, "Unsent draft")
+        core.updateContext(RoomContext(kind: .group, ownUserID: F.other))
+        XCTAssertEqual(core.context, ready, "a context refresh cannot cross accounts")
+    }
+
 }

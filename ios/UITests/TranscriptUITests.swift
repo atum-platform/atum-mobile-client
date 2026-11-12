@@ -27,11 +27,13 @@ final class TranscriptUITests: TranscriptUITestCase {
     func testU2DotsThenAnswerStayInView() {
         let (app, start) = launchTimedChat(ScriptedScenario.chatLongAnswer.rawValue)
         wait(until: start.addingTimeInterval(2.0))
+        if let footer = assertSingleWorkingRow(app) {
+            assertVisible(footer, in: app, "U2 typing-only footer")
+        }
         keepScreenshot("u2-dots", of: app)
-        assertVisible(element(app, AccessibilityID.rowTyping), in: app, "U2 typing row")
         XCTAssertEqual(followValue(app), "following")
         wait(until: start.addingTimeInterval(4))
-        XCTAssertFalse(element(app, AccessibilityID.rowTyping).exists, "U2: dots after the answer")
+        XCTAssertFalse(workingRow(app).exists, "U2: working footer after the answer and typing ended")
         let answer = latest(app).frame
         XCTAssertLessThanOrEqual(answer.maxY, visibleBottom(app) + Self.framePoints, "U2: the answer's end is hidden")
         XCTAssertEqual(followValue(app), "following")
@@ -345,16 +347,34 @@ final class TranscriptUITests: TranscriptUITestCase {
     func testReplyAtBottomHidesTheWorkingLine() {
         let (app, start) = launchTimedChat(ScriptedScenario.chatReplyAtBottom.rawValue)
         wait(until: start.addingTimeInterval(2.2))
-        assertVisible(latest(app), in: app, "working line")
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Đang xử lý'")).firstMatch.exists)
+        if let footer = assertSingleWorkingRow(app, containing: ["Đang xử lý"]) {
+            assertVisible(footer, in: app, "working line")
+        }
         keepScreenshot("reply-at-bottom-working", of: app)
         wait(until: start.addingTimeInterval(6.5))
         assertVisible(latest(app), in: app, "answer")
-        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Đang xử lý'")).firstMatch.exists,
-                       "B17: the working line still shows after the answer")
+        XCTAssertFalse(workingRow(app).exists, "the working footer must disappear after the answer")
+        XCTAssertFalse(row(app, "chat.reply-at-bottom.working").exists,
+                       "the progress event must never reappear as a transcript row")
         XCTAssertEqual(followValue(app), "following")
         assertNoBannedWords(app)
         keepScreenshot("reply-at-bottom-answer", of: app)
+    }
+
+    /// The live line and its edited checklist share one synthetic footer.
+    /// This long-lived fixture also supplies the coordinator's screenshot.
+    @MainActor
+    func testWorkingLineAndStepCardUseOneTypingRow() {
+        let app = launchChat(ScriptedScenario.chatTimelineParity.rawValue)
+        XCTAssertTrue(waitFor(15) { self.workingRow(app).exists
+            && self.workingRow(app).label.contains("Viết bản tóm tắt") }, "the edited step card never arrived")
+        if let footer = assertSingleWorkingRow(app, containing: ["Đang chạy tác vụ…", "Đọc báo cáo quý 3", "Viết bản tóm tắt"]) {
+            assertVisible(footer, in: app, "working line with step card")
+        }
+        XCTAssertFalse(row(app, "chat.timeline-parity.working").exists)
+        XCTAssertFalse(element(app, AccessibilityID.rowWorking).exists, "no separate progress notice row")
+        XCTAssertFalse(latest(app).label.contains("Đang chạy tác vụ"), "latest remains a transcript message")
+        keepScreenshot("working-line-step-card", of: app)
     }
 
     /// §2.10: the accessibility audit on an open assistant chat.

@@ -13,6 +13,14 @@ struct ChatFace: Equatable {
     var sha256: String?
     var candidates: [LiveProductRemoteArt]
 
+    /// Desktop MatrixPersonAvatar uses an identified agent's roster photo
+    /// before its Matrix member photo. Other members use their Matrix photo.
+    var prefersRosterPhoto: Bool {
+        guard kind == .assistant || kind == .atum else { return false }
+        if case .photo = avatar { return true }
+        return false
+    }
+
     static func room(_ avatar: LiveProductAvatar?, matrixURI: String?, sha256: String?,
                      candidates: [LiveProductRemoteArt], name: String,
                      kind: AtumAvatarKind) -> ChatFace {
@@ -60,7 +68,7 @@ struct ChatFace: Equatable {
         }
         if kind.senderWearsRoomFace, let roomFace {
             return ChatFace(name: reader.name ?? roomFace.name, kind: roomFace.kind,
-                            matrixAvatarURI: roomFace.matrixAvatarURI ?? reader.avatarURI,
+                            matrixAvatarURI: reader.avatarURI ?? roomFace.matrixAvatarURI,
                             avatar: roomFace.avatar, sha256: roomFace.sha256,
                             candidates: roomFace.candidates)
         }
@@ -82,7 +90,7 @@ struct ChatFace: Equatable {
                                    roomFace: ChatFace?) -> ChatFace {
         if member.isAssistant || member.isApp, kind.senderWearsRoomFace, let roomFace {
             return ChatFace(name: member.name.isEmpty ? roomFace.name : member.name,
-                            kind: roomFace.kind, matrixAvatarURI: roomFace.matrixAvatarURI,
+                            kind: roomFace.kind, matrixAvatarURI: member.matrixAvatarURI,
                             avatar: roomFace.avatar, sha256: roomFace.sha256,
                             candidates: roomFace.candidates)
         }
@@ -109,7 +117,7 @@ struct ChatFaceView: View {
             .task(id: Request(face: face, size: size)) {
                 art = nil
                 let pixelSide = AtumAvatar.thumbnailPixelSide(for: size)
-                art = await AtumAvatarCandidateLoader.load(
+                let loaded = await AtumAvatarCandidateLoader.load(
                     matrixURI: face.matrixAvatarURI,
                     pixelSide: pixelSide,
                     loadMatrixThumbnail: loadMatrixThumbnail,
@@ -117,17 +125,28 @@ struct ChatFaceView: View {
                         avatar: face.avatar,
                         sha256: face.sha256,
                         declared: face.candidates
-                    )
+                    ),
+                    prefersRemote: face.prefersRosterPhoto
                 )
+                // A cancelled request for the former profile cannot clear the
+                // image a newer profile request has already delivered.
+                guard !Task.isCancelled else { return }
+                art = loaded
             }
     }
 
     private struct Request: Hashable {
-        let description: String
+        let matrixURI: String?
+        let candidates: [LiveProductRemoteArt]
+        let prefersRosterPhoto: Bool
         let size: CGFloat
 
-        init(face: ChatFace, size: CGFloat) {
-            description = String(describing: face)
+        @MainActor init(face: ChatFace, size: CGFloat) {
+            // Name-only profile updates must not blank and reload the photo.
+            matrixURI = face.matrixAvatarURI
+            candidates = AtumAvatarCandidateLoader.candidates(avatar: face.avatar, sha256: face.sha256,
+                                                              declared: face.candidates)
+            prefersRosterPhoto = face.prefersRosterPhoto
             self.size = size
         }
     }

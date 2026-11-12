@@ -112,7 +112,7 @@ struct ChatScreen: View {
                                                            roomID: store.roomID,
                                                            roomIsEncrypted: store.roomIsEncrypted)
         let members = Dictionary(uniqueKeysWithValues: (info?.members ?? []).map { ($0.userID, $0) })
-        let roomFace = ChatFace.room(avatar, matrixURI: info?.matrixAvatarURI,
+        let roomFace = ChatFace.room(info == nil ? avatar : info?.avatar, matrixURI: info?.matrixAvatarURI,
                                      sha256: info?.avatarSHA256,
                                      candidates: info?.avatarCandidates ?? [],
                                      name: info?.title ?? store.title,

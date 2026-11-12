@@ -42,4 +42,29 @@ final class AtumTurnMarkersTests: XCTestCase {
         XCTAssertEqual(AtumTurnMarkers.parse(json: #"{"io.atum.progress":true}"#), AtumTurnMarkers())
         XCTAssertEqual(AtumTurnMarkers.parse(json: #"{"io.atum.interim":false}"#), AtumTurnMarkers())
     }
+    func testSDKFullEventEnvelopeCarriesTheWorkingMarker() {
+        let raw = #"{"type":"m.room.message","sender":"@agent:example.test","event_id":"$work","content":{"msgtype":"m.notice","body":"Đang chạy tác vụ…","io.atum.progress":{"phase":"working","revision":0}}}"#
+        let marker = AtumTurnMarkers.parse(json: raw)
+        XCTAssertEqual(marker.progress?.phase, .working)
+        XCTAssertEqual(marker.progress?.revision, 0)
+    }
+
+    func testSDKFullEditEnvelopePrefersReplacementMarker() {
+        let raw = #"{"type":"m.room.message","content":{"msgtype":"m.notice","io.atum.progress":{"phase":"working","revision":0},"m.new_content":{"msgtype":"m.notice","body":"Done","io.atum.progress":{"phase":"settled","revision":3}},"m.relates_to":{"rel_type":"m.replace","event_id":"$work"}}}"#
+        let marker = AtumTurnMarkers.parse(json: raw)
+        XCTAssertEqual(marker.progress?.phase, .settled)
+        XCTAssertEqual(marker.progress?.revision, 3)
+    }
+
+    func testSDKFullInterimEnvelopeIsRecognized() {
+        XCTAssertTrue(AtumTurnMarkers.parse(json: #"{"content":{"msgtype":"m.text","io.atum.interim":true}}"#).interim)
+    }
+
+    func testReplacementWithoutMarkerDoesNotRestoreOriginalProgress() {
+        let raw = #"{"content":{"io.atum.progress":{"phase":"working"},"m.new_content":{"msgtype":"m.notice","body":"Outcome"}}}"#
+        XCTAssertNil(AtumTurnMarkers.parse(json: raw).progress)
+        XCTAssertNil(AtumTurnMarkers.parse(json: #"{"content":null,"io.atum.progress":{"phase":"working"}}"#).progress)
+        XCTAssertNil(AtumTurnMarkers.parse(json: #"{"content":{"m.new_content":null,"io.atum.progress":{"phase":"working"}}}"#).progress)
+    }
+
 }

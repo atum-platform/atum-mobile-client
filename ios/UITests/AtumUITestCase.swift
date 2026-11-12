@@ -29,6 +29,38 @@ class AtumUITestCase: XCTestCase {
         return app
     }
 
+    /// The assistant's synthetic footer, shared by typing-only and progress
+    /// presentation. It is deliberately not `row.latest` or a notice event ID.
+    @MainActor
+    func workingRow(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: AccessibilityID.rowTyping).firstMatch
+    }
+
+    /// Check the footer itself, including its combined accessibility label;
+    /// a matching static text elsewhere in the transcript is not sufficient.
+    @MainActor @discardableResult
+    func assertSingleWorkingRow(_ app: XCUIApplication, containing words: [String] = [],
+                                file: StaticString = #filePath, line: UInt = #line) -> XCUIElementSnapshot? {
+        // One snapshot keeps count, text and frame at the same instant. Some
+        // scripted typing windows last only 1.5 seconds: repeated live queries
+        // could accidentally compare the typing phase with the final answer.
+        let root: XCUIElementSnapshot
+        do { root = try app.snapshot() }
+        catch { XCTFail("working-row snapshot failed: \(error)", file: file, line: line); return nil }
+        var pending = [root]
+        var rows: [XCUIElementSnapshot] = []
+        while let node = pending.popLast() {
+            if node.identifier == AccessibilityID.rowTyping { rows.append(node) }
+            pending.append(contentsOf: node.children)
+        }
+        XCTAssertEqual(rows.count, 1, "exactly one working row", file: file, line: line)
+        guard let row = rows.first else { return nil }
+        for word in words {
+            XCTAssertTrue(row.label.contains(word), "working row lacks \(word): \(row.label)", file: file, line: line)
+        }
+        return row
+    }
+
     /// The element exists within the wait and its frame lies inside the
     /// container's, within the 4 pt tolerance (U1, U2).
     @MainActor

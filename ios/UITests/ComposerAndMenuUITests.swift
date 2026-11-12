@@ -879,6 +879,10 @@ final class TurnStopUITests: WS3UITestCase {
         let stop = element(app, "composer.stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 8), "Stop while Atum works")
         XCTAssertEqual(stop.label, "Dừng")
+        assertSingleWorkingRow(app)
+        // This fixture acknowledges Stop but does not fabricate a synced
+        // turn-end event. Footer disappearance is proved by TranscriptUITests
+        // when the final message arrives and the typing signal actually ends.
         // 44 wide; 36 tall in the layout so the row never jumps, with its
         // hit shape 4 pt beyond above and below.
         XCTAssertGreaterThanOrEqual(stop.frame.width, 44)

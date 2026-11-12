@@ -1,9 +1,9 @@
 import Foundation
 
 /// The Atum turn markers a client may read from an agent event
-/// (`atum.agent-turns/1.4` A7–A9). Parsed from the SDK's `latestJson()`, which
-/// already applies an edit's `m.new_content`; the parser still prefers that
-/// object when an edit event is passed whole.
+/// (`atum.agent-turns/1.4` A7–A9). The SDK's `latestJson()` is a full event
+/// envelope, including edits. Unwrap `content`, then prefer `m.new_content`.
+/// Bare content is also accepted for callers already holding decoded content.
 ///
 /// The markers are presentation facts only. They never confer execution
 /// authority and never change what a sender is.
@@ -25,9 +25,23 @@ public struct AtumTurnMarkers: Equatable, Sendable {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return AtumTurnMarkers()
         }
-        // `latestJson()` is the latest content. An edit event passed whole
-        // carries the same marker twice; the new content wins.
-        let content = object["m.new_content"] as? [String: Any] ?? object
+        // The pinned SDK explicitly returns the FULL raw event, not only its
+        // content. An edit carries a replacement payload inside that content.
+        // Never fall back to original markers when a replacement omits them.
+        let eventContent: [String: Any]
+        if let raw = object["content"] {
+            guard let content = raw as? [String: Any] else { return AtumTurnMarkers() }
+            eventContent = content
+        } else {
+            eventContent = object
+        }
+        let content: [String: Any]
+        if let raw = eventContent["m.new_content"] {
+            guard let replacement = raw as? [String: Any] else { return AtumTurnMarkers() }
+            content = replacement
+        } else {
+            content = eventContent
+        }
         var markers = AtumTurnMarkers()
         if let value = content["io.atum.interim"] as? Bool, value {
             markers.interim = true

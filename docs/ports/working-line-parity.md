@@ -93,3 +93,137 @@ app adapter and minimal SwiftUI dispatch changes were source-reviewed only.
 
 Log: `/Volumes/AtumTestFlight/working-line-parity-tests-final.log` (local diagnostic;
 this durable report preserves the command and result for coordinator handoff).
+
+## Recognition follow-up: owner report from Luna on 5018d28
+
+The first projection patch alone did not address two upstream recognition defects.
+The owner saw an activity notice centred in the transcript because an unrecognized
+working event follows the ordinary `NoticeRow` path.
+
+1. **Full event JSON was mistaken for content JSON.** The pinned
+   `atum-matrix-rust-components-swift` revision `66c18d37`, generated
+   `Sources/MatrixRustSDK/matrix_sdk_ffi.swift:7707`, documents `latestJson()` as
+   the **full raw JSON string of the latest version of the event (including
+   edits)**. `ItemMapper` passes that string to `AtumTurnMarkers`, whose original
+   parser looked for `io.atum.progress` only at the root. Real SDK envelopes put
+   it in `content`; edited events can put the effective marker in
+   `content["m.new_content"]`. Existing parser tests used bare content and missed
+   the boundary. This explains the centred activity path even with a fully loaded
+   agent directory. The parser now unwraps both layers, preserving bare-content
+   callers. Replacement content wins, including when it removes a marker; malformed
+   content/replacements do not fall back to an old marker.
+2. **Cold-open identity was frozen.** `conversationInfo` derives the private
+   assistant and known agent set from authoritative `/agents` data plus Matrix
+   room membership. Before that data arrives, the same room can open as `.person`
+   with an empty agent set. The store, core, typing factory and SDK mapper kept that
+   initial context. A later `/agents` response or room membership update did not
+   reconcile the open chat. The mapper had already discarded the unknown sender's
+   markers, so merely re-running projection could not repair cached `.notice`
+   items. `refreshConversationIdentity` now runs after directory updates and room
+   publications. A changed identity detaches old callbacks, updates the same store
+   and core, and reattaches a fresh mapper to the SDK cache. Draft/send/follow state
+   stays in the existing store; unchanged publications do not reopen the timeline.
+   The first refreshed projection also replaces the old identity-dependent handover
+   rows: otherwise an all-working timeline with no visible event rows could keep the
+   stale notice through `SessionHandover`.
+
+Desktop's agent set comes from `snapshot.assistant.userId` plus `snapshot.agents`
+(`src/matrix/app.tsx:5282`), and changing `agentKey` reruns its transcript projection.
+Its room-specific singular assistant comes from `snapshotForRoom`
+(`src/matrix/room-agent.ts:32`). A room-type marker alone is not a sender identity:
+`shared/matrix-assistant-room.ts:93` still requires the owner/agent IDs and members.
+The phone does not have a separate Mac host's singular assistant account, so this
+fix waits for its authoritative directory and then repairs the already-open room.
+It does not infer identity from the name Luna, activity copy, raw Matrix ID shape,
+or an untrusted room-type claim. Human and catalog-bot notices remain ordinary
+notices unless the same desktop agent rules recognize the sender/event.
+
+Regression coverage adds full original and edit SDK envelopes, interim envelopes,
+replacement marker removal/malformed payloads, a cached-event late-identity race,
+and an app-store integration test that opens without agents, refreshes identity,
+reattaches the **same cached event**, and checks that it becomes only `atum.typing`
+while preserving the draft. `chat.timeline-parity` now obtains its activity marker
+from a full SDK-shaped event envelope, so the screenshot fixture crosses the repaired
+parser boundary as well.
+
+### Verification follow-up: app target and UI contract
+
+UI tests now query `AccessibilityID.rowTyping` explicitly. `latest()` and reading
+anchors intentionally remain transcript-event queries. A single accessibility
+snapshot checks the working footer's uniqueness, current-step text and frame;
+this avoids comparing different phases during short scripted typing windows.
+G-scroll check 7 checks the edited footer and its removal after the final answer.
+The reply-at-bottom test checks the same lifecycle. U2 checks typing-only footer
+removal. The new step-card test checks current step + both checklist rows in one
+footer, absence of a separate progress row, and keeps a screenshot. Moon's test
+checks its composer typing line and the absence of an assistant footer. The Stop
+test checks one footer while working; that fixture only acknowledges Stop and does
+not invent a synced final event, so disappearance is asserted in the transcript
+fixtures that actually finish their turn.
+
+`ComposerAndMenuUITests.swift` contains `ComposerUITests`, `MessageMenuUITests`,
+and `TurnStopUITests`, not a class named after the file; all three are included.
+The first queue entry was cancelled **before acquiring the lock** on coordinator
+steer. One replacement locked batch includes the new AtumChat tests, app/test-target
+build, all AtumMobileTests, TranscriptUITests, GScrollUITests, these three composer/
+menu/stop classes and S1MatrixUITests. No tests are skipped. It uses two build jobs,
+`/Volumes/AtumTestFlight` derived data, one iPhone 17 simulator, the documented
+appearance/text-size runner, and an EXIT cleanup ending in `xcrun simctl shutdown all`.
+
+First executed batch: AtumChat **718 passed, 0 failed**. The app/test build
+stopped (exit 65) at `ChatFaces.swift:147`: `Request.init` called the main-actor
+avatar candidate helper from a synchronous nonisolated initializer. Corrected by
+marking that UI-only initializer `@MainActor`. No app/UI test executed and no
+screenshot was captured in that batch; the EXIT cleanup ran. Since the coordinator
+explicitly capped execution at one locked run, a corrected build/test/capture batch
+requires an exception to that run limit. Initial evidence is retained as
+`/Volumes/AtumTestFlight/working-line-parity-ui/attempt-1-build.log` and
+`attempt-1-status.txt`.
+
+### Recognition follow-up: typing and Seen avatar evidence
+
+The second owner screenshot (21:32, Luna) shows the composer-level “Luna is typing…”
+line rather than the atom. This is the `.person`/`.group` branch of
+`TypingNames.presentation`; it corroborates the frozen-context race above. The
+app integration regression now sends real scripted typing before and after the
+identity refresh: it first observes `.names(["Luna"])` above the composer, then
+`.nobody` there and exactly one synthetic working footer after directory arrival.
+
+The Seen avatar has independent stale-input paths in addition to classification:
+
+- `openConversation` fetched Matrix members but discarded their profiles for
+  assistant/app chats. It now retains them for faces in every chat. Current
+  `LiveMatrixRoomRow.memberProfiles` publications replace open-time records in
+  `chatInfoPresentation`, so a late photo updates the visible Seen face and an
+  explicit removed photo replaces the old profile.
+- `ChatScreen` built the face environment with `conversationAvatar`, captured only
+  at open, although current `ChatInfoPresentation.avatar` could already have the
+  new `/agents` photo. It now uses current info artwork when info exists, including
+  an explicit nil, falling back to the launch avatar only before info exists.
+- `ChatFace.memberFace` discarded an assistant member's actual Matrix avatar and
+  substituted the room's URI. It now retains the member's URI. Before a member
+  record arrives, a reader's own timeline profile precedes a room-URI fallback.
+- `ChatFaceView` keyed photo requests on the entire face (including its display
+  name) and unconditionally assigned a cancelled loader's nil result. Image
+  requests now depend only on image sources/size/preference, and a cancelled
+  request cannot overwrite a newer image.
+
+Desktop evidence is `src/matrix/send-state.tsx:60` (Seen resolves each reader's
+member) and `src/matrix/member-avatar.tsx:68` (an identified agent uses its roster
+art; other members use their Matrix avatar). The phone now prefers a private
+assistant's current roster photo, with the actual member photo available if the
+remote photo cannot load. No size, shape, spacing, or other styling changes.
+
+App tests cover a missing → available member photo, actual PNG decoding through
+the same avatar loader, current roster-photo precedence with member fallback,
+and a current member whose removed photo must not reuse an old room/event URI.
+No fixture reads a live account or downloads an avatar. The second queue entry
+was also cancelled before acquiring the lock; the final combined batch includes
+both owner follow-ups.
+
+
+The coordinator approved one corrected locked batch after the initializer fix,
+with a local implementation commit before starting it. Package code is unchanged
+since the 718-test pass, so that batch skips the redundant package run and includes
+the app/test build, all previously selected app/UI tests, and screenshot capture.
+Final results will be appended after reading the result bundle.

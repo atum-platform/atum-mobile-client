@@ -121,14 +121,14 @@ final class ConversationLocalMediaDraft {
 @Observable
 final class LiveConversationStore: ConversationStore {
     let roomID: String
-    let kind: RoomKind
+    private(set) var kind: RoomKind
     let title: String
     let ownUserID: String
     let roomIsEncrypted: Bool?
     let mediaComposer: ChatMediaComposerState
     /// The room's agent or bot users; the environment uses it for faces and
     /// the transient-line rule.
-    let agentUserIDs: Set<String>
+    private(set) var agentUserIDs: Set<String>
     /// The owner's activity switch (§9.1); changes while the chat is open.
     private(set) var shareActivity: Bool
 
@@ -263,8 +263,8 @@ final class LiveConversationStore: ConversationStore {
     // MARK: Private
 
     @ObservationIgnored private var core: ConversationCore
-    @ObservationIgnored private let info: ConversationRoomInfo
-    @ObservationIgnored private let makeTyping: ConversationTypingFactory?
+    @ObservationIgnored private var info: ConversationRoomInfo
+    @ObservationIgnored private var makeTyping: ConversationTypingFactory?
     @ObservationIgnored private let localMediaDraft: ConversationLocalMediaDraft
     /// The room's typing controller on the current session; nil while
     /// detached and on a scripted source (its typing comes as outputs).
@@ -340,6 +340,29 @@ final class LiveConversationStore: ConversationStore {
             report: { [weak self] id, reason in await self?.report(id, reason: reason) ?? false }
         )
         ProbeLog.mark(.chatOpened, id: LiveFlowLog.fingerprint(info.roomID))
+    }
+
+    /// Reconcile late account/room identity without replacing the store or
+    /// dropping its draft and send state. A true result requires reattaching:
+    /// the old SDK mapper discarded unrecognized markers, so reprojecting its
+    /// already-mapped values would leave stale centred notices on screen.
+    @discardableResult
+    func updateRoomInfo(_ updated: ConversationRoomInfo,
+                        makeTyping: ConversationTypingFactory? = nil) -> Bool {
+        guard !isClosed, updated.roomID == roomID,
+              updated.context.ownUserID == ownUserID else { return false }
+        guard info.context != updated.context || info.knownNames != updated.knownNames
+                || info.catalogBotUserIDs != updated.catalogBotUserIDs else { return false }
+        // Close callbacks before changing identity so an in-flight publication
+        // from the old mapper cannot consume the refreshed projection boundary.
+        detach()
+        info = updated
+        kind = updated.context.kind
+        agentUserIDs = updated.context.agentUserIDs
+        self.makeTyping = makeTyping
+        core.updateContext(updated.context)
+        typingChanged(typingNames)
+        return true
     }
 
     // MARK: Protocol

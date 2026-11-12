@@ -22,7 +22,9 @@ extension ScriptedChats {
                                 body: "Tóm tắt giúp mình báo cáo quý 3 nhé.", receiptUserIDs: [Cast.atum]))
         let lineID = "\(name).working"
         var line = notice(lineID, "Đang chạy tác vụ…", replyTo: "$" + questionID)
-        line.progress = ChatProgress(phase: .working, kind: "activity", revision: 1)
+        // Match the SDK's full event envelope so a screenshot also exercises
+        // the marker shape that was missed by the original phone parser.
+        line.progress = AtumTurnMarkers.parse(json: #"{"type":"m.room.message","content":{"msgtype":"m.notice","io.atum.progress":{"phase":"working","kind":"activity","revision":1}}}"#).progress
         let steps: [ScriptedStep] = [
             ScriptedStep(at: 3, .typing([Cast.atum])),
             ScriptedStep(at: 6, .arrive(line)),
