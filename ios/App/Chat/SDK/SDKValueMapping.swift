@@ -167,8 +167,9 @@ extension ChatItem {
     }
 
     /// `EventTimelineItem.readReceipts` (`SDK:21822`): who has read up to here.
+    /// Ordered as desktop's `publicReaders` (`Delivery.receiptOrder`).
     static func receiptUserIDs(_ receipts: [String: Receipt]) -> [String] {
-        receipts.keys.sorted()
+        Delivery.receiptOrder(receipts.mapValues(\.timestamp))
     }
 
     /// `MsgLikeContent.inReplyTo` (`SDK:23876`, `InReplyToDetails.eventId()`

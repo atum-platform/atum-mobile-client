@@ -61,18 +61,23 @@ public struct ChatRow: Identifiable, Equatable, Hashable, Sendable {
     /// `DeliveryMark`, because it shows together with that message's
     /// "Đã gửi" or "Đã xem".
     public var showsNoAnswer: Bool
-    /// B16: run position (corner shape, spacing) and the centred time label
-    /// above this row (contract amendment, S1 day 1). `.none` for rows that
+    /// B16: run position (corner shape, spacing), the run time and the edit
+    /// mark under this row (TL-4, TL-5). `.none` for rows that
     /// are not bubbles and for a projection that has not laid out runs.
     public var grouping: RowGrouping
     /// B21: what the quote view draws, for a row that replies to an event
     /// (contract amendment, S1 day 1). Nil when the row replies to nothing
     /// or the source has no details yet.
     public var replyDetails: ChatReplyDetails?
+    /// §9.1 Seen: who read this message of mine, in receipt order, with the
+    /// profile their messages carry (`Delivery.readers`). Set with a `.seen`
+    /// mark; empty otherwise.
+    public var readers: [ChatReader]
 
     public init(item: ChatItem, showsSender: Bool = false, showsQuote: Bool = false,
                 delivery: DeliveryMark = .none, isLatest: Bool = false, showsNoAnswer: Bool = false,
-                grouping: RowGrouping = .none, replyDetails: ChatReplyDetails? = nil) {
+                grouping: RowGrouping = .none, replyDetails: ChatReplyDetails? = nil,
+                readers: [ChatReader] = []) {
         self.item = item
         self.showsSender = showsSender
         self.showsQuote = showsQuote
@@ -81,6 +86,7 @@ public struct ChatRow: Identifiable, Equatable, Hashable, Sendable {
         self.showsNoAnswer = showsNoAnswer
         self.grouping = grouping
         self.replyDetails = replyDetails
+        self.readers = readers
     }
 
     public var id: String { item.id }
@@ -129,7 +135,8 @@ public enum Projection {
     ///   no visible event row (B14); the read marker when it would be the
     ///   last row (B15); virtual items `options` turns off; room-state
     ///   events, always; a second item with an ID already shown.
-    /// - Added: the loading row (first) and the typing row (last).
+    /// - Added: the loading row (first) and the typing row (last, unless the
+    ///   live working line takes that place).
     /// - Per row: the sender line (B16: on a sender change in S1a, at the
     ///   start of a run with `groupsRuns`), the quote flag judged after hiding
     ///   (B21), the delivery mark (B7: S1a, or Sent and Seen with
@@ -193,6 +200,14 @@ public enum Projection {
         // previous event row and ignore virtual rows, as desktop's entries do.
         var previousForSender: ChatItem?
         var previousForQuote: ChatItem?
+        // Built on the first Seen row only, then shared by every other one.
+        var profileIndex: [String: ChatReader]?
+        func senderProfileIndex() -> [String: ChatReader] {
+            if let profileIndex { return profileIndex }
+            let index = Delivery.senderProfiles(items)
+            profileIndex = index
+            return index
+        }
         for (index, item) in visible.enumerated() {
             guard item.kind.isEventContent else {
                 if case .dayDivider = item.kind { previousForSender = nil }
@@ -206,24 +221,33 @@ public enum Projection {
                 previousForSender = item
             }
             let delivery = marks.map { $0[item.id] ?? .none } ?? Delivery.mark(for: item)
+            let readers: [ChatReader] = if case .seen = delivery {
+                Delivery.readers(of: item, profiles: senderProfileIndex(), context: context)
+            } else {
+                []
+            }
             rows.append(ChatRow(item: item, showsSender: showsSender,
                                 showsQuote: showsQuote(item, previous: previousForQuote, context: context),
                                 delivery: delivery,
                                 isLatest: index == latestIndex,
                                 showsNoAnswer: item.id == noAnswerID,
-                                replyDetails: item.replyTo == nil ? nil : replyDetails[item.id]))
+                                replyDetails: item.replyTo == nil ? nil : replyDetails[item.id],
+                                readers: readers))
             previousForQuote = item
         }
-        if !typingNames.isEmpty {
-            rows.append(ChatRow(item: ChatItem(id: typingRowID, kind: .typing(names: typingNames))))
-        }
-        // A7/§3: the one live working line sits under the typing bubble, not
-        // where it happened to be sent. A line whose turn ended is already
+        // A7/§3, desktop's `MatrixAgentWorking` (`loadingIndicator` in
+        // `src/matrix/app.tsx`): the agent at work is ONE last row, shown
+        // while it types or while its turn's working line lives. The live
+        // line moves there from where it happened to be sent and stands for
+        // the typing row too (the atom, then the line); with no line, the
+        // typing row is the atom alone. A line whose turn ended is already
         // gone from `shownItems`.
         if let working = TransientLines.workingLine(items, agents: context.agentUserIDs),
            let index = rows.firstIndex(where: { $0.id == working.id }) {
             let row = rows.remove(at: index)
             rows.append(row)
+        } else if !typingNames.isEmpty {
+            rows.append(ChatRow(item: ChatItem(id: typingRowID, kind: .typing(names: typingNames))))
         }
         return Grouping.apply(to: rows, context: context, groupsRuns: options.groupsRuns, calendar: calendar)
     }

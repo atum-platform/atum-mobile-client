@@ -720,9 +720,10 @@ final class LiveConversationStore: ConversationStore {
         if !typingNames.isEmpty { typingChanged([]) }
     }
 
-    /// Whoever is typing (display names, my own user dropped). §2.7: agents
-    /// and bots get the dots as the last row; people and groups get the line
-    /// above the composer and no row (`TypingNames.presentation`).
+    /// Whoever is typing (display names, my own user dropped). My assistant's
+    /// chat gets the working atom as the last row; every other chat, an app
+    /// bot's included, gets the line above the composer and no row
+    /// (`TypingNames.presentation`, desktop parity).
     private func typingChanged(_ names: [String]) {
         let presentation = TypingNames.presentation(kind: kind, names: names)
         if names != typingNames { typingNames = names }

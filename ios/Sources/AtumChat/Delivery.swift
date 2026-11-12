@@ -34,6 +34,21 @@ public enum SendRepair: Equatable, Hashable, Sendable {
     case retryParkedRequest(ChatEventRef)
 }
 
+/// One reader of my message (§9.1 Seen): who, and the profile their own
+/// messages carry in the loaded timeline (nil when they have sent none). The
+/// app prefers the member list's profile and the room's face for its agent.
+public struct ChatReader: Equatable, Hashable, Sendable {
+    public var userID: String
+    public var name: String?
+    public var avatarURI: String?
+
+    public init(userID: String, name: String? = nil, avatarURI: String? = nil) {
+        self.userID = userID
+        self.name = name
+        self.avatarURI = avatarURI
+    }
+}
+
 public enum Delivery {
     /// B10: how long my newest message in an agent room waits for an answer
     /// before the quiet "Chưa có câu trả lời." line shows (desktop
@@ -59,8 +74,11 @@ public enum Delivery {
     ///   receipt sits on that very item (the Element X model: the reader's
     ///   avatar appears under the message their receipt names), counting each
     ///   reader once;
-    /// - "Đã gửi" only under my last settled message while nobody has read it
-    ///   yet, in every room kind (§9.1: never under older unread messages);
+    /// - "Đã gửi" only under my newest message, once it has settled and while
+    ///   nobody has read it yet, in every room kind (desktop `send-state.tsx`:
+    ///   `latest && message.sent`, `latest` being my newest message whatever
+    ///   its state; §9.1: never under older unread messages). While a newer
+    ///   one is still sending, its clock is the only mark;
     /// - older unread settled messages show nothing.
     ///
     /// My own account's receipts (the Mac) never count.
@@ -76,10 +94,74 @@ public enum Delivery {
                 marks[item.id] = .seen(readerCount: readers.count)
             }
         }
-        guard let newest = items.lastIndex(where: { isSettledOwnMessage($0) }),
+        guard let newest = items.lastIndex(where: { $0.isOwn && isMessageLike($0.kind) }),
+              isSettledOwnMessage(items[newest]),
               marks[items[newest].id] == nil else { return marks }
         marks[items[newest].id] = .sent
         return marks
+    }
+
+    /// The readers of one of my messages, in receipt order (the SDK mapping
+    /// sorts them by receipt time, as desktop's `publicReaders`), my own
+    /// account dropped, each with the name and Matrix avatar their own
+    /// messages in `items` carry. A Seen face then wears the reader's photo
+    /// even where the chat has no member list (an assistant or app chat, a
+    /// Team Space channel) or before it lands. Empty for a row nobody read.
+    public static func readers(of item: ChatItem, in items: [ChatItem],
+                               context: RoomContext) -> [ChatReader] {
+        var seen = Set<String>()
+        let userIDs = item.receiptUserIDs.filter { userID in
+            !userID.isEmpty && userID != context.ownUserID && seen.insert(userID).inserted
+        }
+        guard !userIDs.isEmpty else { return [] }
+        return readers(userIDs, profiles: senderProfiles(items, wanted: Set(userIDs)))
+    }
+
+    /// `readers(of:in:context:)` with a sender-profile index the caller built
+    /// once (`senderProfiles(items)`), so a projection with many Seen rows
+    /// scans the timeline once rather than once per row.
+    static func readers(of item: ChatItem, profiles: [String: ChatReader],
+                        context: RoomContext) -> [ChatReader] {
+        var seen = Set<String>()
+        let userIDs = item.receiptUserIDs.filter { userID in
+            !userID.isEmpty && userID != context.ownUserID && seen.insert(userID).inserted
+        }
+        return readers(userIDs, profiles: profiles)
+    }
+
+    private static func readers(_ userIDs: [String], profiles: [String: ChatReader]) -> [ChatReader] {
+        userIDs.map { userID in
+            ChatReader(userID: userID, name: profiles[userID]?.name, avatarURI: profiles[userID]?.avatarURI)
+        }
+    }
+
+    /// Who read up to an event, ordered as desktop's `publicReaders`
+    /// (`src/matrix/read-state.ts`): by receipt time, earliest first, then by
+    /// user ID. A receipt with no time sorts first.
+    public static func receiptOrder(_ times: [String: UInt64?]) -> [String] {
+        times.sorted { left, right in
+            let leftTime = left.value ?? 0
+            let rightTime = right.value ?? 0
+            return leftTime != rightTime ? leftTime < rightTime : left.key < right.key
+        }.map(\.key)
+    }
+
+    /// Each sender's profile, taken whole from their newest message whose
+    /// profile is known (a name or an avatar), so a removed photo stays
+    /// removed rather than falling back to an older message's. A message
+    /// carrying neither is an unavailable profile and is skipped. `wanted`
+    /// nil indexes every sender in one pass.
+    static func senderProfiles(_ items: [ChatItem], wanted: Set<String>? = nil) -> [String: ChatReader] {
+        var profiles = [String: ChatReader]()
+        for item in items.reversed() where item.kind.isEventContent && profiles[item.sender] == nil {
+            if let wanted, !wanted.contains(item.sender) { continue }
+            let name = item.senderName.flatMap { $0.isEmpty ? nil : $0 }
+            let avatarURI = item.senderAvatarURI.flatMap { $0.isEmpty ? nil : $0 }
+            guard name != nil || avatarURI != nil else { continue }
+            profiles[item.sender] = ChatReader(userID: item.sender, name: name, avatarURI: avatarURI)
+            if let wanted, profiles.count == wanted.count { break }
+        }
+        return profiles
     }
 
     /// B10: the ID of my newest message in my assistant's chat when it has

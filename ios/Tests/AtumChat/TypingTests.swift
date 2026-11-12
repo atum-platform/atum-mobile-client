@@ -34,9 +34,16 @@ final class TypingTests: XCTestCase {
             let names = TypingNames.displayNames([F.agent], ownUserID: F.me, kind: kind, roomTitle: "Moon",
                                                  name: { _ in nil })
             XCTAssertEqual(names, ["Moon"], "\(kind): before the profile lookup lands")
-            let rows = Projection.rows([F.text("a", from: F.agent)], context: F.assistantRoom(),
-                                       typingNames: TypingNames.presentation(kind: kind, names: names).rowNames)
-            XCTAssertEqual(rows.last?.item.kind, .typing(names: ["Moon"]), "\(kind)")
+            // Desktop: my assistant's chat shows the working row, an app's
+            // chat the line above the composer, both under the room's title.
+            let presentation = TypingNames.presentation(kind: kind, names: names)
+            if kind == .assistant {
+                let rows = Projection.rows([F.text("a", from: F.agent)], context: F.assistantRoom(),
+                                           typingNames: presentation.rowNames)
+                XCTAssertEqual(rows.last?.item.kind, .typing(names: ["Moon"]), "\(kind)")
+            } else {
+                XCTAssertEqual(presentation, TypingPresentation(rowNames: [], line: .names(["Moon"])), "\(kind)")
+            }
             XCTAssertEqual(TypingNames.displayNames([F.agent, "@helper:example.test"], ownUserID: F.me, kind: kind,
                                                     roomTitle: "Moon", name: { _ in nil }), ["Moon"],
                            "\(kind): the title once")
@@ -56,11 +63,13 @@ final class TypingTests: XCTestCase {
         XCTAssertEqual(TypingNames.line(["A", "B", "C", "D"]), .many)
     }
 
-    func testAgentsAndBotsGetTheRowPeopleGetTheLine() {
-        for kind in [RoomKind.assistant, .appBot] {
-            let presentation = TypingNames.presentation(kind: kind, names: ["Atum"])
-            XCTAssertEqual(presentation, TypingPresentation(rowNames: ["Atum"], line: .nobody), "\(kind)")
-        }
+    /// Desktop `src/matrix/app.tsx`: `{!room.assistant && <MatrixTypingLine/>}`
+    /// and `MatrixAgentWorking` only in the assistant's chat.
+    func testOnlyMyAssistantGetsTheRowEveryOtherChatGetsTheLine() {
+        let presentation = TypingNames.presentation(kind: .assistant, names: ["Atum"])
+        XCTAssertEqual(presentation, TypingPresentation(rowNames: ["Atum"], line: .nobody))
+        XCTAssertEqual(TypingNames.presentation(kind: .appBot, names: ["Moon"]),
+                       TypingPresentation(rowNames: [], line: .names(["Moon"])), "an app bot's chat")
         for kind in [RoomKind.person, .group] {
             let presentation = TypingNames.presentation(kind: kind, names: ["Minh Anh"])
             XCTAssertEqual(presentation, TypingPresentation(rowNames: [], line: .names(["Minh Anh"])), "\(kind)")

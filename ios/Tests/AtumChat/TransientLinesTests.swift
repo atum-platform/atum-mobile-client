@@ -139,10 +139,35 @@ final class TransientLinesTests: XCTestCase {
 
     // MARK: Projection and the rest of the chat
 
-    func testProjectionPutsTheLiveWorkingLineUnderTheTypingRow() {
-        let items = [own(), message("i", interim: true, minute: 2), progress(minute: 3)]
+    /// Desktop `MatrixAgentWorking`: one last row while the agent works; the
+    /// live line stands for the typing row (the atom, then the line).
+    func testProjectionPutsTheLiveWorkingLineLastInPlaceOfTheTypingRow() {
+        let items = [own(), progress(minute: 1), message("i", interim: true, minute: 2)]
         let rows = Projection.rows(items, context: F.assistantRoom(), typingNames: ["Atum"], options: .s1)
-        XCTAssertEqual(rows.map(\.id), ["q", "i", Projection.typingRowID, "p"])
+        XCTAssertEqual(rows.map(\.id), ["q", "i", "p"])
+        let idle = Projection.rows(items, context: F.assistantRoom(), options: .s1)
+        XCTAssertEqual(idle.map(\.id), ["q", "i", "p"], "the line shows while typing pauses too")
+        let typingOnly = Projection.rows([own()], context: F.assistantRoom(), typingNames: ["Atum"], options: .s1)
+        XCTAssertEqual(typingOnly.map(\.id), ["q", Projection.typingRowID], "no line yet: the atom alone")
+    }
+
+    func testDesktopStatusLineWaitsAreRetiredWorkingText() {
+        for body in ["Đang chờ bạn trả lời trên máy Mac.", "Đã chờ bạn trả lời trên máy Mac.",
+                     "Waiting for you on your Mac.", "Waited for you on your Mac."] {
+            XCTAssertTrue(TransientLines.isTransientLine(notice("w", body, minute: 1), agents: agents), body)
+        }
+        let items = [own(), notice("w", "Đã chờ bạn trả lời trên máy Mac.", minute: 1), message("a", minute: 2)]
+        XCTAssertEqual(Projection.rows(items, context: F.assistantRoom(), options: .s1).map(\.id), ["q", "a"])
+    }
+
+    func testWorkingLineTextSplitsTheStepFromItsChecklist() {
+        let text = WorkingLineText(body: "Đang chạy tác vụ…\n✓ Đọc tệp\n•  Viết báo cáo\n\n◦ Gửi")
+        XCTAssertEqual(text.current, "Đang chạy tác vụ…")
+        XCTAssertEqual(text.steps, [.init(text: "Đọc tệp", done: true), .init(text: "Viết báo cáo", done: false),
+                                    .init(text: "Gửi", done: false)])
+        XCTAssertEqual(WorkingLineText(body: "Đang tra cứu trên web…"),
+                       WorkingLineText(current: "Đang tra cứu trên web…", steps: []))
+        XCTAssertNil(WorkingLineText(body: " \n ").current)
     }
 
     func testProjectionHidesAnEndedWorkingLineAndRetiredWaitLines() {
