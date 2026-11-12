@@ -34,6 +34,10 @@
 	<string>Atum lưu ảnh bạn chọn vào Thư viện ảnh.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Atum dùng nhận dạng giọng nói để chuyển lời bạn nói thành chữ trong khung soạn tin.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

@@ -119,6 +119,11 @@ are logged. `event_id_only` and presentation/privacy filtering are unchanged.
 | Undecryptable, unknown, empty text, not found | Generic alert | Generic body |
 | Filtered, redacted or own event | Empty alert | Badge only; no sound |
 
+Since 2026-11-11 a fetched message with a sender is also turned into an
+Apple communication notification (sender or group face as the big image); see
+`docs/ports/communication-notifications.md`. The table above still describes
+the text, which iOS shows unchanged when no face can be applied.
+
 Names pass through `MatrixPersonName.name(_:userID:)`, then exclude Matrix IDs,
 localparts, server names and control characters. Missing sender names use the
 exported unnamed-user word; missing usable group names keep the generic alert.

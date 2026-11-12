@@ -46,7 +46,10 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let match = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "Đà Lạt")).firstMatch
         XCTAssertTrue(match.waitForExistence(timeout: 5), boundedHierarchy(app))
-        XCTAssertTrue(waitFor(3) { match.isHittable }, "the match was not brought into view")
+        // The count lands before the scroll finishes; on a hosted runner the
+        // walk back and the smooth scroll took over 3 s (#43 shard 3, 12 Nov:
+        // the recording shows the match in view, highlighted, ~6 s later).
+        XCTAssertTrue(waitFor(10) { match.isHittable }, "the match was not brought into view")
         keepScreenshot("hc6-search-found-\(appearanceTag)-en", of: app)
 
         element(app, "chat.search.close").tap()
@@ -102,10 +105,19 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let count = element(app, "chat.search.count")
         XCTAssertTrue(waitFor(15) { count.label.hasPrefix("Result 1 of 1") }, "count: \(count.label)")
         keepScreenshot("hc6-search-ax5-\(appearanceTag)-en", of: app)
-        try app.performAccessibilityAudit(for: [.textClipped]) { issue in
-            // Only the bar is this slice's; transcript rows have their own audits.
+        // Only the bar is this slice's; transcript rows have their own audits.
+        let barOnly: (XCUIAccessibilityAuditIssue) -> Bool = { issue in
             guard let element = issue.element else { return true }
             return !element.identifier.hasPrefix("chat.search")
+        }
+        do {
+            try app.performAccessibilityAudit(for: [.textClipped], barOnly)
+        } catch let error as NSError where Self.isAuditTimeout(error) {
+            // "Audit failed to complete in time" at AX XXXL on a hosted runner
+            // (#43 shard 3, 12 Nov; passes locally): one more full attempt.
+            // A finding still fails; a second timeout still fails.
+            print("MEASURE audit.timeout textClipped; one more attempt")
+            try app.performAccessibilityAudit(for: [.textClipped], barOnly)
         }
     }
 

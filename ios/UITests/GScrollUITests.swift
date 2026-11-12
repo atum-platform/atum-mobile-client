@@ -94,6 +94,11 @@ final class GScrollUITests: TranscriptUITestCase {
         }
         XCTAssertTrue(waitFor(3) { followValue(app) == "following" }, "check 9: did not re-attach")
         wait(0.8)
+        // The typing row (23–30 s) leaves below the newest row; while
+        // following, that rightly moves it by the row's height. A short
+        // transcript (folded long answers) can re-attach before 30 s, so the
+        // view is measured once the scenario is quiet.
+        if Date() < at(30.5) { wait(until: at(30.5)) }
         let reattached = latest(app).frame
         wait(1)
         let moved9b = abs(latest(app).frame.minY - reattached.minY)

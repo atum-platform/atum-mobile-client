@@ -223,6 +223,8 @@ Engine notes from this pass:
 Scripted synthetic hosts (`App/Debug/StoreScriptedCommerce.swift`): `store.acquire`,
 `store.insufficient`, `store.uncertain` (first write commits, reply lost), `store.owned`
 (pet, per-assistant skill, cancellable monthly entitlement). In-memory API and journal.
+`store.closed` (Apple checkout closed, plus the free `pet/mochi`) exercises the REL-15
+Get gate; see `store-get-gate.md`.
 
 ### UI pass verification
 

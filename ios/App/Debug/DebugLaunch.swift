@@ -69,6 +69,9 @@ enum S6ScriptedScenario: String, CaseIterable {
     case storeInsufficient = "store.insufficient"
     case storeUncertain = "store.uncertain"
     case storeOwned = "store.owned"
+    /// Apple checkout closed (REL-15 gate): paid items offer no Get or
+    /// top-up; a free item can still be got.
+    case storeClosed = "store.closed"
     case accountDefault = "account.default"
     case accountRestore = "account.restore"
     case recoveryRejected = "recovery.rejected"

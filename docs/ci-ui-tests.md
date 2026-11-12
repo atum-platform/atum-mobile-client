@@ -41,6 +41,25 @@ per run on 2026-11-11 with six lanes active).
   (Retry state not reached after a failed create, line 349) and
   `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`
   (`company.channel.ops` row not found); both under diagnosis. Remove a line when its fix lands.
+- 2026-11-12: `ChatInfoUITests/testAssistantCardChoosesOneServerDestinationDefault`
+  failed on PR #33 (`84d891a`) because the hosted runner was slow: launch took 32 s and
+  `chat.title` 30 s, then the 2 s + 3 s waits for `assistant.card.model` ran out. Its
+  siblings with the same flow passed. The three card-model waits in `ChatInfoUITests`
+  are now 8 s + 10 s.
+- 2026-11-12: on PR #41 (`6fd2587`) shard 2's first test,
+  `ChatInfoUITests/testAppInfoConfirmsPhoneOnlyChatDeletion`, failed before any test code
+  ran: "Failed to launch ... Timed out while launching application via Xcode" (62 s)
+  on a cold simulator. The other 24 tests in the shard passed. Each shard now boots the
+  simulator, waits with `simctl bootstatus -b`, then installs, launches and terminates
+  the app once before `test-without-building`. The warm-up launch is best-effort; the
+  boot wait is not.
+- 2026-11-12: on PR #43 (`d9c55c2`) shard 3 failed two `HomeChatsWave3UITests` that pass
+  locally on #43 and on main (locked run, iPhone 17, iOS 27):
+  `testSearchFindsAWordThreePagesBackAndCloses` ("the match was not brought into view":
+  the recording shows the match in view, highlighted, a few seconds after the 3 s wait
+  ended) now waits 10 s; `testSearchBarAtAccessibilitySizePassesTheAudit` ("Audit failed to
+  complete in time" at AX XXXL) now makes one more full attempt after a timeout. A finding,
+  or a second timeout, still fails.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

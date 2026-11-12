@@ -27,7 +27,10 @@ MatrixRustSDK-LICENSE.txt. Complete binary/transitive notice inventory remains
 part of release assembly before any public-v1 RC archive.
 
 Element X's last Apache-2.0 iOS revision, 0f3b33c5ae, is an approved parts bin.
-No parts have been copied at setup. Before adding a part, preserve its copyright,
+The notification service lifecycle and the communication-notification intent
+are now adapted from that historical revision (byte-identical at release 1.7.5);
+see ios/Vendor/Notices/ElementX-NSE.md for attribution and modifications.
+Before adding another part, preserve its copyright,
 Apache-2.0 licence, original NOTICE (if present), file notices, immutable source
 revision and modification record in ios/Vendor/Notices/. The same applies to
 later Android parts from b802a196fc. Compound is excluded.

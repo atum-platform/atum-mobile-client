@@ -34,24 +34,32 @@ public struct RowGrouping: Equatable, Hashable, Sendable {
     /// The other bubbles of the run keep an empty face-wide gutter, so the
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
     public var showsFace: Bool
-    /// A centred time label above this row: the gap since the previous event
-    /// row is 60 minutes or more and no day divider already sits between them
-    /// (the divider wins). Nil otherwise.
-    public var timeLabel: Date?
+    /// TL-4, desktop's run time (`src/matrix/app.tsx`, `runEnd`,
+    /// `MatrixSendState`'s `time`): the clock sits in the quiet line under
+    /// this bubble. Under the last bubble of every run (mine share the line
+    /// with Sent or Seen), and under every answer of my agent (desktop's
+    /// answer toolbar). Never on a message still sending, failed, or
+    /// undecryptable, never on notices.
+    public var showsTime: Bool
+    /// TL-5: "đã sửa" sits in that same line (desktop `personEdited`):
+    /// people's edits, mine included; an agent's or bot's edits (a streamed
+    /// answer) say nothing.
+    public var showsEdited: Bool
 
     public init(position: RunPosition? = nil, showsSender: Bool = false, showsFace: Bool = false,
-                timeLabel: Date? = nil) {
+                showsTime: Bool = false, showsEdited: Bool = false) {
         self.position = position
         self.showsSender = showsSender
         self.showsFace = showsFace
-        self.timeLabel = timeLabel
+        self.showsTime = showsTime
+        self.showsEdited = showsEdited
     }
 
     public static let none = RowGrouping()
 }
 
-/// Sender runs, sender lines, sender faces and time labels (B16), on plain
-/// values.
+/// Sender runs, sender lines, sender faces, run times and edit marks (B16,
+/// TL-4, TL-5), on plain values.
 ///
 /// The Matrix SDK's timeline gives each event its sender, `isOwn`, the
 /// sender's profile and a timestamp, and inserts the day dividers, the read
@@ -67,16 +75,15 @@ public struct RowGrouping: Equatable, Hashable, Sendable {
 /// - Notices are quiet centred lines, not bubbles: they are not in a run and,
 ///   as in S0, they do not break one either (a working line between two
 ///   answers does not repeat the agent's name).
-/// - The time label compares each event row with the previous event row,
-///   notices included, whoever sent them.
+/// - The clock sits under the last bubble of each run and under every answer
+///   of my agent, as on desktop (TL-4, 2026-11-11). It replaced the centred
+///   label the phone drew after a 60-minute gap.
 /// - In a group, the sender's name opens a run and the sender's face closes
 ///   it (beside the last bubble, as in Messages and WhatsApp). A 1:1 chat
 // Preserve user-visible identity, state and recovery behavior across connection changes.
 public enum Grouping {
     /// Desktop `MESSAGE_RUN_MS`: the most time between two bubbles of a run.
     public static let runGap: TimeInterval = 5 * 60
-    /// A gap this long or longer gets a centred time label.
-    public static let timeLabelGap: TimeInterval = 60 * 60
 
     /// One `RowGrouping` per row, aligned with `rows`.
     public static func layout(_ rows: [ChatRow], context: RoomContext,
@@ -136,24 +143,14 @@ public enum Grouping {
             }
         }
 
-        // Time labels: a 60-minute gap since the previous event row, unless a
-        // day divider sits between them.
-        var previousEvent: ChatItem?
-        var dividerSincePrevious = false
+        // Run times (TL-4) and edits (TL-5), on bubbles only.
         for (index, row) in rows.enumerated() {
+            guard let position = result[index].position else { continue }
             let item = row.item
-            if case .dayDivider = item.kind {
-                dividerSincePrevious = true
-                continue
+            if showsTime(item) {
+                result[index].showsTime = position.endsRun || isAnswer(item, context: context)
             }
-            guard item.kind.isEventContent, item.kind != .roomState,
-                  !item.isProgressLine else { continue }
-            if let previousEvent, !dividerSincePrevious,
-               item.timestamp.timeIntervalSince(previousEvent.timestamp) >= timeLabelGap {
-                result[index].timeLabel = item.timestamp
-            }
-            previousEvent = item
-            dividerSincePrevious = false
+            result[index].showsEdited = showsEdited(item, context: context)
         }
         return result
     }
@@ -183,6 +180,42 @@ public enum Grouping {
         guard previous.sender == next.sender, !next.sender.isEmpty else { return false }
         guard calendar.isDate(previous.timestamp, inSameDayAs: next.timestamp) else { return false }
         return next.timestamp.timeIntervalSince(previous.timestamp) <= runGap
+    }
+
+    /// Desktop `timeEligible`: settled (not sending, not failed, not
+    /// undecryptable). My deleted message has no line (desktop draws no
+    /// send state for it).
+    static func showsTime(_ item: ChatItem) -> Bool {
+        switch item.kind {
+        case .placeholder(.undecryptable), .placeholder(.undecryptableOldHistory): return false
+        case .placeholder(.redacted) where item.isOwn: return false
+        default: break
+        }
+        switch item.delivery {
+        case .sending, .failed: return false
+        case .remote, .sent: return true
+        }
+    }
+
+    /// Desktop's `answer`: my agent's message (not an interim remark). Only
+    /// my assistant's chat knows its agent (`RoomContext.agentUserIDs`; an
+    /// app's chat lists its bot there, which desktop does not count, and a
+    /// live group lists nobody). Every answer carries its time.
+    public static func isAnswer(_ item: ChatItem, context: RoomContext) -> Bool {
+        guard !item.isOwn, context.kind == .assistant, !item.interim,
+              context.agentUserIDs.contains(item.sender) else { return false }
+        switch item.kind {
+        case .message, .image, .file: return true
+        default: return false
+        }
+    }
+
+    /// Desktop `personEdited`: an edited message from a person (me
+    /// included), never from an agent or a bot, never once deleted.
+    public static func showsEdited(_ item: ChatItem, context: RoomContext) -> Bool {
+        guard item.isEdited, item.kind != .placeholder(.redacted) else { return false }
+        if item.isOwn { return true }
+        return context.kind != .appBot && !context.agentUserIDs.contains(item.sender)
     }
 
     /// Rows drawn as bubbles (or bare answers) that take part in runs.

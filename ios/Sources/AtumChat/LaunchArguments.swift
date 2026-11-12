@@ -1,3 +1,4 @@
+#if DEBUG
 /// Debug-only launch arguments (plan §2.10). The owner never passes any:
 /// tapping the icon starts the normal app.
 public struct AtumLaunchArguments: Equatable, Sendable {
@@ -88,4 +89,15 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     /// HC-6: an assistant chat whose one "Đà Lạt" is three older pages back,
     /// for the in-chat search walking history.
     case chatSearch = "chat.search"
+    /// Desktop timeline parity (2026-11-11): Atum's Seen face under my
+    /// message, then Atum typing (the atom alone), then a live working line
+    /// with its checklist that stays until the turn ends.
+    case chatTimelineParity = "chat.timeline-parity"
+    /// Bubble width, tight hug and the long-message fold (2026-11-11): my
+    /// assistant's chat with short and long answers, the long one folded.
+    case chatBubbles = "chat.bubbles"
+    /// The same in a group with faces.
+    case chatBubblesGroup = "chat.bubbles-group"
 }
+
+#endif

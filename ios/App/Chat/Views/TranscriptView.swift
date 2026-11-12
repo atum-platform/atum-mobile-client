@@ -71,6 +71,8 @@ struct TranscriptView: View {
         // (FlowPhone › Chat); people chats and groups have none.
         let latestAnswerID = store.kind == .assistant || store.kind == .appBot
             ? rows.last { $0.item.kind == .message && !$0.item.isOwn }?.id : nil
+        // Messages the agent may still be writing never fold (`MessageFold`).
+        let growing = MessageFold.growingIDs(in: rows)
         ScrollView {
             // An eager stack: every loaded row is laid out. A lazy stack
             // estimates rows it has not laid out, and with rows as different
@@ -81,7 +83,7 @@ struct TranscriptView: View {
                 ForEach(rows) { row in
                     ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
                                 parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
-                                searchHighlight: search?.highlights[row.id])
+                                searchHighlight: search?.highlights[row.id], isGrowing: growing.contains(row.id))
                         .equatable()
                         // Each row's top in the content (it changes only when
                         // something above it changes height, never on scroll).
@@ -102,6 +104,12 @@ struct TranscriptView: View {
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(sizeChangeAnchor(following: following), for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
+        // Telegram and Messages: a tap anywhere on the transcript, or a drag
+        // towards older messages, puts the keyboard away. Both recognizers
+        // run beside every other touch (links, media, quotes, Show more, the
+        // long-press menu) and cancel none; the draft stays in the composer.
+        .gesture(TranscriptKeyboardDismissal.Tap())
+        .gesture(TranscriptKeyboardDismissal.Pan())
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         .onScrollPhaseChange { _, phase in
             scratch.motion = ScrollMotion(phase)
@@ -120,6 +128,7 @@ struct TranscriptView: View {
             syncFollowState()
         }
         .onChange(of: store.snapshot) { old, new in
+            MessageFoldStore.session.sawGrowing(MessageFold.growingIDs(in: new.rows))
             snapshotChanged(from: old, to: new)
             syncFollowState()
         }
@@ -139,6 +148,7 @@ struct TranscriptView: View {
         .onChange(of: scenePhase) { _, _ in updateBottomVisible() }
         .onChange(of: covered) { _, _ in updateBottomVisible() }
         .onAppear {
+            MessageFoldStore.session.sawGrowing(growing)
             scratch.rowOrder = rows.map(\.id)
             scratch.isOnScreen = true
             updateBottomVisible()
@@ -151,6 +161,7 @@ struct TranscriptView: View {
             updateBottomVisible()
         }
         .environment(\.chatRowInteractions.showOriginal, { id in showOriginal(id) })
+        .environment(\.chatRowInteractions.folded, { id in rowFolded(id) })
         .accessibilityIdentifier(AccessibilityID.transcript)
         .accessibilityValue(AccessibilityID.transcriptValue(followState))
     }
@@ -384,6 +395,18 @@ struct TranscriptView: View {
     private func showOriginal(_ eventID: String) {
         guard let row = store.snapshot.rows.first(where: { $0.item.eventID == eventID }) else { return }
         withAnimation(.smooth(duration: 0.35)) { position.scrollTo(id: row.id, anchor: .center) }
+    }
+
+    /// Show less on a long message whose top has scrolled out of view: the
+    /// fold would leave the reader below it, so its top comes back into view
+    /// (Telegram does the same). While following, the bottom stays pinned and
+    /// the folded message is already in view.
+    private func rowFolded(_ rowID: String) {
+        guard !store.follow.isFollowing, let minY = scratch.rowMinY[rowID],
+              minY < scratch.geometry.distanceFromTop else { return }
+        scratch.anchor = nil
+        scratch.pendingHold = nil
+        withAnimation(.smooth(duration: 0.3)) { position.scrollTo(id: rowID, anchor: .top) }
     }
 
     // MARK: HC-6: bringing a search match into view
@@ -660,6 +683,83 @@ private extension ScrollMotion {
         case .idle: self = .idle
         case .animating: self = .animating
         case .tracking, .interacting, .decelerating: self = .user
+        }
+    }
+}
+
+/// Puts the keyboard away from the transcript, as Telegram and Messages do
+/// (owner, 2026-11-11). UIKit recognizers rather than SwiftUI gestures, so
+/// they can be told to recognise beside every other gesture and to cancel no
+/// touch: a tap on a link, a photo, a quote, Show more or the jump pill still
+/// does what it does, and the long-press menu still opens. Resigning the
+/// first responder only hides the keyboard; the composer keeps its draft.
+/// While following, the transcript's bottom anchor keeps the newest row at
+/// the bottom as the keyboard goes; while reading, the rows on screen stay.
+enum TranscriptKeyboardDismissal {
+    @MainActor static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    /// Recognises beside everything; never delays or cancels a touch.
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        /// The pan already put the keyboard away during this drag.
+        var dismissedThisDrag = false
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
+        }
+    }
+
+    /// A tap anywhere on the transcript.
+    struct Tap: UIGestureRecognizerRepresentable {
+        func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+        func makeUIGestureRecognizer(context: Context) -> UITapGestureRecognizer {
+            let recognizer = UITapGestureRecognizer()
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delaysTouchesEnded = false
+            recognizer.delegate = context.coordinator
+            return recognizer
+        }
+
+        func handleUIGestureRecognizerAction(_ recognizer: UITapGestureRecognizer, context: Context) {
+            if recognizer.state == .ended { TranscriptKeyboardDismissal.dismiss() }
+        }
+    }
+
+    /// A drag towards older messages (the finger moving down) of more than
+    /// `distance` points, Telegram's rule. `.scrollDismissesKeyboard(
+    /// .interactively)` alone hides it only once the finger reaches the
+    /// keyboard. A drag towards newer messages keeps it up.
+    struct Pan: UIGestureRecognizerRepresentable {
+        static let distance: CGFloat = 24
+
+        func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+        func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+            let recognizer = UIPanGestureRecognizer()
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delaysTouchesEnded = false
+            recognizer.delegate = context.coordinator
+            return recognizer
+        }
+
+        func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+            let coordinator = context.coordinator
+            switch recognizer.state {
+            case .began:
+                coordinator.dismissedThisDrag = false
+            case .changed:
+                guard !coordinator.dismissedThisDrag,
+                      recognizer.translation(in: recognizer.view).y > Self.distance else { return }
+                coordinator.dismissedThisDrag = true
+                TranscriptKeyboardDismissal.dismiss()
+            default:
+                break
+            }
         }
     }
 }
