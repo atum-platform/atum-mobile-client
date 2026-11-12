@@ -292,3 +292,11 @@ no bubble/avatar/time, below the last reply and above the composer. The owner
 explicitly authorized merging `origin/main` (`aa75765`, #47) and one final locked
 run after this batch, with light/dark rendered evidence. #48's fold work remains
 separate; keep shared test changes minimal and do not edit fold/scroll code.
+
+Merged `origin/main` at `aa75765` cleanly. The merge changes only the design lock,
+manifest, schema-2 atom JSON and upstream repin documentation. The existing
+`AtomWait` renderer already supports one orbit and honors `ChatMotion.disabledForUITests`
+for schema 2; its legacy schema-1 branch did not honor that flag. This is a plausible
+contributor to the missed 1.5-second U2 window; do not widen or weaken that assertion
+before checking the corrected asset. Layout keeps the desktop Kit body/ink-2/spacing
+rules already implemented by `AgentWorkingLayout`.
