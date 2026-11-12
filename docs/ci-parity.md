@@ -141,7 +141,8 @@ The wave 3 desktop copy export (atum-desktop `055bd491`) carries a DM identifier
 address (local part `you`, domain `example.com`), so the vendored `Localizable.xcstrings` was refused as "new identifier". Addresses
 at RFC 2606 / RFC 6761 reserved names (`example.com`, `example.net`, `example.org`, `*.example`,
 `*.test`, `*.invalid`, `*.localhost`) can't route to a person, so the email class now skips them, like
-role addresses. A routable lookalike (`example.com.co`) is still refused. `test_denied_personal_email`
+role addresses. Subdomains of those names (`mail.example.com`) are reserved too, so they are skipped as
+well. A routable lookalike (`example.com.co`, `myexample.com`, `evil-example.com`) is still refused. `test_denied_personal_email`
 now uses a routable domain; `test_allowed_reserved_example_domain` and
 `test_denied_lookalike_of_reserved_domain` cover the change. Reviewed blob hashes for the guard and
 its tests are updated in `scripts/public-boundary.json`. Every other identifier class, the gitleaks

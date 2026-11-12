@@ -104,7 +104,9 @@ class GuardTests(unittest.TestCase):
         self.check(False)
 
     def test_allowed_reserved_example_domain(self):
-        for address in ['you'+'@example.com', 'person'+'@example.org', 'a'+'@host.example', 'b'+'@x.test']:
+        for address in ['you'+'@example.com', 'person'+'@example.org', 'c'+'@example.net',
+                        'd'+'@mail.example.com', 'a'+'@host.example', 'b'+'@x.test',
+                        'e'+'@x.invalid', 'f'+'@x.localhost']:
             with self.subTest(address=address):
                 self.git('reset', '--hard', self.root)
                 self.git('clean', '-fdq')
@@ -112,8 +114,13 @@ class GuardTests(unittest.TestCase):
                 self.check(True)
 
     def test_denied_lookalike_of_reserved_domain(self):
-        self.add_file('README.md', 'person'+'@example.com.co')
-        self.check(False)
+        for address in ['person'+'@example.com.co', 'person'+'@myexample.com',
+                        'person'+'@evil-example.com', 'person'+'@x.test.evil.com']:
+            with self.subTest(address=address):
+                self.git('reset', '--hard', self.root)
+                self.git('clean', '-fdq')
+                self.add_file('README.md', address)
+                self.check(False)
 
     def test_denied_aws_key(self):
         self.add_file('README.md', 'aws_access_key_id = "AK'+'IA'+'Z7N4K2Q3R6M3T2V5"')

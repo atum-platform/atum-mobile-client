@@ -98,7 +98,7 @@
   "max_blob_bytes": 10485760,
   "reviewed_blobs": {
     "scripts/public_guard.py": "2987c62200a5147d09a2733842732a78e7373cb3abc119c5457d280dfe643abc",
-    "scripts/test_public_guard.py": "a41872e9d5bdc42ed665a78e3cdcdd2302472110beaa39f3370161893a21e667"
+    "scripts/test_public_guard.py": "4a25f02361021c31c0c5a6fb3119d28dbd51fb07715a6b4b2ad804fd978fba69"
   },
   "denied_regexes": [
     "(?:^|/)scripts/releases/(?!versioning\\.py$|commit_build\\.py$)"
