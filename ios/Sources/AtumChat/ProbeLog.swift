@@ -33,6 +33,7 @@ public enum ProbePoint: String, CaseIterable, Sendable {
     case timelineBatch = "timeline.batch"
 }
 
+#if DEBUG
 /// One JSON line of the probe log. Content-free: IDs and numbers only, never
 /// message text, names or tokens.
 public struct ProbeRecord: Codable, Equatable, Sendable {
@@ -69,7 +70,10 @@ public protocol ProbeSink: Sendable {
     func write(_ record: ProbeRecord)
 }
 
+#endif
+
 public enum ProbeLog {
+    #if DEBUG
     private final class Slot: @unchecked Sendable {
         private let lock = NSLock()
         private var sink: (any ProbeSink)?
@@ -87,8 +91,7 @@ public enum ProbeLog {
 
     private static let slot = Slot()
 
-    /// Installs (or, with nil, removes) the sink. Release builds never call
-    /// this, so every `mark` there is a no-op.
+    /// Installs (or, with nil, removes) the Debug-only sink.
     public static func install(_ sink: (any ProbeSink)?) {
         slot.set(sink)
     }
@@ -101,6 +104,13 @@ public enum ProbeLog {
                           uptime: ProcessInfo.processInfo.systemUptime, now: Date()))
     }
 
+    #else
+    /// Release has no sink storage, clock reads or record serialization.
+    public static var isEnabled: Bool { false }
+    public static func mark(_ point: ProbePoint, id: String? = nil, fields: [String: String] = [:]) { }
+    #endif
+
+    #if DEBUG
     /// The record `mark` writes, with the clock injected (tests).
     public static func record(_ point: ProbePoint, id: String?, fields: [String: String],
                               uptime: TimeInterval, now: Date) -> ProbeRecord {
@@ -109,4 +119,5 @@ public enum ProbeLog {
         return ProbeRecord(point: point.rawValue, uptimeMs: (uptime * 1000).rounded(),
                            wall: formatter.string(from: now), id: id, fields: fields)
     }
+    #endif
 }

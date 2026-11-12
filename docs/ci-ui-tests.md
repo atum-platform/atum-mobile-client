@@ -41,6 +41,11 @@ per run on 2026-11-11 with six lanes active).
   (Retry state not reached after a failed create, line 349) and
   `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`
   (`company.channel.ops` row not found); both under diagnosis. Remove a line when its fix lands.
+- 2026-11-12: `ChatInfoUITests/testAssistantCardChoosesOneServerDestinationDefault`
+  failed on PR #33 (`84d891a`) because the hosted runner was slow: launch took 32 s and
+  `chat.title` 30 s, then the 2 s + 3 s waits for `assistant.card.model` ran out. Its
+  siblings with the same flow passed. The three card-model waits in `ChatInfoUITests`
+  are now 8 s + 10 s.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

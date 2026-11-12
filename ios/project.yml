@@ -54,6 +54,10 @@ targets:
       - App
       - path: App/Resources/NOTICE
         buildPhase: resources
+      - path: ../LICENSE
+        buildPhase: resources
+      - path: ../LICENSES/Hermes-Agent-MIT.txt
+        buildPhase: resources
     dependencies:
       - target: AtumNotifications
         embed: true
@@ -88,6 +92,18 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: 'UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
+      configs:
+        Release:
+          # No demo opt-in or scripted compilation flags in a shipping build.
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: ''
+          EXCLUDED_SOURCE_FILE_NAMES:
+            - $(inherited)
+            - DebugLaunch.swift
+            - ProbeLog.swift
+            - S6SystemGallery.swift
+            - S6ScriptedHost.swift
+            - Scripted*.swift
+            - StoreScriptedCommerce.swift
   AtumNotifications:
     type: app-extension
     platform: iOS
