@@ -46,6 +46,13 @@ per run on 2026-11-11 with six lanes active).
   `chat.title` 30 s, then the 2 s + 3 s waits for `assistant.card.model` ran out. Its
   siblings with the same flow passed. The three card-model waits in `ChatInfoUITests`
   are now 8 s + 10 s.
+- 2026-11-12: on PR #41 (`6fd2587`) shard 2's first test,
+  `ChatInfoUITests/testAppInfoConfirmsPhoneOnlyChatDeletion`, failed before any test code
+  ran: "Failed to launch ... Timed out while launching application via Xcode" (62 s)
+  on a cold simulator. The other 24 tests in the shard passed. Each shard now boots the
+  simulator, waits with `simctl bootstatus -b`, then installs, launches and terminates
+  the app once before `test-without-building`. The warm-up launch is best-effort; the
+  boot wait is not.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

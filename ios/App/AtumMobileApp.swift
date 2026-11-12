@@ -17,6 +17,15 @@ struct AtumMobileApp: App {
         disablesAnimations = AtumDebugLaunch.configure(arguments: arguments)
         AtumDebugLaunch.configureS6(arguments: arguments)
         AtumScriptedLaunch.configure(arguments: arguments)
+        #if targetEnvironment(simulator)
+        // Simulator proof of communication notifications only: `simctl` cannot
+        // grant notification permission, so a UI test passes this flag and
+        // taps Allow (CommunicationNotificationCaptureUITests).
+        if arguments.contains("-AtumRequestNotificationAuthorization") {
+            Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) }
+        }
+        ScriptedNotificationPoster.configure(arguments: arguments)
+        #endif
         #else
         disablesAnimations = false
         #endif
@@ -204,6 +213,9 @@ final class AtumAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
+        #if DEBUG && targetEnvironment(simulator)
+        if ScriptedNotificationPoster.owns(notification.request.identifier) { return [.banner, .list] }
+        #endif
         guard let roomID = LivePushRouting.roomID(from: notification.request.content.userInfo) else { return [] }
         return await MainActor.run {
             LiveRemoteNotificationRelay.shared.foregroundOptions(roomID: roomID)
