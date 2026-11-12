@@ -287,8 +287,8 @@ Evidence:
 
 ### Owner reference and final visual pass
 
-The owner supplied and this worker opened:
-the owner desktop screenshot (chat attachment, not in the repo).
+The owner supplied a desktop screenshot (a chat attachment, kept off the
+public repo), and this worker opened it.
 It shows one orbit with a nucleus, a muted body-size “Đang đọc…” alongside it,
 no bubble/avatar/time, below the last reply and above the composer. The owner
 explicitly authorized merging `origin/main` (`aa75765`, #47) and one final locked
@@ -400,7 +400,7 @@ This visual result does not turn the remaining U2/U7 and broader UI failures gre
 
 | Desktop reference | Phone light (UI-test capture) | Phone dark (UI-test capture) |
 | --- | --- | --- |
-| the owner desktop screenshot (chat attachment, not in the repo) | `/Volumes/AtumTestFlight/working-line-parity-shots/schema2-reading-light-ui-test.png` | `/Volumes/AtumTestFlight/working-line-parity-shots/schema2-reading-dark-ui-test.png` |
+| owner desktop screenshot (chat attachment, not in the repo) | `/Volumes/AtumTestFlight/working-line-parity-shots/schema2-reading-light-ui-test.png` | `/Volumes/AtumTestFlight/working-line-parity-shots/schema2-reading-dark-ui-test.png` |
 
 Running phase + step card:
 `/Volumes/AtumTestFlight/working-line-parity-shots/schema2-working-step-card-ui-test.png`.
