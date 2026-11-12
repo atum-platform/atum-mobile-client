@@ -2,6 +2,11 @@
 import AtumChat
 import SwiftUI
 
+/// A plain reference count: changing it is not a SwiftUI state change.
+final class ScriptedReadCounter {
+    var count = 0
+}
+
 struct S6ScriptedHost: View {
     let scenario: S6ScriptedScenario
     private let design = try! LiveDesign()
@@ -10,6 +15,10 @@ struct S6ScriptedHost: View {
     @State private var recoveryRestored = false
     @State private var legalLinks = ChatLinkRouter()
     @State private var storePath = NavigationPath()
+    /// Counted without redrawing the host: a redraw would rebuild the page
+    /// and read the list again, hiding the failed first read.
+    @State private var deviceReads = ScriptedReadCounter()
+    @State private var openedDeviceSignOut: URL?
 
     var body: some View {
         Group {
@@ -38,7 +47,8 @@ struct S6ScriptedHost: View {
             case .storeUncertain: StoreCommerceScriptedHost(design: design, mode: .uncertain)
             case .storeOwned: StoreCommerceScriptedHost(design: design, mode: .owned)
             case .accountDefault, .accountRestore, .recoveryRejected, .recoveryDone,
-                 .accountKey, .signOutPlain, .signOutSaveKey, .accountLegal:
+                 .accountKey, .signOutPlain, .signOutSaveKey, .accountLegal,
+                 .accountDevices, .accountDevicesFailed:
                 accountHost
             }
         }
@@ -79,8 +89,38 @@ struct S6ScriptedHost: View {
                                   presentation: accountPresentation,
                                   actions: scriptedAccountActions)
                 }
+                // The browser page a device sign-out opens is only recorded here.
+                .environment(\.openURL, OpenURLAction { url in
+                    guard url.host == "account.atum.invalid" else { return .systemAction }
+                    openedDeviceSignOut = url
+                    return .handled
+                })
+                .overlay(alignment: .bottom) {
+                    if openedDeviceSignOut != nil {
+                        Text(verbatim: "device-sign-out-opened")
+                            .font(.caption2)
+                            .opacity(0.01)
+                            .accessibilityIdentifier("scripted.device-sign-out-opened")
+                    }
+                }
             }
         }
+    }
+
+    private var scriptedDevices: Bool {
+        scenario == .accountDevices || scenario == .accountDevicesFailed
+    }
+
+    /// Two synthetic sessions: a named Mac seen two hours ago and an unnamed
+    /// one seen three days ago. The device IDs are never drawn.
+    private func scriptedDeviceList() -> [AccountDevice]? {
+        deviceReads.count += 1
+        if scenario == .accountDevicesFailed && deviceReads.count == 1 { return nil }
+        let now = Date()
+        return [
+            AccountDevice(id: "SCRIPTEDMAC", name: "MacBook Pro", lastSeen: now.addingTimeInterval(-2 * 3_600)),
+            AccountDevice(id: "SCRIPTEDOLD", name: nil, lastSeen: now.addingTimeInterval(-3 * 86_400)),
+        ]
     }
 
     private var storePresentation: LiveProductStoreRead {
@@ -90,7 +130,7 @@ struct S6ScriptedHost: View {
         case .storeUnavailable:
             return .init(availability: .unavailable)
         case .storeEmpty:
-            return .init(availability: .empty, walletValue: "12.400")
+            return .init(availability: .empty, walletMicroProtons: 12_400_000_000)
         default:
             let featured = LiveProductStoreItem(
                 id: "featured", kind: .skill,
@@ -130,7 +170,7 @@ struct S6ScriptedHost: View {
                 roomID: nil
             )
             return .init(availability: .ready,
-                         walletValue: scenario == .storePartial ? nil : "12.400",
+                         walletMicroProtons: scenario == .storePartial ? nil : 12_400_000_000,
                          items: scenario == .storePartial ? [featured] : [featured, assistant, skill, pet],
                          apps: scenario == .storePartial ? [] : [moon, andy],
                          staleAvailability: scenario == .storeStale ? .offline
@@ -147,12 +187,13 @@ struct S6ScriptedHost: View {
             offersHistoryRecovery: restore, holdsRecoveryKey: key,
             recoveryKeySavedOnThisPhone: false, signOutInProgress: false,
             signOutFailureToken: 0, version: "1.0.0 (202610130001)",
-            directoryHandle: "annguyen"
+            directoryHandle: "annguyen",
+            recoveryStatus: scriptedDevices ? .off : .unknown
         )
     }
 
     private var scriptedAccountActions: AccountActions {
-        AccountActions(
+        var actions = AccountActions(
             readNotificationState: { .on }, requestNotifications: { .on },
             openNotificationSettings: {}, openAppSettings: {},
             loadRecoveryKey: { .value("SYNTH ETIC RECO VERY KEY1") },
@@ -166,6 +207,14 @@ struct S6ScriptedHost: View {
             openWebPage: { legalLinks.open($0.absoluteString) },
             saveProfileName: { _ in .saved }
         )
+        if scriptedDevices {
+            actions.loadDevices = { scriptedDeviceList() }
+            actions.deviceSignOutURL = { deviceID in
+                URL(string: "https://account.atum.invalid/account/?action=org.matrix.device_delete&device_id="
+                    + deviceID)
+            }
+        }
+        return actions
     }
 
     private var scriptedMoon: AppBotPresentation {

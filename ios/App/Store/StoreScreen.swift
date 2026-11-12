@@ -55,7 +55,7 @@ struct StoreScreen: View {
             // FlowPhone › Store: the balance once, in the top bar, as the
             // Proton mark and whole Protons. Pressing it opens the top-up
             // (desktop `discover-view.tsx:563-581`, lane 4 W14).
-            if let value = store.walletValue {
+            if let value = store.walletText(locale: design.locale) {
                 ToolbarItem(placement: .topBarTrailing) { balanceChip(value) }
             }
         }
@@ -559,7 +559,8 @@ struct StoreItemRow: View {
                     }
                     if let regularOffer {
                         // PENDING-COPY:store-copy.ts firstHatch / regularPrice labels.
-                        Text(verbatim: StoreOutcomePresentation.protons(regularOffer.priceMicroProtons))
+                        Text(verbatim: StoreOutcomePresentation.protons(regularOffer.priceMicroProtons,
+                                                                        locale: design.locale))
                             .font(design.kit.font(.caption))
                             .monospacedDigit()
                             .strikethrough()
@@ -577,7 +578,8 @@ struct StoreItemRow: View {
     /// screen; nil when the item is free or has no price.
     private var firstPrice: String? {
         if let offer = item.offer {
-            return offer.priceMicroProtons > 0 ? StoreOutcomePresentation.protons(offer.priceMicroProtons) : nil
+            return offer.priceMicroProtons > 0
+                ? StoreOutcomePresentation.protons(offer.priceMicroProtons, locale: design.locale) : nil
         }
         guard let value = item.price, value != "0" else { return nil }
         return value
@@ -591,9 +593,11 @@ struct StoreItemRow: View {
         case .price:
             if let offer = item.offer, offer.billingInterval == .month {
                 parts.append(StorePricePresentation.text(offer, design: design))
-            } else if let value = item.price {
-                parts.append(value == "0" ? design.text(StoreCopyKey.free)
-                             : design.text(StoreCopyKey.protons, arguments: [.text(value)]))
+            } else if let value = firstPrice {
+                // The spoken price is the drawn one, in the same format.
+                parts.append(design.text(StoreCopyKey.protons, arguments: [.text(value)]))
+            } else if item.offer != nil || item.price == "0" {
+                parts.append(design.text(StoreCopyKey.free))
             }
         }
         return parts.joined(separator: ", ")

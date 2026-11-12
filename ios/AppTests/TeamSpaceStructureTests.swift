@@ -150,6 +150,48 @@ final class TeamSpaceStructureTests: XCTestCase {
         XCTAssertEqual(model.viewerRole(companyID: companyA), model.copy?.role(.member))
     }
 
+    /// Communication notifications: the app's directory names a channel as
+    /// Team Space does ("# channel · Company"), carries the company logo, and
+    /// marks assistant and app chats for their header face. People chats and
+    /// placeholder rows get no entry (the extension uses the SDK's facts).
+    @MainActor
+    func testNotificationDirectoryNamesChannelsLikeTeamSpaceWithTheCompanyLogo() async throws {
+        let account = "structure-" + UUID().uuidString
+        defer { clearPrefs(account) }
+        let model = try model(try api(companies: [companyA, companyB]), account: account)
+        await model.refresh()
+        let copy = try XCTUnwrap(model.copy)
+        let rooms = [
+            LiveProductRoom(id: roomA, kind: .group, title: "general", roomAvatarURL: "mxc://atum.test/logo-a"),
+            LiveProductRoom(id: roomA2, kind: .group, title: "ops"),
+            LiveProductRoom(id: "!agent:atum.test", kind: .agent, title: "Atlas",
+                            matrixAvatarURL: "mxc://atum.test/atlas"),
+            LiveProductRoom(id: "!bot:atum.test", kind: .agent, title: "Moon", isAppBotRoom: true),
+            LiveProductRoom(id: "!friend:atum.test", kind: .people, title: "Friend"),
+            LiveProductRoom(id: "app:moon", kind: .agent, title: "Moon", isAppBotRoom: true),
+        ]
+        let input = try XCTUnwrap(NotificationRoomPublisher.input(ownUserID: "@me:atum.test", rooms: rooms,
+                                                                  workspace: model))
+        let general = try XCTUnwrap(input.rooms[roomA])
+        XCTAssertEqual(general.kind, .teamChannel)
+        XCTAssertEqual(general.groupName, "# " + copy.channelName("general", isDefault: true) + " · Company 1")
+        XCTAssertEqual(general.companyLogoURI, "mxc://atum.test/logo-a")
+        XCTAssertEqual(general.companyName, "Company 1")
+        XCTAssertEqual(input.rooms[roomA2]?.groupName, "# ops · Company 1")
+        XCTAssertEqual(input.rooms[roomA2]?.companyLogoURI, "mxc://atum.test/logo-a",
+                       "a channel without its own avatar still carries the company logo")
+        XCTAssertEqual(input.rooms["!agent:atum.test"], NotificationRoomEntry(kind: .assistant, faceName: "Atlas"))
+        XCTAssertEqual(input.rooms["!bot:atum.test"]?.kind, .appBot)
+        XCTAssertNil(input.rooms["!friend:atum.test"])
+        XCTAssertNil(input.rooms["app:moon"])
+        XCTAssertEqual(input.faces.map(\.roomID), ["!agent:atum.test", "!bot:atum.test"])
+        XCTAssertEqual(input.faces.first?.kind, .assistant)
+        XCTAssertEqual(input.faces.last?.kind, .app)
+        XCTAssertTrue(input.faces[0].expectsPhoto)
+        XCTAssertNotEqual(input.faces[0].fileName, input.faces[1].fileName)
+        XCTAssertNil(NotificationRoomPublisher.input(ownUserID: nil, rooms: rooms, workspace: model))
+    }
+
     @MainActor
     func testRoomLabelsAreTheCompanyDirectorysOnly() async throws {
         let account = "structure-" + UUID().uuidString

@@ -17,6 +17,9 @@ final class ChatLinkRouter {
 
     var presented: Page?
     var showsHeld = false
+    /// A first-party company board link (desktop `parseCompanyBoardLink`) opens
+    /// the company's board in Team space, never the website. Nil outside a chat.
+    @ObservationIgnored var openCompanyBoard: (@MainActor (CompanyBoardLinkTarget) -> Void)?
 
     @ObservationIgnored private weak var routedStore: LiveConversationStore?
     @ObservationIgnored private var routedActions = ChatActions.none
@@ -37,6 +40,10 @@ final class ChatLinkRouter {
     }
 
     func open(_ text: String) {
+        if let openCompanyBoard, let board = CompanyBoardLinkTarget.parse(text) {
+            openCompanyBoard(board)
+            return
+        }
         switch LinkPolicy.decision(for: text) {
         case let .openInApp(url): presented = Page(url: url)
         case .hold: showsHeld = true

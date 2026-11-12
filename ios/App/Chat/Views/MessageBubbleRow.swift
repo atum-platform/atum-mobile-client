@@ -70,7 +70,7 @@ struct MessageBubbleRow: View {
     /// Links in a person's message (mine show literally, B6), for VoiceOver.
     private var links: [(text: String, url: URL)] {
         guard !trailing, case .message = row.item.kind else { return [] }
-        return MarkdownBlocks.links(in: parsedBody ?? MessageMarkup.parse(row.item.body))
+        return MarkdownBlocks.links(in: parsedBody ?? MessageMarkup.parse(row.item.markdownBody))
     }
 
     var body: some View {
@@ -360,7 +360,7 @@ struct MessageBubbleRow: View {
                 .foregroundStyle(theme.design.kit.color(.onBubbleOwn, scheme: scheme))
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            NativeRichText(bodyText: row.item.body, parsed: parsedBody)
+            NativeRichText(bodyText: row.item.markdownBody, parsed: parsedBody)
         }
     }
 
@@ -380,12 +380,12 @@ struct MessageBubbleRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else if let searchHighlight {
-                NativeRichText(bodyText: row.item.body,
-                               parsed: searchPainted(parsedBody ?? MessageMarkup.parse(row.item.body),
+                NativeRichText(bodyText: row.item.markdownBody,
+                               parsed: searchPainted(parsedBody ?? MessageMarkup.parse(row.item.markdownBody),
                                                      searchHighlight, theme))
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                NativeRichText(bodyText: row.item.body, parsed: parsedBody)
+                NativeRichText(bodyText: row.item.markdownBody, parsed: parsedBody)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

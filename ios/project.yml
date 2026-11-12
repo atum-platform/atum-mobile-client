@@ -46,6 +46,10 @@ targets:
         NSSpeechRecognitionUsageDescription: Atum dùng nhận dạng giọng nói để chuyển lời bạn nói thành chữ trong khung soạn tin.
         UILaunchScreen:
           UIColorName: ground
+        # Communication notifications (sender/group face as the big image):
+        # the extension donates INSendMessageIntent; Apple requires the app to
+        # declare it. The entitlement is in App/AtumMobile.entitlements.
+        NSUserActivityTypes: [INSendMessageIntent]
         # The app and its extension must report the same versions to App
         # Store Connect; scripts/testflight.sh sets the build number.
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -53,6 +57,15 @@ targets:
     sources:
       - App
       - path: App/Resources/NOTICE
+        buildPhase: resources
+      # Shared with the notification extension so Debug simulator builds can
+      # post the extension's communication content locally
+      # (App/Debug/ScriptedNotificationPoster.swift).
+      - path: Notifications/CommunicationNotification.swift
+      - path: Notifications/ScriptedNotificationFixtures.swift
+      - path: ../LICENSE
+        buildPhase: resources
+      - path: ../LICENSES/Hermes-Agent-MIT.txt
         buildPhase: resources
     dependencies:
       - target: AtumNotifications
@@ -88,6 +101,18 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: 'UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
+      configs:
+        Release:
+          # No demo opt-in or scripted compilation flags in a shipping build.
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: ''
+          EXCLUDED_SOURCE_FILE_NAMES:
+            - $(inherited)
+            - DebugLaunch.swift
+            - ProbeLog.swift
+            - S6SystemGallery.swift
+            - S6ScriptedHost.swift
+            - Scripted*.swift
+            - StoreScriptedCommerce.swift
   AtumNotifications:
     type: app-extension
     platform: iOS
@@ -100,6 +125,7 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+        NSUserActivityTypes: [INSendMessageIntent]
     sources:
       - path: Notifications
         excludes: [Info.plist, AtumNotifications.entitlements]

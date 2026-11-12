@@ -156,6 +156,11 @@ struct ReaderAvatarMarks: View {
     static let shownFaces = 3
     static let faceSize: CGFloat = 16
     static let overlap: CGFloat = 6
+    /// The smallest hit region the accessibility audit accepts.
+    static let minHit: CGFloat = 44
+    /// Slop around the visible faces: 20 + 2 * 12 = 44 tall, and one face
+    /// (16) + 2 * 14 = 44 wide; wider marks only get wider.
+    static let hitSlop = EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14)
 
     private struct ReaderFace: Identifiable {
         let id: String
@@ -188,9 +193,24 @@ struct ReaderAvatarMarks: View {
                 }
             }
             .frame(minHeight: 20)
+            .padding(Self.hitSlop)
+            .frame(minWidth: Self.minHit, minHeight: Self.minHit)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The faces' fixed-size initials are drawing, not text: assistive
+        // tech gets a plain button (its label and the names are set below),
+        // so the §2.10 Dynamic Type audit does not read them as type.
+        .accessibilityRepresentation {
+            Button(theme.copy.text(.seen)) { showsNames = true }
+                .disabled(names.isEmpty)
+        }
+        // The faces draw at 16 pt; the button's frame (its hit and
+        // accessibility region) is 44 pt (§2.10 audit, HIG). The negative
+        // padding hands the slop back so the line keeps its 20 pt row and
+        // the faces stay where they were; it reaches into the space around
+        // the line, not into another control.
+        .padding(Self.hitSlop.negated)
         .disabled(names.isEmpty)
         .popover(isPresented: $showsNames, arrowEdge: .top) {
             Text(verbatim: names)
@@ -206,4 +226,8 @@ struct ReaderAvatarMarks: View {
         .accessibilityValue(names)
         .accessibilityIdentifier("delivery.seen")
     }
+}
+
+private extension EdgeInsets {
+    var negated: EdgeInsets { EdgeInsets(top: -top, leading: -leading, bottom: -bottom, trailing: -trailing) }
 }

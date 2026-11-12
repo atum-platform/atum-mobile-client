@@ -342,7 +342,10 @@ final class HomeShellUITests: TranscriptUITestCase {
         let name = app.textFields.matching(identifier: "home.newAssistant.name").firstMatch
         XCTAssertTrue(name.exists)
         name.tap()
-        name.typeText("Alfred")
+        // Not "Alfred": the scripted roster already has one, and the sheet
+        // refuses a duplicate before anything is created (AS-3, desktop
+        // `isDuplicateAssistantName`).
+        name.typeText("Mây")
         let submit = app.buttons.matching(identifier: "home.newAssistant.create").firstMatch
         XCTAssertTrue(submit.isEnabled)
         submit.tap()
@@ -350,7 +353,7 @@ final class HomeShellUITests: TranscriptUITestCase {
         submit.tap()
         XCTAssertTrue(waitFor(3) { self.probeLines("home-actions.txt").count == 2 })
         XCTAssertEqual(probeLines("home-actions.txt").map(\.text),
-                       ["newAssistant Alfred", "newAssistant Alfred"])
+                       ["newAssistant Mây", "newAssistant Mây"])
     }
 
     @MainActor

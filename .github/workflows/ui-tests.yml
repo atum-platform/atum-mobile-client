@@ -102,6 +102,20 @@ jobs:
             -destination "$IOS_DESTINATION" -destination-timeout 60 \
             -derivedDataPath "$RUNNER_TEMP/dd" -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
             -jobs 3 CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build-for-testing
+      - name: Boot the simulator and warm the first app launch
+        # A cold hosted simulator can take over a minute to boot and first-launch
+        # the app, and XCTest's own launch then times out on the shard's first
+        # test (#41 shard 2, 12 Nov). Boot and launch once outside the tests.
+        run: |
+          set -euo pipefail
+          udid="${IOS_DESTINATION##*id=}"
+          xcrun simctl boot "$udid" 2>/dev/null || true
+          xcrun simctl bootstatus "$udid" -b
+          app="$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/AtumMobile.app"
+          xcrun simctl install "$udid" "$app"
+          xcrun simctl launch "$udid" com.atum.mobile >/dev/null || echo "warm-up launch failed; tests will launch cold"
+          sleep 5
+          xcrun simctl terminate "$udid" com.atum.mobile 2>/dev/null || true
       - name: Run ${{ matrix.shard.classes }}
         env:
           CLASSES: ${{ matrix.shard.classes }}

@@ -72,6 +72,8 @@ struct AppRoot: View {
     @State private var legalLinks = ChatLinkRouter()
     @State private var roomlessAppFallback: AppBotContinueRequest?
     @State private var appliedAccountScopeGeneration: UInt64?
+    /// TS-6b: the one thread panel and the thread drafts.
+    @State private var companyThreads = CompanyThreadsCoordinator()
     private let design = try! LiveDesign()
     @Environment(\.colorScheme) private var scheme
 
@@ -393,7 +395,8 @@ struct AppRoot: View {
                         companyID: model.companyWorkspace.activeCompanyID),
                     canCreateChannel: model.companyWorkspace.channelCreationAllowed(
                         companyID: model.companyWorkspace.activeCompanyID),
-                    sectionsChannels: model.companyWorkspace.teamSpaceProfile.channels
+                    sectionsChannels: model.companyWorkspace.teamSpaceProfile.channels,
+                    boardLinkRequest: model.companyWorkspace.boardLinkRequest
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },
@@ -428,7 +431,20 @@ struct AppRoot: View {
                     loadActivity: { await model.companyActivity(companyID: $0) },
                     loadSavedPointers: { await model.companySavedPointers() },
                     loadSavedRows: { await model.companySavedRows($0) },
-                    invites: companyInviteActions
+                    invites: companyInviteActions,
+                    clearBoardLink: { model.companyWorkspace.clearBoardLink($0) },
+                    threads: CompanyThreadsActions(
+                        load: { await model.companyThreadRows(companyID: $0) },
+                        follow: { thread, followed in
+                            await model.setCompanyThreadFollow(roomID: thread.roomID, rootID: thread.root.eventID,
+                                                               followed: followed)
+                        },
+                        markRead: { await model.readCompanyThread($0) },
+                        open: { roomID, rootID in
+                            // Desktop `onOpenCompanyThread`: the room opens with its thread on top.
+                            companyThreads.pending = CompanyThreadRoute(roomID: roomID, rootID: rootID)
+                            routeFromRootDestination(roomID)
+                        })
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -509,6 +525,21 @@ struct AppRoot: View {
             rosterStore.apply(rosterSnapshot)
             validatePendingPush()
         }
+        // Communication notifications: what only the app knows about a room
+        // (assistant/app faces, Team Space names and logos) for the extension.
+        .task(id: NotificationRoomPublisher.input(ownUserID: model.notificationOwnUserID,
+                                                  rooms: presentation.rooms.rooms,
+                                                  workspace: model.companyWorkspace)) {
+            guard let input = NotificationRoomPublisher.input(ownUserID: model.notificationOwnUserID,
+                                                              rooms: presentation.rooms.rooms,
+                                                              workspace: model.companyWorkspace) else { return }
+            // Coalesce bursts of roster updates into one write.
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await NotificationRoomPublisher.publish(input, design: design) { uri, side in
+                await model.avatarThumbnail(uri: uri, pixelSide: side)
+            }
+        }
         .task(id: RoomClassificationInput(
             roomIDs: presentation.rooms.rooms.map(\.id).sorted(),
             typeClaims: presentation.rooms.rooms.filter(\.claimsConversationType).map(\.id).sorted(),
@@ -563,7 +594,8 @@ struct AppRoot: View {
             founderContactAvailable: model.founderContactAvailable,
             founderContactTitle: model.founderContactTitle,
             avatarURL: account.avatarURL,
-            connection: model.accountConnection
+            connection: model.accountConnection,
+            recoveryStatus: model.accountRecoveryStatus
         )
     }
 
@@ -603,7 +635,9 @@ struct AppRoot: View {
                 await model.avatarThumbnail(uri: uri, pixelSide: pixelSide)
             },
             ignoredPeople: { await model.ignoredPeople() },
-            setIgnored: { await model.setIgnored(userID: $0, ignored: $1) }
+            setIgnored: { await model.setIgnored(userID: $0, ignored: $1) },
+            loadDevices: { await model.ownDevices() },
+            deviceSignOutURL: { await model.deviceSignOutURL(deviceID: $0) }
         )
     }
 
@@ -786,6 +820,7 @@ struct AppRoot: View {
                     companyChannel: CompanyChannelActions(
                         loadFacts: { await model.companyChannelFacts(roomID: $0) },
                         loadPinned: { await model.companyPinnedRows(roomID: $0) }),
+                    appPanel: model.appPanelActions(roomID: roomID),
                     // HC-7: Rename from the panel (desktop conversation menu).
                     rename: model.offersPersonalExits(roomID: roomID)
                         ? ChatRenameActions(request: { await model.renameRequest(roomID: $0) },
@@ -794,6 +829,11 @@ struct AppRoot: View {
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),
                 onOpenAppBot: { router.open(app: $0) },
+                // A first-party board link stays in Atum (desktop `openMatrixMarkdownLink`):
+                // Team space → that company → Board, and the card.
+                onOpenCompanyBoard: { target in
+                    if model.companyWorkspace.requestBoardLink(target) { router.showTeamSpaceRoot() }
+                },
                 onBeginAppBotSetup: model.beginAppOnboarding,
                 onOpenAppBotRoute: model.openAppRoute,
                 onOpenAppBotTerms: model.openAppTerms,
@@ -827,8 +867,13 @@ struct AppRoot: View {
                 dismissPresentationRequest: dismissChatPresentationRequest,
                 onPresentationChanged: { active in
                     if router.activeRoomID == roomID { router.presentationChanged(active) }
-                }
+                },
+                openThreads: model.offersCompanyThreads(roomID: roomID)
+                    ? { rootID in companyThreads.open(roomID: roomID, rootID: rootID) } : nil,
+                threadPanelPresented: companyThreads.panel?.roomID == roomID
             )
+            .modifier(CompanyThreadPanelHost(model: model, design: design, coordinator: companyThreads,
+                                             roomID: roomID))
         } else if let opening = model.appBotRoomOpening, opening.roomID == roomID {
             AppBotRoomOpeningView(opening: opening, design: design) {
                 model.retryAppBotJoin(roomID: roomID)
@@ -891,7 +936,8 @@ struct AppRoot: View {
             ) : nil,
             founderDraft: founderDraftActions(dismissAccountOnSent: false),
             exitRoom: { model.exitRoom($0, $1) },
-            viewerIsFounder: model.isFounderAccount
+            viewerIsFounder: model.isFounderAccount,
+            appInfo: { model.appCardPresentation(rowID: $0) }
         )
         // HC-7: the long-press's Low priority, Rename and Block.
         actions.setLowPriority = { model.setRoomLowPriority($0, isLowPriority: $1) }

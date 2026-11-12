@@ -158,3 +158,29 @@ Copy keys missing from the pinned export (`atum-design.lock`), all under
 - A reader's profile is taken whole from their newest message whose profile is known (a name or an avatar), so a photo they removed doesn't come back from an older message. A message with neither is an unavailable profile and is skipped. Regression test: `DeliveryS1Tests.testANewerProfileWithoutAPhotoWinsOverAnOlderPhoto`.
 - Verified by `swiftc -parse` locally and the hosted `swift` check; the build lock was busy.
 - CI (UI shard 2, `ChatKindsUITests.testContextMenuPreventsReadReceiptUntilDismissed`) caught that the delivery line's `accessibilityIdentifier` was stamped onto its children. The inline Copy button lost `answer.copy`, so the menu's "Sao chép" query also matched it and the menu looked like it never closed. The line now uses `.accessibilityElement(children: .contain)`, so the Copy button and Seen faces keep their own identifiers.
+
+## Search-scan stall investigation (hosted UI shard 1, run before the 11 Nov main update)
+
+- `HomeChatsWave3UITests.testSearchBarAtAccessibilitySizePassesTheAudit` saw "Searching 71 of 2200 messages…" after 15 s. The 2200 is `ChatHistorySearch.eventBound`; the `chat.search` scenario holds only 140 messages in 20-event pages, so the walk is a handful of passes, not a 2200-row scan.
+- The #38 projection work is linear: Seen readers use one sender-profile index per pass, run times and edit marks are per-row lookups on a `Set`, `Delivery.marks` is one pass. Added `TimelineScanPerformanceTests` (2200 messages, 3 receipts on every message of mine, projected page by page as search does) to keep it that way.
+- Same run, same build: `testSearchWithNoMatchSaysNoResultsInVietnamese` (walks all 140 messages) and `testSearchFindsAWordThreePagesBackAndCloses` passed. Only the AX-XXXL test failed, and every `chat.search.count` accessibility query in it took 2-4 s, so the runner was slow to answer snapshots (three shards plus other branches' runs were live at once). Treat the failure as runner load at the largest text size unless it repeats on a re-run.
+- Measured (`swift test -j 2 --filter AtumChat`, debug): the page-by-page walk, 44 passes and 49,500 projected rows, takes 0.71 s; one 2200-row projection takes 0.03 s. All 658 AtumChat tests pass. The test bounds (20 s, 2 s) are deliberately far above that.
+
+## Seen faces hit region (local `TranscriptUITests` audit, 12 Nov)
+
+- `TranscriptUITests.testAccessibilityAuditAssistantChat` (LOCAL_ONLY, so hosted CI never runs it) failed with "Hit area is too small" on `delivery.seen`: the button was 16 x 20 pt.
+- The button's label now pads the faces out to at least 44 x 44 pt (`ReaderAvatarMarks.hitSlop`, `minHit`), and negative padding outside the button hands the slop back. The line keeps its 20 pt row and the faces don't move. The before/after captures of `chat.actions` show the same layout; only the clock differs. The extra hit region reaches 12 pt above and below the line and 14 pt to each side, into empty space, not into another control.
+- With the hit region fixed, the same audit flagged the faces' fixed-size monogram initials ("Dynamic Type font sizes are partially unsupported"). The button now gives assistive tech a plain button (`accessibilityRepresentation`), with its existing label, value and `delivery.seen` identifier. The faces are drawing.
+- The audit test now asserts the Seen frame is at least 44 x 44 pt. The new `testSeenFacesAnswerATapOutsideTheDrawnFace` taps near the region's corner and expects the names popover (`delivery.seen.names`).
+- Still open, not in #38's diff: with those two fixed, both `testAccessibilityAuditAssistantChat` and `ChatKindsUITests.testAccessibilityAuditKinds` stop at a contrast finding on quote-preview text (`QuoteView`, muted on the bubble). `continueAfterFailure = false` had hidden it behind the first finding.
+- Verified locally (iPhone 17 simulator, under the heavy-build lock). Pass: `testSeenFacesAnswerATapOutsideTheDrawnFace`, `ChatKindsUITests.testEveryKindShows`, `ChatKindsUITests.testContextMenuPreventsReadReceiptUntilDismissed`, `ComposerUITests.testU4SendIsInstantLiteralAndKeepsTheKeyboard`. The Seen frame went from 16 x 20 to 44 x 44 pt. The two audits now fail only on the quote contrast above.
+- `ComposerUITests.testTheModelSheetListsTheAccountSubscriptions` fails with "no Subscriptions section" both on this branch and on origin/main d37e008, so the cause is not in #38.
+
+## Main integration (2026-11-12, after #33)
+
+Merged main `88f7085` (#33). The only conflict was the app target's Sources
+phase in `project.pbxproj`: main's Team Space copy files are kept, and
+`TimeLabelRow.swift`, which this branch deletes, is dropped. The project now
+differs from main only by that file's four entries. Checked locally with
+`plutil -lint` and the project-source tests (6/0); the builds and UI shards
+run on hosted CI in this PR's merge turn.

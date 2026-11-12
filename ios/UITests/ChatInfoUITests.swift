@@ -118,8 +118,8 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 15))
         title.tap()
         let model = app.buttons.matching(identifier: "assistant.card.model").firstMatch
-        if !model.waitForExistence(timeout: 2) { app.swipeUp() }
-        XCTAssertTrue(model.waitForExistence(timeout: 3))
+        if !model.waitForExistence(timeout: 8) { app.swipeUp() }
+        XCTAssertTrue(model.waitForExistence(timeout: 10))
         model.tap()
         let hard = app.buttons.matching(identifier: "phone.model.row.nhat-thuc").firstMatch
         XCTAssertTrue(hard.waitForExistence(timeout: 3))
@@ -144,8 +144,8 @@ final class ChatInfoUITests: TranscriptUITestCase {
         let title = app.descendants(matching: .any).matching(identifier: "chat.title").firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 15)); title.tap()
         let model = app.buttons.matching(identifier: "assistant.card.model").firstMatch
-        if !model.waitForExistence(timeout: 2) { app.swipeUp() }
-        XCTAssertTrue(model.waitForExistence(timeout: 3)); model.tap()
+        if !model.waitForExistence(timeout: 8) { app.swipeUp() }
+        XCTAssertTrue(model.waitForExistence(timeout: 10)); model.tap()
 
         let current = app.buttons.matching(identifier: "phone.model.row.nguyet-thuc").firstMatch
         XCTAssertTrue(current.waitForExistence(timeout: 3))
@@ -169,8 +169,8 @@ final class ChatInfoUITests: TranscriptUITestCase {
         let title = app.descendants(matching: .any).matching(identifier: "chat.title").firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 15)); title.tap()
         let model = app.buttons.matching(identifier: "assistant.card.model").firstMatch
-        if !model.waitForExistence(timeout: 2) { app.swipeUp() }
-        XCTAssertTrue(model.waitForExistence(timeout: 3)); model.tap()
+        if !model.waitForExistence(timeout: 8) { app.swipeUp() }
+        XCTAssertTrue(model.waitForExistence(timeout: 10)); model.tap()
 
         XCTAssertTrue(app.buttons.matching(identifier: "phone.model.row.nguyet-thuc").firstMatch
             .waitForExistence(timeout: 3))

@@ -2127,6 +2127,36 @@ import AtumChat
         XCTAssertEqual(Set(bodies[3].keys), ["app_version_id", "route_id"])
     }
 
+    // MARK: App workspace manifest (AS-11: the side panel's pages)
+
+    /// The platform serves the workspace at `/apps/{slug}/manifest` and adds
+    /// the declared pages only for the `atum.app-panel/1` negotiation header
+    /// (desktop `electron/matrix/account.ts` `appRequest`).
+    func testAppWorkspaceReadsTheManifestRouteAndNegotiatesThePanel() async throws {
+        let version = "00000000-0000-4000-8000-088a99dcb870"
+        NativeDomainProtocol.state.handler = { request in
+            guard request.url?.path == "/api/matrix/v1/apps/moon/manifest" else {
+                return .init(status: 404, chunks: [Data("{\"error\":\"matrix_404\"}".utf8)])
+            }
+            return .json(Data("""
+            {"profile":"atum.app-workspace/1","descriptor":{"app":"moon","app_version_id":"\(version)"},
+             "manifest":{"profile":"atum.remote-app-manifest/1","app":{"slug":"moon","app_version_id":"\(version)"},
+              "launch":{"profile":"atum.app-launch/1","path":"/atum/launch"},
+              "routes":[{"id":"readings","label":{"vi":"Luận Giải","en":"Readings"},"icon":"book-2","path":"/readings","placements":["menu"],"session":"required"}]},
+             "web_origin":"https://moon.atumplatform.com","network_origins":[],
+             "app_panel":{"profile":"atum.app-panel/1","pages":[{"route_id":"readings","glyph":"book-open-text"}]}}
+            """.utf8))
+        }
+        let workspace = try await client(TestAuthorization(first: "phone-domain-token")).appWorkspace(slug: "moon")
+        XCTAssertEqual(workspace.panel?.pages.map(\.routeID), ["readings"])
+        XCTAssertEqual(workspace.routes.map(\.label.en), ["Readings"])
+        let request = try XCTUnwrap(NativeDomainProtocol.state.requests.first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/matrix/v1/apps/moon/manifest")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Atum-App-Panel-Profile"), "atum.app-panel/1")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Atum-App-Launch-Profile"))
+    }
+
     // MARK: Canonical-room arbitration (`POST /apps/{slug}/bot/start`)
 
     func testBotStartSendsTheRequestAndReadsEveryAnswerIgnoringUnknownFields() async throws {

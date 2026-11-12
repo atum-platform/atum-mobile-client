@@ -38,6 +38,9 @@ struct CompanyPagesBar: View {
 /// state rather than an empty board that would look real.
 struct CompanyBoardPage: View {
     let design: LiveDesign
+    let companyID: String
+    /// The card a board link names (desktop `selectedCardId`).
+    @Binding var selectedCardID: String?
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 

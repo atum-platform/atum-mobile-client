@@ -1,0 +1,77 @@
+[
+  {
+    "title": "Atum original contributions — source terms",
+    "bundle": "app",
+    "resource": "LICENSE"
+  },
+  {
+    "title": "Matrix Rust SDK and Element X notification service — Apache License 2.0\nElement X: Copyright 2022, 2023 New Vector Ltd.\nModifications: Copyright 2026 Anka Ventures Vietnam Company Limited.",
+    "bundle": "app",
+    "resource": "MatrixRustSDK-LICENSE.txt"
+  },
+  {
+    "title": "Hermes Agent",
+    "bundle": "app",
+    "resource": "Hermes-Agent-MIT.txt"
+  },
+  {
+    "title": "Sentry Cocoa",
+    "bundle": "app",
+    "resource": "Sentry-LICENSE.txt"
+  },
+  {
+    "title": "Sentry Cocoa third-party licences",
+    "bundle": "app",
+    "resource": "Sentry-THIRD_PARTY_NOTICES.txt"
+  },
+  {
+    "title": "Textual",
+    "bundle": "app",
+    "resource": "Textual-LICENSE.txt"
+  },
+  {
+    "title": "SwiftUI Math",
+    "bundle": "app",
+    "resource": "SwiftUIMath-LICENSE.txt"
+  },
+  {
+    "title": "Swift Concurrency Extras",
+    "bundle": "app",
+    "resource": "ConcurrencyExtras-LICENSE.txt"
+  },
+  {
+    "title": "Prism",
+    "bundle": "app",
+    "resource": "Prism-LICENSE.txt"
+  },
+  {
+    "title": "Math fonts — copyright and licence notices",
+    "bundle": "app",
+    "resource": "MathFonts-EmbeddedNotices.txt"
+  },
+  {
+    "title": "Math fonts — MIT License",
+    "bundle": "app",
+    "resource": "MathFonts-MIT-LICENSE.txt"
+  },
+  {
+    "title": "Math fonts — SIL Open Font License",
+    "bundle": "app",
+    "resource": "MathFonts-OFL.txt"
+  },
+  {
+    "title": "Math fonts — GUST Font License",
+    "bundle": "app",
+    "resource": "MathFonts-GUST-FONT-LICENSE.txt"
+  },
+  {
+    "title": "Math fonts — LaTeX Project Public License",
+    "bundle": "app",
+    "resource": "MathFonts-LPPL-1.3c.txt"
+  },
+  {
+    "title": "Cormorant Garamond",
+    "bundle": "design",
+    "resource": "fonts/CormorantGaramond-native-OFL.txt"
+  }
+]
