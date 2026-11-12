@@ -362,6 +362,30 @@ final class TranscriptUITests: TranscriptUITestCase {
     func testAccessibilityAuditAssistantChat() throws {
         let app = launchChat(ScriptedScenario.chatActions.rawValue, pinsTextSize: false)
         wait(1)
+        // The Seen faces draw at 16 pt but answer taps over 44 pt; the line
+        // they sit on keeps its drawn height.
+        let seen = app.descendants(matching: .any)["delivery.seen"].firstMatch
+        XCTAssertTrue(seen.waitForExistence(timeout: 5), "no Seen faces")
+        let line = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'delivery.line.'")).allElementsBoundByIndex
+            .first { $0.frame.intersects(seen.frame) }
+        print("MEASURE delivery.seen \(seen.frame) line \(line?.frame ?? .zero)")
+        keepScreenshot("delivery-seen", of: app)
+        XCTAssertGreaterThanOrEqual(seen.frame.width, 44, "Seen hit region too narrow")
+        XCTAssertGreaterThanOrEqual(seen.frame.height, 44, "Seen hit region too short")
         try auditIgnoringScrollEdges(app)
+    }
+
+    /// The Seen faces' 44 pt region: a tap near its corner, outside the drawn
+    /// 16 pt face, still lists the readers' names.
+    @MainActor
+    func testSeenFacesAnswerATapOutsideTheDrawnFace() {
+        let app = launchChat(ScriptedScenario.chatActions.rawValue)
+        let seen = app.descendants(matching: .any)["delivery.seen"].firstMatch
+        XCTAssertTrue(seen.waitForExistence(timeout: 5), "no Seen faces")
+        seen.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["delivery.seen.names"].waitForExistence(timeout: 3),
+                      "tapping Seen lists no names")
+        keepScreenshot("delivery-seen-names", of: app)
     }
 }

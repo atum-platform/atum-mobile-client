@@ -1,33 +1,21 @@
 import AtumChat
 import SwiftUI
 
-/// agent-turns/1.4 §3: the one live `io.atum.progress` working line, shown as
-/// a light muted row under the typing bubble. It never notifies, never says
-/// "(đã sửa)" and disappears when its turn ends (the projection hides it;
-/// this view only draws what survived).
+/// agent-turns/1.4 §3: the one live `io.atum.progress` working line, drawn as
+/// desktop's `MatrixAgentWorking` (`src/matrix/typing-indicator.tsx`): the
+/// turning atom in the face slot, the current step beside it ("Đang chạy tác
+/// vụ…") and any checklist lines in the quiet step card under it. It is the
+/// transcript's last row, standing for the typing row too, and is edited in
+/// place as the turn moves on. It never notifies, never says "(đã sửa)" and
+/// disappears when its turn ends (the projection hides it; this view only
+/// draws what survived).
 struct WorkingLineRow: View {
     let row: ChatRow
 
-    @Environment(\.chatTheme) private var theme
-    @Environment(\.colorScheme) private var scheme
-
     var body: some View {
-        if let theme {
-            // Kit working state: the turning atom, then the step line.
-            HStack(spacing: 8) {
-                AtomWait()
-                    .frame(width: 16, height: 16)
-                    .accessibilityHidden(true)
-                Text(verbatim: row.item.body)
-                    .font(.footnote)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .foregroundStyle(theme.quiet(scheme))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 2)
+        AgentWorkingLayout(text: WorkingLineText(body: row.item.body))
             .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.updatesFrequently)
             .accessibilityIdentifier(row.accessibilityID)
-        }
     }
 }

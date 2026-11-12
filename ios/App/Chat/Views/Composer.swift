@@ -573,8 +573,9 @@ private struct ComposerModelChoiceButton: View {
     }
 }
 
-/// B11: "X đang soạn tin…" above the pill in people and group chats. Agent
-/// and bot rooms show dots as the transcript's last row instead, and their
+/// B11: "X đang soạn tin…" above the pill in every chat but my assistant's
+/// (desktop `MatrixTypingLine`, app bots included). My assistant's chat shows
+/// the working atom as the transcript's last row instead, and its
 /// `typingLine` is always `.nobody`.
 private struct ComposerTypingLine: View {
     let store: any ConversationStore

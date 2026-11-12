@@ -119,26 +119,56 @@ final class GroupingTests: XCTestCase {
 
     // MARK: Time labels
 
-    func testATimeLabelFollowsAGapOfSixtyMinutesOrMore() {
-        let items = [text("a", from: F.bot, minute: 0), text("b", from: F.me, minute: 59),
-                     text("c", from: F.bot, minute: 119), text("d", from: F.bot, minute: 120)]
-        let labels = Grouping.layout(rows(items), context: F.botRoom(), calendar: utc).map(\.timeLabel)
-        XCTAssertEqual(labels, [nil, nil, at(119), nil], "59 minutes: none; exactly 60: a label")
+    // MARK: TL-4 run times, TL-5 edits (desktop parity, 2026-11-11)
+
+    private func times(_ items: [ChatItem], _ context: RoomContext) -> [Bool] {
+        Grouping.layout(rows(items), context: context, calendar: utc).map(\.showsTime)
     }
 
-    func testTheDayDividerWinsOverTheTimeLabel() {
-        let divider = ChatItem(id: "d", kind: .dayDivider(at(600)))
-        let items = [text("a", from: F.bot, minute: 0), divider, text("b", from: F.bot, minute: 600)]
-        let labels = Grouping.layout(rows(items), context: F.botRoom(), calendar: utc).map(\.timeLabel)
-        XCTAssertEqual(labels, [nil, nil, nil])
+    func testTheClockSitsUnderTheLastBubbleOfEachRunMineIncluded() {
+        let items = [text("a", from: F.friend, minute: 0), text("b", from: F.friend, minute: 2),
+                     text("c", from: F.me, minute: 3), text("d", from: F.me, minute: 4),
+                     text("e", from: F.friend, minute: 30)]
+        XCTAssertEqual(times(items, F.personRoom()), [false, true, false, true, true],
+                       "desktop runEnd: a sender change or a 5-minute gap ends a run")
+        XCTAssertEqual(times([text("a", from: F.friend, minute: 0), text("b", from: F.friend, minute: 6)],
+                             F.personRoom()), [true, true], "more than 5 minutes apart: two runs")
     }
 
-    func testNoticesCountForTheGapAndTheFirstRowHasNoLabel() {
+    func testEveryAnswerOfMyAgentCarriesItsTimeAnAppsOnlyAtRunEnd() {
+        let answers = [text("q", from: F.me, minute: 0), text("a1", from: F.agent, minute: 1),
+                       text("a2", from: F.agent, minute: 2)]
+        XCTAssertEqual(times(answers, F.assistantRoom()), [true, true, true], "desktop's answer toolbar time")
+        let app = [text("m1", from: F.bot, minute: 1), text("m2", from: F.bot, minute: 2)]
+        XCTAssertEqual(times(app, F.botRoom()), [false, true], "an app's messages are not answers")
+        var interim = text("i", from: F.agent, minute: 1)
+        interim.interim = true
+        XCTAssertEqual(times([interim, text("a", from: F.agent, minute: 2)], F.assistantRoom()), [false, true])
+    }
+
+    func testNoClockWhileSendingFailedOrUndecryptableAndNeverOnNotices() {
+        var sending = text("s", from: F.me, minute: 0)
+        sending.delivery = .sending()
+        var failed = text("f", from: F.me, minute: 10)
+        failed.delivery = .failed(isRecoverable: true)
+        var locked = text("u", from: F.friend, minute: 20)
+        locked.kind = .placeholder(.undecryptable)
         var notice = F.notice("n", from: F.agent)
-        notice.timestamp = at(50)
-        let items = [text("q", from: F.me, minute: 0), notice, text("a", from: F.agent, minute: 100)]
-        let labels = Grouping.layout(rows(items), context: F.assistantRoom(), calendar: utc).map(\.timeLabel)
-        XCTAssertEqual(labels, [nil, nil, nil], "50 minutes after the notice, not 100 after the question")
+        notice.timestamp = at(30)
+        XCTAssertEqual(times([sending, failed, locked, notice], F.personRoom()), [false, false, false, false])
+    }
+
+    func testEditedShowsForPeopleAndMeNeverForAgentsOrBots() {
+        func edited(_ item: ChatItem) -> ChatItem { var copy = item; copy.isEdited = true; return copy }
+        let mine = edited(text("m", from: F.me, minute: 0))
+        let friend = edited(text("f", from: F.friend, minute: 1))
+        XCTAssertEqual(Grouping.layout(rows([mine, friend]), context: F.personRoom(), calendar: utc)
+            .map(\.showsEdited), [true, true])
+        let answer = edited(text("a", from: F.agent, minute: 1))
+        XCTAssertEqual(Grouping.layout(rows([mine, answer]), context: F.assistantRoom(), calendar: utc)
+            .map(\.showsEdited), [true, false], "a streamed answer never says đã sửa")
+        let bot = edited(text("b", from: F.bot, minute: 1))
+        XCTAssertEqual(Grouping.layout(rows([bot]), context: F.botRoom(), calendar: utc).map(\.showsEdited), [false])
     }
 }
 
