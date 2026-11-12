@@ -60,6 +60,14 @@ per run on 2026-11-11 with six lanes active).
   ended) now waits 10 s; `testSearchBarAtAccessibilitySizePassesTheAudit` ("Audit failed to
   complete in time" at AX XXXL) now makes one more full attempt after a timeout. A finding,
   or a second timeout, still fails.
+- 2026-11-12: on PR #44 (`22ff66c`) shard 3 failed the same two tests with that hardening in place.
+  The search test's recording shows the match in view and highlighted from ~34 s, yet
+  `firstMatch.isHittable` stayed false for the full 10 s. The test now checks that some element
+  whose label carries the word lies inside the window, and prints the hierarchy if not. A
+  message that was never scrolled to is unloaded or off-window, so the check still fails then.
+  The audit timed out on both attempts. A second timeout now skips the test (`XCTSkip`, with
+  a `MEASURE` line) rather than failing it. A finding still fails, and locked local runs
+  cover the audit. This loosens the hosted check on purpose (owner ruling: make it work first).
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
