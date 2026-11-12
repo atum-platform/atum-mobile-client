@@ -39,16 +39,47 @@ final class MessageFoldTests: XCTestCase {
         XCTAssertFalse(MessageFoldBook.showsToggle(isLong: false, isGrowing: false))
     }
 
-    func testAGrowingMessageNeverFoldsAndStaysOpenOnceFinal() {
+    func testAGrowingMessageNeverFoldsAndFoldsOnceFinal() {
         var book = MessageFoldBook()
         XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: true))
         XCTAssertFalse(MessageFoldBook.showsToggle(isLong: true, isGrowing: true), "no toggle while streaming")
-        book.sawGrowing(["$a"])
+        book.readerSees([], among: ["$a"])
+        XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: true), "still growing: still open")
+        XCTAssertTrue(book.isFolded("$a", isLong: true, isGrowing: false),
+                      "seen growing (owner, 2026-11-12): it folds once final")
+        XCTAssertTrue(MessageFoldBook.showsToggle(isLong: true, isGrowing: false), "Show more is offered")
+        book.toggle("$a", wasFolded: true)
+        XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: false), "the reader can open it")
+    }
+
+    func testOpeningOneMessageLeavesTheNextLiveAnswerFolded() {
+        var book = MessageFoldBook()
+        book.toggle("$a", wasFolded: true)
+        book.readerSees([], among: ["$b"])
+        XCTAssertFalse(book.isFolded("$b", isLong: true, isGrowing: true))
+        XCTAssertTrue(book.isFolded("$b", isLong: true, isGrowing: false), "the next long answer folds")
+        XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: false), "the opened one stays open")
+    }
+
+    func testAMessageBeingReadBelowItsFoldStaysOpenOnceFinal() {
+        var book = MessageFoldBook()
+        book.readerSees(["$a"], among: ["$a", "$b"])
         XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: false),
-                       "seen growing: it does not fold under the reader")
+                       "the reader was reading below its fold line when it became final")
+        XCTAssertTrue(book.isFolded("$b", isLong: true, isGrowing: false))
+        // Once final, it is no longer growing and later passes leave it alone.
+        book.readerSees([], among: ["$c"])
+        XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: false))
         XCTAssertTrue(MessageFoldBook.showsToggle(isLong: true, isGrowing: false), "Show less is offered")
         book.toggle("$a", wasFolded: false)
         XCTAssertTrue(book.isFolded("$a", isLong: true, isGrowing: false), "the reader can still fold it")
+    }
+
+    func testOnlyTheLastPassBeforeFinalCounts() {
+        var book = MessageFoldBook()
+        book.readerSees(["$a"], among: ["$a"])
+        book.readerSees([], among: ["$a"])
+        XCTAssertTrue(book.isFolded("$a", isLong: true, isGrowing: false), "the reader scrolled away before it ended")
     }
 
     func testTheReadersChoiceIsKeptPerEvent() {
@@ -56,10 +87,13 @@ final class MessageFoldTests: XCTestCase {
         book.toggle("$a", wasFolded: true)
         XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: false))
         XCTAssertTrue(book.isFolded("$b", isLong: true, isGrowing: false), "other messages keep their own state")
-        book.sawGrowing(["$a"])
+        book.readerSees(["$a"], among: ["$a"])
         book.toggle("$a", wasFolded: false)
-        book.sawGrowing(["$a"])
+        book.readerSees(["$a"], among: ["$a"])
         XCTAssertTrue(book.isFolded("$a", isLong: true, isGrowing: false), "a later growing pass does not undo a choice")
+        book.toggle("$a", wasFolded: true)
+        book.readerSees([], among: ["$a"])
+        XCTAssertFalse(book.isFolded("$a", isLong: true, isGrowing: false), "nor does a pass that saw nothing")
     }
 
     func testMessagesAfterMyNewestWhileTheAgentWorksAreGrowing() {

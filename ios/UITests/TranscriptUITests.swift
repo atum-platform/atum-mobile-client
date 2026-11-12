@@ -32,8 +32,12 @@ final class TranscriptUITests: TranscriptUITestCase {
         XCTAssertEqual(followValue(app), "following")
         wait(until: start.addingTimeInterval(4))
         XCTAssertFalse(element(app, AccessibilityID.rowTyping).exists, "U2: dots after the answer")
-        let answer = latest(app).frame
-        XCTAssertLessThanOrEqual(answer.maxY, visibleBottom(app) + Self.framePoints, "U2: the answer's end is hidden")
+        // The answer is two screens long and final: it folds (owner,
+        // 2026-11-12), and the end of its folded bubble, "Show more", sits
+        // at the bottom. (A folded row's frame spans its unclipped text.)
+        let toggle = element(app, "message.fold.\(ScriptedScenario.chatLongAnswer.rawValue).answer")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 2), "U2: the long answer did not fold")
+        XCTAssertLessThanOrEqual(toggle.frame.maxY, visibleBottom(app) + Self.framePoints, "U2: the answer's end is hidden")
         XCTAssertEqual(followValue(app), "following")
         XCTAssertFalse(pill(app).exists)
         keepScreenshot("u2-answer", of: app)

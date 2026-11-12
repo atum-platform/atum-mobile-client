@@ -98,6 +98,9 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     case chatBubbles = "chat.bubbles"
     /// The same in a group with faces.
     case chatBubblesGroup = "chat.bubbles-group"
+    /// The fold reader rules (owner, 2026-11-12): a long answer streams in
+    /// while Atum types and folds once it is final.
+    case chatBubblesLive = "chat.bubbles-live"
 }
 
 #endif
