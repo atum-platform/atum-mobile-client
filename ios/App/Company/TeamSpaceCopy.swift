@@ -29,7 +29,7 @@ struct TeamSpaceCopy {
     /// A two-argument phrase ({0}, {1} in the pending table, `%1$@`, `%2$@` in the export).
     func text(_ key: String, _ first: String, _ second: String) -> String {
         if design.copy.contains(key) {
-            return design.text(key, arguments: [.text(first), .text(second)])
+            return design.text(key, words: [first, second])
         }
         let table = Self.pending(key)
         return (table?[locale] ?? table?["en"] ?? key)
@@ -44,7 +44,7 @@ struct TeamSpaceCopy {
 
     /// A one-argument phrase ({0} in the pending table, `%1$@` in the export).
     func text(_ key: String, _ argument: String) -> String {
-        if design.copy.contains(key) { return design.text(key, arguments: [.text(argument)]) }
+        if design.copy.contains(key) { return design.text(key, words: [argument]) }
         let table = Self.pending(key)
         return (table?[locale] ?? table?["en"] ?? key).replacingOccurrences(of: "{0}", with: argument)
     }
@@ -161,7 +161,7 @@ struct TeamSpaceCopy {
     var inviteLinkReplayed: String { text(Self.team + "inviteLinkReplayed") }
     var inviteLinksActive: String { text(Self.team + "inviteLinksActive") }
     func inviteLinkUsage(used: Int, max: Int) -> String {
-        text(Self.team + "inviteLinkUsage", used.formatted(), max.formatted())
+        text(Self.team + "inviteLinkUsage", String(used), String(max))
     }
     func inviteLinkExpires(days: Int) -> String { count(Self.team + "inviteLinkExpires", days) }
     var inviteLinkRevoke: String { text(Self.team + "inviteLinkRevoke") }

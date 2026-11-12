@@ -33,6 +33,33 @@ No Swift source changes.
   carries (person-info panel table, `assistantCardCopies.routineCount`,
   `model-picker-copy.COPY.subscriptions`). Four stay pending.
 
+## Argument kinds (fixed after the first CI run)
+
+The pin's new keys can move a phone call from a pending table, which takes
+every argument as a word, to the export, whose contract checks each argument's
+kind. Three new keys declare a number where the phone passed a word:
+`shared.matrix-team-space-copy.copy.inviteLinkUsage` (number, number),
+`…assistantCardCopies.routineQuotaReached` (number) and
+`…assistantCardCopies.routineMonthlyWords` (number, string). `LiveDesign.text`
+traps on a contract mismatch, so opening the Team Space invite sheet crashed the
+app (hosted UI shard 1 on `19c5539`: both `TeamSpaceInviteUITests` cases, "no
+invite sheet", crash in `TeamSpaceCopy.inviteLinkUsage`).
+
+The fix is at the boundary, not per call: `AtumCopy.parameterKinds(_:)` reads
+the contract, and `LiveDesign.text(_:words:)` passes a word as a number where
+the export declares one. Every pending-fallback helper that passed words now
+uses it (`TeamSpaceCopy`, `CompanyThreadsCopy`, `AssistantCardCopy.routine` and
+`polish`, `AssistantRetireCopy`). `inviteLinkUsage` passes plain digits, not
+`formatted()`, as desktop does. The audit compared every new or changed key that
+takes arguments against its phone call sites. No existing key changed kind. The
+`count(_:_:)` helpers ask for `.one`/`.other`, which the export doesn't carry
+(it has `.count=0`/`.count=1`), so they still use the pending tables.
+
+Tests: `AtumCopyTests.testParameterKindsFollowTheContract`;
+`TeamSpaceInviteTests.testTheLinkUsageLineTakesItsCountsAsNumbers`;
+`AssistantRoutineStateTests.testPinnedRoutineWordsTakeTheirNumbersAsWords`.
+The last one runs every pinned routine word with its declared argument count.
+
 ## Known gap (pre-existing, not a regression)
 
 `test_copy_keys_in_pin.py` is not in CI and already failed on main: 171 key
@@ -51,3 +78,4 @@ further desktop export before the test can go green and join CI.
 - Missing-key comparison against main: 97 keys fixed, 0 regressions.
 - `swift test` (locked, `-j 2`): 674 tests, 0 failures, after the fixture regeneration. The first run, before it, failed `PrototypeCatalogTests` with `missingKey(walletHistoryRows0Label)`.
 - Private branch `chore/catalog-drop-placeholders` (`dcaccd9`): `generate-native-catalog.py --check` passes, `tests/test_native_catalog.py` 4/0.
+- After the argument-kind fix: locked `swift test` 700/0 (includes the new `AtumCopyTests` case). The App target, AppTests and UI shards run on hosted CI (the build volume is too full for a local xcodebuild).

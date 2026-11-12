@@ -87,4 +87,32 @@ final class AssistantCardCopyTests: XCTestCase {
             XCTAssertEqual(copy.routineCount(3), AssistantRoutinePendingCopy.count(3, locale: design.locale))
         }
     }
+
+    /// The wave 3 pin declares `count`/`day` as numbers where the pending tables
+    /// took words; asking with words must still draw the pinned phrase, not trap.
+    func testPinnedRoutineWordsTakeTheirNumbersAsWords() throws {
+        let design = try LiveDesign()
+        let copy = AssistantCardCopy(design: design)
+        let pin = try AtumCopy()
+        for key in AssistantRoutinePolishCopy.Key.allCases {
+            guard let kinds = pin.parameterKinds(key.exportKey) else { continue }
+            XCTAssertFalse(copy.polish(key, kinds.map { _ in "3" }).isEmpty, key.rawValue)
+        }
+        for key in AssistantRoutinePendingCopy.Key.allCases {
+            guard let kinds = pin.parameterKinds(key.exportKey), kinds.count <= 1 else { continue }
+            XCTAssertFalse(copy.routine(key, name: kinds.isEmpty ? nil : "Mai").isEmpty, key.rawValue)
+        }
+        let quota = AssistantRoutinePolishCopy.Key.routineQuotaReached
+        if pin.parameterKinds(quota.exportKey) == ["number"] {
+            XCTAssertEqual(copy.polish(quota, ["64"]),
+                           design.text(quota.exportKey, arguments: [.number(64)]))
+        }
+        let monthly = AssistantRoutinePolishCopy.Key.routineMonthlyWords
+        if pin.parameterKinds(monthly.exportKey) == ["number", "string"] {
+            let words = AssistantRoutineWords.schedule(.monthly(day: 5, hour: 8, minute: 30),
+                                                       timezone: "Asia/Ho_Chi_Minh", locale: design.locale,
+                                                       resolve: { copy.polish($0, $1) })
+            XCTAssertEqual(words, design.text(monthly.exportKey, arguments: [.number(5), .text("8:30")]))
+        }
+    }
 }

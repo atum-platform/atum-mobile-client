@@ -1222,7 +1222,7 @@ struct AssistantCardCopy {
     /// desktop's own value in the app language (`AssistantRoutinePendingCopy`).
     func routine(_ key: AssistantRoutinePendingCopy.Key, name: String? = nil) -> String {
         if design.copy.contains(key.exportKey) {
-            return design.text(key.exportKey, arguments: name.map { [.text($0)] } ?? [])
+            return design.text(key.exportKey, words: name.map { [$0] } ?? [])
         }
         return AssistantRoutinePendingCopy.text(key, locale: design.locale, name: name)
     }
@@ -1231,7 +1231,7 @@ struct AssistantCardCopy {
     /// app language (`AssistantRoutinePolishCopy`).
     func polish(_ key: AssistantRoutinePolishCopy.Key, _ arguments: [String] = []) -> String {
         if design.copy.contains(key.exportKey) {
-            return design.text(key.exportKey, arguments: arguments.map { .text($0) })
+            return design.text(key.exportKey, words: arguments)
         }
         return AssistantRoutinePolishCopy.text(key, locale: design.locale, arguments: arguments)
     }
@@ -1284,7 +1284,7 @@ struct AssistantRetireCopy {
 
     func text(_ key: AssistantShellPendingCopy.Key, name: String? = nil) -> String {
         if design.copy.contains(key.exportKey) {
-            return design.text(key.exportKey, arguments: name.map { [.text($0)] } ?? [])
+            return design.text(key.exportKey, words: name.map { [$0] } ?? [])
         }
         return AssistantShellPendingCopy.text(key, locale: design.locale, name: name)
     }

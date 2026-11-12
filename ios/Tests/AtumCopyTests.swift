@@ -17,6 +17,14 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testParameterKindsFollowTheContract() throws {
+        let copy = try AtumCopy()
+        XCTAssertEqual(copy.parameterKinds("shared.matrix-team-space-copy.copy.inviteLinkUsage"), ["number", "number"])
+        XCTAssertEqual(copy.parameterKinds("src.matrix.assistant-card.copy.assistantCardCopies.routineMonthlyWords"),
+                       ["number", "string"])
+        XCTAssertNil(copy.parameterKinds("no.such.key"))
+    }
+
     func testCommittedPhoneSourceLoadsExactlyInAllLocales() throws {
         let copy = try AtumCopy()
         let raw = try JSONSerialization.jsonObject(with: AtumDesign.data(for: "Localizable.xcstrings")) as! [String: Any]

@@ -1,5 +1,6 @@
 @testable import AtumMobile
 import AtumChat
+import AtumDesign
 import AtumNativeAPI
 import XCTest
 
@@ -166,6 +167,20 @@ final class TeamSpaceInviteTests: XCTestCase {
         api.inviteFailure = .transport
         let lost = await model.invite(companyID: company, handle: "nobody")
         XCTAssertEqual(lost, .unavailable)
+    }
+
+    /// The wave 3 pin carries `inviteLinkUsage` with two number arguments; the
+    /// invite sheet's link rows used to pass words and trapped on open.
+    @MainActor
+    func testTheLinkUsageLineTakesItsCountsAsNumbers() throws {
+        let design = try LiveDesign()
+        let team = TeamSpaceCopy(design: design)
+        let key = "shared.matrix-team-space-copy.copy.inviteLinkUsage"
+        let line = team.inviteLinkUsage(used: 2, max: 5)
+        if design.copy.parameterKinds(key) == ["number", "number"] {
+            XCTAssertEqual(line, design.text(key, arguments: [.number(2), .number(5)]))
+        }
+        XCTAssertTrue(line.contains("2") && line.contains("5"), line)
     }
 
     @MainActor

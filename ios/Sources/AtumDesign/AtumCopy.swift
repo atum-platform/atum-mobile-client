@@ -60,6 +60,10 @@ public struct AtumCopy {
 
     public func contains(_ key: String) -> Bool { catalog.strings[key] != nil }
 
+    /// The argument kinds (`"string"` or `"number"`) the export declares for a
+    /// key, in order, or nil when the key has no contract entry.
+    public func parameterKinds(_ key: String) -> [String]? { contract.parameters[key]?.map(\.kind) }
+
     public func text(_ key: String, locale: String, arguments: [Argument] = []) throws -> String {
         guard locales.contains(locale) else { throw CopyError.unsupportedLocale(locale) }
         guard catalog.strings[key] != nil, let parameters = contract.parameters[key] else {
