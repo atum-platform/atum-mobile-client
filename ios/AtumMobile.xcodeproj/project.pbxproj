@@ -159,6 +159,7 @@
 		A0EC8BD92076BE153023533B /* S6SystemUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AA1C01CBCBF54986F755DA /* S6SystemUITests.swift */; };
 		A2117D0A1EFE433E001525D0 /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 6B7B8ADB36AC492CA81EFEBD /* AtumChat */; };
 		A238FAF6582B06674992DEC5 /* MessageBubbleRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0114D09D4628D3AD5D494B17 /* MessageBubbleRow.swift */; };
+		D6786F83C8212754F06652B5 /* MessageFoldViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1C774E1A415CF65143E3A3 /* MessageFoldViews.swift */; };
 		A251BDEDFCF1FD320573FAA1 /* MediaRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D532825556EA6FFB98E8E56 /* MediaRows.swift */; };
 		A26794091054BB4F9CFFA780 /* IgnoredPeopleList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9759FFBC6760628756EECA /* IgnoredPeopleList.swift */; };
 		A3DF398F7FFDBDF7FD846FAC /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = FE09EC837F5D02840D34BB11 /* Localizable.xcstrings */; };
@@ -201,6 +202,7 @@
 		C847245926D94DEA1A6AD528 /* MatrixRustSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 6609D85B0A2DBD948F46EBE5 /* MatrixRustSDK */; };
 		A3D0C1E2B4F5061728394A53 /* ProtonAmountFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D0C1E2B4F5061728394A54 /* ProtonAmountFormat.swift */; };
 		C8D3197CAA8F1DBADEB85732 /* ComposerAndMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */; };
+		E776A5F3F706EEFAE4747D01 /* TranscriptKeyboardAndFoldUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA8E271898B10FFC40A26887 /* TranscriptKeyboardAndFoldUITests.swift */; };
 		C9BACD4F0326BE550F6E2F2B /* S6AuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1B5B7722A21CCE0A6CB3EF /* S6AuthViews.swift */; };
 		CB482E7DDAABC9B72C8E36FB /* CompanyInviteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB9AE3A7A1F74B1E712C872E /* CompanyInviteViews.swift */; };
 		CC9C1E925E30B858DCA45EE1 /* S2StateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5F8419BC1E29292FC4AC30 /* S2StateTests.swift */; };
@@ -333,6 +335,7 @@
 		00AA1C01CBCBF54986F755DA /* S6SystemUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S6SystemUITests.swift; sourceTree = "<group>"; };
 		00AB21F5CFF8004E21E6065F /* AppBotNoticeProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBotNoticeProjection.swift; sourceTree = "<group>"; };
 		0114D09D4628D3AD5D494B17 /* MessageBubbleRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubbleRow.swift; sourceTree = "<group>"; };
+		CA1C774E1A415CF65143E3A3 /* MessageFoldViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFoldViews.swift; sourceTree = "<group>"; };
 		023052D06543345DF0DC9F77 /* MatrixLiveRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixLiveRuntime.swift; sourceTree = "<group>"; };
 		035FA77E13156782F1C8641D /* ScriptedLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptedLaunch.swift; sourceTree = "<group>"; };
 		047AEB418B8DD1F993C3DDD7 /* AppBotPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBotPresentation.swift; sourceTree = "<group>"; };
@@ -503,6 +506,7 @@
 		AE6265E160DBC6C35D2C445F /* FirstRunGreetingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRunGreetingTests.swift; sourceTree = "<group>"; };
 		B0C5457A5495F8263F9B4B28 /* AtumMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AtumMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAndMenuUITests.swift; sourceTree = "<group>"; };
+		EA8E271898B10FFC40A26887 /* TranscriptKeyboardAndFoldUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptKeyboardAndFoldUITests.swift; sourceTree = "<group>"; };
 		B50C197752B5EB15B984BC58 /* AccountProfileEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountProfileEditorTests.swift; sourceTree = "<group>"; };
 		B5700387D0A5F802386263D0 /* SDKTimelineSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDKTimelineSource.swift; sourceTree = "<group>"; };
 		B9BCC89E163B580641A28AFD /* SharedCollectionsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedCollectionsUITests.swift; sourceTree = "<group>"; };
@@ -962,6 +966,7 @@
 				FFC664004AF714C51541782F /* ChatPanelUITests.swift */,
 				9F4F2CD716AF30482AAECA10 /* HomeChatsWave3UITests.swift */,
 				B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */,
+				EA8E271898B10FFC40A26887 /* TranscriptKeyboardAndFoldUITests.swift */,
 				A3E14C8E07A5220CD1744589 /* GScrollDynamicTypeUITests.swift */,
 				12D964ECFA8E0F284D646944 /* GScrollUITests.swift */,
 				7B6B1F163B1FF44576CFFB31 /* HomeShellUITests.swift */,
@@ -1145,6 +1150,7 @@
 				4A5F646A651995AC791525E8 /* JumpPillButton.swift */,
 				85BDC5DD56B44C08D958FD9C /* LoadingEarlierRow.swift */,
 				0114D09D4628D3AD5D494B17 /* MessageBubbleRow.swift */,
+				CA1C774E1A415CF65143E3A3 /* MessageFoldViews.swift */,
 				7F21F01CD5A7DE4E8C71BFFC /* MessageMenu.swift */,
 				928D052ADCCB2BF76FA35EE6 /* NoticeRow.swift */,
 				4791811ED8DA6CB94C011D8A /* PhoneModelPicker.swift */,
@@ -1471,6 +1477,7 @@
 				E07B18193463CEE2C2500B58 /* ChatPanelUITests.swift in Sources */,
 				1DE6F7A74851F5D67F404C42 /* HomeChatsWave3UITests.swift in Sources */,
 				C8D3197CAA8F1DBADEB85732 /* ComposerAndMenuUITests.swift in Sources */,
+				E776A5F3F706EEFAE4747D01 /* TranscriptKeyboardAndFoldUITests.swift in Sources */,
 				1FED11C16F6AAF0A823FA3D5 /* GScrollDynamicTypeUITests.swift in Sources */,
 				F72702E8DB3BA69328FAD75F /* GScrollUITests.swift in Sources */,
 				65CCD6C57981869C01537BC3 /* HomeShellUITests.swift in Sources */,
@@ -1611,6 +1618,7 @@
 				A251BDEDFCF1FD320573FAA1 /* MediaRows.swift in Sources */,
 				5652640CB42EC304DBA47862 /* MediaViewer.swift in Sources */,
 				A238FAF6582B06674992DEC5 /* MessageBubbleRow.swift in Sources */,
+				D6786F83C8212754F06652B5 /* MessageFoldViews.swift in Sources */,
 				5EB134D76B899F90E0D467B5 /* MessageMenu.swift in Sources */,
 				DC2A1406B5512A2805608224 /* NativeRichText.swift in Sources */,
 				A789CE19B3A7734ECDEED18A /* NoticeRow.swift in Sources */,

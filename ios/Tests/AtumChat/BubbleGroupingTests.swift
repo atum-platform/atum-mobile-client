@@ -152,15 +152,34 @@ final class BubbleFaceGroupingTests: XCTestCase {
 }
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
 final class BubbleGeometryTests: XCTestCase {
-    func testTheWidestBubbleIsSeventyEightPercentOfTheRow() {
-        XCTAssertEqual(BubbleGeometry.maxWidth(row: 370), 288)
-        XCTAssertEqual(BubbleGeometry.maxWidth(row: 370, gutter: 31), 288,
-                       "the group's face gutter does not narrow a long bubble")
+    /// Telegram's geometry (owner, 2026-11-11): the widest bubble stops
+    /// 48 pt short of the screen's far edge. iPhone 16e is 390 pt wide
+    /// (row 358), iPhone 17 402 pt (row 370), both with 16 pt margins.
+    func testTheWidestBubbleLeavesTheFarSideGap() {
+        XCTAssertEqual(BubbleGeometry.farSideGap, 48)
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 358), 326, "iPhone 16e: 84% of the screen, was 279 (72%)")
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 370), 338, "iPhone 17: 84% of the screen, was 288")
+        XCTAssertEqual(390 - 16 - BubbleGeometry.maxWidth(row: 358), 48, "far edge to screen edge")
     }
 
-    func testTheGutterOnlyNarrowsTheBubbleWhenItWouldOverflowTheRow() {
-        XCTAssertEqual(BubbleGeometry.maxWidth(row: 200, gutter: 80), 120)
-        XCTAssertEqual(BubbleGeometry.maxWidth(row: 100, gutter: 31), 96, "never below the minimum")
+    func testAGroupsFaceGutterNarrowsTheBubbleOnTheNearSide() {
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 358, gutter: 31), 295)
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 370, gutter: 31), 307)
+    }
+
+    func testTheMarginIsPartOfTheGap() {
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 374, margin: 8), 334)
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 300, margin: 60), 300, "a margin wider than the gap adds none")
+    }
+
+    func testDesktopsCapOnlyBindsOnWideScreens() {
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 408), 376, "iPhone Pro Max portrait: uncapped")
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 900), 576, "landscape and iPad: desktop's 36rem")
+    }
+
+    func testTheBubbleIsNeverNarrowerThanTheImageBoxMinimum() {
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 100, gutter: 31), 96)
+        XCTAssertEqual(BubbleGeometry.maxWidth(row: 40), 96)
     }
 
     func testShortTextGetsASmallBubbleAndLongTextGrowsToTheLimit() {
@@ -177,5 +196,25 @@ final class BubbleGeometryTests: XCTestCase {
         XCTAssertEqual(BubbleGeometry.hugWidth(fitted: [200, 288], natural: [200, 1], limit: 288), 200)
         // A long code line never pushes past the limit.
         XCTAssertEqual(BubbleGeometry.hugWidth(fitted: [288], natural: [640], limit: 288), 288)
+    }
+
+    /// Measured (docs/ports/bubble-width-collapse.md): SwiftUI reports a
+    /// wrapped paragraph 278 pt wide at 300, its words 274; offered 274 it
+    /// keeps its three lines, offered 270 it takes four.
+    func testWrappedTextLosesTheTrailingSpaceButKeepsItsLines() {
+        let lines: (Double) -> Int = { $0 >= 273.9 ? 3 : 4 }
+        let tight = BubbleGeometry.tightWidth(from: 278, slack: 6) { lines($0) == 3 }
+        XCTAssertGreaterThanOrEqual(tight, 273.9)
+        XCTAssertLessThanOrEqual(tight, 274.5)
+    }
+
+    func testTightWidthNeverGoesBelowOneSpace() {
+        XCTAssertEqual(BubbleGeometry.tightWidth(from: 278, slack: 5) { _ in true }, 273)
+        XCTAssertEqual(BubbleGeometry.tightWidth(from: 278, slack: 5, floor: 276) { _ in true }, 276)
+    }
+
+    func testTightWidthKeepsTheWidthWhenEveryNarrowerOneWraps() {
+        XCTAssertEqual(BubbleGeometry.tightWidth(from: 205, slack: 5) { $0 >= 205 }, 205)
+        XCTAssertEqual(BubbleGeometry.tightWidth(from: 205, slack: 0) { _ in false }, 205)
     }
 }
