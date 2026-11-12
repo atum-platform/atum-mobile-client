@@ -13,9 +13,9 @@ final class MessageFoldStore {
 
     private(set) var book = MessageFoldBook()
 
-    func sawGrowing(_ ids: Set<String>) {
-        guard !ids.isEmpty else { return }
-        book.sawGrowing(ids)
+    func readerSees(_ reading: Set<String>, among growing: Set<String>) {
+        guard !growing.isEmpty else { return }
+        book.readerSees(reading, among: growing)
     }
 
     func isFolded(_ id: String, isLong: Bool, isGrowing: Bool) -> Bool {

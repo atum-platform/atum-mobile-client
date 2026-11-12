@@ -86,17 +86,47 @@ Desktop has no such control.
 - **Never while growing:** `MessageFold.growingIDs` names the incoming messages after
   my newest message while the agent still shows it is working after them (typing row
   or a live `io.atum.progress` line). Those never fold and show no toggle.
-- **No jump under the reader:** a message the transcript showed while it was growing
-  stays open once it is final (`MessageFoldBook.sawGrowing`, recorded on every
-  snapshot). Only a message that is final when it first shows starts folded: history
-  at open, or a complete answer that arrives in one piece. Once final, a long open
-  message offers "Show less".
+- **Folds once final (owner, device feedback 2026-11-12):** a long message folds as
+  soon as it is final, even if it arrived live, unless the reader opened it. Until
+  then every live answer stayed open (`sawGrowing` kept open every message the
+  transcript had shown while it grew), which read on the device as "after I expanded
+  one message, every later long message arrives expanded".
+- **No jump under the reader:** the fold never moves what is on screen.
+  - Following: the bottom stays pinned as the message folds, so the folded bubble and
+    its "Show more" sit at the bottom.
+  - Scrolled away from the bottom: the row being read is held where it is
+    (`holdAnchor`, the same machinery as for older pages and Dynamic Type).
+  - The one exception: if, when the message turns final, the reader is detached and has
+    its text below the fold line on screen, it stays open. Folding it would take away
+    the lines being read, and no anchor can hold those.
+    `TranscriptView.noteReading` tells `MessageFoldBook.readerSees` on every pass which
+    growing messages that is true of; only growing ones are updated, so the last pass
+    before a message turns final decides. The fold line is taken as 12 body lines below
+    the row's top (the real one is lower), so a line that may be on screen counts as
+    read. While following, nothing counts as read.
+  - **`keptOpen` was narrowed, not removed:** it now holds only these
+    read-while-final messages. Removing it would fold text out from under a reader
+    who scrolled up into a streaming answer. Keeping its old meaning (every message
+    seen growing) is the bug.
+  - Known risk: an interim long answer counts as growing again if the agent shows it
+    is working after a pause (`growingIDs` is a heuristic). It then opens and folds
+    again when the turn ends. Following or held, nothing on screen moves.
 - **State:** the reader's choice is kept per row ID (the event ID, kept through a
   local echo's settling) for the app session (`MessageFoldStore.session`). It survives
   scrolling, timeline diffs and reopening the chat. Nothing is persisted to disk.
-- **Show less** on a message whose top has scrolled away brings its top back into
-  view (`ChatRowInteractions.folded` → `TranscriptView.rowFolded`), so the reader is
-  not left below it. While following, the bottom stays pinned.
+- **Show more opens in place (owner, 2026-11-12; Slack and Telegram expandable quotes
+  do the same):** the message's top, its first 12 lines and the toggle stay exactly
+  where they are on screen, and the revealed text extends below. Opening stops the
+  chat following the bottom, because the reader is reading now. The jump pill shows
+  as it does for any detached chat. `ChatRowInteractions.opening` →
+  `TranscriptView.rowOpening` runs before the row grows. It detaches the follow state,
+  which turns the size-change anchor to the top. It makes the toggled row the row
+  being read, and holds the current offset as an absolute target (`pendingHold`) in
+  case a pass pinned to the bottom lands first. Before this, opening while following
+  kept the bottom pinned, so Show more scrolled to the end of the expanded message.
+- **Show less** (unchanged) on a message whose top has scrolled away brings its top
+  back into view (`ChatRowInteractions.folded` → `TranscriptView.rowFolded`), so the
+  reader is not left below it. While following, the bottom stays pinned.
 - **Search:** a message with open search highlights never folds, so a match cannot
   sit under the fold.
 - **Accessibility:** the message element's label is the whole body (`RowSpeech`), so
@@ -161,6 +191,12 @@ Apache-2.0 one, per `NOTICE`) was fetched and read. No AGPL source was opened.
 - `chat.bubbles`: my assistant's chat. Short lines both ways, my wrapped question, a
   long markdown answer (`row.chat.bubbles.long`) that is final at open and starts
   folded, then my thanks and a wrapped four-line answer.
+- `chat.bubbles-live` (2026-11-12): my assistant's chat, quiet until I send. My send is
+  the trigger, so a UI test sees every phase however long the launch takes. Atum types
+  0.8 s after it, and its answer (`row.chat.bubbles-live.answer-1`) arrives at 1.5 s.
+  The answer grows in place every 4 s to about two screens (`ScriptedReplies.stream`:
+  `m.replace`-style edits). Typing stops 4 s after the last growth; the answer is then
+  final and folds at the bottom.
 - `chat.bubbles-group`: a group with faces. Quân's six-paragraph message
   (`row.chat.bubbles-group.long`) folds; Huy's and my wrapped messages show the far
   gap and the face gutter.

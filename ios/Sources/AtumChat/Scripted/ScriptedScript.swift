@@ -121,15 +121,33 @@ public struct ScriptedReplies: Sendable {
     /// Agents and bots answer with a rich reply to the message (B21); people
     /// just write.
     public var answersAsReply: Bool
+    /// The answer grows in place as a live answer streams (`m.replace`
+    /// edits): it arrives as the first of these bodies and is edited to each
+    /// next one `every` seconds; typing stops only after the last. Nil: it
+    /// arrives whole (and typing stops with it).
+    public var stream: ScriptedStream?
 
     public init(sender: String, seenAfter: TimeInterval, typingAfter: TimeInterval? = nil,
-                answerAfter: TimeInterval? = nil, bodies: [String] = [], answersAsReply: Bool = true) {
+                answerAfter: TimeInterval? = nil, bodies: [String] = [], answersAsReply: Bool = true,
+                stream: ScriptedStream? = nil) {
         self.sender = sender
         self.seenAfter = seenAfter
         self.typingAfter = typingAfter
         self.answerAfter = answerAfter
         self.bodies = bodies
         self.answersAsReply = answersAsReply
+        self.stream = stream
+    }
+}
+
+/// A streamed answer's bodies, shortest first, and the seconds between them.
+public struct ScriptedStream: Sendable {
+    public var bodies: [String]
+    public var every: TimeInterval
+
+    public init(bodies: [String], every: TimeInterval) {
+        self.bodies = bodies
+        self.every = every
     }
 }
 #endif

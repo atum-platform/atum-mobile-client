@@ -132,15 +132,20 @@ final class GScrollUITests: TranscriptUITestCase {
         keepScreenshot("g7-answer-\(tag)", of: app)
 
         // Check 8: an answer two screens tall arrives at the bottom; the view
-        // stays pinned to its end; no pill.
+        // stays pinned to its end; no pill. Final once Atum stops typing, it
+        // folds (owner, 2026-11-12), so its end is the folded bubble's
+        // "Show more" (a folded row's frame spans its unclipped text).
         wait(until: at(64))
         let tall = latest(app).frame
+        let toggle = element(app, "message.fold.\(ScriptedScenario.chatLong.rawValue).step-09")
         let bottom = visibleBottom(app)
+        XCTAssertTrue(toggle.exists, "check 8: the final two-screen answer did not fold")
+        let end = toggle.frame.maxY
         record("g8.tallAnswerHeight.\(tag)", tall.height)
-        record("g8.endToComposer.\(tag)", bottom - tall.maxY)
+        record("g8.endToComposer.\(tag)", bottom - end)
         XCTAssertGreaterThan(tall.height, screen, "check 8: the answer is not taller than the screen")
-        XCTAssertLessThanOrEqual(tall.maxY, bottom + Self.framePoints, "check 8: the answer's end is under the composer")
-        XCTAssertGreaterThanOrEqual(tall.maxY, bottom - 48, "check 8: the view is not at the answer's end")
+        XCTAssertLessThanOrEqual(end, bottom + Self.framePoints, "check 8: the answer's end is under the composer")
+        XCTAssertGreaterThanOrEqual(end, bottom - 120, "check 8: the view is not at the answer's end")
         XCTAssertFalse(pill(app).exists, "check 8: pill for an incoming answer while following")
         XCTAssertEqual(followValue(app), "following")
         keepScreenshot("g8-tall-answer-\(tag)", of: app)

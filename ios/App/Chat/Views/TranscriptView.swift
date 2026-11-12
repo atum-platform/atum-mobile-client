@@ -128,12 +128,15 @@ struct TranscriptView: View {
             syncFollowState()
         }
         .onChange(of: store.snapshot) { old, new in
-            MessageFoldStore.session.sawGrowing(MessageFold.growingIDs(in: new.rows))
             snapshotChanged(from: old, to: new)
             syncFollowState()
         }
         .onChange(of: rows.map(\.id)) { old, new in
             rowsShown(from: old, to: new)
+        }
+        .onChange(of: growing) { _, new in
+            scratch.growing = new
+            noteReading()
         }
         .onChange(of: dynamicTypeSize) { _, _ in
             // Every row changes height at once. While following, the bottom
@@ -148,7 +151,7 @@ struct TranscriptView: View {
         .onChange(of: scenePhase) { _, _ in updateBottomVisible() }
         .onChange(of: covered) { _, _ in updateBottomVisible() }
         .onAppear {
-            MessageFoldStore.session.sawGrowing(growing)
+            scratch.growing = growing
             scratch.rowOrder = rows.map(\.id)
             scratch.isOnScreen = true
             updateBottomVisible()
@@ -159,8 +162,10 @@ struct TranscriptView: View {
         .onDisappear {
             scratch.isOnScreen = false
             updateBottomVisible()
+            noteReading()
         }
         .environment(\.chatRowInteractions.showOriginal, { id in showOriginal(id) })
+        .environment(\.chatRowInteractions.opening, { id in rowOpening(id) })
         .environment(\.chatRowInteractions.folded, { id in rowFolded(id) })
         .accessibilityIdentifier(AccessibilityID.transcript)
         .accessibilityValue(AccessibilityID.transcriptValue(followState))
@@ -181,6 +186,7 @@ struct TranscriptView: View {
 
     private func geometryChanged(from old: TranscriptGeometry, to new: TranscriptGeometry) {
         scratch.geometry = new
+        defer { noteReading() }
         let contentChanged = abs(new.contentHeight - old.contentHeight) > 0.5
         #if DEBUG
         scratch.holdProbe?.observe(new, contentChanged: contentChanged)
@@ -327,6 +333,7 @@ struct TranscriptView: View {
         }
         let pill = store.follow.pill
         if pill != chrome.pill { chrome.pill = pill }
+        noteReading()
     }
 
     private func apply(_ command: FollowCommand) {
@@ -397,6 +404,31 @@ struct TranscriptView: View {
         withAnimation(.smooth(duration: 0.35)) { position.scrollTo(id: row.id, anchor: .center) }
     }
 
+    /// Show more keeps the message where it is on screen (owner,
+    /// 2026-11-12; Slack and Telegram expand in place): its top, its first
+    /// lines and the toggle stay put and the revealed text extends below.
+    /// The reader is reading now, so the chat stops following the bottom
+    /// (the jump pill shows as for any detached chat), which turns the
+    /// size-change anchor to the top before the row grows, and the toggled
+    /// row becomes the row being read. The current offset is also held as an
+    /// absolute target, should a pass pinned to the bottom land first.
+    private func rowOpening(_ rowID: String) {
+        let geometry = scratch.geometry
+        guard scratch.isOnScreen, geometry.viewportHeight > 0 else { return }
+        if store.follow.isFollowing {
+            store.handle(.geometry(distanceFromBottom: max(geometry.distanceFromBottom, FollowPolicy.nearBottomPoints + 1),
+                                   distanceFromTop: geometry.distanceFromTop,
+                                   viewportHeight: geometry.viewportHeight, motion: .user))
+            syncFollowState()
+        }
+        if let minY = scratch.rowMinY[rowID] {
+            let top = geometry.offsetY + geometry.insetTop
+            scratch.anchor = TranscriptAnchor(id: rowID, minY: minY, viewportY: minY - top)
+        }
+        scratch.pendingHold = (target: geometry.offsetY, attempts: 0)
+        scheduleSettle(after: Self.settleSeconds)
+    }
+
     /// Show less on a long message whose top has scrolled out of view: the
     /// fold would leave the reader below it, so its top comes back into view
     /// (Telegram does the same). While following, the bottom stays pinned and
@@ -407,6 +439,39 @@ struct TranscriptView: View {
         scratch.anchor = nil
         scratch.pendingHold = nil
         withAnimation(.smooth(duration: 0.3)) { position.scrollTo(id: rowID, anchor: .top) }
+    }
+
+    /// A long message folds once it is final (owner, 2026-11-12), unless
+    /// I am reading its text below the fold line in a chat scrolled away
+    /// from the bottom: then it stays open (`MessageFoldBook.readerSees`).
+    /// Told on every pass for the messages still growing, so what is on
+    /// screen when one turns final decides. While following, the bottom
+    /// stays pinned as it folds; otherwise the row being read is above it
+    /// or is held (`holdAnchor`). The fold line is put at 12 body lines
+    /// below the row's top (its quote and padding put the real one lower),
+    /// so a line that may be on screen counts as being read. Reads only
+    /// the scratch; the book is not observed, so nothing re-renders.
+    private func noteReading() {
+        let growing = scratch.growing
+        guard !growing.isEmpty else { return }
+        var reading = Set<String>()
+        if scratch.isOnScreen, !store.follow.isFollowing {
+            let geometry = scratch.geometry
+            let top = geometry.offsetY + geometry.insetTop
+            let bottom = top + geometry.viewportHeight
+            let foldLine = Double(MessageFoldMeasure.lineHeight(dynamicTypeSize)) * Double(MessageFold.foldedLines)
+            let order = scratch.rowOrder
+            for id in growing {
+                guard let minY = scratch.rowMinY[id] else { continue }
+                var end = geometry.contentHeight
+                if let index = order.lastIndex(of: id), index + 1 < order.count,
+                   let next = scratch.rowMinY[order[index + 1]] {
+                    end = next
+                }
+                if max(minY + foldLine, top) < min(end, bottom) { reading.insert(id) }
+            }
+        }
+        MessageFoldStore.session.readerSees(reading, among: growing)
     }
 
     // MARK: HC-6: bringing a search match into view
@@ -564,6 +629,9 @@ private final class TranscriptScratch {
     var rowMinY: [String: Double] = [:]
     /// The IDs of the rows on screen, top to bottom.
     var rowOrder: [String] = []
+    /// The messages still growing (`MessageFold.growingIDs`) in the rows on
+    /// screen.
+    var growing: Set<String> = []
     /// The row being read (§2.4 "Prepend").
     var anchor: TranscriptAnchor?
     /// A hold whose `ScrollPosition` command has not landed yet.
