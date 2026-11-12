@@ -46,6 +46,11 @@ per run on 2026-11-11 with six lanes active).
   `chat.title` 30 s, then the 2 s + 3 s waits for `assistant.card.model` ran out. Its
   siblings with the same flow passed. The three card-model waits in `ChatInfoUITests`
   are now 8 s + 10 s.
+- 2026-11-12: on PR #46 (`9d63d30`) shard 2 failed
+  `ChatInfoUITests/testAssistantCardModelRowOpensTheComposerPicker` at the last step:
+  the tapped row's "Đang dùng" value (the check) did not appear within 3 s. No crash,
+  copy unchanged, and it passed on `19c5539`. That wait is now 10 s, like the others
+  after the sheet opens.
 - 2026-11-12: on PR #41 (`6fd2587`) shard 2's first test,
   `ChatInfoUITests/testAppInfoConfirmsPhoneOnlyChatDeletion`, failed before any test code
   ran: "Failed to launch ... Timed out while launching application via Xcode" (62 s)

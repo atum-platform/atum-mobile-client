@@ -126,10 +126,11 @@ final class ChatInfoUITests: TranscriptUITestCase {
         // `86228cb`, 12 Nov); every first-row wait after opening it is 10 s.
         XCTAssertTrue(hard.waitForExistence(timeout: 10))
         hard.tap()
-        // The current row is marked by a check, spoken as the row's value.
+        // The current row is marked by a check, spoken as the row's value. A
+        // hosted runner missed it inside 3 s (#46 shard 2, `9d63d30`, 12 Nov).
         XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "Đang dùng"), object: hard
-        )], timeout: 3) == .completed)
+        )], timeout: 10) == .completed)
     }
 
     /// Retains the workflow selector from the pre-Kit destination picker.
