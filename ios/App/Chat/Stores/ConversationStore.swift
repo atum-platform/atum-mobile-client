@@ -35,6 +35,9 @@ struct ConversationRoomInfo: Sendable {
     /// The owner's `io.atum.desktop.share_activity` at open (default true):
     /// public receipts and typing, or private receipts and no typing.
     var shareActivity = true
+    /// TS-6b: the thread this store shows (its root's event ID); nil for the
+    /// room's own timeline.
+    var threadRootID: String? = nil
 }
 
 /// Builds the room's typing controller (WS3's `TypingController`, B10–B12)
@@ -546,6 +549,7 @@ final class LiveConversationStore: ConversationStore {
         do {
             let controller = try await TimelineController.make(room: room, mapperRoom: mapperRoom,
                                                                generation: generation, aliases: identityAliases,
+                                                               threadRootID: info.threadRootID,
                                                                clock: clock)
             guard generation == self.generation, !isClosed else {
                 controller.close()

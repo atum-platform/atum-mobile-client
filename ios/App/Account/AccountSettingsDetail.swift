@@ -46,8 +46,13 @@ struct AccountSettingsDetail: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var openedAssistant: AccountAssistantSummary?
     @State private var deletesAccount = false
+    @State private var deviceLoad = AccountDeviceLoad.loading
+    @State private var deviceToSignOut: AccountDevice?
+    @State private var deviceSignOutPending = false
+    @State private var deviceSignOutFailed = false
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
@@ -89,6 +94,13 @@ struct AccountSettingsDetail: View {
             DeleteAccountRequestSheet(design: design, accountID: presentation.matrixUserID) {
                 deletesAccount = false
             }
+        }
+        .task(id: section.page) {
+            if section.page == .account { await reloadDevices() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Back from the browser page that signed a device out.
+            if phase == .active, section.page == .account { Task { await reloadDevices() } }
         }
         .accessibilityIdentifier("account.settings." + section.page.rawValue)
     }
@@ -193,10 +205,13 @@ struct AccountSettingsDetail: View {
     }
 
     private var protonsHelp: String {
-        if let value = store.walletValue {
+        if let value = store.walletText(locale: design.locale) {
             return AccountSettingsCopy.text(.protonsLeft, argument: value, design: design)
         }
-        if store.availability == .loading { return copy("desktop.common.loading") }
+        // Desktop's Protons wording while the wallet is read (`protons.checking`),
+        // then its wallet-unavailable line. Totals only: never a paid, earned or
+        // bonus figure, and never a rate (owner ruling 1).
+        if store.availability == .loading { return copy("desktop.atum.protons.checking") }
         return text(.walletUnavailableHelp)
     }
 
@@ -208,12 +223,177 @@ struct AccountSettingsDetail: View {
                       value: AccountSettingsCopy.sectionTitle(.devices, design: design)
                           + " · " + connectionText,
                       identifier: "account.settings.privacy.devices.current")
-            capabilityRow(capability: presentation.settingsCapabilities.pairedDevices,
-                          glyph: .users,
-                          title: text(.otherDevices),
-                          identifier: "account.settings.privacy.devices.others")
+            if actions.loadDevices != nil {
+                otherDeviceRows
+            } else {
+                capabilityRow(capability: presentation.settingsCapabilities.pairedDevices,
+                              glyph: .users,
+                              title: text(.otherDevices),
+                              identifier: "account.settings.privacy.devices.others")
+            }
         } header: {
             Text(copy("src.matrix.security-copy.copies.devicesTitle"))
+        } footer: {
+            if showsDeviceSignOutHelp {
+                footer(copy(SecurityCopyKey.manageHelp))
+            }
+        }
+    }
+
+    private var offersDeviceSignOut: Bool { actions.deviceSignOutURL != nil }
+
+    private var showsDeviceSignOutHelp: Bool {
+        guard offersDeviceSignOut, case let .loaded(devices) = deviceLoad else { return false }
+        return !devices.isEmpty
+    }
+
+    /// The account's other devices (desktop `DevicesPanel`): each by the name it
+    /// gave itself and when it was last active, never an ID; a spinner while
+    /// they load; "Couldn't load your devices." with Try again.
+    @ViewBuilder private var otherDeviceRows: some View {
+        switch deviceLoad {
+        case .loading:
+            HStack(spacing: 12) {
+                AtomWait().frame(width: 20, height: 20)
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .frame(width: 28)
+                    .accessibilityHidden(true)
+                Text(copy(SecurityCopyKey.loading))
+                    .font(.body)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 52)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("account.settings.privacy.devices.loading")
+        case .failed:
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 12))
+            layout {
+                Text(copy(SecurityCopyKey.devicesFailed))
+                    .font(.body)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("account.settings.privacy.devices.failed")
+                Button(copy(SecurityCopyKey.retry)) { Task { await reloadDevices() } }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .tint(atum.color(.ink, scheme: scheme))
+                    .accessibilityIdentifier("account.settings.privacy.devices.retry")
+            }
+            .padding(.leading, 40)
+            .padding(.vertical, 6)
+            .frame(minHeight: 52)
+        case let .loaded(devices):
+            ForEach(Array(devices.enumerated()), id: \.element.id) { index, device in
+                deviceRow(device, index: index)
+            }
+            if deviceSignOutFailed {
+                Text(copy(SecurityCopyKey.error))
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 40)
+                    .accessibilityIdentifier("account.settings.privacy.devices.error")
+            }
+        }
+    }
+
+    private func deviceName(_ device: AccountDevice) -> String {
+        device.name ?? copy(SecurityCopyKey.otherDevice)
+    }
+
+    @ViewBuilder private func deviceRow(_ device: AccountDevice, index: Int) -> some View {
+        let name = deviceName(device)
+        let seen = device.lastSeen.map {
+            copy(SecurityCopyKey.seen, [.text(AccountDeviceSeen.ago($0, locale: design.locale))])
+        }
+        let content = HStack(spacing: 12) {
+            // Aligned with This iPhone's text; a device's kind is not known.
+            Color.clear.frame(width: 28, height: 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: name)
+                    .font(.body)
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let seen {
+                    Text(seen)
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if offersDeviceSignOut {
+                Image(atum.symbol(.logOut))
+                    .font(.body)
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+        let identifier = "account.settings.privacy.devices.other.\(index)"
+        if offersDeviceSignOut {
+            Button { deviceToSignOut = device } label: { content }
+                .buttonStyle(.plain)
+                .disabled(deviceSignOutPending)
+                .accessibilityLabel(name)
+                .accessibilityValue(seen ?? "")
+                .accessibilityHint(copy(SecurityCopyKey.revoke))
+                .accessibilityIdentifier(identifier)
+                // Signing a device out asks here first, then the sign-in server's
+                // own page asks again and does it (desktop `manageHelp`). On the
+                // row, so the popover points at the device it is about.
+                .confirmationDialog(Text(verbatim: name),
+                                    isPresented: Binding(get: { deviceToSignOut?.id == device.id },
+                                                         set: { if !$0 { deviceToSignOut = nil } }),
+                                    titleVisibility: .visible) {
+                    Button(copy(SecurityCopyKey.revoke), role: .destructive) { signOut(device) }
+                        .accessibilityIdentifier("account.settings.privacy.devices.confirm-sign-out")
+                    Button(copy(SecurityCopyKey.cancel), role: .cancel) {}
+                } message: {
+                    Text(copy(SecurityCopyKey.manageHelp))
+                }
+        } else {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel([name, seen].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityIdentifier(identifier)
+        }
+    }
+
+    /// Reads the list again; a list already on screen stays while it does.
+    private func reloadDevices() async {
+        guard let load = actions.loadDevices else { return }
+        if case .failed = deviceLoad { deviceLoad = .loading }
+        if let devices = await load() {
+            deviceLoad = .loaded(devices)
+        } else {
+            deviceLoad = .failed
+        }
+    }
+
+    /// Opens the sign-in server's page for ending that device's session, in
+    /// the browser, where the person confirms. Nothing is ended from here.
+    private func signOut(_ device: AccountDevice) {
+        guard let resolve = actions.deviceSignOutURL else { return }
+        deviceSignOutPending = true
+        deviceSignOutFailed = false
+        Task { @MainActor in
+            let url = await resolve(device.id)
+            deviceSignOutPending = false
+            guard let url else {
+                deviceSignOutFailed = true
+                return
+            }
+            openURL(url)
         }
     }
 
@@ -487,16 +667,28 @@ struct AccountSettingsDetail: View {
                         identifier: "account.settings.privacy.restore",
                         action: callbacks.restoreMessages)
         case .recoveryKey:
+            // Desktop `RecoveryRow`: the key's name and "On".
             settingsRow(glyph: .keyRound,
                         title: copy("src.matrix.security-copy.copies.recoveryTitle"),
+                        value: copy(SecurityCopyKey.recoveryOn),
                         indicator: .push,
                         identifier: "account.settings.privacy.recovery-key",
                         action: callbacks.openRecoveryKey)
         case nil:
+            // On, or Not set up, as the desktop says; nothing known yet keeps
+            // "Not available yet". Setting a key up here is a later slice.
             disabledRow(glyph: .keyRound,
                         title: copy("src.matrix.security-copy.copies.recoveryTitle"),
-                        value: text(.notAvailableYet),
+                        value: recoveryStatusText,
                         identifier: "account.settings.privacy.recovery-unavailable")
+        }
+    }
+
+    private var recoveryStatusText: String {
+        switch presentation.recoveryStatus {
+        case .on: copy(SecurityCopyKey.recoveryOn)
+        case .off: copy(SecurityCopyKey.recoveryOff)
+        case .unknown: text(.notAvailableYet)
         }
     }
 
@@ -831,6 +1023,25 @@ struct AccountSettingsDetail: View {
                       _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key, arguments: arguments)
     }
+}
+
+/// Desktop `security-copy.ts` words for devices and recovery (all exported).
+enum SecurityCopyKey {
+    private static let prefix = "src.matrix.security-copy.copies."
+    static let loading = prefix + "loading"
+    static let devicesFailed = prefix + "devicesFailed"
+    static let retry = prefix + "retry"
+    static let otherDevice = prefix + "otherDevice"
+    static let seen = prefix + "seen"
+    static let revoke = prefix + "revoke"
+    static let manageHelp = prefix + "manageHelp"
+    static let cancel = prefix + "cancel"
+    static let error = prefix + "error"
+    static let recoveryOn = prefix + "recoveryOn"
+    static let recoveryOff = prefix + "recoveryOff"
+
+    static let all = [loading, devicesFailed, retry, otherDevice, seen, revoke, manageHelp,
+                      cancel, error, recoveryOn, recoveryOff]
 }
 
 extension AccountAssistantSummary {

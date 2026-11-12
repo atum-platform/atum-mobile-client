@@ -198,3 +198,77 @@ profiles carry the capability:
   a live account, and Team Space names/logos from live company data;
 - a locked phone after first unlock reading the App Group files; Focus,
   Announce Notifications and Siri suggestion effects of donation.
+
+## Main integration (2026-11-12)
+
+Merged `origin/main` at `c358c0c81f0a0af479ee0d6c81b07c82d00f6c74`
+into feature head `124ac10f5bcd7a37ae0046b95880a3e950c55db4`.
+The only textual conflict was `AtumMobile.xcodeproj/project.pbxproj`.
+
+Resolution starts with main's checked-in project, preserving its format and
+object identities. Added six file references with fresh 24-hex IDs and ten
+separate source-build entries: the app's notification publisher and Debug
+poster, communication content and scripted fixtures in the app, extension and
+extension-test targets, the extension communication tests, and the capture UI
+test. Removed main's redundant `SharedCollectionsUITests.swift` file reference
+and source-build entry; the existing second reference remains. No XcodeGen
+regeneration or conflict-hunk union was used.
+
+The feature does not change any `XCBuildConfiguration` or `PBXProject` settings
+relative to its old base `88917a7`; the app communication entitlement and both
+`NSUserActivityTypes` declarations remain in their checked-in plist files.
+
+Project verification:
+
+- `plutil -lint` passes for the project, app entitlements and both Info.plists.
+- Recursive PBXGroup inspection finds no duplicate PBXFileReference paths.
+- Actual PBXSourcesBuildPhase membership exactly matches all Swift sources in
+  `project.yml`, with one entry per required target: AtumMobile 163,
+  AtumNotifications 4, AtumNotificationsTests 6, AtumMobileTests 29,
+  AtumMobileUITests 24.
+- `python -m pytest tests/test_ios_project_sources.py`: 2 passed (isolated
+  Python 3.14 environment because the host Python has no pytest installed).
+
+Locked verification completed in one uninterrupted lock acquisition, 2026-11-12
+00:00:06–00:09:03 UTC (07:00–07:09 local), with all commands succeeding on their
+first attempt. Entry command:
+
+```sh
+TMPDIR=/Volumes/AtumTestFlight/tmp \
+  lockf -k /Volumes/AtumTestFlight/.heavy-build.lock \
+  bash /Volumes/AtumTestFlight/tmp/communication-merge-verify.sh
+```
+
+The batch ran `swift test --package-path ios --scratch-path
+/Volumes/AtumTestFlight/tmp/swift-communication-merge -j 2`, then
+`xcodebuild build-for-testing` and `test-without-building` for schemes
+`AtumMobile` (`-only-testing:AtumMobileTests`) and `AtumNotifications`
+(all `AtumNotificationsTests`). Common Xcode arguments: `-configuration Debug`,
+`-jobs 2`, `ARCHS=arm64`, `ONLY_ACTIVE_ARCH=YES`, `CODE_SIGNING_ALLOWED=NO`,
+`COMPILER_INDEX_STORE_ENABLE=NO`, `-parallel-testing-enabled NO`,
+`-maximum-concurrent-test-simulator-destinations 1`,
+`-disableAutomaticPackageResolution`, `-onlyUsePackageVersionsFromResolvedFile`,
+`-clonedSourcePackagesDirPath /Volumes/AtumTestFlight/spm`,
+`-derivedDataPath /Volumes/AtumTestFlight/tmp/dd-communication-merge`, and
+`-destination platform=iOS\ Simulator,id=CB24FAE2-75F9-4E19-A856-0F5A9F036C0B`.
+Only the existing Atum iPhone 16e (iOS 27.0 runtime) booted; the batch's final
+EXIT trap ran `xcrun simctl shutdown all` before releasing the lock.
+
+Results:
+
+- Swift package: 1,499 passed, zero failures: AtumDesignTests 787,
+  AtumChatTests 674, AtumDriveTests 22, AtumTelemetryTests 16.
+- App `build-for-testing`: succeeded, including the capture UI test source.
+- Notification `build-for-testing`: succeeded.
+- AtumMobileTests: 356 passed, zero failures.
+- AtumNotificationsTests: 20 passed, zero failures, comprising
+  CommunicationNotificationTests 11 and NotificationServiceTests 9.
+- Total XCTest cases: 1,875 passed, zero failures; UI capture was compiled but
+  not executed. The two Python project-source checks also passed.
+
+No semantic Swift changes were required: the feature's rich-push presentation,
+notification fetch/content APIs, room publisher and LiveAppModel integration
+compiled and passed against main as merged. Build/test logs are under
+`/Volumes/AtumTestFlight/tmp/communication-merge-results`; `.xcresult` bundles
+are under the derived-data directory's `Logs/Test`. This integration is a local
+merge checkpoint only; no push or pull request was requested.

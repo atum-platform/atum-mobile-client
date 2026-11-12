@@ -95,6 +95,8 @@ struct AccountPresentation: Equatable {
     /// the phone reads `GET /aliases/current` (plan SV-4): the handle is then
     /// left out, never guessed from the Matrix ID.
     var directoryHandle: String?
+    /// Whether the account's recovery is on (desktop `RecoveryRow`).
+    var recoveryStatus: AccountRecoveryStatus
 
     init(matrixUserID: String,
          displayName: String?,
@@ -110,7 +112,8 @@ struct AccountPresentation: Equatable {
          founderContactTitle: String = "Contact us",
          avatarURL: String? = nil,
          connection: AccountConnectionState = .ready,
-         directoryHandle: String? = nil) {
+         directoryHandle: String? = nil,
+         recoveryStatus: AccountRecoveryStatus = .unknown) {
         self.matrixUserID = matrixUserID
         self.displayName = displayName
         self.avatarURL = avatarURL
@@ -126,6 +129,7 @@ struct AccountPresentation: Equatable {
         self.founderContactTitle = founderContactTitle
         self.connection = connection
         self.directoryHandle = directoryHandle
+        self.recoveryStatus = recoveryStatus
     }
 
     /// The name the person set, or nil: never their Matrix ID or its opaque
@@ -201,6 +205,13 @@ struct AccountActions {
     /// where a person is unignored. Nil hides the row.
     var ignoredPeople: (@MainActor () async -> [IgnoredPerson]?)? = nil
     var setIgnored: (@MainActor (String, Bool) async -> Bool)? = nil
+    /// Settings › Your devices: the account's other sessions, newest first.
+    /// Nil hides the list; a nil answer is a failed read.
+    var loadDevices: (@MainActor () async -> [AccountDevice]?)? = nil
+    /// The sign-in server's own page for signing one of those devices out,
+    /// where the person confirms (desktop `endDeviceSession`). Nil: the rows
+    /// offer no sign-out. A nil answer means the page could not be found.
+    var deviceSignOutURL: (@MainActor (String) async -> URL?)? = nil
 }
 
 /// The desktop's display-name rule (`matrixProfileDisplayName`,

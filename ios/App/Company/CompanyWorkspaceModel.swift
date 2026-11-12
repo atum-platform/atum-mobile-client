@@ -132,6 +132,13 @@ struct CompanyWorkspacePresentation: Identifiable, Equatable {
 /// derives it from the live room list; the model never reads Matrix itself.
 typealias CompanyRoomSignals = [String: Badge.Input]
 
+/// A tapped board link waiting for Team space (desktop `$companyBoardLinkRequest`,
+/// `team-space/board-links.ts`): the serial makes a second tap on the same link a new request.
+struct CompanyBoardLinkRequest: Equatable {
+    let serial: UInt64
+    let target: CompanyBoardLinkTarget
+}
+
 enum CompanyRoomClassification: Equatable {
     case company(CompanyRoomClaim)
     /// A company DM or group DM, believed because the conversation directory lists it.
@@ -176,6 +183,9 @@ final class CompanyWorkspaceModel {
     /// "this Matrix room is a conversation".
     let conversations = CompanyConversationStore()
     private(set) var privateCosBindings = CompanyPrivateCosBindings()
+    /// The latest board link tapped in any chat, until Team space shows its board.
+    private(set) var boardLinkRequest: CompanyBoardLinkRequest?
+    @ObservationIgnored private var boardLinkSerial: UInt64 = 0
     /// The last strict view per company and its availability (desktop `$companyPrivateCos`).
     private(set) var privateCosStates = [String: CompanyPrivateCosState]()
     /// Before a view is served: still asking, or asked and nothing usable came back.
@@ -782,6 +792,23 @@ final class CompanyWorkspaceModel {
         }
         return prefs.resolvedCompanyID(candidates: candidates,
                                        locale: Locale(identifier: copy?.design.locale ?? "en"))
+    }
+
+    /// A board link was tapped (desktop `requestCompanyBoardLink`). True when the
+    /// company is listed for this account, so Team space can show its board now;
+    /// otherwise the request waits, as on desktop, until the list names it.
+    @discardableResult
+    func requestBoardLink(_ target: CompanyBoardLinkTarget) -> Bool {
+        boardLinkSerial &+= 1
+        boardLinkRequest = CompanyBoardLinkRequest(serial: boardLinkSerial, target: target)
+        guard list?.companies.contains(where: { $0.id.rawValue == target.companyID }) == true else { return false }
+        selectCompany(target.companyID)
+        return true
+    }
+
+    /// Team space showed the board (desktop `clearCompanyBoardLink`): only this request is cleared.
+    func clearBoardLink(_ request: CompanyBoardLinkRequest) {
+        if boardLinkRequest == request { boardLinkRequest = nil }
     }
 
     func selectCompany(_ companyID: String) {

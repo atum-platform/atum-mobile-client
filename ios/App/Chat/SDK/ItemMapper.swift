@@ -134,7 +134,9 @@ final class ItemMapper {
             botAPI: botAPIMessage(event, kind: kind),
             senderAvatarURI: ChatItem.senderAvatarURI(event.senderProfile),
             interim: markers.interim,
-            progress: markers.progress
+            progress: markers.progress,
+            privateCosGreeting: hiddenPlaintext || kind != .message ? nil
+                : privateCosGreeting(event.content, body: content.body, sender: sender)
         )
         return MappedItem(item: item, uniqueID: uniqueID,
                           replyDetails: hiddenPlaintext ? nil : replyDetails(event.content),
@@ -286,6 +288,19 @@ final class ItemMapper {
         guard room.isEncrypted == false, kind == .notice,
               room.catalogBotUserIDs.contains(event.sender) else { return nil }
         return event.lazyProvider.latestJson()
+    }
+
+    /// The Chief of Staff greeting's links (desktop `privateCosGreetingLinks`):
+    /// only in a room the platform binds as this account's company-private
+    /// CoS, only from an HTML-formatted `m.text` (the SDK's content already
+    /// carries the sender's latest edit, as desktop `shownContent`).
+    private func privateCosGreeting(_ content: TimelineItemContent, body: String,
+                                    sender: String) -> PrivateCosGreeting? {
+        guard room.context.isCompanyPrivateCos, case let .msgLike(messageLike) = content,
+              case let .message(message) = messageLike.kind, case let .text(text) = message.msgType,
+              let formatted = text.formatted, case .html = formatted.format else { return nil }
+        return PrivateCosGreeting.parse(sender: sender, body: body, format: "org.matrix.custom.html",
+                                        formattedBody: formatted.body)
     }
 
     /// Transport mode never reaches this projection. Every formatted Bot API
