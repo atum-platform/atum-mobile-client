@@ -9,9 +9,12 @@ import Foundation
 /// - The threshold has slack (20 lines fold to 12), so a fold always hides
 ///   at least eight lines: a message is never folded to save one line.
 /// - A message still growing (the agent is still working after it) never
-///   folds, and one the reader saw growing stays open once it is final: a
-///   fold never shrinks a bubble under the reader. Only a message that is
-///   final when it first shows starts folded.
+///   folds and shows no toggle. Once final it folds like any other long
+///   message (owner, 2026-11-12), unless the reader opened it, or was
+///   reading its text below the fold line in a chat scrolled away from the
+///   bottom at that moment: folding it then would take away the lines being
+///   read. The transcript keeps the bottom pinned while following and holds
+///   the row being read otherwise, so the fold never moves what is on screen.
 /// - The reader's choice is kept per event for the app session
 ///   (`MessageFoldBook`), so scrolling, timeline diffs and reopening the chat
 ///   do not undo it.
@@ -69,15 +72,27 @@ public enum MessageFold {
 public struct MessageFoldBook: Equatable, Sendable {
     /// The reader's own choices: true = open, false = folded.
     private var choices: [String: Bool] = [:]
-    /// Messages first seen while they were still growing: they stay open.
+    /// Growing messages whose text below the fold line the reader had on
+    /// screen, in a chat scrolled away from the bottom, the last time the
+    /// transcript looked: they stay open once final. Only growing messages
+    /// are updated (`readerSees`), so what was true when a message turned
+    /// final is what it keeps.
     private var keptOpen: Set<String> = []
 
     public init() {}
 
-    /// The rows still growing: each stays open from now on, unless the
-    /// reader folds it.
-    public mutating func sawGrowing(_ ids: some Sequence<String>) {
-        for id in ids where choices[id] == nil { keptOpen.insert(id) }
+    /// Of the messages still `growing`, those in `reading` have text below
+    /// their fold line on the reader's screen (detached) and stay open when
+    /// they become final; every other growing message folds when final. A
+    /// message the reader has toggled keeps the reader's choice.
+    public mutating func readerSees(_ reading: Set<String>, among growing: some Sequence<String>) {
+        for id in growing where choices[id] == nil {
+            if reading.contains(id) {
+                keptOpen.insert(id)
+            } else {
+                keptOpen.remove(id)
+            }
+        }
     }
 
     /// Whether the message `id` shows folded now.

@@ -616,6 +616,35 @@ final class ScriptedTests: XCTestCase {
                        "a ref to the accepted echo's event ID finds the echo before its remote copy lands")
     }
 
+    /// `chat.bubbles-live` (owner, 2026-11-12): nothing moves until I send;
+    /// then Atum's answer arrives and grows in place while it types, and
+    /// typing stops only once the answer is whole.
+    func testTheLiveAnswerStreamsAfterMySendAndEndsWithTyping() throws {
+        var player = player(try script(ScriptedScenario.chatBubblesLive.rawValue))
+        _ = player.open()
+        _ = player.advance(to: 60)
+        let answerID = "chat.bubbles-live.answer-1"
+        XCTAssertNil(player.buffer.items.first { $0.id == answerID }, "the answer waits for my send")
+        _ = player.send(text: "Lên giúp mình kế hoạch cả tuần tới nhé.")
+        var bodies: [String] = []
+        var typingWhileGrowing = true
+        var second = 60.0
+        while second < 90 {
+            second += 0.25
+            _ = player.advance(to: second)
+            guard let answer = player.buffer.items.first(where: { $0.id == answerID }) else { continue }
+            if bodies.last != answer.body {
+                bodies.append(answer.body)
+                if !player.typingUserIDs.contains(ScriptedCast.atum) { typingWhileGrowing = false }
+            }
+        }
+        XCTAssertEqual(bodies.count, 3, "it arrives, then grows twice")
+        XCTAssertEqual(bodies.map(\.count), bodies.map(\.count).sorted(), "it only grows")
+        XCTAssertTrue(typingWhileGrowing, "Atum types while it grows")
+        XCTAssertTrue(player.typingUserIDs.isEmpty, "typing stops once it is whole")
+        XCTAssertEqual(bodies.last, ScriptedChats.twoScreenAnswer(seed: 52))
+    }
+
     func testRepliesCarryTheDetailsTheSDKWouldGive() throws {
         let actions = try script(ScriptedScenarios.chatActions)
         var player = player(actions)

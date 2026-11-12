@@ -102,6 +102,7 @@ public enum ScriptedScenarios {
         case .chatTimelineReading: return chat(ScriptedChats.chatTimelineParity(env, reading: true))
         case .chatBubbles: return chat(ScriptedChats.chatBubbles(env))
         case .chatBubblesGroup: return chat(ScriptedChats.chatBubblesGroup(env))
+        case .chatBubblesLive: return chat(ScriptedChats.chatBubblesLive(env))
         }
     }
 

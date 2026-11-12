@@ -75,6 +75,9 @@ public struct ScriptedTimelinePlayer: Sendable {
         case seen(itemID: String)
         case startTyping
         case answer(itemID: String)
+        /// A streamed answer grows to its next body.
+        case grow(itemID: String, body: String)
+        case stopTyping
     }
 
     private enum Settlement: Sendable {
@@ -377,17 +380,32 @@ public struct ScriptedTimelinePlayer: Sendable {
             answerCount += 1
             let id = "\(script.name).answer-\(answerCount)"
             let replyTo = replies.answersAsReply ? "$" + itemID : nil
-            let answer = ChatItem(id: id, kind: .message, sender: replies.sender,
+            var answer = ChatItem(id: id, kind: .message, sender: replies.sender,
                                   senderName: script.names[replies.sender],
                                   eventOrTransactionId: .event("$" + id), body: body, replyTo: replyTo,
                                   resultFor: ChatItem.resultFor(kind: .message, sender: replies.sender,
                                                                 replyTo: replyTo,
                                                                 agentUserIDs: script.context.agentUserIDs))
+            if let stream = replies.stream, let first = stream.bodies.first {
+                answer.body = first
+                for (index, grown) in stream.bodies.dropFirst().enumerated() {
+                    schedule(now + stream.every * Double(index + 1), .grow(itemID: id, body: grown))
+                }
+                schedule(now + stream.every * Double(stream.bodies.count), .stopTyping)
+                return perform(.arrive(answer))
+            }
             var outputs = perform(.arrive(answer))
             if replies.typingAfter != nil, typingUserIDs.contains(replies.sender) {
                 outputs += perform(.typing(typingUserIDs.filter { $0 != replies.sender }))
             }
             return outputs
+
+        case let .grow(itemID, body):
+            return perform(.edit(id: itemID, body: body))
+
+        case .stopTyping:
+            guard let replies = script.replies, typingUserIDs.contains(replies.sender) else { return [] }
+            return perform(.typing(typingUserIDs.filter { $0 != replies.sender }))
         }
     }
 

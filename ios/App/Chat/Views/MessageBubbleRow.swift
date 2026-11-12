@@ -312,6 +312,8 @@ struct MessageBubbleRow: View {
 
     private func foldToggle(_ theme: ChatTheme, folded: Bool) -> some View {
         MessageFoldToggle(rowID: row.id, folded: folded) {
+            // Show more: the transcript takes its hold before the row grows.
+            if folded { interactions.opening(row.id) }
             MessageFoldStore.session.toggle(row.id, wasFolded: folded)
             foldTick &+= 1
             if !folded { interactions.folded(row.id) }
