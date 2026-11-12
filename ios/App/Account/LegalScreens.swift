@@ -87,11 +87,26 @@ struct LicencesScreen: View {
     }
 
     private var text: String {
-        let attribution = (try? AtumDesign.data(for: "ATTRIBUTION.md"))
-            .map { String(decoding: $0, as: UTF8.self) } ?? ""
-        let notice = Bundle.main.url(forResource: "NOTICE", withExtension: nil)
-            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
-        return [attribution, notice].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        guard let url = Bundle.main.url(forResource: "ThirdPartyLicences", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let licences = try? JSONDecoder().decode([BundledLicence].self, from: data) else { return "" }
+        return licences.compactMap { licence -> String? in
+            let body: Data?
+            if licence.bundle == "design" {
+                body = try? AtumDesign.data(for: licence.resource)
+            } else {
+                body = Bundle.main.url(forResource: licence.resource, withExtension: nil)
+                    .flatMap { try? Data(contentsOf: $0) }
+            }
+            guard let body else { return nil }
+            return licence.title + "\n\n" + String(decoding: body, as: UTF8.self)
+        }.joined(separator: "\n\n")
+    }
+
+    private struct BundledLicence: Decodable {
+        let title: String
+        let bundle: String
+        let resource: String
     }
 }
 

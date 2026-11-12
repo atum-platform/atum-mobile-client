@@ -3,12 +3,6 @@ import UIKit
 import UserNotifications
 import AtumChat
 
-// Release archives stay blocked unless the TestFlight demo lane opts in:
-// scripts/testflight.sh passes ATUM_DEMO_RELEASE. Debug builds are unaffected.
-#if !DEBUG && !ATUM_DEMO_RELEASE
-#error("Release archive is only built by scripts/testflight.sh (ATUM_DEMO_RELEASE); see docs/testflight.md.")
-#endif
-
 @main
 struct AtumMobileApp: App {
     @UIApplicationDelegateAdaptor(AtumAppDelegate.self) private var appDelegate

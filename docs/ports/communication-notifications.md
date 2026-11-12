@@ -272,3 +272,24 @@ compiled and passed against main as merged. Build/test logs are under
 `/Volumes/AtumTestFlight/tmp/communication-merge-results`; `.xcresult` bundles
 are under the derived-data directory's `Logs/Test`. This integration is a local
 merge checkpoint only; no push or pull request was requested.
+
+## Second main integration: release-blockers #33 (2026-11-12 00:3x UTC)
+
+Main `88f7085` (#33, demo-free Release builds) conflicted only in the
+`Notifications` group of `project.pbxproj` and the app sources in
+`ios/project.yml`; both sides are kept (the feature's two shared notification
+files plus main's privacy manifest and licence resources). #33's project-source
+test then needed two follow-ups:
+
+- `App/Debug/ScriptedNotificationPoster.swift` now opens with a plain
+  `#if DEBUG` and nests `#if targetEnvironment(simulator)`, so it matches the
+  rule that Debug sources start with `#if DEBUG`. Behaviour is unchanged.
+- The app target lists `Notifications/ScriptedNotificationFixtures.swift`.
+  #33's test refused any `Fixtures` in the app spec. It now allows only
+  `Scripted*.swift` paths, which Release already excludes through
+  `EXCLUDED_SOURCE_FILE_NAMES` and which compile their fixture code only under
+  `DEBUG && targetEnvironment(simulator)`.
+
+Verified locally: `plutil -lint` on the project, and the project-source and
+Info.plist localisation tests (9/0). The Debug and Release builds plus the UI
+shards are verified by hosted CI on the PR, not under the local build lock.

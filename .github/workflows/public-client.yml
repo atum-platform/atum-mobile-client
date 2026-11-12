@@ -120,6 +120,29 @@ jobs:
             -only-testing:AtumMobileTests \
             CODE_SIGNING_ALLOWED=NO \
             test-without-building
+      - name: Build Release for device without signing
+        # TestFlight archives use Release; prove it compiles without Debug-only
+        # sources and carries its privacy manifest.
+        env:
+          RELEASE_DERIVED_DATA: ${{ runner.temp }}/atum-mobile-release-derived-data
+          SOURCE_PACKAGES: ${{ runner.temp }}/atum-mobile-source-packages
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/AtumMobile.xcodeproj \
+            -scheme AtumMobile \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RELEASE_DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+            -disableAutomaticPackageResolution \
+            -jobs 2 \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+          app=$(find "$RELEASE_DERIVED_DATA/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' | head -1)
+          test -n "$app" || { echo "no Release .app produced"; exit 1; }
+          test -f "$app/PrivacyInfo.xcprivacy" || { echo "app privacy manifest missing"; exit 1; }
       - name: Shut down simulator
         if: always()
         run: xcrun simctl shutdown all || true

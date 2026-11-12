@@ -1,4 +1,5 @@
-#if DEBUG && targetEnvironment(simulator)
+#if DEBUG
+#if targetEnvironment(simulator)
 import AtumChat
 import Foundation
 import UserNotifications
@@ -47,4 +48,5 @@ enum ScriptedNotificationPoster {
         }
     }
 }
+#endif
 #endif

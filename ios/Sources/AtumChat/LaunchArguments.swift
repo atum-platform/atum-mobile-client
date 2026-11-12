@@ -1,3 +1,4 @@
+#if DEBUG
 /// Debug-only launch arguments (plan §2.10). The owner never passes any:
 /// tapping the icon starts the normal app.
 public struct AtumLaunchArguments: Equatable, Sendable {
@@ -89,3 +90,5 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     /// for the in-chat search walking history.
     case chatSearch = "chat.search"
 }
+
+#endif
