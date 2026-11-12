@@ -23,8 +23,8 @@ final class TimelineParityTests: XCTestCase {
     func testTypingIsTheAtomRowThenTheWorkingLineTakesItsPlace() throws {
         XCTAssertEqual(try rows(after: 4).last?.id, Projection.typingRowID, "Atum types: the atom alone")
         let working = try rows(after: 6.5)
-        XCTAssertEqual(working.last?.id, "chat.timeline-parity.working")
-        XCTAssertFalse(working.contains { $0.id == Projection.typingRowID },
+        XCTAssertEqual(working.last?.id, Projection.typingRowID)
+        XCTAssertFalse(working.contains { $0.id == "chat.timeline-parity.working" },
                        "one working row, never a typing bubble above the line")
         let edited = try XCTUnwrap(try rows(after: 9).last)
         XCTAssertEqual(WorkingLineText(body: edited.item.body),

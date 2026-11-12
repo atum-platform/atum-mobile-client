@@ -5,8 +5,8 @@ import SwiftUI
 /// desktop's `MatrixAgentWorking` (`src/matrix/typing-indicator.tsx`): the
 /// turning atom in the face slot, the current step beside it ("Đang chạy tác
 /// vụ…") and any checklist lines in the quiet step card under it. It is the
-/// transcript's last row, standing for the typing row too, and is edited in
-/// place as the turn moves on. It never notifies, never says "(đã sửa)" and
+/// synthetic typing footer's body, updated in place as the turn moves on.
+/// The progress event itself is never a transcript row. It never notifies, never says "(đã sửa)" and
 /// disappears when its turn ends (the projection hides it; this view only
 /// draws what survived).
 struct WorkingLineRow: View {

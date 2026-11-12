@@ -36,11 +36,7 @@ struct ChatRowView: View, Equatable {
                              isLatestAnswer: isLatestAnswer, searchHighlight: searchHighlight,
                              isGrowing: isGrowing)
         case .notice:
-            if row.item.isProgressLine || Self.isRetiredWaitLine(row.item) {
-                WorkingLineRow(row: row)
-            } else {
-                NoticeRow(row: row, kind: kind, parsedBody: parsedBody)
-            }
+            NoticeRow(row: row, kind: kind, parsedBody: parsedBody)
         case let .dayDivider(day):
             DayDividerRow(day: day)
         case .readMarker:
@@ -48,7 +44,11 @@ struct ChatRowView: View, Equatable {
         case .timelineStart:
             TimelineStartRow()
         case let .typing(names):
-            TypingRow(names: names)
+            if row.item.body.isEmpty {
+                TypingRow(names: names)
+            } else {
+                WorkingLineRow(row: row)
+            }
         case .loadingEarlier:
             LoadingEarlierRow()
         case .roomState:
@@ -117,15 +117,6 @@ enum ChatRowStyle {
     /// are left bubbles like a person's, never bare full-width answers.
     static func isAnswer(_ item: ChatItem, kind: RoomKind) -> Bool {
         false
-    }
-}
-
-extension ChatRowView {
-    /// A live retired fixed wait line (older builds, no marker) is working
-    /// text too: the muted row, never a centred notice. Ended ones never
-    /// reach a view (`TransientLines`).
-    static func isRetiredWaitLine(_ item: ChatItem) -> Bool {
-        TransientLines.retiredWaitLines.contains(item.body.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 

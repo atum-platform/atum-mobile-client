@@ -187,7 +187,8 @@ final class ScriptedTests: XCTestCase {
         // Check 7: the working line shows, is edited in place, then hides.
         mirror.take(player.advance(to: 41))
         var visible = Projection.rows(mirror.buffer.items, context: long.context).map(\.id)
-        XCTAssertTrue(visible.contains("chat.long.step-06"))
+        XCTAssertTrue(visible.contains(Projection.typingRowID))
+        XCTAssertFalse(visible.contains("chat.long.step-06"))
         mirror.take(player.advance(to: 43))
         XCTAssertEqual(mirror.changes.last, .inPlace)
         XCTAssertEqual(mirror.buffer.items.first { $0.id == "chat.long.step-06" }?.body, "Đang xử lý… sắp xong")
@@ -414,7 +415,7 @@ final class ScriptedTests: XCTestCase {
         mirror.take(player.open())
         mirror.take(player.advance(to: 3.5))
         let working = "chat.reply-at-bottom.working"
-        XCTAssertTrue(Projection.rows(mirror.buffer.items, context: reply.context).contains { $0.id == working })
+        XCTAssertEqual(Projection.rows(mirror.buffer.items, context: reply.context).last?.id, Projection.typingRowID)
         XCTAssertEqual(mirror.buffer.items.first { $0.id == working }?.isEdited, true)
         mirror.take(player.advance(to: 5.5))
         let rows = Projection.rows(mirror.buffer.items, context: reply.context)

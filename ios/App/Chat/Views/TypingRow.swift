@@ -5,8 +5,8 @@ import SwiftUI
 /// `src/matrix/typing-indicator.tsx`): while the agent's real `m.typing` is
 /// active and its turn has no live working line yet, the turning atom sits
 /// alone in the face slot as the transcript's last row. No bubble, no name,
-/// no dots. Once a working line lives, that line's row takes this place
-/// (`Projection`, `WorkingLineRow`). Every other chat says who is typing in
+/// no dots. Once a working line lives, the same synthetic footer carries its
+/// body (`Projection`, `WorkingLineRow`). Every other chat says who is typing in
 /// the line above the composer (`TypingNames.presentation`).
 /// Accessibility label "{name} đang soạn tin…" (desktop's `aria-label`).
 struct TypingRow: View {

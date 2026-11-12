@@ -56,7 +56,7 @@ enum ScriptedChats {
             ScriptedStep(at: 23, .typing([Cast.atum])),
             ScriptedStep(at: 30, .typing([])),
             ScriptedStep(at: 38, .arrive(mine(step(5), "Tóm tắt giúp mình tài liệu dài vừa gửi nhé."))),
-            ScriptedStep(at: 40, .arrive(notice(step(6), "Đang xử lý…", replyTo: "$" + step(5)))),
+            ScriptedStep(at: 40, .arrive(notice(step(6), "Đang xử lý…", replyTo: "$" + step(5), progress: ChatProgress(phase: .working)))),
             ScriptedStep(at: 43, .edit(id: step(6), body: "Đang xử lý… sắp xong")),
             ScriptedStep(at: 46, .arrive(answer(step(7), ScriptedText.paragraph(seed: 46, sentences: 3),
                                                replyTo: "$" + step(5)))),
@@ -92,9 +92,10 @@ enum ScriptedChats {
                  body: body)
     }
 
-    static func notice(_ id: String, _ body: String, replyTo: String? = nil, sender: String = Cast.atum) -> ChatItem {
+    static func notice(_ id: String, _ body: String, replyTo: String? = nil, sender: String = Cast.atum,
+                       progress: ChatProgress? = nil) -> ChatItem {
         ChatItem(id: id, kind: .notice, sender: sender, senderName: Cast.names[sender],
-                 eventOrTransactionId: .event("$" + id), body: body, replyTo: replyTo)
+                 eventOrTransactionId: .event("$" + id), body: body, replyTo: replyTo, progress: progress)
     }
 
     /// About two screens of text at the default Dynamic Type size.

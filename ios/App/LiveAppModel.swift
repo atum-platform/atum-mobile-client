@@ -3567,6 +3567,9 @@ final class LiveAppModel {
         } else {
             context = RoomContext(kind: room.memberCount > 2 ? .group : .person, ownUserID: ownUserID)
         }
+        // Desktop knows all account agents even in a shared room. Keep this
+        // separate from the selected private-chat agent and catalog bots.
+        context.knownAgentUserIDs = Set(agentByUser.keys)
         if case .privateCos = companyWorkspace.roomClassification(roomID) { context.isCompanyPrivateCos = true }
         return ConversationRoomInfo(roomID: roomID, title: title, context: context,
                                     knownNames: knownAgentAndBotNames,

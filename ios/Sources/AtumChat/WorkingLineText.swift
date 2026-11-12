@@ -27,17 +27,18 @@ public struct WorkingLineText: Equatable, Sendable {
     }
 
     public init(body: String) {
-        let lines = body.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let lines = body.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         current = lines.first
         steps = lines.dropFirst().map { line in
-            let done = line.first == "✓" || line.first == "✔"
-            var text = Substring(line)
-            if let first = text.first, "✓✔•◦".contains(first) {
-                text = text.dropFirst().drop(while: \.isWhitespace)
-            }
-            return Step(text: String(text), done: done)
+            // Desktop's regex consumes one marker scalar, even when it is
+            // followed by a variation selector (one Swift Character).
+            let first = line.unicodeScalars.first
+            let done = first == "✓" || first == "✔"
+            let text = line.replacingOccurrences(of: "^[✓✔•◦]\\s*", with: "",
+                                                 options: .regularExpression)
+            return Step(text: text, done: done)
         }
     }
 }

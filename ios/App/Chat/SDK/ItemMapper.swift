@@ -103,7 +103,7 @@ final class ItemMapper {
         // agent-turns/1.4 markers come from the SDK's latest content JSON
         // (edits applied). Parse them only for this room's agents, so a
         // stranger cannot make a notice look transient or an interim.
-        let markers = room.context.agentUserIDs.contains(sender) && (kind == .notice || kind == .message) &&
+        let markers = room.context.transientAgentUserIDs.contains(sender) && (kind == .notice || kind == .message) &&
             !hiddenPlaintext
             ? AtumTurnMarkers.parse(json: event.lazyProvider.latestJson())
             : AtumTurnMarkers()
