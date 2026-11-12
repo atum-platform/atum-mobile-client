@@ -53,6 +53,13 @@ per run on 2026-11-11 with six lanes active).
   simulator, waits with `simctl bootstatus -b`, then installs, launches and terminates
   the app once before `test-without-building`. The warm-up launch is best-effort; the
   boot wait is not.
+- 2026-11-12: on PR #43 (`d9c55c2`) shard 3 failed two `HomeChatsWave3UITests` that pass
+  locally on #43 and on main (locked run, iPhone 17, iOS 27):
+  `testSearchFindsAWordThreePagesBackAndCloses` ("the match was not brought into view":
+  the recording shows the match in view, highlighted, a few seconds after the 3 s wait
+  ended) now waits 10 s; `testSearchBarAtAccessibilitySizePassesTheAudit` ("Audit failed to
+  complete in time" at AX XXXL) now makes one more full attempt after a timeout. A finding,
+  or a second timeout, still fails.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
