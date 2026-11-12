@@ -68,6 +68,10 @@ per run on 2026-11-11 with six lanes active).
   The audit timed out on both attempts. A second timeout now skips the test (`XCTSkip`, with
   a `MEASURE` line) rather than failing it. A finding still fails, and locked local runs
   cover the audit. This loosens the hosted check on purpose (owner ruling: make it work first).
+- 2026-11-12: on `78d9de7` the audit passed and the search test failed earlier. The count
+  appeared ~0.2 s after typing, while the match three pages back was not loaded within the
+  5 s existence wait; the failure dump moments later shows it in the window. The separate
+  existence wait is gone, and one 20 s "in view" wait now covers loading and scrolling.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
