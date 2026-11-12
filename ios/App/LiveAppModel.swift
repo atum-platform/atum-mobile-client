@@ -6517,7 +6517,11 @@ final class LiveAppModel {
     private func clearAccountCaches() async {
         await MatrixAvatarThumbnailCache.shared.removeAll()
         await AvatarDiskCache().removeAll()
+        NotificationRoomPublisher.removeAll()
     }
+
+    /// The signed-in Matrix account the notification room directory belongs to.
+    var notificationOwnUserID: String? { context?.runtime.ticket.session.userID }
 
     /// The chat list's rows (`LiveRosterRows`, pure) from the live values.
     private func productRooms() -> [LiveProductRoom] {

@@ -82,7 +82,12 @@ class IOSProjectSourcesTests(unittest.TestCase):
         spec = (ROOT / "ios/project.yml").read_text()
         app_spec = spec.split("  AtumMobile:\n", 1)[1].split("  AtumNotifications:\n", 1)[0]
         self.assertNotIn("AtumPrototype", app_spec)
-        self.assertNotIn("Fixtures", app_spec)
+        # The only fixtures the app target may list are Scripted*.swift files,
+        # which Release excludes (EXCLUDED_SOURCE_FILE_NAMES) and which compile
+        # their fixture code only under DEBUG.
+        fixture_lines = [line for line in app_spec.splitlines() if "Fixtures" in line]
+        for line in fixture_lines:
+            self.assertRegex(line.strip(), r"^- path: [\w/]*/Scripted\w*\.swift$")
         scheme = (PROJECT.parent / "xcshareddata/xcschemes/AtumMobile.xcscheme").read_text()
         self.assertRegex(scheme, r'TestAction\s+buildConfiguration = "Debug"')
 
