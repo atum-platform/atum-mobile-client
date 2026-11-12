@@ -227,3 +227,68 @@ with a local implementation commit before starting it. Package code is unchanged
 since the 718-test pass, so that batch skips the redundant package run and includes
 the app/test build, all previously selected app/UI tests, and screenshot capture.
 Final results will be appended after reading the result bundle.
+
+Root-cause evidence index for the coordinator (phone paths at `c1b18e8`):
+
+| Failure boundary | Evidence and fix |
+| --- | --- |
+| SDK full event → missing progress marker | `ios/App/Chat/SDK/ItemMapper.swift:108` passes `latestJson`; `ios/Sources/AtumChat/AtumTurnMarkers.swift:31` now unwraps the event content and then replacement content. SDK contract: generated `matrix_sdk_ffi.swift:7707` at pinned revision `66c18d37`. |
+| Open-time person context survives late agent data | `ios/App/LiveAppModel.swift:3553` reconciles open identity; `:4250` invokes it on Matrix room publication and `:6344` after domain reads. `ios/App/Chat/Stores/ConversationStore.swift:350` updates the same store and requires remapping. |
+| Old mapped notice survives a cache-only identity rebuild | `ios/Sources/AtumChat/ConversationCore.swift:212` marks identity invalidation; `:263` replaces old handover rows on the first fresh projection, even if only a synthetic footer remains. |
+| Assistant member avatars discarded / not refreshed | `ios/App/LiveAppModel.swift:3499` retains assistant/app member profiles; `:1651` reads current SDK member profiles when available. |
+| Seen uses stale launch artwork or ignores member photo | `ios/App/Chat/Views/ChatScreen.swift:115` uses current chat info; `ios/App/Chat/Views/ChatFaces.swift:93` preserves the actual member URI. |
+| Late cancelled image request can clear current image | `ios/App/Chat/Views/ChatFaces.swift:133` rejects cancelled completion; `:138` keys requests only by image sources, preference and size. |
+
+### Corrected batch results (tested code: c1b18e8)
+
+Completed 2026-11-12 22:50 local; app/test-target build passed. Result bundle read
+with `xcresulttool get test-results summary`: **403 passed, 14 failed, 0 skipped**
+across 417 app/UI tests. The simulator was shut down by the batch cleanup.
+
+| Suite | Passed | Failed |
+| --- | ---: | ---: |
+| AtumChat (prior unchanged package run) | 718 | 0 |
+| AtumMobileTests | 363 | 0 |
+| ComposerUITests | 12 | 0 |
+| MessageMenuUITests | 9 | 0 |
+| TurnStopUITests | 4 | 0 |
+| GScrollUITests | 0 | 2 |
+| S1MatrixUITests | 4 | 7 |
+| TranscriptUITests | 11 | 5 |
+
+Failures retained, without skipping or weakening assertions:
+
+- G-scroll A check 1: opening position moved 23.67 pt, beyond 4 pt; B check 9:
+  reattachment overlapped the next scripted phase. Neither reached check 7.
+- Five contrast audit findings: S1 answers/quotes/reactions, bot, people, roster;
+  Transcript assistant-chat audit. One S1 group Dynamic Type finding.
+- Four visible-copy bans from unmarked historical scripted `Đang xử lý…` notices:
+  S1 assistant/send-then-seen, Transcript U1/reply-at-bottom. The generator in
+  `ScriptedChats.swift` still emits these as ordinary notices; they must acquire
+  explicit progress markers, not a broader text heuristic or restored generic
+  notice suppression. Reply-at-bottom's new footer presence/disappearance checks
+  passed before its final copy-ban failure.
+- Transcript U2: no typing footer in its timed snapshot (short typing window).
+- Transcript U7: latest message was below the composer after hiding the keyboard.
+
+The new `testWorkingLineAndStepCardUseOneTypingRow` **passed**. Its screenshot was
+visually inspected: current step beside the atom, both checklist entries beneath,
+left-aligned at the transcript bottom above the composer. It still uses the old
+multi-orbit atom at this tested revision, so the owner's later schema-2 reference
+requires the main-branch merge and another explicitly authorized final run.
+
+Evidence:
+- Bundle: `/Volumes/AtumTestFlight/working-line-parity-ui/tests.xcresult`
+- Read summary: `/Volumes/AtumTestFlight/working-line-parity-ui/summary.json`
+- Logs: `/Volumes/AtumTestFlight/working-line-parity-ui/build.log`, `tests.log`
+- Verified old-mark capture: `/Volumes/AtumTestFlight/working-line-parity-shots/working-line-step-card-ui-test.png`
+
+### Owner reference and final visual pass
+
+The owner supplied and this worker opened:
+the owner desktop screenshot (chat attachment, not in the repo).
+It shows one orbit with a nucleus, a muted body-size “Đang đọc…” alongside it,
+no bubble/avatar/time, below the last reply and above the composer. The owner
+explicitly authorized merging `origin/main` (`aa75765`, #47) and one final locked
+run after this batch, with light/dark rendered evidence. #48's fold work remains
+separate; keep shared test changes minimal and do not edit fold/scroll code.
