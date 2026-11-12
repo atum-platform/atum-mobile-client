@@ -60,6 +60,17 @@ Tests: `AtumCopyTests.testParameterKindsFollowTheContract`;
 `AssistantRoutineStateTests.testPinnedRoutineWordsTakeTheirNumbersAsWords`.
 The last one runs every pinned routine word with its declared argument count.
 
+## Changed wording in UI tests
+
+Desktop reworded `desktop.atum.roster.emptySearch` in this pin (en "No results
+found", vi "Không tìm thấy kết quả nào"; it was "Không tìm thấy cuộc trò chuyện
+nào"). `HomeShellUITests.testSearchFiltersNamesAndCancelRestoresRows` matched the
+old Vietnamese literally and failed on hosted UI shard 0 (`9d63d30`); it now
+expects the pinned wording. A scan of every string literal in `ios/UITests` and
+`ios/AppTests` against the 109 export values this pin retires found no other
+stale UI-test literal. The `AccountSettingsStateTests` hit is intentional: it
+checks that a stale exported title does not win.
+
 ## Known gap (pre-existing, not a regression)
 
 `test_copy_keys_in_pin.py` is not in CI and already failed on main: 171 key
