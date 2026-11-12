@@ -72,6 +72,15 @@ per run on 2026-11-11 with six lanes active).
   appeared ~0.2 s after typing, while the match three pages back was not loaded within the
   5 s existence wait; the failure dump moments later shows it in the window. The separate
   existence wait is gone, and one 20 s "in view" wait now covers loading and scrolling.
+- 2026-11-12: on `86228cb` shard 2 failed `ChatInfoUITests.testAssistantCardChoosesOneServerDestinationDefault`
+  (it passed on both earlier #44 heads): the model sheet's first row did not appear within 3 s of the
+  tap. In `ChatInfoUITests`, each wait for the sheet's first row after opening it is now 10 s.
+- 2026-11-12: `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses` is
+  **quarantined** (atum-mobile#50). On `86228cb` the CI recording shows the count reaching
+  "1/1" while the transcript stayed at the bottom for the rest of the 20 s wait. The search
+  found the match but never scrolled to it. On the two earlier #44 heads it did scroll, late.
+  That reads as an intermittent app race in scroll-to-result on a slow host, not test timing.
+  It still runs locally. Remove the line when the race is fixed.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

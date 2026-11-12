@@ -39,6 +39,7 @@ env:
     ChatKindsUITests/testAccessibilityAuditKinds
     HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning
     TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet
+    HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses
 jobs:
   plan:
     runs-on: ubuntu-latest
