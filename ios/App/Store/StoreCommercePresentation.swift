@@ -60,6 +60,9 @@ enum StoreCopyKey {
     static let offline = "src.matrix.chat-copy.copies.errorOffline"
     static let genericError = "src.matrix.chat-copy.copies.errorGeneric"
     static let denied = "desktop.dm.artifact.state.denied.title"
+    /// "Purchases are not available yet": the paid Get's place while the
+    /// App Store gate is closed (`StorePurchaseGate`). The pack sheet's own key.
+    static let purchasesClosed = "src.matrix.mobile-copy.mobilePhoneCopy.noPurchasesTitle"
 
     /// Every key above, for the five-locale presence test.
     static let all: [String] = [
@@ -71,7 +74,21 @@ enum StoreCopyKey {
         buyFor, protons, owned, ownedEmpty, free, notForSale, insufficient, offerChanged,
         uncertain, failed, purchaseUnavailable, checkStatus, tryExample, open, comingSoon,
         loading, confirm, cancel, back, close, done, busy, retry, offline, genericError, denied,
+        purchasesClosed,
     ]
+}
+
+/// The App Store gate (REL-15): a paid item is spent on only while Apple
+/// checkout for Protons is open on this device, i.e.
+/// `ApplePurchaseCoordinator.checkoutOpen` — the server's
+/// `apple_checkout_enabled` switch and catalogue, matched to the device's
+/// verified StoreKit environment, with its products loaded. It is false while
+/// loading, closed, mismatched or without a coordinator, so a public build
+/// fails closed. Free items and already-owned Open are never gated.
+enum StorePurchaseGate {
+    static func allowsSpend(priceMicroProtons: Int64, checkoutOpen: Bool) -> Bool {
+        priceMicroProtons <= 0 || checkoutOpen
+    }
 }
 
 /// A notice's meaning, kept apart from SwiftUI so each outcome's wording is
