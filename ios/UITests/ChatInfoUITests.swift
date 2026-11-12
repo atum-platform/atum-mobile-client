@@ -122,7 +122,9 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(model.waitForExistence(timeout: 10))
         model.tap()
         let hard = app.buttons.matching(identifier: "phone.model.row.nhat-thuc").firstMatch
-        XCTAssertTrue(hard.waitForExistence(timeout: 3))
+        // The sheet can take over 3 s to present on a hosted runner (#44 shard 2,
+        // `86228cb`, 12 Nov); every first-row wait after opening it is 10 s.
+        XCTAssertTrue(hard.waitForExistence(timeout: 10))
         hard.tap()
         // The current row is marked by a check, spoken as the row's value.
         XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
@@ -148,7 +150,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(model.waitForExistence(timeout: 10)); model.tap()
 
         let current = app.buttons.matching(identifier: "phone.model.row.nguyet-thuc").firstMatch
-        XCTAssertTrue(current.waitForExistence(timeout: 3))
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
         XCTAssertEqual(current.value as? String, "Đang dùng")
         let hard = app.buttons.matching(identifier: "phone.model.row.nhat-thuc").firstMatch
         XCTAssertTrue(hard.exists); hard.tap()
@@ -173,7 +175,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(model.waitForExistence(timeout: 10)); model.tap()
 
         XCTAssertTrue(app.buttons.matching(identifier: "phone.model.row.nguyet-thuc").firstMatch
-            .waitForExistence(timeout: 3))
+            .waitForExistence(timeout: 10))
         XCTAssertFalse(app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "assistant.model.destination.")).firstMatch.exists)
         XCTAssertTrue(app.buttons.matching(identifier: "phone.model.favorite.nguyet-thuc").firstMatch.exists)
@@ -196,7 +198,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertEqual(model.label, "Nguyệt Thực")
         model.tap()
         let hard = app.buttons.matching(identifier: "phone.model.row.nhat-thuc").firstMatch
-        XCTAssertTrue(hard.waitForExistence(timeout: 3))
+        XCTAssertTrue(hard.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Phù hợp tác vụ hàng ngày"].exists,
                       "Nguyệt Thực names what it is for")
         XCTAssertTrue(app.staticTexts["Phù hợp với tác vụ khó khăn"].exists,
