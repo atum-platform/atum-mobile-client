@@ -44,9 +44,20 @@ public struct RoomContext: Equatable, Sendable {
     public var kind: RoomKind
     /// This account's Matrix user ID.
     public var ownUserID: String
-    /// The room's agent or bot users: their text answers are results, and
-    /// their notices that a result supersedes are hidden (B17, B21).
+    /// The room's selected agent or bot users: their text replies are results
+    /// (B21). Transient-line recognition uses the separate account agent set.
     public var agentUserIDs: Set<String>
+    /// Known agents across the account, also in group/company rooms. Catalog
+    /// bots are not agents for transient-line rules. Nil keeps fixture callers
+    /// compatible with the room's agent set.
+    public var knownAgentUserIDs: Set<String>?
+    /// The assistant whose working line belongs in this private chat.
+    public var workingLineSenderID: String?
+
+    public var transientAgentUserIDs: Set<String> {
+        knownAgentUserIDs ?? (kind == .appBot ? [] : agentUserIDs)
+    }
+
     /// The platform's company-private CoS view binds this room to this account
     /// (`CompanyRoomClassification.privateCos`): only here is the Chief of
     /// Staff greeting's pill and board link projected (desktop proves the same
@@ -54,10 +65,14 @@ public struct RoomContext: Equatable, Sendable {
     public var isCompanyPrivateCos: Bool
 
     public init(kind: RoomKind, ownUserID: String, agentUserIDs: Set<String> = [],
-                isCompanyPrivateCos: Bool = false) {
+                isCompanyPrivateCos: Bool = false, knownAgentUserIDs: Set<String>? = nil,
+                workingLineSenderID: String? = nil) {
         self.kind = kind
         self.ownUserID = ownUserID
         self.agentUserIDs = agentUserIDs
         self.isCompanyPrivateCos = isCompanyPrivateCos
+        self.knownAgentUserIDs = knownAgentUserIDs
+        self.workingLineSenderID = workingLineSenderID
+            ?? (kind == .assistant && agentUserIDs.count == 1 ? agentUserIDs.first : nil)
     }
 }

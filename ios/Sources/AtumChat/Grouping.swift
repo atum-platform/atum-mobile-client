@@ -216,6 +216,7 @@ public enum Grouping {
         guard item.isEdited, item.kind != .placeholder(.redacted) else { return false }
         if item.isOwn { return true }
         return context.kind != .appBot && !context.agentUserIDs.contains(item.sender)
+            && !context.transientAgentUserIDs.contains(item.sender)
     }
 
     /// Rows drawn as bubbles (or bare answers) that take part in runs.

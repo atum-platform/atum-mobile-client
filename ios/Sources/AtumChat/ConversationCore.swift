@@ -117,7 +117,7 @@ public struct ConversationCore: Sendable {
     /// IDs of held sends' rows (`atum.` is never an SDK-derived ID).
     public static let heldRowPrefix = "atum.held."
 
-    public let context: RoomContext
+    public private(set) var context: RoomContext
     public var kind: RoomKind { context.kind }
     public let history: HistoryLoading
     /// Kept per room while the app runs (B25).
@@ -172,6 +172,9 @@ public struct ConversationCore: Sendable {
     private var handoverRows: [ChatRow]?
     /// The handover's merged rows while it runs.
     private var mergedRows: [ChatRow]?
+    /// Reclassified rows cannot be retained by the session-handover merge:
+    /// an all-working timeline may correctly have no event rows after remapping.
+    private var replacesIdentityProjection = false
     /// The change of a step that altered the rows without a projection
     /// (a held send); cleared by the next projection.
     private var localChange: SnapshotChange?
@@ -202,6 +205,14 @@ public struct ConversationCore: Sendable {
         self.context = context
         self.history = history
         self.draft = draft
+    }
+
+    /// Identity can arrive after the room opens. Keep draft, held sends and
+    /// follow state while the app reopens the SDK timeline with fresh mapping.
+    public mutating func updateContext(_ context: RoomContext) {
+        guard context.ownUserID == self.context.ownUserID, context != self.context else { return }
+        self.context = context
+        replacesIdentityProjection = true
     }
 
     public init(kind: RoomKind, draft: String = "", history: HistoryLoading = .onScroll) {
@@ -249,6 +260,11 @@ public struct ConversationCore: Sendable {
     /// caught up, and the `whileFollowing` depth.
     public mutating func receive(_ projection: ProjectedTimeline, now: Date) -> [ConversationEffect] {
         projected = projection
+        if replacesIdentityProjection {
+            handoverRows = nil
+            mergedRows = nil
+            replacesIdentityProjection = false
+        }
         localChange = nil
         let rows = projection.snapshot.rows
         if !retryingIDs.isEmpty {

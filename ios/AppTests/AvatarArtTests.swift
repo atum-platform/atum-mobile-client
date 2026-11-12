@@ -254,6 +254,57 @@ final class AvatarArtTests: XCTestCase {
         XCTAssertEqual(attempted, [first, second])
     }
 
+    @MainActor
+    func testSeenFaceResolvesAndLoadsAPhotoWhenTheMemberProfileArrives() async throws {
+        let reader = ChatReader(userID: "@luna:atum.test", name: "Luna")
+        let roomFace = ChatFace.room(.monogram("L"), matrixURI: nil, sha256: nil,
+                                     candidates: [], name: "Luna", kind: .assistant)
+        let before = ChatFace.reader(reader, kind: .assistant, roomFace: roomFace, members: [:])
+        XCTAssertNil(before.matrixAvatarURI)
+        let member = ChatInfoMember(userID: reader.userID, name: "Luna", matrixAvatarURI: "mxc://atum.test/luna",
+                                    isAssistant: true, isCurrentUser: false)
+        let after = ChatFace.reader(reader, kind: .assistant, roomFace: roomFace, members: [reader.userID: member])
+        XCTAssertEqual(after.matrixAvatarURI, member.matrixAvatarURI)
+        XCTAssertNotEqual(before, after, "profile arrival changes the image request")
+        let data = try png(try fullBleed())
+        var fetched: [String] = []
+        let art = await AtumAvatarCandidateLoader.load(matrixURI: after.matrixAvatarURI, pixelSide: 48,
+            loadMatrixThumbnail: { uri, _ in fetched.append(uri); return data }, remoteCandidates: [])
+        XCTAssertNotNil(art, "the Seen face resolves actual image bytes, not just a monogram")
+        XCTAssertEqual(fetched, ["mxc://atum.test/luna"])
+        let incoming = ChatFace.incoming(ChatItem(id: "reply", kind: .message, sender: reader.userID),
+                                         kind: .assistant, roomTitle: "Luna", roomFace: roomFace,
+                                         members: [reader.userID: member])
+        XCTAssertEqual(incoming.matrixAvatarURI, after.matrixAvatarURI)
+    }
+
+    @MainActor
+    func testSeenFaceUsesNewRosterArtAndPreservesTheMemberPhotoFallback() throws {
+        let reader = ChatReader(userID: "@luna:atum.test", name: "Luna")
+        let url = try XCTUnwrap(URL(string: "https://images.atum.test/luna.png"))
+        let photo = LiveProductAvatar.photo(url: url, fallback: "L")
+        let fresh = ChatFace.room(photo, matrixURI: nil, sha256: nil, candidates: [], name: "Luna", kind: .assistant)
+        let member = ChatInfoMember(userID: reader.userID, name: "Luna", matrixAvatarURI: "mxc://atum.test/profile",
+                                    isAssistant: true, isCurrentUser: false)
+        let face = ChatFace.reader(reader, kind: .assistant, roomFace: fresh, members: [reader.userID: member])
+        XCTAssertEqual(face.avatar, photo)
+        XCTAssertTrue(face.prefersRosterPhoto, "desktop gives an identified agent its current roster photo")
+        XCTAssertEqual(face.matrixAvatarURI, member.matrixAvatarURI, "the member photo must not be discarded")
+        XCTAssertEqual(AtumAvatarCandidateLoader.candidates(avatar: face.avatar, sha256: face.sha256,
+                                                           declared: face.candidates).map(\.url), [url])
+    }
+
+    @MainActor
+    func testAuthoritativeMemberWithoutPhotoDoesNotBorrowAStaleRoomPhoto() {
+        let reader = ChatReader(userID: "@luna:atum.test", name: "Luna", avatarURI: "mxc://atum.test/old-event")
+        let room = ChatFace.room(nil, matrixURI: "mxc://atum.test/old-room", sha256: nil,
+                                candidates: [], name: "Luna", kind: .assistant)
+        let member = ChatInfoMember(userID: reader.userID, name: "Luna", matrixAvatarURI: nil,
+                                    isAssistant: true, isCurrentUser: false)
+        XCTAssertNil(ChatFace.reader(reader, kind: .assistant, roomFace: room,
+                                     members: [reader.userID: member]).matrixAvatarURI)
+    }
+
     func testTheCacheEvictsTheLeastRecentlyUsedEntry() {
         var cache = AvatarArtLRU<String, Int>(capacity: 2)
         cache.insert(1, for: "a")

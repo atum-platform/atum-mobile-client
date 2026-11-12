@@ -144,9 +144,9 @@ final class TransientLinesTests: XCTestCase {
     func testProjectionPutsTheLiveWorkingLineLastInPlaceOfTheTypingRow() {
         let items = [own(), progress(minute: 1), message("i", interim: true, minute: 2)]
         let rows = Projection.rows(items, context: F.assistantRoom(), typingNames: ["Atum"], options: .s1)
-        XCTAssertEqual(rows.map(\.id), ["q", "i", "p"])
+        XCTAssertEqual(rows.map(\.id), ["q", "i", Projection.typingRowID])
         let idle = Projection.rows(items, context: F.assistantRoom(), options: .s1)
-        XCTAssertEqual(idle.map(\.id), ["q", "i", "p"], "the line shows while typing pauses too")
+        XCTAssertEqual(idle.map(\.id), ["q", "i", Projection.typingRowID], "the line shows while typing pauses too")
         let typingOnly = Projection.rows([own()], context: F.assistantRoom(), typingNames: ["Atum"], options: .s1)
         XCTAssertEqual(typingOnly.map(\.id), ["q", Projection.typingRowID], "no line yet: the atom alone")
     }

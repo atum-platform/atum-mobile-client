@@ -70,7 +70,7 @@ final class ProjectionTests: XCTestCase {
         let items = [F.start(), F.divider("d1"), created, F.divider("d2"), F.mine("m")]
         XCTAssertEqual(F.ids(Projection.rows(items, context: F.assistantRoom(), options: all)), ["start", "d2", "m"])
         let superseded = [F.divider("d1"), F.mine("q"), F.divider("d2"),
-                          F.notice("n", from: F.agent, replyTo: "$q"), F.readMarker(),
+                          F.notice("n", from: F.agent, "Waiting for your Mac.", replyTo: "$q"), F.readMarker(),
                           F.divider("d3"), F.text("a", from: F.agent, replyTo: "$q")]
         XCTAssertEqual(F.ids(Projection.rows(superseded, context: F.assistantRoom(), options: all)),
                        ["d1", "q", "read-marker", "d3", "a"],
@@ -94,7 +94,7 @@ final class ProjectionTests: XCTestCase {
 
     func testASetAfterAHiddenRowUpdatesTheRightRow() throws {
         var buffer = TimelineBuffer()
-        try buffer.apply([.reset([F.mine("q"), F.divider("d"), F.notice("n", from: F.agent, replyTo: "$q"),
+        try buffer.apply([.reset([F.mine("q"), F.divider("d"), F.notice("n", from: F.agent, "Waiting for your Mac.", replyTo: "$q"),
                                   F.text("a", from: F.agent, "first", replyTo: "$q")])])
         let before = Projection.rows(buffer.items, context: F.assistantRoom())
         XCTAssertEqual(F.ids(before), ["q", "a"])
@@ -108,22 +108,21 @@ final class ProjectionTests: XCTestCase {
 
     // MARK: Superseded working lines (B17)
 
-    func testAWorkingNoticeIsHiddenOnceTheSameAgentsAnswerToTheSameMessageArrives() {
+    func testAnOrdinaryNoticePersistsAfterTheSameAgentsAnswerToTheSameMessageArrives() {
         let working = [F.mine("q"), F.notice("n", from: F.agent, "Đang xử lý…", replyTo: "$q")]
         XCTAssertEqual(F.ids(Projection.rows(working, context: F.assistantRoom())), ["q", "n"],
                        "while the agent works, the line shows")
         let answered = working + [F.text("a", from: F.agent, replyTo: "$q")]
-        XCTAssertEqual(F.ids(Projection.rows(answered, context: F.assistantRoom())), ["q", "a"])
+        XCTAssertEqual(F.ids(Projection.rows(answered, context: F.assistantRoom())), ["q", "n", "a"])
     }
 
     func testAWaitStateLineWithNoAnswerStays() {
         let items = [F.mine("q1"), F.notice("wait", from: F.agent, "offline", replyTo: "$q1"),
                      F.mine("q2"), F.text("a2", from: F.agent, replyTo: "$q2")]
         XCTAssertEqual(F.ids(Projection.rows(items, context: F.assistantRoom())), ["q1", "wait", "q2", "a2"])
-        XCTAssertFalse(Projection.isSuperseded(items[1], in: items, context: F.assistantRoom()))
     }
 
-    func testTheRuleIsStructuralNotByText() {
+    func testOrdinaryNoticesPersistRegardlessOfReplyTargets() {
         let room = F.assistantRoom()
         let q = F.mine("q")
         // Another sender's answer, a notice answer, an answer to another
@@ -145,9 +144,9 @@ final class ProjectionTests: XCTestCase {
         XCTAssertEqual(F.ids(Projection.rows(items, context: F.personRoom())), ["q", "n", "a"])
     }
 
-    func testABotsWorkingLineIsHiddenToo() {
+    func testABotsOrdinaryNoticePersistsToo() {
         let items = [F.mine("q"), F.notice("n", from: F.bot, replyTo: "$q"), F.text("a", from: F.bot, replyTo: "$q")]
-        XCTAssertEqual(F.ids(Projection.rows(items, context: F.botRoom())), ["q", "a"])
+        XCTAssertEqual(F.ids(Projection.rows(items, context: F.botRoom())), ["q", "n", "a"])
     }
 
     // MARK: showsQuote (B21, desktop's rule after hiding)
@@ -162,7 +161,7 @@ final class ProjectionTests: XCTestCase {
     }
 
     func testDirectlyUnderIsJudgedAfterTheWorkingLineIsHidden() {
-        let items = [F.mine("q"), F.notice("n", from: F.agent, replyTo: "$q"), F.text("a", from: F.agent, replyTo: "$q")]
+        let items = [F.mine("q"), F.notice("n", from: F.agent, "Waiting for your Mac.", replyTo: "$q"), F.text("a", from: F.agent, replyTo: "$q")]
         XCTAssertFalse(quote("a", in: Projection.rows(items, context: F.assistantRoom())))
     }
 

@@ -197,7 +197,8 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
         case dayDivider(Date)
         case readMarker
         case timelineStart
-        /// Synthetic last row while a real `m.typing` is active (B10).
+        /// Synthetic working footer while typing or a live working line exists.
+        /// `body` carries the current working line; empty means the atom alone.
         case typing(names: [String])
         /// Synthetic first row while older history loads (B5, S1b).
         case loadingEarlier

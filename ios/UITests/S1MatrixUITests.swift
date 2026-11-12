@@ -179,7 +179,8 @@ final class S1MatrixUITests: TranscriptUITestCase {
         XCTAssertTrue(latest(app).descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "ngày tốt")).firstMatch.waitForExistence(timeout: 8),
                       "Moon's answer")
-        XCTAssertTrue(waitFor(3) { !self.element(app, AccessibilityID.rowTyping).exists }, "Moon's dots stay")
+        XCTAssertFalse(workingRow(app).exists, "app-bot rooms never render an assistant working footer")
+        XCTAssertTrue(waitFor(3) { !self.element(app, "composer.typing").exists }, "Moon's composer typing line stays")
         wait(1)
         try check(app, "bot")
     }

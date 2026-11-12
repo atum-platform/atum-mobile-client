@@ -26,7 +26,8 @@ extension ScriptedChats {
         let initial = shortTranscript(name: name, messages: 20, env: env, seed: 4)
         let question = initial.last { $0.isOwn && $0.kind == .message }?.eventID
         return ScriptedScript(name: name, title: "Atum", context: assistant, initial: initial, steps: [
-            ScriptedStep(at: 1.5, .arrive(notice("\(name).working", "Đang xử lý…", replyTo: question))),
+            ScriptedStep(at: 1.5, .arrive(notice("\(name).working", "Đang xử lý…", replyTo: question,
+                                                  progress: ChatProgress(phase: .working)))),
             ScriptedStep(at: 3, .edit(id: "\(name).working", body: "Đang xử lý… sắp xong")),
             ScriptedStep(at: 4, .typing([Cast.atum])),
             ScriptedStep(at: 5.5, .arrive(answer("\(name).answer", ScriptedText.paragraph(seed: 5, sentences: 3),

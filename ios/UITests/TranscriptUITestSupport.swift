@@ -121,6 +121,8 @@ class TranscriptUITestCase: AtumUITestCase {
     }
 
     @MainActor func transcript(_ app: XCUIApplication) -> XCUIElement { element(app, AccessibilityID.transcript) }
+    /// Latest transcript event only. Working/typing is a synthetic footer;
+    /// tests of live work must query `workingRow`, not silently retarget this.
     @MainActor func latest(_ app: XCUIApplication) -> XCUIElement { element(app, AccessibilityID.rowLatest) }
     @MainActor func row(_ app: XCUIApplication, _ id: String) -> XCUIElement { element(app, AccessibilityID.row(id: id)) }
     @MainActor func composerField(_ app: XCUIApplication) -> XCUIElement { element(app, AccessibilityID.composerField) }
@@ -153,6 +155,18 @@ class TranscriptUITestCase: AtumUITestCase {
         let frame = element.frame
         let top = visibleTop(app) - Self.framePoints
         let bottom = visibleBottom(app) + Self.framePoints
+        XCTAssertTrue(frame.minY >= top && frame.maxY <= bottom,
+                      "\(message) \(frame) is not between \(top) and \(bottom)", file: file, line: line)
+    }
+
+    /// The same visibility contract for an atomic working-row snapshot.
+    @MainActor
+    func assertVisible(_ snapshot: XCUIElementSnapshot, in app: XCUIApplication, _ message: String,
+                       file: StaticString = #filePath, line: UInt = #line) {
+        let frame = snapshot.frame
+        let top = visibleTop(app) - Self.framePoints
+        let bottom = visibleBottom(app) + Self.framePoints
+        XCTAssertGreaterThan(frame.height, 0, "empty \(message)", file: file, line: line)
         XCTAssertTrue(frame.minY >= top && frame.maxY <= bottom,
                       "\(message) \(frame) is not between \(top) and \(bottom)", file: file, line: line)
     }
@@ -199,7 +213,9 @@ class TranscriptUITestCase: AtumUITestCase {
     }
 
     /// An event row's identifier (`row.<displayId>`, `row.latest`): not the
-    /// typing row. (A reply's quote is `quote`, outside the namespace.)
+    /// synthetic working/typing footer. Reading anchors must remain event
+    /// rows even while the footer carries current-step text.
+    /// (A reply's quote is `quote`, outside the namespace.)
     func isEventRow(_ identifier: String) -> Bool {
         identifier.hasPrefix("row.") && identifier != AccessibilityID.rowTyping
     }

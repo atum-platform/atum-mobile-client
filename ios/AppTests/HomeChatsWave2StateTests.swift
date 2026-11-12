@@ -51,4 +51,52 @@ final class HomeChatsWave2StateTests: XCTestCase {
         XCTAssertEqual(store.composerFocusRequest, before &+ 1)
         XCTAssertTrue(store.snapshot.rows.isEmpty)
     }
+    /// A room opened before `/agents` is classified as a person. Receiving
+    /// the directory must request a fresh mapper, even with no new event.
+    func testLateAgentIdentityRefreshesAnOpenChatAndItsCachedWorkingLine() async throws {
+        let owner = "@me:atum.test", agent = "@luna:atum.test"
+        let cold = RoomContext(kind: .person, ownUserID: owner, knownAgentUserIDs: [])
+        let ready = RoomContext(kind: .assistant, ownUserID: owner, agentUserIDs: [agent],
+                                knownAgentUserIDs: [agent])
+        func info(_ context: RoomContext) -> ConversationRoomInfo {
+            ConversationRoomInfo(roomID: "!luna:atum.test", title: "Luna", context: context,
+                                 knownNames: [agent: "Luna"], catalogBotUserIDs: [], languageCode: "vi", roomIsEncrypted: false)
+        }
+        let raw = #"{"type":"m.room.message","content":{"msgtype":"m.notice","body":"Đang chạy tác vụ…","io.atum.progress":{"phase":"working"}}}"#
+        func cachedSource(_ context: RoomContext) -> ScriptedTimelineSource {
+            let marker = context.transientAgentUserIDs.contains(agent) ? AtumTurnMarkers.parse(json: raw).progress : nil
+            let item = ChatItem(id: "same-cached-event", kind: .notice, sender: agent,
+                                body: "Đang chạy tác vụ…", progress: marker)
+            return ScriptedTimelineSource(script: ScriptedScript(name: "identity-race", title: "Luna",
+                context: context, initial: [item], startsAfterOlderPages: false,
+                steps: [ScriptedStep(at: 0.1, .typing([agent]))], names: [agent: "Luna"]))
+        }
+        let store = LiveConversationStore(info: info(cold), draft: "Keep my draft")
+        defer { store.close() }
+        await store.attach(source: cachedSource(cold))
+        for _ in 0..<100 where store.snapshot.rows.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(store.snapshot.rows.first?.item.kind, .notice)
+        for _ in 0..<200 where store.typingLine != .names(["Luna"]) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(store.typingLine, .names(["Luna"]), "cold identity initially uses the person typing line")
+        XCTAssertFalse(store.snapshot.rows.contains { $0.id == Projection.typingRowID })
+        XCTAssertTrue(store.updateRoomInfo(info(ready)), "the app must reattach/remap on directory arrival")
+        XCTAssertEqual(store.kind, .assistant)
+        XCTAssertEqual(store.agentUserIDs, [agent])
+        XCTAssertEqual(store.draft, "Keep my draft")
+        // Same production sequence as refreshConversationIdentity: keep the
+        // store, reopen its source, and remap the SDK cache with the new facts.
+        await store.attach(source: cachedSource(ready))
+        for _ in 0..<200 where store.snapshot.rows.last?.item.body != "Đang chạy tác vụ…" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let displayedContent = store.snapshot.rows.filter {
+            $0.item.kind.isEventContent || $0.id == Projection.typingRowID
+        }
+        XCTAssertEqual(displayedContent.map(\.id), [Projection.typingRowID])
+        XCTAssertEqual(store.snapshot.rows.last?.item.body, "Đang chạy tác vụ…")
+        XCTAssertEqual(store.typingLine, .nobody, "assistant typing leaves the composer and uses the atom footer")
+        XCTAssertFalse(store.updateRoomInfo(info(ready)), "unchanged room publications must not reopen the timeline")
+        XCTAssertEqual(store.draft, "Keep my draft")
+    }
+
 }

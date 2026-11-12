@@ -59,7 +59,7 @@ struct ScriptedWriter {
                       media: ChatMedia? = nil,
                       replyTo: String? = nil, threadRoot: String? = nil, reactions: [ChatReaction] = [],
                       receipts: [String] = [], isEdited: Bool = false, delivery: ChatDelivery = .remote,
-                      appBotMeta: String? = nil) -> ChatItem {
+                      appBotMeta: String? = nil, progress: ChatProgress? = nil) -> ChatItem {
         if kind.isEventContent { dividerIfNewDay(date) }
         count += 1
         let id = scenario + "." + String(format: "%04d", count)
@@ -72,7 +72,7 @@ struct ScriptedWriter {
                             reactions: reactions, receiptUserIDs: receipts.sorted(),
                             resultFor: ChatItem.resultFor(kind: kind, sender: sender, replyTo: replyTo,
                                                           agentUserIDs: context.agentUserIDs),
-                            appBotMeta: appBotMeta)
+                            appBotMeta: appBotMeta, progress: progress)
         items.append(item)
         return item
     }

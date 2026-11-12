@@ -131,12 +131,12 @@ public enum Projection {
                  change: change, generation: generation)
     }
 
-    /// - Hidden: superseded working lines (B17); a day divider whose day has
+    /// - Hidden: transient working-line events; a day divider whose day has
     ///   no visible event row (B14); the read marker when it would be the
     ///   last row (B15); virtual items `options` turns off; room-state
     ///   events, always; a second item with an ID already shown.
-    /// - Added: the loading row (first) and the typing row (last, unless the
-    ///   live working line takes that place).
+    /// - Added: the loading row (first) and one assistant working footer
+    ///   (last), carrying the live line when present or the typing atom alone.
     /// - Per row: the sender line (B16: on a sender change in S1a, at the
     ///   start of a run with `groupsRuns`), the quote flag judged after hiding
     ///   (B21), the delivery mark (B7: S1a, or Sent and Seen with
@@ -156,16 +156,22 @@ public enum Projection {
         // turn works, and a redacted agent message shows nothing. Both rules
         // run before answer detection, so a hidden line never is the newest
         // thing the agent said.
-        let shownItems = TransientLines.visibleItems(items, agents: context.agentUserIDs)
-        let answers = answerKeys(shownItems, context: context)
+        let shownItems = TransientLines.visibleItems(items, agents: context.transientAgentUserIDs)
+        let working = context.kind == .assistant
+            ? TransientLines.workingLine(shownItems, agents: context.transientAgentUserIDs,
+                                         sender: context.workingLineSenderID)
+            : nil
         var visible = shownItems.filter { item in
+            // Every transient event leaves the transcript, including older live
+            // lines from legacy publishers. Only the selected line feeds the footer.
+            guard !TransientLines.isTransientLine(item, agents: context.transientAgentUserIDs) else { return false }
             switch item.kind {
             case .dayDivider: return options.showsDayDividers
             case .readMarker: return options.showsReadMarker
             case .timelineStart: return options.showsTimelineStart
             case .typing, .loadingEarlier: return false // never in the buffer
             case .roomState: return false
-            case .notice: return !isSuperseded(item, answers: answers, context: context)
+            case .notice: return true
             case .message, .image, .file, .placeholder: return true
             }
         }
@@ -235,29 +241,13 @@ public enum Projection {
                                 readers: readers))
             previousForQuote = item
         }
-        // A7/§3, desktop's `MatrixAgentWorking` (`loadingIndicator` in
-        // `src/matrix/app.tsx`): the agent at work is ONE last row, shown
-        // while it types or while its turn's working line lives. The live
-        // line moves there from where it happened to be sent and stands for
-        // the typing row too (the atom, then the line); with no line, the
-        // typing row is the atom alone. A line whose turn ended is already
-        // gone from `shownItems`.
-        if let working = TransientLines.workingLine(items, agents: context.agentUserIDs),
-           let index = rows.firstIndex(where: { $0.id == working.id }) {
-            let row = rows.remove(at: index)
-            rows.append(row)
-        } else if !typingNames.isEmpty {
-            rows.append(ChatRow(item: ChatItem(id: typingRowID, kind: .typing(names: typingNames))))
+        // Desktop's loadingIndicator: one stable synthetic row, never the
+        // progress event itself (no quote, delivery, timestamp or edited mark).
+        if context.kind == .assistant, working != nil || !typingNames.isEmpty {
+            rows.append(ChatRow(item: ChatItem(id: typingRowID, kind: .typing(names: typingNames),
+                                               body: working?.body ?? "")))
         }
         return Grouping.apply(to: rows, context: context, groupsRuns: options.groupsRuns, calendar: calendar)
-    }
-
-    /// B17: a notice from the room's agent or bot that replies to an event is
-    /// a working line once the same sender's text answer to the same event
-    /// exists. Structural only: same sender, text versus notice, same
-    /// `inReplyTo`. A wait-state line with no answer stays.
-    public static func isSuperseded(_ item: ChatItem, in items: [ChatItem], context: RoomContext) -> Bool {
-        isSuperseded(item, answers: answerKeys(items, context: context), context: context)
     }
 
     /// B21, desktop's rule (`D194: apps/desktop/src/matrix/app.tsx:498-505`):
@@ -291,26 +281,6 @@ public enum Projection {
             }
         }
         return items.indices.filter { keep[$0] }.map { items[$0] }
-    }
-
-    private struct AnswerKey: Hashable {
-        let sender: String
-        let replyTo: String
-    }
-
-    private static func answerKeys(_ items: [ChatItem], context: RoomContext) -> Set<AnswerKey> {
-        guard !context.agentUserIDs.isEmpty else { return [] }
-        var keys = Set<AnswerKey>()
-        for item in items where item.kind == .message && context.agentUserIDs.contains(item.sender) {
-            if let replyTo = item.replyTo { keys.insert(AnswerKey(sender: item.sender, replyTo: replyTo)) }
-        }
-        return keys
-    }
-
-    private static func isSuperseded(_ item: ChatItem, answers: Set<AnswerKey>, context: RoomContext) -> Bool {
-        guard item.kind == .notice, context.agentUserIDs.contains(item.sender),
-              let replyTo = item.replyTo else { return false }
-        return answers.contains(AnswerKey(sender: item.sender, replyTo: replyTo))
     }
 }
 

@@ -1044,6 +1044,7 @@ final class LiveAppModel {
                                                       generation: generation),
                           !Task.isCancelled else { return .starting }
                     agentsRead.receive(response)
+                    refreshConversationIdentity()
                     authoritativeAgent = HomeAssistantLifecyclePolicy.authoritativeAgent(
                         for: snapshot, in: response.agents
                     )
@@ -1645,7 +1646,15 @@ final class LiveAppModel {
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
-        let members = conversationMembers.map { member in
+        // Room-list publications carry fresh SDK member profiles too. A newer
+        // member record (including a removed avatar) replaces the open-time one.
+        let profiles = matrixRoom.memberProfiles.isEmpty ? conversationMembers : matrixRoom.memberProfiles
+        let members = profiles.sorted { left, right in
+            if (left.userID == ownUserID) != (right.userID == ownUserID) { return left.userID == ownUserID }
+            let order = left.displayName.compare(right.displayName, options: [.caseInsensitive, .diacriticInsensitive],
+                                                 locale: Locale(identifier: appLanguage))
+            return order == .orderedSame ? left.userID < right.userID : order == .orderedAscending
+        }.map { member in
             ChatInfoMember(userID: member.userID, name: member.displayName,
                            matrixAvatarURI: member.avatarURL,
                            isAssistant: knownAssistants.contains(member.userID),
@@ -1893,6 +1902,7 @@ final class LiveAppModel {
         guard domainClient === client else { return .retired }
         if let response = try? await client.agents(), domainClient === client {
             agentsRead.receive(response)
+            refreshConversationIdentity()
         }
         // Only the owner's one-to-one chat with it leaves the list; a room
         // with anyone else in it stays, as on desktop.
@@ -3462,7 +3472,6 @@ final class LiveAppModel {
             // The member list in chat info is for personal groups; a company
             // channel's people come from the company roster. Both feed the
             // composer's `@` picker.
-            let listsMembers = info.context.kind == .group && !companyWorkspace.isCompanyChannel(roomID)
             let roster = companyWorkspace.mentionRoster(roomID: roomID)
             conversationMembersTask = Task { @MainActor [weak self, weak session] in
                 guard let self, let session, let members = await session.members(roomID: roomID) else { return }
@@ -3485,7 +3494,9 @@ final class LiveAppModel {
                 guard !Task.isCancelled,
                       self.liveMatrix === session,
                       self.conversation?.roomID == roomID else { return }
-                if listsMembers || info.context.kind == .person { self.conversationMembers = ordered }
+                // Seen faces need the real member profile in assistant/app
+                // chats too, even though those chats have no Members panel.
+                self.conversationMembers = ordered
                 self.conversation?.setMentionCandidates(MentionRules.candidates(
                     members: ordered.map { (userID: $0.userID, displayName: $0.displayName) },
                     roster: roster, ownUserID: ownUserID))
@@ -3536,6 +3547,17 @@ final class LiveAppModel {
                                                                          sentBody: text, sameRoomOpen: true).draft
     }
 
+    /// `/agents` and room membership can arrive after a deep link opened the
+    /// chat. Desktop reprojects when its agent key changes; rebuild our SDK
+    /// mapper as well because old items were mapped before that identity existed.
+    private func refreshConversationIdentity() {
+        guard let conversation, let current = context,
+              let info = conversationInfo(roomID: conversation.roomID, title: conversation.title,
+                                          ownUserID: current.runtime.ticket.session.userID),
+              conversation.updateRoomInfo(info, makeTyping: Self.typingFactory(for: info)) else { return }
+        attachConversation()
+    }
+
     /// The chat's kind and who is who in it (§2.7), from the same tested
     /// policies the roster uses: the owner's agent → my assistant; a catalog
     /// bot → app bot; otherwise a 1:1 person or a group by member count.
@@ -3567,6 +3589,9 @@ final class LiveAppModel {
         } else {
             context = RoomContext(kind: room.memberCount > 2 ? .group : .person, ownUserID: ownUserID)
         }
+        // Desktop knows all account agents even in a shared room. Keep this
+        // separate from the selected private-chat agent and catalog bots.
+        context.knownAgentUserIDs = Set(agentByUser.keys)
         if case .privateCos = companyWorkspace.roomClassification(roomID) { context.isCompanyPrivateCos = true }
         return ConversationRoomInfo(roomID: roomID, title: title, context: context,
                                     knownNames: knownAgentAndBotNames,
@@ -4222,6 +4247,7 @@ final class LiveAppModel {
             self.reconcileRoomMutations(with: rooms, revision: self.roomPublicationRevision)
             self.reconcileFounderBindingFromKnownMarker()
             self.notesSelfRoomsChanged(rooms)
+            self.refreshConversationIdentity()
         }
         matrix.onSessionInvalid = { [weak self, weak matrix] in
             guard let self, let matrix else { return }
@@ -6315,6 +6341,7 @@ final class LiveAppModel {
         apply(agentsResult, to: &agentsRead)
         if case .success = agentsResult { assistantTurnStopUnavailable.removeAll() }
         apply(appsResult, to: &appsRead)
+        refreshConversationIdentity()
         apply(storeCatalogResult, to: &storeCatalogRead)
         apply(walletResult, to: &walletRead)
         if self.domainClient === domainClient, let accountID = context?.runtime.ticket.session.userID {
