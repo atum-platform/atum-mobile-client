@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "approvedDesignCommit": "ab95e8fc16e92878ea1702f8ca20bad9f1075fb2",
-  "sourceSHA256": "2b318831b32b93671919a4af32b9175afd91dd09f6f8bb1fceba3ffd13017593",
+  "sourceSHA256": "1b5fc50a63e71d2095a7b39f2fb9d5382ba4f42747e8dbce0acb30e6f687c602",
   "uiCopy": {
     "home": {
       "key": "desktop.atum.nav.home",
@@ -9178,36 +9178,7 @@
       "body": {
         "literal": ""
       },
-      "rows": [
-        {
-          "label": {
-            "key": "src.matrix.mobile-device-copy.mobileDeviceCopy.walletHistoryRows0Label",
-            "arguments": []
-          },
-          "detail": {
-            "literal": ""
-          },
-          "value": {
-            "literal": "protons:−12"
-          },
-          "route": "",
-          "style": ""
-        },
-        {
-          "label": {
-            "key": "src.matrix.mobile-device-copy.mobileDeviceCopy.walletHistoryRows1Label",
-            "arguments": []
-          },
-          "detail": {
-            "literal": ""
-          },
-          "value": {
-            "literal": "protons:+252"
-          },
-          "route": "",
-          "style": ""
-        }
-      ],
+      "rows": [],
       "inputs": [],
       "actions": [],
       "states": [
@@ -9306,8 +9277,7 @@
             "arguments": []
           },
           "detail": {
-            "key": "src.matrix.mobile-device-copy.mobileDeviceCopy.packLayoutRows0Detail",
-            "arguments": []
+            "literal": ""
           },
           "value": {
             "literal": ""
