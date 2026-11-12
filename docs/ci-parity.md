@@ -134,3 +134,18 @@ fixture UUIDs whose last group is all digits (the zero-padded test UUIDs), so ve
 Tests `test_allowed_uuid_node_of_digits` and `test_denied_bare_account_id` cover both; the reviewed
 blob hashes for the guard and its tests are updated in `scripts/public-boundary.json`. Every other
 identifier class, the gitleaks scan and the path policy are unchanged.
+
+## 2026-11-12: reserved example domains are not personal addresses
+
+The wave 3 desktop copy export (atum-desktop `055bd491`) carries a DM identifier placeholder
+address (local part `you`, domain `example.com`), so the vendored `Localizable.xcstrings` was refused as "new identifier". Addresses
+at RFC 2606 / RFC 6761 reserved names (`example.com`, `example.net`, `example.org`, `*.example`,
+`*.test`, `*.invalid`, `*.localhost`) can't route to a person, so the email class now skips them, like
+role addresses. Subdomains of those names (`mail.example.com`) are reserved too, so they are skipped as
+well. A routable lookalike (`example.com.co`, `myexample.com`, `evil-example.com`) is still refused. `test_denied_personal_email`
+now uses a routable domain; `test_allowed_reserved_example_domain` and
+`test_denied_lookalike_of_reserved_domain` cover the change. Reviewed blob hashes for the guard and
+its tests are updated in `scripts/public-boundary.json`. Every other identifier class, the gitleaks
+scan and the path policy are unchanged. Local note: run the guard tests with
+`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null` when a global hooks
+path blocks commits in the tests' temporary repos.

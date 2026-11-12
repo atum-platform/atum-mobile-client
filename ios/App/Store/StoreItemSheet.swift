@@ -1,6 +1,7 @@
 import AtumChat
 import AtumDesign
 import AtumNativeAPI
+import Combine
 import SwiftUI
 
 /// One Store item (FlowStore-2 / FlowPhone3 › Store item): what it is, its
@@ -8,7 +9,9 @@ import SwiftUI
 /// separate review step before any Protons move. An action appears only when
 /// `LiveStoreCommerce` reports it possible. Short of Protons, the action is the
 /// in-app Proton top-up (Apple IAP only, App Review 3.1.1), which returns here
-/// with Continue (desktop `store-detail.tsx:372-420, 611-614`).
+/// with Continue (desktop `store-detail.tsx:372-420, 611-614`). While Apple
+/// checkout is closed (`StorePurchaseGate`, REL-15) a paid item offers
+/// neither Get nor top-up, only one quiet line; free items and Open stay.
 struct StoreItemSheet: View {
     let design: LiveDesign
     let item: LiveProductStoreItem
@@ -23,6 +26,10 @@ struct StoreItemSheet: View {
     /// Hosted here, not on the short-of-Protons button: the credit turns that
     /// button into Get, which would otherwise dismiss the sheet mid-flow.
     @State private var showsTopUp = false
+    /// Mirrors `ApplePurchaseCoordinator.checkoutOpen`; false until it says
+    /// otherwise and whenever no top-up context is installed (fails closed).
+    @State private var purchasesOpen = false
+    @Environment(\.protonTopUp) private var topUp
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
 
@@ -46,11 +53,18 @@ struct StoreItemSheet: View {
                           onFinished: { Task { await commerce?.refresh() } })
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(commerce?.busy == true)
+        .onReceive(checkoutOpenUpdates) { purchasesOpen = $0 }
         .task {
             // A quote needs this moment's catalog, inventory and wallet.
             guard let commerce, !commerce.busy else { return }
             await commerce.refresh()
         }
+    }
+
+    /// `@Published` replays the current value on subscription.
+    private var checkoutOpenUpdates: AnyPublisher<Bool, Never> {
+        topUp?.purchases.$checkoutOpen.removeDuplicates().eraseToAnyPublisher()
+            ?? Just(false).eraseToAnyPublisher()
     }
 
     // MARK: Detail
@@ -280,6 +294,8 @@ struct StoreItemSheet: View {
         case notForSale
         case blocked(LiveStoreCommerce.ReviewFailure)
         case ready(StoreAcquireQuote)
+        /// A paid item while Apple checkout is closed: no Get, no top-up.
+        case purchasesClosed
 
         var showsPrice: Bool {
             switch self {
@@ -336,8 +352,12 @@ struct StoreItemSheet: View {
         if commerce.busy || commerce.refreshing || !commerce.ready { return .loading }
         if perAssistant && assistant == nil { return .blocked(.noEligibleAssistant) }
         do {
-            return .ready(try commerce.review(itemID: item.id, assistant: assistant))
+            let quote = try commerce.review(itemID: item.id, assistant: assistant)
+            return StorePurchaseGate.allowsSpend(priceMicroProtons: quote.price, checkoutOpen: purchasesOpen)
+                ? .ready(quote) : .purchasesClosed
         } catch let failure as LiveStoreCommerce.ReviewFailure {
+            // Short of Protons means a paid item, whose only way on is a top-up.
+            if failure == .insufficientBalance && !purchasesOpen { return .purchasesClosed }
             return .blocked(failure)
         } catch {
             return .blocked(.unavailable)
@@ -353,7 +373,7 @@ struct StoreItemSheet: View {
         case .info:
             return item.offer == nil && item.install == nil && item.kind != .agent
                 ? .init(key: StoreCopyKey.detailNoOffer, tone: .neutral) : nil
-        case .loading, .ready: return nil
+        case .loading, .ready, .purchasesClosed: return nil
         case .readFailed(let state):
             switch state {
             case .offline: return .init(key: StoreCopyKey.offline, tone: .warning)
@@ -417,6 +437,16 @@ struct StoreItemSheet: View {
             )
         case .unresolved(let attempt):
             return AnyView(checkStatusButton(attempt))
+        case .purchasesClosed:
+            return AnyView(
+                Text(copy(StoreCopyKey.purchasesClosed))
+                    .font(kit.font(.callout))
+                    .foregroundStyle(kit.color(.ink3, scheme: scheme))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: kit.phoneControlHeight(.primary))
+                    .accessibilityIdentifier("store.detail.closed")
+            )
         case .readFailed:
             guard let commerce else { return nil }
             return AnyView(
@@ -506,6 +536,7 @@ private struct StoreReviewView: View {
     /// The changed offer could not be quoted again (for example, it now costs
     /// more than the balance): say why and offer only Close.
     @State private var requoteFailure: LiveStoreCommerce.ReviewFailure?
+    @Environment(\.protonTopUp) private var topUp
     @Environment(\.dismiss) private var pop
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -690,6 +721,9 @@ private struct StoreReviewView: View {
             // Single flight: the engine refuses a second write while busy, and
             // the page shows the first one's outcome.
             guard !commerce.busy, !submitted || outcome == .requote else { return }
+            // The App Store gate, again at the moment Protons would move.
+            guard StorePurchaseGate.allowsSpend(priceMicroProtons: quote.price,
+                                                checkoutOpen: topUp?.purchases.checkoutOpen == true) else { return }
             submitted = true
             requoted = false
             let confirmed = quote

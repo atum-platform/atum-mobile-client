@@ -14,7 +14,14 @@ public enum TransientLines {
     /// are transient too.
     public static let retiredWaitLines: Set<String> = [
         "Waiting for your Mac.", "Đang chờ máy Mac của bạn.", "Macを待っています。", "正在等待你的 Mac。",
-        "Waited for your Mac.", "Đã chờ máy Mac của bạn.", "Macを待ちました。", "已等待你的 Mac。"
+        "Waited for your Mac.", "Đã chờ máy Mac của bạn.", "Macを待ちました。", "已等待你的 Mac。",
+        // Desktop `shared/matrix-status-line-copy.ts` (`waiting`, `waited`):
+        // matched as retired working text, never shown by this rule.
+        "Waiting for you on your Mac.", "Waited for you on your Mac.",
+        "Đang chờ bạn trả lời trên máy Mac.", "Đã chờ bạn trả lời trên máy Mac.",
+        "Macでの応答を待っています。", "Macでの応答を待ちました。",
+        "正在等待你在 Mac 上回复。", "已等待你在 Mac 上回复。",
+        "正在等待你在 Mac 上回覆。", "已等待你在 Mac 上回覆。"
     ]
 
     /// A progress line, or one of the retired fixed wait lines, sent by an

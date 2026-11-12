@@ -19,7 +19,9 @@ import SwiftUI
 }
 
 @MainActor final class ScriptedStoreAPI: StoreCommerceAPI {
-    enum Mode { case acquire, insufficient, uncertain, owned }
+    /// `closed`: the Apple catalogue answers `checkoutOpen: false` and the
+    /// catalogue adds one free item (`pet/mochi`).
+    enum Mode { case acquire, insufficient, uncertain, owned, closed }
 
     static let account = "@synthetic-store:example.invalid"
     static let mai = id("20000000-0000-4000-8000-0000000000a1")
@@ -29,8 +31,9 @@ import SwiftUI
     static let petOffer = "30000000-0000-4000-8000-000000000001"
     static let skillOffer = "30000000-0000-4000-8000-000000000002"
     static let agentOffer = "30000000-0000-4000-8000-000000000003"
+    static let freeOffer = "30000000-0000-4000-8000-000000000004"
 
-    private let mode: Mode
+    let mode: Mode
     private var available: Int64
     private var entitlements = [[String: Any]]()
     private var purchases = [[String: Any]]()
@@ -69,7 +72,7 @@ import SwiftUI
     }
 
     func storeCatalog() async throws -> StoreCatalogResponse {
-        try decode(["items": Self.catalogItems])
+        try decode(["items": Self.catalogItems(for: mode)])
     }
 
     func storeEntitlements() async throws -> StoreEntitlementsResponse {
@@ -112,7 +115,9 @@ import SwiftUI
         if let existing = purchases.first(where: { $0["idempotencyKey"] as? String == key }) {
             return try result(existing, attempt: attempt)
         }
-        let price = attempt.itemID == "pet/gigi" ? Int64(90_000_000) : 24_000_000
+        let offer = Self.catalogItems(for: mode).first { $0["itemId"] as? String == attempt.itemID }?["offer"]
+        let price = Int64(((offer as? [String: Any])?["priceMicroProtons"] as? Int)
+            ?? (attempt.itemID == "pet/gigi" ? 90_000_000 : 24_000_000))
         guard available >= price else { return .refused(.insufficientProtons) }
         available -= price
         let purchase = Self.purchase(id: UUID().uuidString.lowercased(), item: attempt.itemID,
@@ -156,6 +161,20 @@ import SwiftUI
     private static func id(_ value: String) -> NativeID { try! NativeID(value) }
 
     private static func copy(_ vi: String, _ en: String) -> [String: String] { ["vi": vi, "en": en] }
+
+    static func catalogItems(for mode: Mode) -> [[String: Any]] {
+        mode == .closed ? catalogItems + [freeItem] : catalogItems
+    }
+
+    static let freeItem: [String: Any] = [
+        "itemId": "pet/mochi", "kind": "pet", "title": copy("Mochi", "Mochi"),
+        "summary": copy("Một người bạn miễn phí", "A free companion"),
+        "description": copy("Một người bạn miễn phí", "A free companion"),
+        "tryPrompt": copy("Chọn người bạn này.", "Choose this companion."),
+        "needs": ["Atum"], "glyph": "🐾", "accent": "#b5e3c4", "featured": false, "sortOrder": 15,
+        "offer": ["id": freeOffer, "version": 1, "priceMicroProtons": 0, "scope": "account",
+                  "billingInterval": "one_time", "delivery": "bundled"],
+    ]
 
     static let catalogItems: [[String: Any]] = [
         [
@@ -248,7 +267,7 @@ import SwiftUI
     init(store: ScriptedStoreAPI) { self.store = store }
 
     func appleProducts() async throws -> AppleProductsResponse {
-        try decode(["catalogVersion": 1, "environment": "sandbox", "checkoutOpen": true,
+        try decode(["catalogVersion": 1, "environment": "sandbox", "checkoutOpen": store.mode != .closed,
                     "products": Self.packs.keys.sorted().map { id in
                         ["productId": id, "packId": String(id.split(separator: ".").last!),
                          "paidMicroProtons": Self.packs[id]!, "bonusMicroProtons": 0] as [String: Any]
@@ -313,7 +332,7 @@ struct StoreCommerceScriptedHost: View {
 
     private var presentation: LiveProductStoreRead {
         let catalog = (try? StoreWire.decode(StoreCatalogResponse.self, from: JSONSerialization.data(
-            withJSONObject: ["items": ScriptedStoreAPI.catalogItems])).items) ?? []
+            withJSONObject: ["items": ScriptedStoreAPI.catalogItems(for: mode)])).items) ?? []
         let items = catalog.filter(\.isVisibleInStore).map { item in
             LiveProductStoreItem(
                 id: item.itemID,

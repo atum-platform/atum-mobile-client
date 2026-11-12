@@ -53,6 +53,34 @@ per run on 2026-11-11 with six lanes active).
   simulator, waits with `simctl bootstatus -b`, then installs, launches and terminates
   the app once before `test-without-building`. The warm-up launch is best-effort; the
   boot wait is not.
+- 2026-11-12: on PR #43 (`d9c55c2`) shard 3 failed two `HomeChatsWave3UITests` that pass
+  locally on #43 and on main (locked run, iPhone 17, iOS 27):
+  `testSearchFindsAWordThreePagesBackAndCloses` ("the match was not brought into view":
+  the recording shows the match in view, highlighted, a few seconds after the 3 s wait
+  ended) now waits 10 s; `testSearchBarAtAccessibilitySizePassesTheAudit` ("Audit failed to
+  complete in time" at AX XXXL) now makes one more full attempt after a timeout. A finding,
+  or a second timeout, still fails.
+- 2026-11-12: on PR #44 (`22ff66c`) shard 3 failed the same two tests with that hardening in place.
+  The search test's recording shows the match in view and highlighted from ~34 s, yet
+  `firstMatch.isHittable` stayed false for the full 10 s. The test now checks that some element
+  whose label carries the word lies inside the window, and prints the hierarchy if not. A
+  message that was never scrolled to is unloaded or off-window, so the check still fails then.
+  The audit timed out on both attempts. A second timeout now skips the test (`XCTSkip`, with
+  a `MEASURE` line) rather than failing it. A finding still fails, and locked local runs
+  cover the audit. This loosens the hosted check on purpose (owner ruling: make it work first).
+- 2026-11-12: on `78d9de7` the audit passed and the search test failed earlier. The count
+  appeared ~0.2 s after typing, while the match three pages back was not loaded within the
+  5 s existence wait; the failure dump moments later shows it in the window. The separate
+  existence wait is gone, and one 20 s "in view" wait now covers loading and scrolling.
+- 2026-11-12: on `86228cb` shard 2 failed `ChatInfoUITests.testAssistantCardChoosesOneServerDestinationDefault`
+  (it passed on both earlier #44 heads): the model sheet's first row did not appear within 3 s of the
+  tap. In `ChatInfoUITests`, each wait for the sheet's first row after opening it is now 10 s.
+- 2026-11-12: `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses` is
+  **quarantined** (atum-mobile#50). On `86228cb` the CI recording shows the count reaching
+  "1/1" while the transcript stayed at the bottom for the rest of the 20 s wait. The search
+  found the match but never scrolled to it. On the two earlier #44 heads it did scroll, late.
+  That reads as an intermittent app race in scroll-to-result on a slow host, not test timing.
+  It still runs locally. Remove the line when the race is fixed.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
@@ -60,3 +88,14 @@ per run on 2026-11-11 with six lanes active).
 
 Run one class against a branch:
 `gh workflow run ui-tests.yml --ref <branch> -f only="ChatPanelUITests"`
+
+## Local-only failure: `ComposerUITests/testTheModelSheetListsTheAccountSubscriptions` (2026-11-12)
+
+Failed locally ("no Subscriptions section", iOS 27.0 simulator, iPhone 16e and iPhone 17) while hosted
+`macos-26` shards passed it. Cause was in the test, not the app or the environment: it waited for
+`app.navigationBars.firstMatch`, which is the chat's own bar behind the model sheet, then swiped up on it.
+The swipe lands on the dimmed area and dismisses the half sheet (the recording shows the sheet open, then the bare
+chat). The test also never scrolled the sheet, whose list is lazy and opens at the medium detent. The test now waits
+for the sheet's `composer.model.close` button and scrolls inside the sheet until the header exists.
+Which bar `firstMatch` returns differs between the hosted runtime and the local iOS 27.0 runtime; that is the likely
+reason hosted passed, but it was not verified on a hosted runner. After the fix the test passes locally on both devices.
