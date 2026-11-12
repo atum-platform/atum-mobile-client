@@ -27,24 +27,6 @@ PENDING = {
     "src.matrix.model-picker-copy.COPY.taglineEveryday",
     "src.matrix.model-picker-copy.COPY.taglineHard",
     "src.matrix.model-picker-copy.COPY.taglineFlagship",
-    "src.matrix.model-picker-copy.COPY.subscriptions",
-    # Desktop person-info-panel table, held back from the phone export
-    # (docs/ports/shared-collections-ui.md); SharedCollectionsCopy falls back.
-    "src.matrix.person-info-copy.copy.media",
-    "src.matrix.person-info-copy.copy.files",
-    "src.matrix.person-info-copy.copy.links",
-    "src.matrix.person-info-copy.copy.seeAll",
-    "src.matrix.person-info-copy.copy.seeAllMedia",
-    "src.matrix.person-info-copy.copy.seeAllFiles",
-    "src.matrix.person-info-copy.copy.seeAllLinks",
-    "src.matrix.person-info-copy.copy.loadMore",
-    "src.matrix.person-info-copy.copy.noMedia",
-    "src.matrix.person-info-copy.copy.noFiles",
-    "src.matrix.person-info-copy.copy.noLinks",
-    "src.matrix.person-info-copy.copy.noneRecent",
-    # Desktop assistant-card routineCount (a plural); AssistantCardCopy.routineCount
-    # falls back to AssistantRoutinePendingCopy (docs/ports/assistant-card-rows.md).
-    "src.matrix.assistant-card.copy.assistantCardCopies.routineCount",
 }
 
 

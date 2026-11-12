@@ -22,7 +22,7 @@ struct CompanyThreadsCopy {
 
     /// A one-argument phrase ({0} in the pending table, `%1$@` in the export).
     func text(_ key: String, _ argument: String) -> String {
-        if design.copy.contains(key) { return design.text(key, arguments: [.text(argument)]) }
+        if design.copy.contains(key) { return design.text(key, words: [argument]) }
         let table = TeamSpaceThreadsPendingCopy.tables[key]
         return (table?[design.locale] ?? table?["en"] ?? key).replacingOccurrences(of: "{0}", with: argument)
     }

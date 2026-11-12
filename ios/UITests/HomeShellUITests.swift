@@ -180,7 +180,7 @@ final class HomeShellUITests: TranscriptUITestCase {
 
         field.tap()
         field.typeText("zzz")
-        XCTAssertTrue(app.staticTexts["Không tìm thấy cuộc trò chuyện nào"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Không tìm thấy kết quả nào"].waitForExistence(timeout: 2))
         app.buttons.matching(identifier: "home.search.clear").firstMatch.tap()
 
         app.buttons.matching(identifier: "home.search.cancel").firstMatch.tap()
