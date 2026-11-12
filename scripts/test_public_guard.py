@@ -100,7 +100,19 @@ class GuardTests(unittest.TestCase):
         self.check(False)
 
     def test_denied_personal_email(self):
-        self.add_file('README.md', 'person'+'@example.com')
+        self.add_file('README.md', 'person'+'@mail-host.net')
+        self.check(False)
+
+    def test_allowed_reserved_example_domain(self):
+        for address in ['you'+'@example.com', 'person'+'@example.org', 'a'+'@host.example', 'b'+'@x.test']:
+            with self.subTest(address=address):
+                self.git('reset', '--hard', self.root)
+                self.git('clean', '-fdq')
+                self.add_file('Copy.json', '{"placeholder": "' + address + '"}')
+                self.check(True)
+
+    def test_denied_lookalike_of_reserved_domain(self):
+        self.add_file('README.md', 'person'+'@example.com.co')
         self.check(False)
 
     def test_denied_aws_key(self):

@@ -23,6 +23,9 @@ PATTERNS = [r'/Users/[^/\s"\']+', r'/home/[^/\s"\']+/',
             r'\b[\w-]+(?:\.[\w-]+)*\.(?:internal|local|lan)\b']
 ROLE_ADDRESSES = {'engineering', 'security', 'support', 'hello', 'info',
                   'contact', 'privacy', 'legal', 'noreply', 'no-reply', 'help'}
+# RFC 2606 / RFC 6761 reserved names never route to a person (e.g. a
+# placeholder address at example.com in vendored desktop copy).
+RESERVED_DOMAIN = re.compile(r'(?:^|\.)(?:example\.(?:com|net|org)|example|test|invalid|localhost)$')
 
 def git(*args):
     return subprocess.check_output(['git', *args])
@@ -31,7 +34,8 @@ def identifiers(data):
     text = data.decode('utf-8', errors='replace')
     return Counter((i, m.group().lower()) for i, p in enumerate(PATTERNS)
                    for m in re.finditer(p, text, re.IGNORECASE)
-                   if not (i == 7 and m.group().split('@')[0].lower() in ROLE_ADDRESSES))
+                   if not (i == 7 and (m.group().split('@')[0].lower() in ROLE_ADDRESSES
+                                       or RESERVED_DOMAIN.search(m.group().split('@')[1].lower()))))
 
 def tree(ref):
     result = {}
