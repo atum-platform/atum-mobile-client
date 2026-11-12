@@ -1,5 +1,7 @@
 # Working-line parity: desktop → phone
 
+Latest result: see **Final verification and stop record** below. The rendered footer matches the owner reference in both appearances; the full UI gate still has 12 failures.
+
 Audit date: 2026-11-12. Phone baseline: `5018d28b0e2321675760214547f2eaa120db7b01`.
 Desktop source of truth: `b4506a4e78e0faad49f741705bb8dd4bc2124f1f` (`origin/main` in
 `~/projects/atum-desktop`), read with `git show`. Desktop evidence below is relative
@@ -316,3 +318,100 @@ and actual light/dark ground. The existing running/checklist fixture remains cov
 No further changes to GScrollUITests or ScriptedTests; only an isolated new test method
 is added to the shared TranscriptUITests file for this final visual pass. U2's timing
 and all audit tolerances remain unchanged.
+
+
+## Final verification and stop record
+
+Tested source commit: `c06cf465c6147f58e34e4ea08f50534310fb9fb7`, including the
+`origin/main` schema-2 merge `aa75765` (merge commit `5d46ce4`). The final batch
+completed 2026-11-13 at 00:07:57 Asia/Ho_Chi_Minh. Per the owner's cost cap, no
+further fix round or locked run follows; the coordinator owns the next step.
+
+The batch used `TMPDIR=/Volumes/AtumTestFlight/tmp`, the shared `lockf -k` lock,
+`swift test -j 2`, `xcodebuild -jobs 2`, derived data on `/Volumes/AtumTestFlight`,
+one iPhone 17 / iOS 27 simulator, and serial UI tests. Cleanup finished with
+`xcrun simctl shutdown all`; a read-only device listing confirmed no booted simulator.
+The completed xcresult summary was read once after waiting for the command to finish.
+
+| Check / class | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| AtumChat package | 720 | 0 | 0 |
+| App and test-target build | Passed | — | — |
+| AtumMobileTests | 363 | 0 | 0 |
+| ComposerUITests | 10 | 2 | 0 |
+| GScrollUITests | 1 | 1 | 0 |
+| MessageMenuUITests | 8 | 1 | 0 |
+| S1MatrixUITests | 7 | 4 | 0 |
+| TranscriptUITests | 13 | 4 | 0 |
+| TurnStopUITests | 4 | 0 | 0 |
+| UI subtotal | 43 | 12 | 0 |
+| xcresult app + UI total | 406 | 12 | 0 |
+
+The full UI gate is **not green**. No assertions were skipped or weakened.
+The late-agent context/typing regression and the Seen-photo source/PNG-loading
+regressions passed in AtumMobileTests. The shipped Kit mark test passed with schema 2.
+`testReadingFooterMatchesDesktopInLightAndDark` and
+`testWorkingLineAndStepCardUseOneTypingRow` both passed.
+
+### Failure split and interpretation
+
+The pre-existing-on-main classification below is the coordinator's supplied baseline
+classification. This worker did not spend another run re-testing main. New failures
+without that baseline evidence are conservatively left as branch follow-ups, not
+claimed to be pre-existing.
+
+**Pre-existing on main, per coordinator: contrast, Dynamic Type, GScroll A/B.**
+
+| Final result | Interpretation / evidence |
+| --- | --- |
+| S1 `testAnswersQuotesAndReactions`: contrast failure | Existing audit category; `TranscriptUITestSupport.swift:335`. No contrast exception or color restyle was added. |
+| S1 `testBotRoom`: contrast failure | Composer typing/footer assertions passed before the audit finding; same audit boundary at line 335. |
+| S1 `testGroupChat`: contrast failure | Final finding is contrast. The earlier Dynamic Type finding is not reported in the final bundle; this does not prove every audit type completed after the contrast failure. |
+| S1 `testPeopleChat`: contrast failure | Existing audit category; keep its failure rather than suppressing it. |
+| Transcript `testAccessibilityAuditAssistantChat`: contrast failure | Existing audit category; keep the complete finding in xcresult. |
+| GScroll mechanism B: check 4 pagination anchor failure | `GScrollUITests.swift:167`: row movement 7931.33 pt versus 4 pt allowed. It reached this check after the working-line/edit/removal checks. Fold/scroll code was not edited. |
+| GScroll mechanism A: **passed** | Previously failed opening-position check; the final method completed successfully, including working-line check 7. |
+| S1 roster audit: **passed** | Previous contrast finding did not recur in this run. |
+
+**Branch-caused/branch-owned regression bucket requested by the coordinator.**
+
+| Final result | Interpretation / evidence |
+| --- | --- |
+| Four `Đang xử lý` text-ban fixture failures: **fixed, all four methods now pass** | The settled-history generator now emits explicit settled progress markers. S1 assistant/send-then-seen and Transcript U1/reply-at-bottom passed. Neither bans nor runtime transient recognition were broadened. |
+| Transcript U2: **still fails** | `TranscriptUITests.swift:30`: the atomic snapshot found 0 `rowTyping` elements, expected 1. The schema-2 animation behavior did not resolve this check. Cause beyond this observation remains unproven; retain as a branch follow-up. |
+| Transcript U7: **still fails** | `TranscriptUITests.swift:199`: after the keyboard hid, the latest row frame was `(60, 912.67, 322, 84.67)`, below the visible bottom at 750. No fold/scroll fix attempted in this worker's scope. |
+| Composer controls-order test: **new final-run failure; baseline unconfirmed** | `ComposerAndMenuUITests.swift:284`: keyboard did not appear within the assertion's wait after tapping the field. The failure is at keyboard appearance, after the controls-order assertions. This method passed in the previous c1b18e8 run. |
+| Composer U4: **new final-run failure; baseline unconfirmed** | `ComposerAndMenuUITests.swift:361`: did not observe the `Đã xem` receipt label within 15 s. This checks receipt state; the separate avatar-source and image-loading tests passed. This method passed in the previous run. |
+| Message-menu links: **new final-run failure; baseline unconfirmed** | `ComposerAndMenuUITests.swift:720`: no held-link alert within 5 s after tapping the selected link. This method passed in the previous run; no claim of pre-existing-on-main without a baseline. |
+| Transcript U3 other-device message: **new final-run failure; baseline unconfirmed** | `TranscriptUITests.swift:99`: pill existed with generic `Đến tin nhắn mới nhất`, rather than a label containing count `1`. This method passed in the previous run. |
+
+The four newly observed failures are kept in the branch follow-up bucket pending
+coordinator attribution. No causal claim is made from a single changed outcome.
+
+### Rendered comparison
+
+**Yes: the footer visually matches the supplied reference in both light and dark.**
+Both final UI-test PNGs were opened and inspected. They show the single Kit orbit,
+nucleus and electron, with `Đang đọc…` immediately to the right in muted body text;
+the row is left-aligned below the agent's interim reply and above the composer,
+with no bubble, avatar, or timestamp of its own. Reading text is preserved rather
+than replaced by a fixed running phrase. The running/checklist scene also passed.
+This visual result does not turn the remaining U2/U7 and broader UI failures green.
+
+| Desktop reference | Phone light (UI-test capture) | Phone dark (UI-test capture) |
+| --- | --- | --- |
+| the owner desktop screenshot (chat attachment, not in the repo) | `/Volumes/AtumTestFlight/working-line-parity-shots/schema2-reading-light-ui-test.png` | `/Volumes/AtumTestFlight/working-line-parity-shots/schema2-reading-dark-ui-test.png` |
+
+Running phase + step card:
+`/Volumes/AtumTestFlight/working-line-parity-shots/schema2-working-step-card-ui-test.png`.
+The earlier multi-orbit capture is historical evidence only, not the final visual result.
+
+Final evidence:
+- `/Volumes/AtumTestFlight/working-line-parity-final/tests.xcresult`
+- `/Volumes/AtumTestFlight/working-line-parity-final/summary.json`
+- `/Volumes/AtumTestFlight/working-line-parity-final/swift-tests.log`
+- `/Volumes/AtumTestFlight/working-line-parity-final/build.log`
+- `/Volumes/AtumTestFlight/working-line-parity-final/tests.log`
+- `/Volumes/AtumTestFlight/working-line-parity-final/run.sh`
+
+All work remains local on `fix/working-line-parity`; no push, PR or CI was run.
