@@ -208,9 +208,12 @@ Apache-2.0 one, per `NOTICE`) was fetched and read. No AGPL source was opened.
   clip itself follows the real layout.
 - The width for the estimate comes from the key window at body time. After a
   rotation, a row keeps its fold decision until it redraws.
-- XCUITest reports a folded message's accessibility frame at its unclipped height. A
-  UI test that measures a fold must use a neighbouring row (as
-  `TranscriptKeyboardAndFoldUITests` does), not the row's own frame.
+- XCUITest reports a folded message's accessibility frame at its unclipped height (the
+  body keeps its full layout under the clip). The row's layout is the folded height:
+  the time under the bubble and the bottom pin follow the folded bubble (2026-11-12
+  `chat.long` capture: the row's frame was 355–2736 pt while its footer sat at about
+  708 pt, just above the composer). A UI test that measures a fold uses the row's
+  top, a neighbouring row or the toggle's frame, never the row's bottom.
 
 ## Verification
 
@@ -260,3 +263,48 @@ with `-j 2` / `-jobs 2`, on 2026-11-11 and 12. The simulators were iPhone 17
   captures show Lan as the long message's sender; the scenario now uses Quân,
   because the public guard's local-network host pattern matches the Swift name of
   Lan's cast entry. The layout is identical.
+
+### Reader rules (owner feedback, 2026-11-12)
+
+Branch `fix/fold-reader-place` from `5018d28`, iPhone 17 simulator (939B69F8), every
+heavy run under the shared lock with `-j 2` / `-jobs 2`.
+
+- `swift test --filter AtumChatTests`: 704 tests, 0 failures. New or rewritten:
+  `MessageFoldTests` (a message seen growing folds once final; opening one leaves
+  the next live answer folded; a message read below its fold stays open; only the
+  last pass before final counts; the reader's choice persists) and
+  `ScriptedTests.testTheLiveAnswerStreamsAfterMySendAndEndsWithTyping`.
+- `xcodebuild build-for-testing` (Debug, simulator): succeeded.
+- `TranscriptKeyboardAndFoldUITests`, all three tests pass:
+  - `testALiveLongAnswerFoldsOnceFinalAndOpensInPlace`: no toggle while the answer is
+    long and Atum still types; then folded, following, "Xem thêm" above the composer
+    (toggle bottom 684 pt, composer 746 pt). After Show more the body's top stayed at
+    364.0 pt, the toggle moved to 2713 pt, the chat read `detached`, and the jump pill
+    showed.
+  - `testALongAnswerFoldsAndOpens`: the history answer's top and the row above it each
+    moved 1 pt or less on Show more, and the chat stopped following. Show less folds
+    it again.
+  - `testTappingTheTranscriptHidesTheKeyboardAndKeepsTheDraft`.
+- `TranscriptUITests/testU2DotsThenAnswerStayInView` passes; it now measures the
+  folded answer's toggle.
+- `GScrollUITests/testChatLongMechanismA` failed twice on this busy Mac, both times
+  behind its scenario clock. That is environmental as far as the runs show, but it is
+  not proven against the base.
+  - First run: the launch waited 485 s for the app to idle ("App event loop idle
+    notification not received"), so "check 1 at 0 s" ran on the 62 s answer. Its
+    folded row's accessibility frame spans the hidden text (above); the screenshot
+    shows the folded layout pinned at the bottom.
+  - Second run: check 1 passed (0 pt). Check 2 missed its typing window, and check 3's
+    two synthesized drags, about 12 s late, did not move the transcript (screen
+    recording), so it never detached.
+  - In both runs the failing checks come before any row grows, where the new code
+    does nothing. Check 8 was rewritten for the fold (it measures the toggle) but has
+    not run to completion. Re-run it on a quiet machine and compare with `5018d28`
+    before relying on it.
+- Public guard (base checker and policy from `origin/main`): PASS.
+- Screenshots (local only): `/Volumes/AtumTestFlight/fold-reader-place-shots/`,
+  `live-1-growing`, `live-2-folded-before-show-more`, `live-3-after-show-more`,
+  `history-1-folded-before-show-more`, `history-2-after-show-more` and
+  `history-3-show-less`. These are before and after the tap on this branch, not
+  against the old build.
+
