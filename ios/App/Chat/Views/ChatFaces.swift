@@ -42,16 +42,38 @@ struct ChatFace: Equatable {
                         candidates: [])
     }
 
-    /// A reader in a Seen row. An agent keeps the room's photo; a person uses
-    /// their member avatar, and an unknown member falls back to a monogram of
-    /// the display name (never the raw Matrix ID when the profile has one).
-    static func reader(_ userID: String, kind: RoomKind, roomFace: ChatFace?,
+    /// A reader in a Seen row, as desktop's `MatrixSendState` draws one: the
+    /// member's own photo when the member list has them; in a 1:1 chat (my
+    /// assistant's, an app's, a person's) the room's face, which is the
+    /// reader's (desktop: the agent's roster photo); otherwise the profile
+    /// the reader's own messages carry (`ChatReader`: a Team Space channel
+    /// or a member list still loading). The monogram is the last resort, of
+    /// the display name, never of the raw Matrix ID.
+    ///
+    /// Before 2026-11-11 an unknown reader always fell back to a monogram of
+    /// its Matrix ID: the phone loads no member list for assistant, app and
+    /// Team Space chats, so the agent's Seen face was "@" or a bare letter.
+    static func reader(_ reader: ChatReader, kind: RoomKind, roomFace: ChatFace?,
                        members: [String: ChatInfoMember]) -> ChatFace {
-        if let member = members[userID] {
+        if let member = members[reader.userID] {
             return memberFace(member, kind: kind, roomFace: roomFace)
         }
-        return ChatFace(name: userID, kind: .person, matrixAvatarURI: nil, avatar: nil,
-                        sha256: nil, candidates: [])
+        if kind.senderWearsRoomFace, let roomFace {
+            return ChatFace(name: reader.name ?? roomFace.name, kind: roomFace.kind,
+                            matrixAvatarURI: roomFace.matrixAvatarURI ?? reader.avatarURI,
+                            avatar: roomFace.avatar, sha256: roomFace.sha256,
+                            candidates: roomFace.candidates)
+        }
+        return ChatFace(name: readerName(reader), kind: .person, matrixAvatarURI: reader.avatarURI,
+                        avatar: nil, sha256: nil, candidates: [])
+    }
+
+    /// The reader's name for the tap list and the monogram: the member's,
+    /// the profile's, else the Matrix ID's localpart.
+    static func readerName(_ reader: ChatReader, members: [String: ChatInfoMember] = [:]) -> String {
+        if let name = members[reader.userID]?.name, !name.isEmpty { return name }
+        if let name = reader.name, !name.isEmpty { return name }
+        return MatrixPersonName.localpart(reader.userID)
     }
 
     /// A known member's face. Before 2026-11-05 an agent or app member always

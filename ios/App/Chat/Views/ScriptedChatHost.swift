@@ -2,6 +2,7 @@
 import AtumChat
 import AtumNativeAPI
 import SwiftUI
+import UIKit
 
 /// Debug only (plan §2.10): `-AtumScripted <chat scenario>` opens the chat
 /// on a `ScriptedTimelineSource` instead of signing in. The real store, core,
@@ -78,6 +79,43 @@ struct ScriptedChatHost: View {
     }
 
     static let connectionGlyphFlag = "-AtumScriptedConnectionGlyph"
+    /// Gives Atum's room face and the group's members a Matrix photo (a
+    /// generated gradient served by a scripted thumbnail loader), so captures
+    /// show photos where the live chat has them.
+    static let photosFlag = "-AtumScriptedPhotos"
+    private static let showsPhotos = ProcessInfo.processInfo.arguments.contains(photosFlag)
+
+    static func scriptedPhotoURI(_ userID: String) -> String? {
+        guard showsPhotos else { return nil }
+        let local = userID.drop(while: { $0 == "@" }).prefix(while: { $0 != ":" })
+        return "mxc://scripted.invalid/\(local)"
+    }
+
+    private static let photoLoader: ((String, Int) async -> Data?)? = showsPhotos
+        ? { uri, pixelSide in await scriptedPhoto(uri: uri, pixelSide: pixelSide) }
+        : nil
+
+    /// A square two-colour gradient, its hue taken from the URI, as PNG.
+    static func scriptedPhoto(uri: String, pixelSide: Int) async -> Data? {
+        guard showsPhotos, uri.hasPrefix("mxc://scripted.invalid/") else { return nil }
+        let side = CGFloat(max(pixelSide, 8))
+        let hue = CGFloat(uri.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 360 }) / 360
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+            let colors = [UIColor(hue: hue, saturation: 0.55, brightness: 0.95, alpha: 1).cgColor,
+                          UIColor(hue: (hue + 0.12).truncatingRemainder(dividingBy: 1), saturation: 0.8,
+                                  brightness: 0.55, alpha: 1).cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: nil) {
+                context.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: side, y: side),
+                                                     options: [])
+            }
+            UIColor.white.withAlphaComponent(0.85).setFill()
+            context.cgContext.fillEllipse(in: CGRect(x: side * 0.34, y: side * 0.2, width: side * 0.32, height: side * 0.32))
+            context.cgContext.fillEllipse(in: CGRect(x: side * 0.18, y: side * 0.58, width: side * 0.64, height: side * 0.6))
+        }
+        return image.pngData()
+    }
     /// Shows a group chat as a team space channel (flat runs) for captures.
     static let teamChannelFlag = "-AtumScriptedTeamChannel"
     private static let isTeamChannel = ProcessInfo.processInfo.arguments.contains(teamChannelFlag)
@@ -298,7 +336,8 @@ struct ScriptedChatHost: View {
                             ),
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,
-                            mediaAccess: ScriptedMediaAccess.access
+                            mediaAccess: ScriptedMediaAccess.access,
+                            loadMatrixThumbnail: Self.photoLoader
                         )
                     }
                 }
@@ -421,6 +460,7 @@ struct ScriptedChatHost: View {
             kind: kind,
             avatar: scriptedAppBot.map { .photo(url: $0.avatarURL, fallback: $0.name) }
                 ?? Self.avatar(for: script),
+            matrixAvatarURI: script.context.kind == .assistant ? Self.scriptedPhotoURI(ScriptedCast.atum) : nil,
             avatarSHA256: scriptedAppBot?.avatarSHA256,
             accent: scriptedAppBot?.brandAccentColor,
             isPinned: infoPinned,
@@ -479,7 +519,7 @@ struct ScriptedChatHost: View {
                            name: userID == ScriptedCast.me
                                ? "Minh"
                                : script.names[userID] ?? userID,
-                           matrixAvatarURI: nil,
+                           matrixAvatarURI: Self.scriptedPhotoURI(userID),
                            isAssistant: false,
                            isCurrentUser: userID == ScriptedCast.me)
         }

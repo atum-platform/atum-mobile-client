@@ -15,8 +15,8 @@ protocol TypingControlling: AnyObject {
     /// SDK's order (B10). In an agent or bot room an unnamed typer shows as
     /// the room's title, so the agent's dots never wait for a name. Pass them
     /// through
-    /// `TypingNames.presentation(kind:names:)`: agents and bots get the typing
-    /// row, people and groups the line above the composer.
+    /// `TypingNames.presentation(kind:names:)`: my assistant's chat gets the
+    /// working row, every other chat the line above the composer.
     var typingNames: [String] { get }
     /// Called on the main actor after `typingNames` changed.
     var onTypingNamesChange: (@MainActor ([String]) -> Void)? { get set }

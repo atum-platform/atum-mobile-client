@@ -136,7 +136,6 @@
 		91A65384B3D9089D63D913F7 /* SharedCollectionsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BCC89E163B580641A28AFD /* SharedCollectionsUITests.swift */; };
 		EEE98F362626FF0F767499E1 /* AppSidePanelUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF86A9815E78E17BD6BE49AA /* AppSidePanelUITests.swift */; };
 		921B6069E1C8EB254F1FEBF0 /* ConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0FC555340582E84414D171 /* ConversationTests.swift */; };
-		9307BF51515A02F5AB755E84 /* TimeLabelRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B4B772D94436D22F34482A /* TimeLabelRow.swift */; };
 		932350441E74DCDDEF01498B /* TeamSpaceDailyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E12532A687A3AD0B73DE494 /* TeamSpaceDailyTests.swift */; };
 		93832330B2B256E36B524D10 /* AppBotNoticeProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AB21F5CFF8004E21E6065F /* AppBotNoticeProjection.swift */; };
 		93E1B89C89129390C23F9A63 /* TranscriptUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3680C4853A6454B341ABC067 /* TranscriptUITests.swift */; };
@@ -489,7 +488,6 @@
 		A097B829D58A185C0CB1C433 /* DriveScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveScreen.swift; sourceTree = "<group>"; };
 		A2E304229026117B7D508A16 /* QuoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuoteView.swift; sourceTree = "<group>"; };
 		A301DCAB5CF1EE9026EC7F22 /* ComposerDictationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerDictationTests.swift; sourceTree = "<group>"; };
-		A3B4B772D94436D22F34482A /* TimeLabelRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeLabelRow.swift; sourceTree = "<group>"; };
 		A3E14C8E07A5220CD1744589 /* GScrollDynamicTypeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GScrollDynamicTypeUITests.swift; sourceTree = "<group>"; };
 		A4744C01F6EFBF653B13ABC5 /* AttachmentTray.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTray.swift; sourceTree = "<group>"; };
 		A5B880A8993F917C69ACC3FE /* SpeechDictationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechDictationEngine.swift; sourceTree = "<group>"; };
@@ -1158,7 +1156,6 @@
 				4EA192043DCF2945396A080F /* SafariView.swift */,
 				DE20BDFE3B419CA064C3D4A8 /* ScriptedChatHost.swift */,
 				71639C969F81B43074856324 /* SelectTextSheet.swift */,
-				A3B4B772D94436D22F34482A /* TimeLabelRow.swift */,
 				74387C8A27D11F2B1288AD0A /* TimelineStartRow.swift */,
 				A959224C834A607E693ECD47 /* TranscriptView.swift */,
 				BF4FAC48D700C20DC183A8CD /* TypingRow.swift */,
@@ -1661,7 +1658,6 @@
 				11B70B0B1D9D1EEA82825373 /* TeamSpaceCopy.swift in Sources */,
 				E27319D8D48889689C291439 /* TeamSpacePendingCopy.swift in Sources */,
 				D2BC5DFDDD70C97E107A5437 /* TeamSpaceWave3PendingCopy.swift in Sources */,
-				9307BF51515A02F5AB755E84 /* TimeLabelRow.swift in Sources */,
 				C2990FFE0E818136B095EB67 /* TimelineController.swift in Sources */,
 				C2FD7254CCF6633C18FBD49F /* TimelineStartRow.swift in Sources */,
 				DC16172A5CF2A96B274C7064 /* TranscriptView.swift in Sources */,

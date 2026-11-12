@@ -2,8 +2,9 @@ import AtumChat
 import SwiftUI
 
 /// One display row (plan §2.2): picks the row view for the row's kind and
-/// the room's kind (§2.7), and adds the spacing and the centred time label
-/// grouping decided (B16). `Equatable`, so an unchanged row is skipped.
+/// the room's kind (§2.7), and adds the spacing grouping decided (B16; the
+/// run time is in the line under the bubble, TL-4). `Equatable`, so an
+/// unchanged row is skipped.
 ///
 /// The event rows carry WS3's long-press menu (B20–B22, `chatRowMenu`): on
 /// a bubble, the bubble; on an answer, its quote and text.
@@ -19,9 +20,6 @@ struct ChatRowView: View, Equatable {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let time = row.grouping.timeLabel {
-                TimeLabelRow(date: time)
-            }
             content
         }
         .padding(.top, topSpacing)
