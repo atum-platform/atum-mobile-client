@@ -300,3 +300,19 @@ for schema 2; its legacy schema-1 branch did not honor that flag. This is a plau
 contributor to the missed 1.5-second U2 window; do not widen or weaken that assertion
 before checking the corrected asset. Layout keeps the desktop Kit body/ink-2/spacing
 rules already implemented by `AgentWorkingLayout`.
+
+Final-pass preparation keeps production layout unchanged: its atom slot, body font,
+muted ink and normal row spacing already match the desktop structure. The schema-2
+asset supplies the requested single orbit/nucleus. A shipped-resource app test now
+requires that schema instead of accepting either legacy/current data.
+
+Corrected the historical test generator to tag its completed working notices with
+`progress.phase = settled`. This repairs the four copy-ban failures without changing
+the transient recognition rules or removing the bans. Added a `chat.timeline-reading`
+fixture using the same SDK-envelope marker parser and a real interim message followed
+by the live `Đang đọc…` line. One added UI test checks this footer in light and dark,
+including current wording, one synthetic row, no event-based status row, visible frame,
+and actual light/dark ground. The existing running/checklist fixture remains covered.
+No further changes to GScrollUITests or ScriptedTests; only an isolated new test method
+is added to the shared TranscriptUITests file for this final visual pass. U2's timing
+and all audit tolerances remain unchanged.

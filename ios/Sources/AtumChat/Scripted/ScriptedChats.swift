@@ -161,7 +161,9 @@ enum ScriptedChats {
             let question = writer.add(from: context.ownUserID, at: date(), body: random.pick(ScriptedText.questions))
             guard next < last else { break turns }
             if random.next(6) == 0 {
-                writer.add(.notice, from: Cast.atum, at: date(), body: "Đang xử lý…", replyTo: question.eventID)
+                // This generator is settled history, not a live status event.
+                writer.add(.notice, from: Cast.atum, at: date(), body: "Đang xử lý…", replyTo: question.eventID,
+                           progress: ChatProgress(phase: .settled))
                 guard next < last else { break turns }
             }
             let body: String

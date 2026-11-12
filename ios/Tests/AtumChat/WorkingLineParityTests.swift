@@ -196,4 +196,28 @@ final class WorkingLineParityTests: XCTestCase {
         XCTAssertEqual(core.context, ready, "a context refresh cannot cross accounts")
     }
 
+    func testGeneratedHistoricalWorkingNoticesAreExplicitlySettled() throws {
+        let env = ScriptedEnvironment(reference: F.at(100))
+        var checked = 0
+        for scenario in [ScriptedScenario.chatKeyboard, .chatSend, .chatReplyAtBottom, .chatLong] {
+            let script = try XCTUnwrap(ScriptedScenarios.selection(named: scenario.rawValue, environment: env)?.chat)
+            for item in script.initial + script.olderPages.flatMap({ $0 })
+                where item.kind == .notice && item.body == "Đang xử lý…" {
+                checked += 1
+                XCTAssertEqual(item.progress?.phase, .settled, scenario.rawValue)
+            }
+        }
+        XCTAssertGreaterThan(checked, 0)
+    }
+
+    func testReadingActivityRemainsPublisherWordingBesideTheInterimReply() throws {
+        let env = ScriptedEnvironment(reference: F.at(100))
+        let script = try XCTUnwrap(ScriptedScenarios.selection(named: "chat.timeline-reading", environment: env)?.chat)
+        let rows = ScriptedScenarios.rows(script, after: 9, environment: env, options: .s1)
+        XCTAssertEqual(rows.last?.id, Projection.typingRowID)
+        XCTAssertEqual(rows.last?.item.body, "Đang đọc…")
+        XCTAssertTrue(rows.dropLast().last?.item.interim == true)
+        XCTAssertFalse(rows.contains { $0.item.kind == .notice && $0.item.body == "Đang đọc…" })
+    }
+
 }

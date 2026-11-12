@@ -58,13 +58,13 @@ final class KitGlyphTests: XCTestCase {
                             atom.restingAngleDegrees + 180), 0, accuracy: 1e-3)
     }
 
-    /// Older pins (schema 1) still decode, as the three-orbit mark.
-    func testVendoredAtomDecodesWhicheverSchemaIsPinned() throws {
+    /// The shipped resource, not just the schema-2 decoding fixture, must
+    /// match desktop's single-orbit working mark (owner reference, #47).
+    func testVendoredWorkingAtomIsTheDesktopSingleOrbitMark() throws {
         let atom = try XCTUnwrap(AtomGeometry.vendored)
-        switch atom.schema {
-        case .single: XCTAssertEqual(atom.orbits.count, 1)
-        case .legacy: XCTAssertGreaterThan(atom.orbits.count, 1)
-        }
+        XCTAssertEqual(atom.schema, .single)
+        XCTAssertEqual(atom.orbits.count, 1)
+        XCTAssertEqual(atom.nucleusDiameterPercent, 15)
     }
 
     /// Every glyph alias the app draws resolves to a Phosphor custom symbol
