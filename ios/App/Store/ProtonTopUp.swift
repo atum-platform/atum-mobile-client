@@ -294,7 +294,7 @@ struct ProtonTopUpSheet: View {
     // MARK: Balance
 
     private func balanceRow(_ balance: Int64) -> some View {
-        let value = MicroProtonFormat.balance(balance, locale: Locale.current.identifier)
+        let value = ProtonAmountFormat.balance(balance, design: design)
         return StoreValueRow(design: design, label: copy(ProtonTopUpCopyKey.balanceLabel)) {
             HStack(spacing: 3) {
                 ProtonMark(.small)
@@ -354,7 +354,7 @@ struct ProtonTopUpSheet: View {
     }
 
     private func packRow(_ row: AppleProtonPackRow) -> some View {
-        let total = MicroProtonFormat.balance(row.totalMicroProtons, locale: Locale.current.identifier)
+        let total = ProtonAmountFormat.balance(row.totalMicroProtons, design: design)
         let label = copy(ProtonTopUpCopyKey.packLabel, [.text(total), .text(row.displayPrice)])
         let state = purchases.purchaseState(for: row.id)
         let working = state == .purchasing

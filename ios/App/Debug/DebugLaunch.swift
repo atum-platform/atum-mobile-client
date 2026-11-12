@@ -77,6 +77,11 @@ enum S6ScriptedScenario: String, CaseIterable {
     case signOutPlain = "signout.plain"
     case signOutSaveKey = "signout.save-key"
     case accountLegal = "account.legal"
+    /// Settings › Your devices with two other sessions (one unnamed), and
+    /// recovery not set up; the sign-out page is intercepted, never opened.
+    case accountDevices = "account.devices"
+    /// Your devices when the list cannot be read; Try again then loads it.
+    case accountDevicesFailed = "account.devices-failed"
 }
 
 /// The preview host for `-AtumExpiredSessionPreview`: the same S6 welcome

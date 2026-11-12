@@ -175,3 +175,12 @@ Copy keys missing from the pinned export (`atum-design.lock`), all under
 - Still open, not in #38's diff: with those two fixed, both `testAccessibilityAuditAssistantChat` and `ChatKindsUITests.testAccessibilityAuditKinds` stop at a contrast finding on quote-preview text (`QuoteView`, muted on the bubble). `continueAfterFailure = false` had hidden it behind the first finding.
 - Verified locally (iPhone 17 simulator, under the heavy-build lock). Pass: `testSeenFacesAnswerATapOutsideTheDrawnFace`, `ChatKindsUITests.testEveryKindShows`, `ChatKindsUITests.testContextMenuPreventsReadReceiptUntilDismissed`, `ComposerUITests.testU4SendIsInstantLiteralAndKeepsTheKeyboard`. The Seen frame went from 16 x 20 to 44 x 44 pt. The two audits now fail only on the quote contrast above.
 - `ComposerUITests.testTheModelSheetListsTheAccountSubscriptions` fails with "no Subscriptions section" both on this branch and on origin/main d37e008, so the cause is not in #38.
+
+## Main integration (2026-11-12, after #33)
+
+Merged main `88f7085` (#33). The only conflict was the app target's Sources
+phase in `project.pbxproj`: main's Team Space copy files are kept, and
+`TimeLabelRow.swift`, which this branch deletes, is dropped. The project now
+differs from main only by that file's four entries. Checked locally with
+`plutil -lint` and the project-source tests (6/0); the builds and UI shards
+run on hosted CI in this PR's merge turn.

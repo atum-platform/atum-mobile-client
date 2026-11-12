@@ -376,6 +376,9 @@ struct HomeActions {
     var exitRoom: ((String, ChatExitAction) -> Void)?
     /// The signed-in account is the Founder: the Founder chat is kept.
     var viewerIsFounder: Bool
+    /// An app row's "Info": the official app's read-only card (AS-11, desktop
+    /// `RosterAppMenu` → `AppCard`). Nil for a row that is not an app.
+    var appInfo: ((String) -> AppCardPresentation?)?
     /// HC-7: the long-press's Low priority, Rename and Block (desktop
     /// `RosterRoomMenu`). Nil hides each.
     var setLowPriority: ((String, Bool) -> Void)?
@@ -405,9 +408,11 @@ struct HomeActions {
          newAssistant: HomeAssistantActions? = nil,
          founderDraft: FounderDraftActions? = nil,
          exitRoom: ((String, ChatExitAction) -> Void)? = nil,
-         viewerIsFounder: Bool = false) {
+         viewerIsFounder: Bool = false,
+         appInfo: ((String) -> AppCardPresentation?)? = nil) {
         self.exitRoom = exitRoom
         self.viewerIsFounder = viewerIsFounder
+        self.appInfo = appInfo
         self.openRoom = openRoom
         self.joinInvitation = joinInvitation
         self.refresh = refresh
@@ -464,6 +469,8 @@ struct HomeScreen: View {
     @State private var actionFailure = 0
     @State private var pendingDeleteRoomID: String?
     @State private var pendingExit: HomePendingExit?
+    /// The official app card an app row's "Info" opened.
+    @State private var appCard: AppCardPresentation?
     /// HC-7: Rename's alert, Block's confirmation and who is blocked now.
     @State private var renameRequest: ChatRenameRequest?
     @State private var pendingBlock: HomePendingBlock?
@@ -509,6 +516,14 @@ struct HomeScreen: View {
                                }) {
                 startChatPresented = false
             }
+        }
+        .sheet(item: $appCard) { card in
+            AppCardSheet(design: design, card: card, loadMatrixThumbnail: actions.loadMatrixThumbnail,
+                         open: {
+                             appCard = nil
+                             actions.openRoom(card.rowID)
+                         },
+                         close: { appCard = nil })
         }
         .sheet(isPresented: $founderDraftPresented) {
             if let draft = actions.founderDraft {
@@ -893,6 +908,9 @@ struct HomeScreen: View {
                                          },
                                          requestExit: actions.exitRoom == nil ? nil : { roomID, action in
                                              pendingExit = HomePendingExit(roomID: roomID, action: action)
+                                         },
+                                         requestAppInfo: actions.appInfo == nil ? nil : { rowID in
+                                             appCard = actions.appInfo?(rowID)
                                          },
                                          personal: personalMenu(for: row)))
     }
@@ -2397,6 +2415,12 @@ enum HomeRowActionPolicy {
     static func offersShortcutHide(row: HomeRow, hasAction: Bool) -> Bool {
         row.isComingSoon && row.id.hasPrefix("app:") && hasAction
     }
+
+    /// "Info" on an app's row: its chat, or a catalog app not started yet.
+    /// A coming-soon placeholder has no card (desktop `MatrixComingSoonRow`).
+    static func offersAppInfo(row: HomeRow, hasAction: Bool) -> Bool {
+        hasAction && row.kind == .app && !row.isComingSoon && !row.isInvitation
+    }
 }
 
 /// HC-7: a Home row's personal-chat menu items, built by the screen (which
@@ -2427,6 +2451,8 @@ private struct HomeRowActionsModifier: ViewModifier {
     let actions: HomeActions
     let requestDeleteAppRoom: ((String) -> Void)?
     var requestExit: ((String, ChatExitAction) -> Void)? = nil
+    /// "Info" on an app row (desktop `RosterAppMenu`).
+    var requestAppInfo: ((String) -> Void)? = nil
     var personal = HomeRowPersonalMenu()
 
     @Environment(\.colorScheme) private var scheme
@@ -2446,7 +2472,17 @@ private struct HomeRowActionsModifier: ViewModifier {
     private var hasMenuAction: Bool {
         if row.isInvitation { return actions.declineInvitation != nil }
         return actions.setUnread != nil || actions.setPinned != nil || actions.setMuted != nil
-            || offersDelete || exitAction != nil || personal.hasItems
+            || offersDelete || exitAction != nil || offersAppInfo || personal.hasItems
+    }
+    private var offersAppInfo: Bool {
+        HomeRowActionPolicy.offersAppInfo(row: row, hasAction: requestAppInfo != nil)
+    }
+
+    private var appInfoButton: some View {
+        Button { requestAppInfo?(row.id) } label: {
+            Label(design.text(AppCardCopy.menuInfo), image: atum.symbol(.info))
+        }
+        .accessibilityIdentifier("home.row.app-info")
     }
 
     @ViewBuilder func body(content: Content) -> some View {
@@ -2486,6 +2522,14 @@ private struct HomeRowActionsModifier: ViewModifier {
                     "src.matrix.app-copy.matrixAppCopy.hideShortcut"
                 ))) {
                     Task { _ = await setVisibility(appID, false) }
+                }
+        } else if offersAppInfo {
+            // A catalog app with no chat yet keeps its card (desktop wraps its
+            // catalog row in `RosterAppMenu` too); still no room operation.
+            content
+                .contextMenu { appInfoButton }
+                .accessibilityAction(named: Text(design.text(AppCardCopy.menuInfo))) {
+                    requestAppInfo?(row.id)
                 }
         } else {
             // No room exists behind a presentation-only catalog row, so no
@@ -2537,6 +2581,9 @@ private struct HomeRowActionsModifier: ViewModifier {
             }
         let accessibleContent = applyingAccessibilityActions(to: swipeContent)
             .accessibilityActions {
+                if offersAppInfo {
+                    Button(design.text(AppCardCopy.menuInfo)) { requestAppInfo?(row.id) }
+                }
                 if let exitAction, let requestExit {
                     Button(exitTitle(exitAction)) { requestExit(row.roomID, exitAction) }
                 }
@@ -2612,6 +2659,10 @@ private struct HomeRowActionsModifier: ViewModifier {
                 }
             }
         } else {
+            if offersAppInfo {
+                appInfoButton
+                Divider()
+            }
             if let setUnread = actions.setUnread {
                 Button { setUnread(row.roomID, !hasBadge) } label: {
                     Label(design.text(hasBadge ? HomeCopyKey.markRead.rawValue : HomeCopyKey.markUnread.rawValue),

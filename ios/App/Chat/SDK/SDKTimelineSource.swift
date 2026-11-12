@@ -36,11 +36,28 @@ actor SDKTimelineSource: ChatTimelineSource {
         reportUtds: false
     )
 
+    /// TS-6b: one thread of a Team Space room, root first, then its replies.
+    /// The SDK sends from it in the thread (`m.thread` with the reply
+    /// fallback) and reads it with a threaded receipt.
+    static func threadConfiguration(rootEventID: String) -> TimelineConfiguration {
+        TimelineConfiguration(
+            focus: .thread(rootEventId: rootEventID),
+            filter: configuration.filter,
+            internalIdPrefix: nil,
+            dateDividerMode: .daily,
+            trackReadReceipts: .messageLikeEvents,
+            reportUtds: false
+        )
+    }
+
     nonisolated let outputs: AsyncStream<ChatTimelineOutput>
 
     private let roomID: String
     private let room: Room
     private let timeline: Timeline
+    /// Set on a thread's timeline (TS-6b): its reads stay private and never
+    /// move the room's own read marker or unread flag.
+    private let threadRootID: String?
     private let mapper: ItemMapper
     private let outputContinuation: AsyncStream<ChatTimelineOutput>.Continuation
     private let inputs: AsyncStream<SDKTimelineInput>
@@ -66,10 +83,12 @@ actor SDKTimelineSource: ChatTimelineSource {
     /// at once; nothing here waits for history. `aliases`: the previous
     /// timeline's `echoAliases`.
     static func make(room: Room, mapperRoom: ItemMapperRoom, aliases: [String: String],
-                     calendar: Calendar = .current) async throws -> SDKTimelineSource {
-        let timeline = try await room.timelineWithConfiguration(configuration: configuration)
+                     calendar: Calendar = .current, threadRootID: String? = nil) async throws -> SDKTimelineSource {
+        let timeline = try await room.timelineWithConfiguration(
+            configuration: threadRootID.map { threadConfiguration(rootEventID: $0) } ?? configuration)
         return SDKTimelineSource(roomID: mapperRoom.roomID, room: room, timeline: timeline,
-                                 mapper: ItemMapper(room: mapperRoom, aliases: aliases, calendar: calendar))
+                                 mapper: ItemMapper(room: mapperRoom, aliases: aliases, calendar: calendar),
+                                 threadRootID: threadRootID)
     }
 
     /// The room's encryption state for the mapper (rule 10).
@@ -81,11 +100,12 @@ actor SDKTimelineSource: ChatTimelineSource {
         }
     }
 
-    private init(roomID: String, room: Room, timeline: Timeline, mapper: ItemMapper) {
+    private init(roomID: String, room: Room, timeline: Timeline, mapper: ItemMapper, threadRootID: String? = nil) {
         self.roomID = roomID
         self.room = room
         self.timeline = timeline
         self.mapper = mapper
+        self.threadRootID = threadRootID
         (outputs, outputContinuation) = AsyncStream.makeStream(of: ChatTimelineOutput.self)
         (inputs, inputContinuation) = AsyncStream.makeStream(of: SDKTimelineInput.self)
     }
@@ -322,6 +342,14 @@ actor SDKTimelineSource: ChatTimelineSource {
     }
 
     func sendReceipt(_ receipt: ChatReceipt) async throws {
+        if threadRootID != nil {
+            // Desktop `readMatrixThread`: a thread is read privately (clears the
+            // server's unread on every device without telling the room), and the
+            // room's fully-read marker and unread flag belong to the channel.
+            if case .fullyRead = receipt { return }
+            try await timeline.markAsRead(receiptType: .readPrivate)
+            return
+        }
         switch receipt {
         case .readPublic:
             try await timeline.markAsRead(receiptType: .read)

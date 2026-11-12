@@ -320,16 +320,14 @@ struct StoreCommerceScriptedHost: View {
                 kind: item.kind == .pet ? .pet : item.kind == .skill ? .skill : .agent,
                 title: item.title.localized(locale: "vi", fallback: item.itemID),
                 summary: item.summary.localized(locale: "vi"), glyph: item.glyph, featured: item.featured,
-                price: item.offer.map { MicroProtonFormat.string($0.priceMicroProtons, locale: "vi_VN") },
+                price: item.offer.map { ProtonAmountFormat.price($0.priceMicroProtons, design: design) },
                 detailDescription: item.description.localized(locale: "vi"),
                 tryPrompt: item.tryPrompt.localized(locale: "vi"),
                 offer: item.offer, ownership: item.ownership, deliverable: item.deliverable,
                 needs: item.needs, install: item.install)
         }
-        let walletValue = commerce.wallet.map {
-            MicroProtonFormat.balance($0.balances.available, locale: "vi_VN")
-        }
-        return .init(availability: .ready, walletValue: walletValue, items: items, apps: [])
+        return .init(availability: .ready, walletMicroProtons: commerce.wallet?.balances.available,
+                     items: items, apps: [])
     }
 }
 #endif

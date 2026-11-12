@@ -45,6 +45,8 @@ struct ChatScreen: View {
     var appBot: AppBotPresentation? = nil
     var appBotCatalog = AppBotCatalogPresentation.empty
     var onOpenAppBot: @MainActor @Sendable (String) -> Void = { _ in }
+    /// A tapped `#atum-board/…` link: Team space → that company → Board (and card).
+    var onOpenCompanyBoard: @MainActor (CompanyBoardLinkTarget) -> Void = { _ in }
     var onBeginAppBotSetup: @MainActor @Sendable (AppBotPresentation) -> Bool = { _ in false }
     var onOpenAppBotRoute: @MainActor @Sendable (AppBotPresentation, String) -> Bool = { _, _ in false }
     var onOpenAppBotTerms: @MainActor @Sendable (URL) -> Void = { _ in }
@@ -66,6 +68,13 @@ struct ChatScreen: View {
     var conversationActions = ConversationChatActions()
     var dismissPresentationRequest: UInt64 = 0
     var onPresentationChanged: (Bool) -> Void = { _ in }
+    /// TS-6b: this screen shows one thread (its own header, Follow, "Reply").
+    var thread: ChatThreadChrome? = nil
+    /// TS-6b: opens the room's thread panel (nil root: its list). Set on a Team
+    /// Space channel or conversation; never inside a thread (no nested threads).
+    var openThreads: ((String?) -> Void)? = nil
+    /// The thread panel covers this chat, so nothing here is read meanwhile (B13).
+    var threadPanelPresented = false
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
@@ -97,6 +106,7 @@ struct ChatScreen: View {
         let covered = links.presented != nil || links.showsHeld || presenter.covers || infoPresented
             || composerModelPresented
             || appBotPresenter.covers || appOnboardingPresented || mediaPresenter.covers
+            || threadPanelPresented
         let appBotProjection = AppBotNoticeProjectionInput(rows: store.snapshot.rows,
                                                            catalog: appBotCatalog,
                                                            roomID: store.roomID,
@@ -175,13 +185,7 @@ struct ChatScreen: View {
                                     // Read-only is the platform's word: no composer, only the banner.
                                     ConversationReadOnlyBanner(text: banner, design: design)
                                 } else {
-                                    ChatComposer(store: store, design: design, haptics: haptics,
-                                                 modelActions: infoActions.assistantModels,
-                                                 modelDestinations: infoActions.assistantModelDestinations,
-                                                 modelRefreshToken: composerModelRefreshToken,
-                                                 modelPickerPresented: $composerModelPresented,
-                                                 turnStopActions: store.kind == .assistant
-                                                     ? infoActions.assistantTurnStop : nil)
+                                    composer
                                 }
                             }
                         }
@@ -192,7 +196,9 @@ struct ChatScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    if let info, let company = info.company {
+                    if let thread {
+                        ChatThreadTitle(design: design, chrome: thread)
+                    } else if let info, let company = info.company {
                         CompanyChannelTitle(design: design, title: company.channelName, topic: info.topic) {
                             openPanel()
                         }
@@ -221,7 +227,12 @@ struct ChatScreen: View {
                 // HC-6: the chat's search (desktop's header magnifier), in
                 // personal chats. Company and conversation chats keep their
                 // own header (lane 2).
-                if Self.offersSearch(info: info, conversation: conversationChat), !search.isOpen {
+                if let thread {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ChatThreadFollowButton(chrome: thread)
+                    }
+                }
+                if thread == nil, Self.offersSearch(info: info, conversation: conversationChat), !search.isOpen {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { openSearch() } label: {
                             AtumVisualSystem(design: design).barIcon(.search)
@@ -258,7 +269,8 @@ struct ChatScreen: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         CompanyChannelMenu(design: design, info: info,
-                                           setPinned: infoActions.setPinned, setMuted: infoActions.setMuted) {
+                                           setPinned: infoActions.setPinned, setMuted: infoActions.setMuted,
+                                           openThreads: openThreads.map { open in { () -> Void in open(nil) } }) {
                             openPanel()
                         }
                     }
@@ -287,7 +299,8 @@ struct ChatScreen: View {
             .environment(\.chatMediaNamespace, mediaNamespace)
             .environment(\.chatToday, today)
             .environment(\.chatReducesMotion, reduceMotion || ChatMotion.disabledForUITests)
-            .environment(\.chatFlatRuns, info?.company != nil || conversationChat != nil || teamSpaceChat)
+            .environment(\.chatFlatRuns, info?.company != nil || conversationChat != nil || teamSpaceChat
+                         || thread != nil)
             .messageActionSheets(presenter, design: design, actions: actions)
             .sheet(isPresented: $addPeoplePresented) {
                 if let conversation = conversationChat {
@@ -346,6 +359,9 @@ struct ChatScreen: View {
                 appBotPresenter.beginSetup = onBeginAppBotSetup
                 appBotPresenter.openRoute = onOpenAppBotRoute
                 appBotPresenter.openTerms = onOpenAppBotTerms
+                // "Reply in thread" only where the room has threads, and never in one.
+                presenter.openThread = thread == nil
+                    ? openThreads.map { open in { (rootID: String) -> Void in open(rootID) } } : nil
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshToday() }
@@ -363,6 +379,7 @@ struct ChatScreen: View {
                 dismissPresentations()
             }
             .onDisappear { onPresentationChanged(false) }
+            .onAppear { links.openCompanyBoard = onOpenCompanyBoard }
             .fullScreenCover(item: $links.presented) { page in
                 SafariView(url: page.url).ignoresSafeArea()
             }
@@ -379,6 +396,19 @@ struct ChatScreen: View {
             .alert(theme.copy.text(.linkHeld), isPresented: $links.showsHeld) {
                 Button(theme.copy.text(.dismiss), role: .cancel) {}
             }
+    }
+
+    /// The composer, split out of `body` so the type checker stays within its
+    /// time limit (TS-6b's thread placeholder tipped the inline call over).
+    private var composer: some View {
+        let turnStop = store.kind == .assistant ? infoActions.assistantTurnStop : nil
+        return ChatComposer(store: store, design: design, haptics: haptics,
+                            modelActions: infoActions.assistantModels,
+                            modelDestinations: infoActions.assistantModelDestinations,
+                            modelRefreshToken: composerModelRefreshToken,
+                            modelPickerPresented: $composerModelPresented,
+                            turnStopActions: turnStop,
+                            placeholder: thread?.composerPlaceholder)
     }
 
     /// Add people (a new conversation with the larger group; not on a read-only
