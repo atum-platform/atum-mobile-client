@@ -105,7 +105,8 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         for (language, locale) in [("vi", "vi_VN"), ("en", "en_US")] {
             let app = launchStore("store.acquire", language: language, locale: locale)
             XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
-            let balance = element(app, "store.balance")
+            // A button only once the coordinator opens checkout.
+            let balance = app.buttons.matching(identifier: "store.balance").firstMatch
             XCTAssertTrue(balance.waitForExistence(timeout: 8))
             balance.tap()
             XCTAssertTrue(element(app, "topup.sheet").waitForExistence(timeout: 5))
@@ -238,6 +239,83 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         element(app, "store.review.confirm").tap()
         XCTAssertTrue(text(app, Self.delivered).waitForExistence(timeout: 5))
     }
+
+    /// Owner follow-up to REL-15 (13 Nov): with checkout closed the header
+    /// keeps the balance but drops its Proton-pack entry; paid prices stay on
+    /// the rows and the sheet.
+    @MainActor
+    func testClosedCheckoutHidesHeaderTopUpButKeepsBalanceAndPrices() {
+        let app = launchStore("store.closed")
+        XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
+        let balance = element(app, "store.balance")
+        XCTAssertTrue(balance.waitForExistence(timeout: 8), "the balance stays visible")
+        XCTAssertTrue(balance.label.contains("120"), balance.label)
+        let row = element(app, "store.item.pet/gigi")
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.label.contains("90"), "the paid price stays on the row: \(row.label)")
+        // Give the coordinator time to answer, then check it never offered packs.
+        wait(2)
+        XCTAssertFalse(app.buttons.matching(identifier: "store.balance").firstMatch.exists,
+                       "no Proton-pack entry on the header while checkout is closed")
+        keepScreenshot("U-Store-15-header-checkout-closed-\(appearanceTag)-vi", of: app)
+        balance.tap()
+        wait(1)
+        XCTAssertFalse(element(app, "topup.sheet").exists, "the balance opens nothing while closed")
+        assertNoTopUp(app)
+        assertNoEconomicMath(app)
+
+        openItem("pet/gigi", in: app)
+        XCTAssertTrue(element(app, "store.detail.closed").waitForExistence(timeout: 8))
+        XCTAssertTrue(visibleTexts(app).contains { $0.contains("90") }, "the paid price stays on the sheet")
+        keepScreenshot("U-Store-15-sheet-checkout-closed-\(appearanceTag)-vi", of: app)
+    }
+
+    /// Owner follow-up to REL-15 (13 Nov): on a build whose checkout opens,
+    /// the sheet waits neutrally while the coordinator settles (no Get, no
+    /// "not available" line, no header top-up), then offers Get.
+    @MainActor
+    func testSettlingCheckoutWaitsNeutrallyThenOffersGet() {
+        let app = launchStore("store.checkout-slow")
+        openItem("pet/gigi", in: app)
+        let loading = element(app, "store.detail.loading")
+        XCTAssertTrue(loading.waitForExistence(timeout: 5), "a neutral wait while checkout settles")
+        XCTAssertFalse(element(app, "store.detail.acquire").exists, "no Get before the coordinator answers")
+        XCTAssertFalse(element(app, "store.detail.closed").exists, "no closed line on a build that opens")
+        XCTAssertTrue(visibleTexts(app).contains { $0.contains("90") }, "the paid price shows while settling")
+        keepScreenshot("U-Store-16-sheet-checkout-settling-\(appearanceTag)-vi", of: app)
+        assertNoTopUp(app)
+
+        let acquire = element(app, "store.detail.acquire")
+        let deadline = Date().addingTimeInterval(40)
+        var sawClosed = false
+        while !acquire.exists, Date() < deadline {
+            if element(app, "store.detail.closed").exists { sawClosed = true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertFalse(sawClosed, "the closed line flashed before Get")
+        XCTAssertTrue(acquire.exists, "Get once checkout opens")
+        XCTAssertEqual(acquire.label, "Nhận · 90 Proton")
+        keepScreenshot("U-Store-16-sheet-checkout-open-\(appearanceTag)-vi", of: app)
+        element(app, "store.sheet.close").tap()
+        XCTAssertTrue(app.buttons.matching(identifier: "store.balance").firstMatch.waitForExistence(timeout: 5),
+                      "the header's Proton-pack entry once checkout is open")
+    }
+
+    /// Settling, from launch: the header holds the balance without a
+    /// Proton-pack entry until checkout opens.
+    @MainActor
+    func testSettlingCheckoutKeepsHeaderEntryHiddenUntilOpen() {
+        let app = launchStore("store.checkout-slow")
+        XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
+        XCTAssertTrue(element(app, "store.balance").waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.matching(identifier: "store.balance").firstMatch.exists,
+                       "no Proton-pack entry while checkout settles")
+        keepScreenshot("U-Store-16-header-checkout-settling-\(appearanceTag)-vi", of: app)
+        XCTAssertTrue(app.buttons.matching(identifier: "store.balance").firstMatch.waitForExistence(timeout: 40),
+                      "the entry once checkout opens")
+    }
+
+    @MainActor private var appearanceTag: String { XCUIDevice.shared.appearance == .dark ? "dark" : "light" }
 
     /// The item sheet's settled action: Get or the closed line.
     @MainActor

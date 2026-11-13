@@ -47,13 +47,47 @@ In the item sheet (`StoreItemSheet`), mirrored from `checkoutOpen` via
 - the review's Confirm re-checks the gate at the moment Protons would move.
 
 The Store rows only open the item sheet; they have no Get of their own, so no
-row change. The Store header's balance still opens the pack sheet, which shows
-its own existing closed state. No Proton paid/bonus split or rate is shown
-anywhere (owner rule).
+row change. No Proton paid/bonus split or rate is shown anywhere (owner rule).
 
-Known trade-off: on a build with checkout open, a paid item shows the closed
-line for the moment before the coordinator's catalogue load finishes (and
-during a foreground reload), then Get. Fail-closed by design.
+## Follow-up: header entry and the settling state (owner, 2026-11-13)
+
+The owner ruled on three points while Apple checkout is closed:
+
+1. **The header balance drops its Proton-pack entry.** `StoreScreen.balanceChip`
+   is the top-up button only when `StorePurchaseGate.showsTopUpEntry` says so,
+   i.e. once the coordinator reports checkout open. Until then (settling,
+   closed, mismatched, no `\.protonTopUp` context) it is the plain balance: same
+   mark, same whole Protons, same `store.balance` identifier and VoiceOver
+   label, no button and no sheet. It fails closed: the mirror starts at
+   `.settling`.
+2. **Paid prices stay visible.** No change: the rows keep their price, and
+   the item sheet keeps its price rows in the closed and settling phases
+   (`Phase.showsPrice`). Only Get, top-up and the balance row go.
+3. **No "not available" flash on an open build.** The sheet and the header
+   now mirror `StorePurchaseGate.Checkout`, derived from the coordinator's
+   existing `state` and `checkoutOpen` (no coordinator change):
+   - `open`: `checkoutOpen == true`;
+   - `settling`: not open and the state is `idle` (no answer yet) or `loading`;
+   - `closed`: any other state without `checkoutOpen` (`closed`,
+     `unavailable` for a mismatch or a failed load, `sandboxCapExceeded`, …),
+     and wherever no top-up context is installed.
+
+   A paid item whose quote is ready, or which is short of Protons, shows the
+   sheet's existing loading phase while settling (`store.detail.loading`:
+   `AtomWait`, labelled with the existing `desktop.atum.discover.catalogLoading`
+   export, no Get, no closed line), then Get once open or the closed line
+   once closed (`StorePurchaseGate.paidAction`). No new strings.
+
+The spend path is unchanged and still fails closed: Get exists only in the
+`ready` phase, which needs `checkout == .open`; Confirm still re-reads
+`ApplePurchaseCoordinator.checkoutOpen` itself (`allowsSpend`). Free items
+keep Get in every state.
+
+A foreground reload (`load()` sets `loading`) moves an open checkout back to
+settling for its duration: the sheet shows the wait instead of Get, never the
+closed line. A coordinator that stays `idle` (no account or API bound) would
+keep the wait; in the app the Store is reached only signed in, where
+`LiveAppModel` binds the coordinator, so this is not expected to show.
 
 ## Tests
 
@@ -64,6 +98,14 @@ during a foreground reload), then Get. Fail-closed by design.
   `testClosedCheckoutKeepsFreeItemGettable` over `store.closed`.
 - Coordinator closed/unavailable → `checkoutOpen == false` is already covered in
   `Tests/ApplePurchaseCoordinatorTests`.
+- Follow-up (2026-11-13): `AppTests/StoreCommercePresentationTests.testCheckoutSettlingShowsNeitherGetNorClosedLine`
+  (state → `Checkout`, `paidAction`, `showsTopUpEntry`, free spend unchanged);
+  `UITests/StoreCommerceUITests.testClosedCheckoutHidesHeaderTopUpButKeepsBalanceAndPrices`
+  over `store.closed`, and `testSettlingCheckoutWaitsNeutrallyThenOffersGet` and
+  `testSettlingCheckoutKeepsHeaderEntryHiddenUntilOpen` over the new scripted
+  scenario `store.checkout-slow` (`acquire`, but the synthetic Apple catalogue
+  answers open after 20 s, long enough for the test to open an item first). `testStoreBalanceOpensThePackSheet` now waits for the
+  balance *button*, which appears once checkout opens.
 
 ## Verification
 

@@ -94,6 +94,40 @@ final class StoreCommercePresentationTests: XCTestCase {
                        "Purchases are not available yet")
     }
 
+    /// REL-15 follow-up (owner, 13 Nov): settling is told apart from closed
+    /// for what the Store shows; only an open checkout shows Get or the
+    /// header's top-up entry, and spending still reads `checkoutOpen` alone.
+    func testCheckoutSettlingShowsNeitherGetNorClosedLine() {
+        typealias Gate = StorePurchaseGate
+        // Before the coordinator's first answer and while it loads: settling.
+        XCTAssertEqual(Gate.Checkout(state: .idle, checkoutOpen: false), .settling)
+        XCTAssertEqual(Gate.Checkout(state: .loading, checkoutOpen: false), .settling)
+        // Its answers without an open checkout: closed.
+        for state: ApplePurchaseCoordinator.State in [.closed, .unavailable, .sandboxCapExceeded,
+                                                     .cancelled, .needsSupport("x")] {
+            XCTAssertEqual(Gate.Checkout(state: state, checkoutOpen: false), .closed, "\(state)")
+        }
+        // Open whenever the coordinator says so, whatever the pack state.
+        for state: ApplePurchaseCoordinator.State in [.ready, .purchasing, .pending, .succeeded, .loading] {
+            XCTAssertEqual(Gate.Checkout(state: state, checkoutOpen: true), .open, "\(state)")
+        }
+
+        // A paid item: the wait (no Get, no closed line) while settling, the
+        // closed line once closed, the sheet's own Get rules once open.
+        XCTAssertEqual(Gate.paidAction(.settling), .wait)
+        XCTAssertEqual(Gate.paidAction(.closed), .closed)
+        XCTAssertNil(Gate.paidAction(.open))
+
+        // The header's Proton-pack entry: hidden until open (fails closed).
+        XCTAssertFalse(Gate.showsTopUpEntry(.settling))
+        XCTAssertFalse(Gate.showsTopUpEntry(.closed))
+        XCTAssertTrue(Gate.showsTopUpEntry(.open))
+
+        // Spending is unchanged: free always, paid only with checkout open.
+        XCTAssertTrue(Gate.allowsSpend(priceMicroProtons: 0, checkoutOpen: false))
+        XCTAssertFalse(Gate.allowsSpend(priceMicroProtons: 90_000_000, checkoutOpen: false))
+    }
+
     func testStoreTimestampsParseWithMicroseconds() throws {
         let data = Data(#"["2026-10-04T08:00:00.123456+00:00"]"#.utf8)
         let value = try JSONDecoder().decode([NativeTimestamp].self, from: data)[0]

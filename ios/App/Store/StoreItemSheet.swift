@@ -1,7 +1,6 @@
 import AtumChat
 import AtumDesign
 import AtumNativeAPI
-import Combine
 import SwiftUI
 
 /// One Store item (FlowStore-2 / FlowPhone3 › Store item): what it is, its
@@ -26,9 +25,11 @@ struct StoreItemSheet: View {
     /// Hosted here, not on the short-of-Protons button: the credit turns that
     /// button into Get, which would otherwise dismiss the sheet mid-flow.
     @State private var showsTopUp = false
-    /// Mirrors `ApplePurchaseCoordinator.checkoutOpen`; false until it says
-    /// otherwise and whenever no top-up context is installed (fails closed).
-    @State private var purchasesOpen = false
+    /// Mirrors the coordinator (`StorePurchaseGate.Checkout`): settling until
+    /// it answers, closed whenever no top-up context is installed. Only
+    /// `.open` shows a paid Get, and Confirm re-reads `checkoutOpen` itself.
+    @State private var checkout: StorePurchaseGate.Checkout = .settling
+    private var purchasesOpen: Bool { checkout == .open }
     @Environment(\.protonTopUp) private var topUp
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
@@ -53,18 +54,12 @@ struct StoreItemSheet: View {
                           onFinished: { Task { await commerce?.refresh() } })
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(commerce?.busy == true)
-        .onReceive(checkoutOpenUpdates) { purchasesOpen = $0 }
+        .onReceive(StorePurchaseGate.checkoutUpdates(topUp)) { checkout = $0 }
         .task {
             // A quote needs this moment's catalog, inventory and wallet.
             guard let commerce, !commerce.busy else { return }
             await commerce.refresh()
         }
-    }
-
-    /// `@Published` replays the current value on subscription.
-    private var checkoutOpenUpdates: AnyPublisher<Bool, Never> {
-        topUp?.purchases.$checkoutOpen.removeDuplicates().eraseToAnyPublisher()
-            ?? Just(false).eraseToAnyPublisher()
     }
 
     // MARK: Detail
@@ -353,15 +348,24 @@ struct StoreItemSheet: View {
         if perAssistant && assistant == nil { return .blocked(.noEligibleAssistant) }
         do {
             let quote = try commerce.review(itemID: item.id, assistant: assistant)
-            return StorePurchaseGate.allowsSpend(priceMicroProtons: quote.price, checkoutOpen: purchasesOpen)
-                ? .ready(quote) : .purchasesClosed
+            if StorePurchaseGate.allowsSpend(priceMicroProtons: quote.price, checkoutOpen: purchasesOpen) {
+                return .ready(quote)
+            }
+            return closedPhase
         } catch let failure as LiveStoreCommerce.ReviewFailure {
             // Short of Protons means a paid item, whose only way on is a top-up.
-            if failure == .insufficientBalance && !purchasesOpen { return .purchasesClosed }
+            if failure == .insufficientBalance && !purchasesOpen { return closedPhase }
             return .blocked(failure)
         } catch {
             return .blocked(.unavailable)
         }
+    }
+
+    /// A paid item while checkout isn't open: the neutral wait until the
+    /// coordinator settles (no "not available" flash on an open build), then
+    /// the closed line. Neither offers Get or top-up.
+    private var closedPhase: Phase {
+        StorePurchaseGate.paidAction(checkout) == .wait ? .loading : .purchasesClosed
     }
 
     private var phaseNotice: StoreNotice? {

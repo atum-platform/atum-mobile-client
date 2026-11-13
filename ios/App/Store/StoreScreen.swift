@@ -26,6 +26,9 @@ struct StoreScreen: View {
     var onShelfShown: (() -> Void)? = nil
 
     @Environment(\.protonTopUp) private var topUp
+    /// Apple checkout, mirrored from the coordinator: the balance opens the
+    /// packs only once it is open (fails closed while settling or closed).
+    @State private var checkout: StorePurchaseGate.Checkout = .settling
     @State private var showsDelayedLoadingMark = false
     @State private var selectedItem: LiveProductStoreItem?
     @State private var showsPurchased = false
@@ -59,6 +62,7 @@ struct StoreScreen: View {
                 ToolbarItem(placement: .topBarTrailing) { balanceChip(value) }
             }
         }
+        .onReceive(StorePurchaseGate.checkoutUpdates(topUp)) { checkout = $0 }
         .sheet(item: $selectedItem) { item in
             StoreItemSheet(design: design, item: item, commerce: commerce,
                            openRoom: onOpenRoom)
@@ -209,7 +213,8 @@ struct StoreScreen: View {
     }
 
     /// The mark stands for the word, as a currency sign does; VoiceOver
-    /// reads "N Protons". With a top-up context it is the top-up button.
+    /// reads "N Protons". With a top-up context and Apple checkout open it is
+    /// the top-up button; otherwise only the balance (REL-15 follow-up).
     @ViewBuilder private func balanceChip(_ value: String) -> some View {
         let label = HStack(spacing: 3) {
             ProtonMark(.small)
@@ -218,7 +223,7 @@ struct StoreScreen: View {
         .font(.subheadline.weight(.semibold))
         .lineLimit(1)
         .padding(.horizontal, 6)
-        if topUp != nil {
+        if topUp != nil, StorePurchaseGate.showsTopUpEntry(checkout) {
             ProtonTopUpEntry(design: design) { present in
                 Button(action: present) { label }
                     .accessibilityLabel(copy(StoreCopyKey.protons, [.text(value)]))

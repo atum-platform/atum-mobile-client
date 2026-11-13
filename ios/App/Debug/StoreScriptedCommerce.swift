@@ -20,8 +20,11 @@ import SwiftUI
 
 @MainActor final class ScriptedStoreAPI: StoreCommerceAPI {
     /// `closed`: the Apple catalogue answers `checkoutOpen: false` and the
-    /// catalogue adds one free item (`pet/mochi`).
-    enum Mode { case acquire, insufficient, uncertain, owned, closed }
+    /// catalogue adds one free item (`pet/mochi`). `slowCheckout`: `acquire`,
+    /// but the Apple catalogue answers (open) only after
+    /// `ScriptedApplePurchasesAPI.slowCheckoutDelay`, so the Store shows the
+    /// coordinator still settling.
+    enum Mode { case acquire, insufficient, uncertain, owned, closed, slowCheckout }
 
     static let account = "@synthetic-store:example.invalid"
     static let mai = id("20000000-0000-4000-8000-0000000000a1")
@@ -266,8 +269,11 @@ import SwiftUI
     let store: ScriptedStoreAPI
     init(store: ScriptedStoreAPI) { self.store = store }
 
+    static let slowCheckoutDelay: Duration = .seconds(20)
+
     func appleProducts() async throws -> AppleProductsResponse {
-        try decode(["catalogVersion": 1, "environment": "sandbox", "checkoutOpen": store.mode != .closed,
+        if store.mode == .slowCheckout { try await Task.sleep(for: Self.slowCheckoutDelay) }
+        return try decode(["catalogVersion": 1, "environment": "sandbox", "checkoutOpen": store.mode != .closed,
                     "products": Self.packs.keys.sorted().map { id in
                         ["productId": id, "packId": String(id.split(separator: ".").last!),
                          "paidMicroProtons": Self.packs[id]!, "bonusMicroProtons": 0] as [String: Any]
