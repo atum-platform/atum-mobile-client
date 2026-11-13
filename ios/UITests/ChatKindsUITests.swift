@@ -89,6 +89,107 @@ final class ChatKindsUITests: TranscriptUITestCase {
         assertNoBannedWords(app)
     }
 
+    /// Quote ink (owner, 13 Nov; `docs/ports/quote-contrast.md`): a quote in
+    /// someone else's bubble (Lan's reply to me) and one in my own bubble (my
+    /// reply to Lan) are drawn at WCAG AA (4.5:1) against their bubble, in
+    /// whichever appearance the simulator is in (the local run does light,
+    /// then dark). Measured from the screenshot: Xcode 27's contrast audit
+    /// flags this footnote text even in the darkest exported ink, and flags
+    /// plain body text and names in the same pass, so it can't judge it.
+    @MainActor
+    func testQuotesInBothBubblesMeetContrast() throws {
+        let app = launchChat(ScriptedScenarios.chatKinds)
+        let target = labelled(app, "Ok, 12 giờ.").firstMatch
+        XCTAssertTrue(target.waitForExistence(timeout: 5), "Lan's reply is missing")
+        let reply = app.buttons.matching(NSPredicate(format: "label == %@", "Trả lời")).firstMatch
+        for _ in 0..<3 where !reply.exists {
+            target.press(forDuration: 1.2)
+            _ = reply.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(reply.exists, "the message menu did not open")
+        reply.tap()
+        XCTAssertTrue(element(app, "composer.reply").waitForExistence(timeout: 5), "the reply chip shows")
+        let field = element(app, AccessibilityID.composerField)
+        // Focus can lag the chip: tap the field (harmless when focused) first.
+        field.tap()
+        _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
+        field.typeText("Ok, mình đặt bàn.")
+        element(app, AccessibilityID.composerSend).tap()
+        let mine = latest(app).descendants(matching: .any)["quote"].firstMatch
+        XCTAssertTrue(mine.waitForExistence(timeout: 5), "my reply shows its quote")
+        // Hide the keyboard as a person does: a slow drag from above the pill
+        // into the keyboard (`.scrollDismissesKeyboard(.interactively)`).
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.exists {
+            let window = app.windows.firstMatch
+            let origin = window.coordinate(withNormalizedOffset: .zero)
+            let from = origin.withOffset(CGVector(dx: window.frame.midX,
+                                                  dy: element(app, "composer.pill").frame.minY - 10))
+            let to = origin.withOffset(CGVector(dx: window.frame.midX, dy: keyboard.frame.midY + 40))
+            from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0)
+            XCTAssertTrue(waitFor(3) { !app.keyboards.firstMatch.exists }, "the keyboard did not hide")
+        }
+        wait(1)
+        // The drag can scroll the transcript up: back to the newest rows.
+        for _ in 0..<4 where !(mine.exists && mine.isHittable) {
+            transcript(app).swipeUp(velocity: .slow)
+            wait(0.5)
+        }
+        let theirs = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ AND label CONTAINS %@", "quote", "hẹn 12 giờ")).firstMatch
+        XCTAssertTrue(theirs.exists, "Lan's reply shows its quote")
+        XCTAssertTrue(mine.isHittable && theirs.isHittable, "both quotes are on screen")
+        let tag = XCUIDevice.shared.appearance == .dark ? "dark" : "light"
+        let screenshot = app.screenshot()
+        keepScreenshot("quote-bubbles-\(tag)", of: app)
+        for (name, quote) in [("mine", mine), ("theirs", theirs)] {
+            // Right of the 2 pt rule and its 8 pt gap: the name and the words.
+            let frame = quote.frame
+            guard frame.width > 10, frame.height > 0, frame.minY >= 0 else {
+                XCTFail("\(name) quote has no visible frame: \(frame)"); continue
+            }
+            let text = CGRect(x: frame.minX + 10, y: frame.minY, width: frame.width - 10, height: frame.height)
+            let ratio = Self.inkContrast(screenshot, in: text)
+            record("quote.contrast.\(name).\(tag)", String(format: "%.2f", ratio))
+            XCTAssertGreaterThanOrEqual(ratio, 4.5, "\(name) quote ink is below AA in \(tag)")
+        }
+    }
+
+    /// The WCAG contrast between the region's ground (its most common
+    /// colour) and its ink (the pixel furthest from that ground), from a
+    /// screenshot. Glyph cores reach the drawn colour at 3x.
+    @MainActor
+    static func inkContrast(_ screenshot: XCUIScreenshot, in rect: CGRect) -> Double {
+        guard let cg = screenshot.image.cgImage else { return 0 }
+        let scale = CGFloat(cg.width) / screenshot.image.size.width
+        let box = CGRect(x: rect.minX * scale, y: rect.minY * scale,
+                         width: rect.width * scale, height: rect.height * scale).integral
+        guard let crop = cg.cropping(to: box) else { return 0 }
+        let width = crop.width, height = crop.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return 0 }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        func linear(_ value: UInt8) -> Double {
+            let c = Double(value) / 255
+            return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        var counts: [UInt32: Int] = [:]
+        var luminance: [UInt32: Double] = [:]
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            let key = UInt32(pixels[index]) << 16 | UInt32(pixels[index + 1]) << 8 | UInt32(pixels[index + 2])
+            counts[key, default: 0] += 1
+            if luminance[key] == nil {
+                luminance[key] = 0.2126 * linear(pixels[index]) + 0.7152 * linear(pixels[index + 1])
+                    + 0.0722 * linear(pixels[index + 2])
+            }
+        }
+        guard let ground = counts.max(by: { $0.value < $1.value })?.key, let groundL = luminance[ground] else { return 0 }
+        let inkL = luminance.values.max { abs($0 - groundL) < abs($1 - groundL) } ?? groundL
+        return (max(inkL, groundL) + 0.05) / (min(inkL, groundL) + 0.05)
+    }
+
     @MainActor
     func testAccessibilityAuditKinds() throws {
         let app = launchChat(ScriptedScenarios.chatKinds, pinsTextSize: false)
