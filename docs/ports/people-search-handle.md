@@ -46,3 +46,13 @@ this worker does not push, open pull requests, or change CI.
   run `xcrun simctl shutdown all` before releasing the lock.
 - Public outbound preflight: pass for the staged candidate (one candidate commit,
   no leaks or boundary violations).
+
+## Coordinator verification (13 Nov 2026)
+
+- First coordinator run: 5 of the 8 new tests failed with `invalidValue`. The test helper decoded the
+  sample lookup with a plain `JSONDecoder`, but contract types read integers through the raw-JSON
+  `userInfo` that `NativeAPI.decode` supplies. The helper now uses `NativeAPI.decode`, as the other
+  contract tests do. This was a test bug, not an app change.
+- Locked rerun on iPhone 17 simulator: `xcodebuild ... -only-testing:AtumMobileTests test`,
+  **371 executed, 0 failures** (includes the 8 `PeopleHandleSearchTests`).
+

@@ -49,7 +49,9 @@ final class PeopleHandleSearchTests: XCTestCase {
         let json = """
         {"state":"assigned","handle":"fake_person","principal":"00000000-0000-4000-8000-000000000001","kind":"\(kind)","generation":1,"matrixUser":"\(user ?? target)"}
         """
-        return try JSONDecoder().decode(AliasLookupResponse.self, from: Data(json.utf8))
+        // Contract types read integers through the raw-JSON userInfo, so a
+        // plain JSONDecoder throws `invalidValue`: decode as the client does.
+        return try NativeAPI.decode(AliasLookupResponse.self, from: Data(json.utf8))
     }
     func testHitIsFirst() async throws {
         let hit = try assignment()
