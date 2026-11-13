@@ -100,3 +100,23 @@ final class HomeChatsWave2StateTests: XCTestCase {
     }
 
 }
+
+/// Home search's People section (`docs/ports/home-search-people.md`).
+final class HomePeopleSearchPolicyTests: XCTestCase {
+    /// Home search's People (desktop roster global search): two characters
+    /// before asking, and only people with no chat yet, each once.
+    func testHomePeopleSearchAsksFromTwoCharactersAndListsOnlyNewPeople() {
+        XCTAssertNil(HomePeopleSearchPolicy.term("@"))
+        XCTAssertNil(HomePeopleSearchPolicy.term("  a "))
+        XCTAssertEqual(HomePeopleSearchPolicy.term(" @s "), "@s")
+        XCTAssertEqual(HomePeopleSearchPolicy.term("Đỗ"), "Đỗ")
+        let found = [
+            HomeGroupCandidate(id: "@new:atum.test", name: "New", kind: .person, handle: "new"),
+            HomeGroupCandidate(id: "@lan:atum.test", name: "Lan", kind: .person),
+            HomeGroupCandidate(id: "@bot:atum.test", name: "Bot", kind: .assistant),
+            HomeGroupCandidate(id: "@new:atum.test", name: "New", kind: .person),
+        ]
+        XCTAssertEqual(HomePeopleSearchPolicy.shown(found) { $0 == "@lan:atum.test" }.map(\.id),
+                       ["@new:atum.test"])
+    }
+}

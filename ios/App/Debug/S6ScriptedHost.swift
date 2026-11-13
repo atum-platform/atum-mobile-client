@@ -47,6 +47,7 @@ struct S6ScriptedHost: View {
             case .storeUncertain: StoreCommerceScriptedHost(design: design, mode: .uncertain)
             case .storeOwned: StoreCommerceScriptedHost(design: design, mode: .owned)
             case .storeClosed: StoreCommerceScriptedHost(design: design, mode: .closed)
+            case .storeCheckoutSlow: StoreCommerceScriptedHost(design: design, mode: .slowCheckout)
             case .accountDefault, .accountRestore, .recoveryRejected, .recoveryDone,
                  .accountKey, .signOutPlain, .signOutSaveKey, .accountLegal,
                  .accountDevices, .accountDevicesFailed:

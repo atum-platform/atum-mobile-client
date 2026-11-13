@@ -46,6 +46,41 @@ struct HomeGroupCandidate: Identifiable, Equatable, Sendable {
     var handle: String? = nil
 }
 
+/// Exact human alias assignments are additive to the native directory, as on desktop.
+enum HomePeopleSearch {
+    @MainActor static func search(
+        _ query: String, ownUserID: String, excluded: Set<String>,
+        lookup: (NativeHandle) async throws -> AliasLookupResponse?,
+        directory: (String) async -> [HomeGroupCandidate]?
+    ) async -> [HomeGroupCandidate]? {
+        var term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if term.first == "@" { term.removeFirst() }
+        guard term.count >= 2, term.count <= 200 else { return [] }
+        var exact: HomeGroupCandidate?
+        if let handle = HomeAddFriendPolicy.handle(term),
+           let response = try? await lookup(handle),
+           case let .assigned(assignment) = response,
+           assignment.kind == .human, let target = assignment.matrixUser,
+           target.rawValue != ownUserID, !excluded.contains(target.rawValue) {
+            exact = HomeGroupCandidate(id: target.rawValue, name: "@" + assignment.handle.rawValue,
+                                       kind: .person, handle: assignment.handle.rawValue)
+        }
+        let results = await directory(term)
+        guard !Task.isCancelled else { return nil }
+        guard let results else { return exact.map { [$0] } }
+        var people = results.filter { $0.id != ownUserID && !excluded.contains($0.id) }
+        if let exact {
+            if let index = people.firstIndex(where: { $0.id == exact.id }) {
+                people[index].handle = exact.handle
+            } else {
+                people.insert(exact, at: 0)
+                people = Array(people.prefix(30))
+            }
+        }
+        return people
+    }
+}
+
 enum HomeGroupLookupResult: Equatable, Sendable {
     case candidate(HomeGroupCandidate)
     case notFound(String)
@@ -125,6 +160,9 @@ struct HomePeopleDiscoveryActions {
     let search: (String) async -> [HomeGroupCandidate]?
     let open: (String) async -> HomeAddFriendResult
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
+    /// The direct chat already held with a person, if any: Home search's
+    /// People section leaves those people out (desktop `directRoomWith`).
+    var directRoom: ((String) -> String?)? = nil
 }
 
 struct HomeGroupActions {

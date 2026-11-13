@@ -918,7 +918,14 @@ struct AppRoot: View {
             peopleDiscovery: model.canAddFriend ? HomePeopleDiscoveryActions(
                 search: { await model.searchPeople($0) },
                 open: { await model.openPerson($0) },
-                loadMatrixThumbnail: { await model.avatarThumbnail(uri: $0, pixelSide: $1) }
+                loadMatrixThumbnail: { await model.avatarThumbnail(uri: $0, pixelSide: $1) },
+                // Desktop `directRoomWith`: a one-to-one room whose other
+                // member is that person (`memberUserIDs` leaves this account out).
+                directRoom: { userID in
+                    model.liveMatrix?.rooms.first {
+                        $0.isDirect && $0.memberCount <= 2 && $0.memberUserIDs == [userID]
+                    }?.roomID
+                }
             ) : nil,
             newGroup: model.canCreateGroup ? HomeGroupActions(
                 candidates: model.groupCandidates,

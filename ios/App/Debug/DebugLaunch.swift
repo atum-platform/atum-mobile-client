@@ -72,6 +72,9 @@ enum S6ScriptedScenario: String, CaseIterable {
     /// Apple checkout closed (REL-15 gate): paid items offer no Get or
     /// top-up; a free item can still be got.
     case storeClosed = "store.closed"
+    /// Apple checkout opens only after a delay: the Store waits neutrally
+    /// (no Get, no closed line, no top-up entry), then offers Get.
+    case storeCheckoutSlow = "store.checkout-slow"
     case accountDefault = "account.default"
     case accountRestore = "account.restore"
     case recoveryRejected = "recovery.rejected"
