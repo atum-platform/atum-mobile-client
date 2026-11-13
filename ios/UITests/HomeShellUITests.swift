@@ -541,4 +541,129 @@ final class HomeShellUITests: TranscriptUITestCase {
             "hidden !moon-plain:atum.test",
         ])
     }
+
+    // MARK: Home search: People (desktop roster global search)
+
+    @MainActor
+    private func launchPeopleSearch(language: String = "vi", size: String = "UICTContentSizeCategoryL")
+        -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+            + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
+               "-UIPreferredContentSizeCategoryName", size]
+            + probeArguments
+        app.launch()
+        let search = element(app, "home.search")
+        XCTAssertTrue(search.waitForExistence(timeout: 15), boundedHierarchy(app))
+        // A loaded simulator can drop the first tap or be slow to hand the
+        // field the keyboard: tap again until it has focus.
+        var focused = false
+        for _ in 0..<4 where !focused {
+            search.tap()
+            focused = waitFor(8) { (search.value(forKey: "hasKeyboardFocus") as? Bool) == true }
+        }
+        XCTAssertTrue(focused, "the Home search did not take focus")
+        return app
+    }
+
+    @MainActor
+    private func peopleSearches() -> [String] {
+        probeLines("home-actions.txt").map(\.text).filter { $0.hasPrefix("peopleSearch ") }
+    }
+
+    /// The owner's report: an @handle typed into Home's search found nothing.
+    /// Desktop's search lists People found by the directory under the
+    /// roster's own matches' search block; tapping one opens their chat.
+    @MainActor
+    func testHomeSearchFindsAPersonByHandleAndOpensTheirChat() {
+        let app = launchPeopleSearch()
+        let search = element(app, "home.search")
+
+        // One character asks nothing (desktop: two or more).
+        search.typeText("@")
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertEqual(peopleSearches(), [], "a single character searched the directory")
+        XCTAssertFalse(element(app, "home.section.people").exists)
+
+        search.typeText("somehandle")
+        let person = element(app, "home.people.@somehandle:atum.test")
+        XCTAssertTrue(person.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(element(app, "home.section.people").exists)
+        XCTAssertTrue(person.label.contains("Thảo Nguyên") && person.label.contains("@somehandle"),
+                      "row reads \(person.label)")
+        XCTAssertEqual(peopleSearches().last, "peopleSearch @somehandle")
+        XCTAssertFalse(element(app, "home.people.@some-assistant:atum.test").exists,
+                       "an assistant is not a person")
+
+        person.tap()
+        XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
+        XCTAssertTrue(probeLines("home-actions.txt").map(\.text).contains("openPerson @somehandle:atum.test"))
+    }
+
+    @MainActor
+    func testHomeSearchDoesNotListAKnownChatAgainUnderPeople() {
+        let app = launchPeopleSearch()
+        element(app, "home.search").typeText("lan")
+        XCTAssertTrue(waitFor(15) { self.peopleSearches().contains("peopleSearch lan") },
+                      "the directory was not asked")
+        // The answer has landed (Lan, already a chat); only the roster's own row shows.
+        XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
+        XCTAssertFalse(element(app, "home.people.@lan:atum.test").exists, "Lan is listed twice")
+        XCTAssertFalse(element(app, "home.section.people").exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Lan'")).firstMatch.exists)
+    }
+
+    /// Evidence of the People section: light and dark, English and
+    /// Vietnamese, and the largest accessibility size.
+    @MainActor
+    func testHomeSearchPeopleAppearances() {
+        addTeardownBlock { XCUIDevice.shared.appearance = .light }
+        let runs: [(String, XCUIDevice.Appearance, String)] = [
+            ("en", .light, "UICTContentSizeCategoryAccessibilityXXXL"),
+            ("en", .light, "UICTContentSizeCategoryL"),
+            ("en", .dark, "UICTContentSizeCategoryL"),
+            ("vi", .light, "UICTContentSizeCategoryL"),
+            ("vi", .dark, "UICTContentSizeCategoryL"),
+        ]
+        for (language, appearance, size) in runs {
+            XCUIDevice.shared.appearance = appearance
+            let app = showPeople(language: language, size: size)
+            let tag = "\(language)-\(appearance == .dark ? "dark" : "light")-"
+                + (size.hasSuffix("AccessibilityXXXL") ? "ax5" : "l")
+            keepScreenshot("home-search-people-\(tag)", of: app)
+            app.terminate()
+            XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
+        }
+    }
+
+    /// The accessibility audit of the People section at the largest size.
+    @MainActor
+    func testHomeSearchPeopleAccessibilityAudit() throws {
+        let app = showPeople(language: "en", size: "UICTContentSizeCategoryAccessibilityXXXL")
+        try auditIgnoringScrollEdges(app)
+    }
+
+    /// Control for the audit above: the same search header with only a
+    /// roster match (Lan is a chat, so People stays empty).
+    @MainActor
+    func testHomeSearchRosterMatchAccessibilityAuditControl() throws {
+        let app = launchPeopleSearch(language: "en", size: "UICTContentSizeCategoryAccessibilityXXXL")
+        element(app, "home.search").typeText("lan\n")
+        XCTAssertTrue(waitFor(15) { self.peopleSearches().contains("peopleSearch lan") })
+        XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
+        XCTAssertFalse(element(app, "home.section.people").exists)
+        try auditIgnoringScrollEdges(app)
+    }
+
+    @MainActor
+    private func showPeople(language: String, size: String) -> XCUIApplication {
+        let app = launchPeopleSearch(language: language, size: size)
+        // Return ends editing and keeps the query (`HomeSearchField`), so
+        // the audit judges the app, not the system keyboard.
+        element(app, "home.search").typeText("@somehandle\n")
+        let person = element(app, "home.people.@somehandle:atum.test")
+        XCTAssertTrue(person.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(person.isHittable, "the person row is not reachable at \(size)")
+        return app
+    }
 }

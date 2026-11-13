@@ -160,6 +160,9 @@ struct HomePeopleDiscoveryActions {
     let search: (String) async -> [HomeGroupCandidate]?
     let open: (String) async -> HomeAddFriendResult
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
+    /// The direct chat already held with a person, if any: Home search's
+    /// People section leaves those people out (desktop `directRoomWith`).
+    var directRoom: ((String) -> String?)? = nil
 }
 
 struct HomeGroupActions {
