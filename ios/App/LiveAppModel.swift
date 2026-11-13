@@ -1175,21 +1175,18 @@ final class LiveAppModel {
         assistantLifecycleStore = nil
     }
 
+    /// Exact human alias assignments add people even when the native directory
+    /// cannot see them yet, matching desktop's additive public-handle search.
     func searchPeople(_ query: String) async -> [HomeGroupCandidate]? {
-        guard let session = liveMatrix, let results = await session.searchPeople(query),
-              liveMatrix === session, !Task.isCancelled else { return nil }
+        guard let session = liveMatrix,
+              let ownUserID = context?.runtime.ticket.session.userID else { return nil }
+        let client = domainClient
         let nonPeople = Set((agentsRead.value?.agents.compactMap { $0.matrixUser?.rawValue } ?? [])
             + (appsRead.value?.apps.compactMap { $0.bot?.userID.rawValue } ?? []))
-        var people = results.filter { !nonPeople.contains($0.id) }
-        // The phone currently has only exact forward alias lookup. Enrich a
-        // matching SDK result, never bypass directory visibility with an alias hit.
-        if let handle = HomeAddFriendPolicy.handle(query), let client = domainClient,
-           let lookup = try? await client.aliasLookup(handle: handle),
-           case let .assigned(assignment) = lookup,
-           let index = people.firstIndex(where: { $0.id == assignment.matrixUser?.rawValue }) {
-            people[index].handle = assignment.handle.rawValue
-        }
-        guard liveMatrix === session, !Task.isCancelled else { return nil }
+        let people = await HomePeopleSearch.search(query, ownUserID: ownUserID, excluded: nonPeople,
+            lookup: { handle in try await client?.aliasLookup(handle: handle) },
+            directory: { term in await session.searchPeople(term) })
+        guard liveMatrix === session, domainClient === client, !Task.isCancelled else { return nil }
         return people
     }
 
