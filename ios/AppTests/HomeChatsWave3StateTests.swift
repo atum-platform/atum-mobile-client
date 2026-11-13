@@ -83,9 +83,14 @@ final class PeopleHandleSearchTests: XCTestCase {
         XCTAssertEqual(result?.map(\.id), [target])
     }
     func testLeadingAtIsStripped() async {
-        _ = await HomePeopleSearch.search(" @fake_person ", ownUserID: own, excluded: [],
-            lookup: { handle in XCTAssertEqual(handle.rawValue, "fake_person"); return nil },
-            directory: { term in XCTAssertEqual(term, "fake_person"); return [] })
+        var lookups: [String] = []
+        var terms: [String] = []
+        let result = await HomePeopleSearch.search(" @fake_person ", ownUserID: own, excluded: [],
+            lookup: { handle in lookups.append(handle.rawValue); return nil },
+            directory: { term in terms.append(term); return [self.row] })
+        XCTAssertEqual(lookups, ["fake_person"])
+        XCTAssertEqual(terms, ["fake_person"])
+        XCTAssertEqual(result, [row])
     }
     func testOwnUserExcludedFromBothSources() async throws {
         let hit = try assignment(user: own)

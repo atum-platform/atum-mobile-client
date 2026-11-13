@@ -56,3 +56,19 @@ this worker does not push, open pull requests, or change CI.
 - Locked rerun on iPhone 17 simulator: `xcodebuild ... -only-testing:AtumMobileTests test`,
   **371 executed, 0 failures** (includes the 8 `PeopleHandleSearchTests`).
 
+
+## Assembly review (13 Nov, `feat/owner-feedback-1113`)
+
+Cross-family review of the four-lane assembly (OpenCode Go `muse-spark-1.3-contributor`, head
+`145d0f4`): **ship, nothing blocking**. The coordinator folded in two small findings:
+
+- `testLeadingAtIsStripped` asserted only inside the transport closures, so a regression that
+  skipped both transports still passed. It now records the calls and checks the result.
+- `HomePeopleSearchPolicy.term` counted Unicode scalars while `HomePeopleSearch.search` and
+  `LiveMatrixSession.searchPeople` count characters, so a one-character, multi-scalar query (a flag
+  emoji) showed "Searching…" and then nothing. The policy now counts characters too.
+
+Not changed, recorded for later: Confirm is a silent no-op if checkout closes between Get and
+Confirm (fail-closed is correct; a disabled state or notice would be kinder), and
+`testQuotesInBothBubblesMeetContrast` types a live reply, which failed in dark appearance locally
+(see `quote-contrast.md`). Verified on the PR's hosted AppTests (the local build lock was busy).

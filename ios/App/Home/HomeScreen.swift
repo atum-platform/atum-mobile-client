@@ -1120,7 +1120,7 @@ enum HomePeopleSearchPolicy {
     /// short to ask.
     static func term(_ query: String) -> String? {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.unicodeScalars.count >= minimumLength ? text : nil
+        return text.count >= minimumLength ? text : nil
     }
 
     /// Desktop's `globalPeople`: people only (the model already leaves out
