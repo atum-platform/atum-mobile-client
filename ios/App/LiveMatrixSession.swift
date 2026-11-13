@@ -249,11 +249,11 @@ final class LiveMatrixSession {
         } catch { return nil }
     }
 
-    /// Native directory search; SDK owns authentication and transport. No
-    /// alias-service response may insert a person the directory did not return.
+    /// Native directory transport. The app model additively merges exact human
+    /// alias assignments, including people absent from this directory.
     func searchPeople(_ query: String) async -> [HomeGroupCandidate]? {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty, term.count <= 200 else { return [] }
+        guard term.count >= 2, term.count <= 200 else { return [] }
         do {
             try runtime.requireCurrent()
             let result = try await runtime.client.searchUsers(searchTerm: term, limit: 30)
