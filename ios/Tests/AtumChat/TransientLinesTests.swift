@@ -71,7 +71,7 @@ final class TransientLinesTests: XCTestCase {
     }
 
     func testARedactedAgentMessageShowsNothingButAPersonsDoes() {
-        let removed = ChatItem(id: "r", kind: .placeholder(.redacted), sender: F.agent, redactedAsEndedTurn: true)
+        let removed = ChatItem(id: "r", kind: .placeholder(.redacted), sender: F.agent)
         let person = ChatItem(id: "pr", kind: .placeholder(.redacted), sender: F.friend)
         let mine = ChatItem(id: "mr", kind: .placeholder(.redacted), sender: F.me, isOwn: true)
         XCTAssertEqual(ids(TransientLines.visibleItems([removed, person, mine], agents: agents)),
@@ -179,7 +179,7 @@ final class TransientLinesTests: XCTestCase {
     }
 
     func testProjectionRendersNoTombstoneForAnAgentRedaction() {
-        let items = [own(), ChatItem(id: "r", kind: .placeholder(.redacted), sender: F.agent, timestamp: F.at(2), redactedAsEndedTurn: true)]
+        let items = [own(), ChatItem(id: "r", kind: .placeholder(.redacted), sender: F.agent, timestamp: F.at(2))]
         XCTAssertEqual(Projection.rows(items, context: F.assistantRoom(), options: .s1).map(\.id), ["q"])
     }
 

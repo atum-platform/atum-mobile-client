@@ -34,8 +34,11 @@ public enum TransientLines {
     }
 
     /// What the chat shows of `items`, in timeline order:
-    /// - a non-own self-redaction with reason `Turn ended` shows nothing;
-    ///   other redactions retain their deleted placeholder;
+    /// - an agent's redacted message shows nothing, not a "deleted" tombstone
+    ///   (the agent removes only its own working lines and a duplicated
+    ///   interim remark); nor does a line its own sender removed with the
+    ///   reason `Turn ended`, even from a sender this chat does not list as
+    ///   an agent (desktop #42). Other redactions keep their placeholder;
     /// - an agent's working line is hidden once its turn has ended: its marker
     ///   says `settled`, or the same agent posted a later message that is
     ///   neither a working line nor an interim remark (the answer, an outcome
@@ -55,7 +58,6 @@ public enum TransientLines {
                 continue
             }
             if item.isRedacted {
-                kept.append(item)
                 continue
             }
             if isTransientLine(item, agents: agents) {

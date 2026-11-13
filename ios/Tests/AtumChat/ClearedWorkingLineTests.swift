@@ -13,7 +13,10 @@ final class ClearedWorkingLineTests: XCTestCase {
                 let fact = ClearedWorkingLine.matches(json: String(decoding: data, as: UTF8.self), originalSender: sender)
                 XCTAssertEqual(fact, expected)
                 let item = ChatItem(id: "r", kind: .placeholder(.redacted), sender: sender, redactedAsEndedTurn: fact)
-                XCTAssertEqual(TransientLines.visibleItems([item], agents: ["agent"]).isEmpty, expected)
+                // A listed agent's redaction is always hidden; another sender's only on a
+                // self-redaction with the exact reason.
+                XCTAssertEqual(TransientLines.visibleItems([item], agents: ["agent"]).isEmpty,
+                               sender == "agent" || expected)
                 var own = item
                 own.isOwn = true
                 XCTAssertEqual(TransientLines.visibleItems([own], agents: ["agent"]), [own])

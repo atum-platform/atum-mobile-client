@@ -6,7 +6,10 @@ LazyTimelineItemProvider.debugInfo().originalJson. Parse its persisted
 unsigned.redacted_because sender and content.reason: only an original sender's
 exact `Turn ended` redaction sets ChatItem.redactedAsEndedTurn. Hide that
 redacted item for any non-own sender, including cloud agents absent from the
-known-agent list. All other redactions retain their placeholder.
+known-agent list. As on desktop (`matrixHideEndedTransientLines`), any
+redaction by a listed agent still shows nothing, whatever its reason. Other
+redactions (people, unlisted senders without the reason) keep their
+placeholder.
 
 Desktop room-preview.ts previewOf still returns `deleted` for all redactions;
 RowPreview therefore remains unchanged for parity. The phone has no progress
@@ -15,16 +18,14 @@ reason and stays that way. No views or layout changed.
 
 Tests cover cloud and known agents, absent/other reason, another redacter,
 owner visibility, malformed JSON, and the existing projection behavior.
-Verification results are recorded below after the shared build lock clears.
 
-Verification: `git diff --check` passed. The public outbound guard passed
-against a temporary commit object of the staged patch before the final commit.
-Both mandatory locked commands were queued for over ten minutes behind another
-worker's UI run, produced no output, and were cancelled before execution:
+Coordinator fix (13 Nov): the first cut also made a listed agent's redaction
+without the reason show a placeholder, and edited two existing tests to fit.
+Desktop still hides every listed-agent redaction, so that rule and both tests
+are restored; the new test asserts it.
 
-- `swift test --package-path ios --scratch-path <external-volume>/build-cleared-working-line -j 2 --filter AtumChatTests`: 0 executed; pending.
-- `xcodebuild build -jobs 2 -project ios/AtumMobile.xcodeproj -scheme AtumMobile -destination 'generic/platform=iOS Simulator' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO` with external DerivedData and shared SPM cache: pending.
+Verification (coordinator, under the shared build lock, 13 Nov):
+- `swift test --package-path ios -j 2 --filter AtumChatTests`: 726 executed, 0 failures.
+- `xcodebuild build -jobs 2` (AtumMobile, Debug, generic iOS Simulator): BUILD SUCCEEDED.
 
-Coordinator must run both under the mandatory shared lock before integration.
-No live cloud/redaction reload verification was performed. No SDK fork, CI,
-push, PR, SwiftUI, Store, or people-search changes were made.
+Not verified live: a cloud agent's cleared line after a reload on a device.
