@@ -475,6 +475,9 @@ struct HomeScreen: View {
     @State private var renameRequest: ChatRenameRequest?
     @State private var pendingBlock: HomePendingBlock?
     @State private var blockedUserIDs = Set<String>()
+    /// Home search's People section (desktop roster global search).
+    @State private var peopleSearch = HomePeopleSearchState.idle
+    @State private var openingPersonID: String?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -497,7 +500,7 @@ struct HomeScreen: View {
             Group {
                 if presentation.rows.isEmpty {
                     emptyContent
-                } else if filteredRows.isEmpty {
+                } else if filteredRows.isEmpty && !showsPeopleResults {
                     noSearchResults
                 } else {
                     roster
@@ -555,6 +558,7 @@ struct HomeScreen: View {
             guard waitingRow != nil else { return }
             await actions.refresh()
         }
+        .task(id: peopleSearchTerm) { await searchPeople() }
         .onChange(of: scenePhase) { old, new in
             guard old != .active, new == .active, waitingRow != nil else { return }
             Task { await actions.refresh() }
@@ -805,13 +809,17 @@ struct HomeScreen: View {
                             .id(topID)
                     }
 
+                    // Desktop draws the search's People above the roster's
+                    // own matches (`data-matrix-global-search-results`).
+                    peopleResults(isTop: !presentation.showsNotificationPrompt)
                     section(copy(.assistants), id: "assistants", rows: assistantRows, now: clock.date,
-                            isTop: !presentation.showsNotificationPrompt)
+                            isTop: !presentation.showsNotificationPrompt && !showsPeopleResults)
                     // Desktop parity: the roster labels its second block
                     // "Chats" too. Without it apps and people read as more
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
                     section(copy(.chats), id: "chats", rows: chatRows, now: clock.date,
-                            isTop: !presentation.showsNotificationPrompt && assistantRows.isEmpty)
+                            isTop: !presentation.showsNotificationPrompt && !showsPeopleResults
+                                && assistantRows.isEmpty)
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -976,6 +984,112 @@ struct HomeScreen: View {
         }
     }
 
+    // MARK: People (desktop roster global search)
+
+    /// The query the People section asks for: two or more characters, and
+    /// only while people can be found (signed in, Matrix ready).
+    private var peopleSearchTerm: String? {
+        actions.peopleDiscovery == nil ? nil : HomePeopleSearchPolicy.term(query)
+    }
+
+    /// The answer for the query on screen; an older query's never shows.
+    private var currentPeopleSearch: HomePeopleSearchState? {
+        guard let term = peopleSearchTerm, peopleSearch.term == term else { return nil }
+        return peopleSearch
+    }
+
+    /// Desktop's `globalSearching`: from the first keystroke of a long
+    /// enough query until its answer lands, debounce included.
+    private var peopleSearching: Bool {
+        peopleSearchTerm != nil && (currentPeopleSearch?.pending ?? true)
+    }
+
+    private var shownPeople: [HomeGroupCandidate] {
+        guard let current = currentPeopleSearch else { return [] }
+        let directRoom = actions.peopleDiscovery?.directRoom
+        return HomePeopleSearchPolicy.shown(current.people) { directRoom?($0) != nil }
+    }
+
+    /// While searching or showing people, the list stays instead of
+    /// "No results" (desktop: `!externalSearching && totalResultCount === 0`).
+    private var showsPeopleResults: Bool { peopleSearching || !shownPeople.isEmpty }
+
+    private func searchPeople() async {
+        guard let term = peopleSearchTerm, let discovery = actions.peopleDiscovery else {
+            peopleSearch = .idle
+            return
+        }
+        peopleSearch = HomePeopleSearchState(term: term, pending: true)
+        do { try await Task.sleep(for: HomePeopleSearchPolicy.debounce) } catch { return }
+        let found = await discovery.search(term)
+        // A newer query cancelled this one: its late answer is dropped.
+        guard !Task.isCancelled, peopleSearchTerm == term else { return }
+        peopleSearch = HomePeopleSearchState(term: term, pending: false, people: found ?? [])
+    }
+
+    @ViewBuilder private func peopleResults(isTop: Bool) -> some View {
+        if peopleSearching {
+            Text(verbatim: copy(.searching))
+                .font(.footnote)
+                .foregroundStyle(atum.color(.muted, scheme: scheme))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, isTop ? 6 : 12)
+                .accessibilityIdentifier("home.people.searching")
+                .id(isTop ? topID : "home.people.searching")
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+        let people = shownPeople
+        if !people.isEmpty {
+            let headerIsTop = isTop && !peopleSearching
+            Text(verbatim: copy(.people))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(atum.color(.muted, scheme: scheme))
+                .textCase(nil)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, headerIsTop ? 6 : 12)
+                .padding(.bottom, 2)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("home.section.people")
+                .id(headerIsTop ? topID : "home.header.people")
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            ForEach(people) { person in
+                Button { openPerson(person) } label: {
+                    HomeDiscoveryPersonRow(design: design, person: person,
+                                           load: actions.peopleDiscovery?.loadMatrixThumbnail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(openingPersonID != nil)
+                .accessibilityIdentifier("home.people.\(person.id)")
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    /// Desktop `openGlobalPerson`: the direct chat with them, made if it does
+    /// not exist yet, then opened. A failure is the generic error, as there.
+    private func openPerson(_ person: HomeGroupCandidate) {
+        guard let discovery = actions.peopleDiscovery, openingPersonID == nil else { return }
+        openingPersonID = person.id
+        Task { @MainActor in
+            let result = await discovery.open(person.id)
+            openingPersonID = nil
+            if case let .openRoom(roomID) = result {
+                actions.openRoom(roomID)
+            } else {
+                actionFailure &+= 1
+                AccessibilityNotification.Announcement(copy(.errorGeneric)).post()
+            }
+        }
+    }
+
     private var noSearchResults: some View {
         ContentUnavailableView {
             Label(copy(.emptySearch), image: atum.symbol(.search))
@@ -988,6 +1102,47 @@ struct HomeScreen: View {
     private func copy(_ key: HomeCopyKey, _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key.rawValue, arguments: arguments)
     }
+}
+
+/// Home search's People section: desktop's roster global search
+/// (`apps/desktop/src/matrix/roster-global-search.ts`, rendered in
+/// `app.tsx`'s roster). While the Home search holds two or more characters it
+/// asks the people directory once per query, 250 ms after typing stops, and
+/// shows the people found that are not already one of your chats.
+enum HomePeopleSearchPolicy {
+    /// Desktop asks from two characters (`[...text].length < 2`, code points).
+    static let minimumLength = 2
+    /// Desktop's `createMatrixRosterGlobalSearch(bridges, delay = 250)`.
+    static let debounce: Duration = .milliseconds(250)
+
+    /// The trimmed query the directory is asked for, or nil while it is too
+    /// short to ask.
+    static func term(_ query: String) -> String? {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.unicodeScalars.count >= minimumLength ? text : nil
+    }
+
+    /// Desktop's `globalPeople`: people only (the model already leaves out
+    /// this account, its assistants and app bots), and nobody you already
+    /// have a direct chat with (`directRoomWith`). Each identity once.
+    static func shown(_ found: [HomeGroupCandidate],
+                      hasDirectChat: (String) -> Bool) -> [HomeGroupCandidate] {
+        var seen = Set<String>()
+        return found.filter { person in
+            person.kind == .person && !hasDirectChat(person.id) && seen.insert(person.id).inserted
+        }
+    }
+}
+
+/// One query's People answer. `pending` covers the debounce and the request,
+/// like desktop's `status: 'pending'`; a failed request completes empty,
+/// because desktop's global search shows no error row (`.catch(() => [])`).
+struct HomePeopleSearchState: Equatable {
+    var term: String?
+    var pending = false
+    var people: [HomeGroupCandidate] = []
+
+    static let idle = HomePeopleSearchState(term: nil)
 }
 
 enum HomeSearch {
@@ -2786,6 +2941,9 @@ private enum HomeCopyKey: String {
     case startChat = "desktop.atum.roster.startChat"
     case emptySearch = "desktop.atum.roster.emptySearch"
     case emptySearchHint = "desktop.atum.roster.emptySearchHint"
+    /// Home search's People section and its pending line (desktop roster).
+    case people = "desktop.atum.roster.people"
+    case searching = "desktop.atum.roster.searching"
     case loadFailed = "desktop.atum.roster.loadFailed"
     case retry = "src.matrix.chat-copy.copies.retry"
     case offline = "src.matrix.chat-copy.copies.errorOffline"
@@ -2897,9 +3055,14 @@ private struct HomeDiscoveryPersonRow: View {
         HStack(spacing: 12) {
             AtumAvatar(kind: person.kind == .assistant ? .assistant : .person,
                        name: person.name, art: art, size: 36)
+                // Decorative: the name beside it is what is read (the Home
+                // row does the same), and its initial is sized to the face.
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: person.name).foregroundStyle(atum.color(.ink, scheme: scheme)).lineLimit(1)
-                if let handle = person.handle {
+                // Desktop `PersonHandleLine`: never a handle that only
+                // repeats the name above it.
+                if let handle = person.handle, "@" + handle != person.name.trimmingCharacters(in: .whitespaces) {
                     Text(verbatim: "@" + handle).font(.caption).foregroundStyle(atum.color(.muted, scheme: scheme)).lineLimit(1)
                 }
             }
