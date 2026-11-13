@@ -1,4 +1,5 @@
 import AtumNativeAPI
+import Combine
 import Foundation
 
 /// Every visible word on the Store's item, review, Purchased and renewal
@@ -88,6 +89,49 @@ enum StoreCopyKey {
 enum StorePurchaseGate {
     static func allowsSpend(priceMicroProtons: Int64, checkoutOpen: Bool) -> Bool {
         priceMicroProtons <= 0 || checkoutOpen
+    }
+
+    /// Where Apple checkout stands, for what the Store shows (never for what
+    /// it allows: only `checkoutOpen` opens a spend path). `settling` is the
+    /// coordinator before its first answer (idle) or while it loads the
+    /// catalogue, so an open build doesn't flash the closed line first.
+    enum Checkout: Equatable, Sendable {
+        case settling, closed, open
+
+        init(state: ApplePurchaseCoordinator.State, checkoutOpen: Bool) {
+            if checkoutOpen { self = .open; return }
+            switch state {
+            case .idle, .loading: self = .settling
+            default: self = .closed
+            }
+        }
+    }
+
+    /// What stands in a paid item's action place when checkout isn't open:
+    /// nil while open (the sheet's own Get/top-up rules apply), the neutral
+    /// wait while settling, the closed line once the coordinator said no.
+    enum PaidAction: Equatable, Sendable { case wait, closed }
+
+    static func paidAction(_ checkout: Checkout) -> PaidAction? {
+        switch checkout {
+        case .open: nil
+        case .settling: .wait
+        case .closed: .closed
+        }
+    }
+
+    /// The header balance opens the Proton packs only once checkout is open
+    /// (fails closed: hidden while settling or closed). The balance stays.
+    static func showsTopUpEntry(_ checkout: Checkout) -> Bool { checkout == .open }
+
+    /// The coordinator's checkout as it changes; `.closed` where no top-up
+    /// context is installed. `@Published` replays the current values.
+    @MainActor static func checkoutUpdates(_ context: ProtonTopUpContext?) -> AnyPublisher<Checkout, Never> {
+        guard let purchases = context?.purchases else { return Just(.closed).eraseToAnyPublisher() }
+        return purchases.$state.combineLatest(purchases.$checkoutOpen)
+            .map { Checkout(state: $0, checkoutOpen: $1) }
+            .removeDuplicates()
+            .eraseToAnyPublisher()
     }
 }
 

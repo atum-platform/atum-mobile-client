@@ -36,7 +36,8 @@ per run on 2026-11-11 with six lanes active).
   (the thinking level never reaches the scripted save, still under investigation) and
   `ChatKindsUITests/testAccessibilityAuditKinds` ("Dynamic Type font sizes are
   partially unsupported": the known avatar-monogram Dynamic Type debt, wave 2
-  carry-over). Third hosted run (after #28 and #31 merged):
+  carry-over; its quote-preview contrast finding is a size-driven audit
+  false positive, see `docs/ports/quote-contrast.md`). Third hosted run (after #28 and #31 merged):
   `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`
   (Retry state not reached after a failed create, line 349) and
   `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`
