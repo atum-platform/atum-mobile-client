@@ -136,7 +136,9 @@ final class ItemMapper {
             interim: markers.interim,
             progress: markers.progress,
             privateCosGreeting: hiddenPlaintext || kind != .message ? nil
-                : privateCosGreeting(event.content, body: content.body, sender: sender)
+                : privateCosGreeting(event.content, body: content.body, sender: sender),
+            redactedAsEndedTurn: kind == .placeholder(.redacted) && ClearedWorkingLine.matches(
+                json: event.lazyProvider.debugInfo().originalJson, originalSender: sender)
         )
         return MappedItem(item: item, uniqueID: uniqueID,
                           replyDetails: hiddenPlaintext ? nil : replyDetails(event.content),

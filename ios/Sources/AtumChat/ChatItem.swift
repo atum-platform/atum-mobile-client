@@ -117,6 +117,8 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
     /// (agent-turns/1.4 A9). It never ends a working line's turn and is never
     /// the answer for the no-answer line.
     public var interim: Bool
+    /// Original sender removed this event with exactly the reason `Turn ended`.
+    public var redactedAsEndedTurn: Bool = false
     /// The `io.atum.progress` marker on a working-line notice (agent-turns/1.4
     /// A7/A8). Nil for every other row.
     public var progress: ChatProgress?
@@ -142,7 +144,7 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
                 appBotMeta: String? = nil, botAPI: BotAPIMessage? = nil,
                 senderAvatarURI: String? = nil,
                 interim: Bool = false, progress: ChatProgress? = nil,
-                privateCosGreeting: PrivateCosGreeting? = nil) {
+                privateCosGreeting: PrivateCosGreeting? = nil, redactedAsEndedTurn: Bool = false) {
         self.id = id
         self.kind = kind
         self.sender = sender
@@ -164,6 +166,7 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
         self.botAPI = botAPI
         self.senderAvatarURI = senderAvatarURI
         self.interim = interim
+        self.redactedAsEndedTurn = redactedAsEndedTurn
         self.progress = progress
         self.privateCosGreeting = privateCosGreeting
     }
@@ -267,9 +270,7 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
     /// The agent posted an `io.atum.progress` working line (agent-turns/1.4).
     public var isProgressLine: Bool { progress != nil }
 
-    /// SDK redaction. A redacted agent message renders nothing (1.4 A7): the
-    /// agent removes only its own working lines and a duplicated interim
-    /// remark, never a person's message.
+    /// SDK redaction; visibility also depends on the persisted redaction fact.
     public var isRedacted: Bool {
         if case .placeholder(.redacted) = kind { return true }
         return false
