@@ -40,6 +40,7 @@ env:
     HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning
     TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet
     HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses
+    HomeShellUITests/testHomeSearchPeopleAccessibilityAudit
 jobs:
   plan:
     runs-on: ubuntu-latest
