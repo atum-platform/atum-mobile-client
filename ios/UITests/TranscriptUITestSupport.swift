@@ -428,6 +428,15 @@ class TranscriptUITestCase: AtumUITestCase {
             return true
         }
         if issue.auditType == .dynamicType,
+           element?.identifier == "avatar.monogram" {
+            // The decorative initial (hidden from VoiceOver) is drawn to its
+            // face, and the face follows Dynamic Type up to S6's 135% cap
+            // (`AtumAvatar.cappedPointSize`). The person's name beside it
+            // carries the readable text. Home search's People row.
+            print("MEASURE audit.dynamicType ignored decorative avatar monogram \(label) \(frame)")
+            return true
+        }
+        if issue.auditType == .dynamicType,
            element?.identifier == "account.version" {
             // List footers are reported as partially unsupported even though
             // this `.footnote` scales; U-S6-10 captures it fully at AX5.

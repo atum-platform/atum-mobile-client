@@ -98,6 +98,7 @@ struct ScriptedHomeHost: View {
                             UITestProbe.append("addFriend \(handle)", to: "home-actions.txt")
                             return .notFound(handle)
                         },
+                        peopleDiscovery: scriptedPeopleDiscovery,
                         newGroup: HomeGroupActions(
                             candidates: [
                                 HomeGroupCandidate(id: "@lan:atum.test", name: "Lan", kind: .person),
@@ -404,6 +405,36 @@ struct ScriptedHomeHost: View {
 
     /// HC-7: the long-press's Low priority, Rename and Block, recorded in
     /// `home-actions.txt`. A person row's peer is a fixed scripted ID.
+    /// Home search's People section on a scripted directory: a new person
+    /// found by @handle or name, Lan (already a chat, so never listed again)
+    /// and an assistant (never a person). Opening someone makes a chat.
+    private static let scriptedDirectory = [
+        HomeGroupCandidate(id: "@somehandle:atum.test", name: "Thảo Nguyên", kind: .person,
+                           handle: "somehandle"),
+        HomeGroupCandidate(id: "@lan:atum.test", name: "Lan", kind: .person, handle: "lan"),
+        HomeGroupCandidate(id: "@some-assistant:atum.test", name: "Some assistant", kind: .assistant),
+    ]
+
+    private var scriptedPeopleDiscovery: HomePeopleDiscoveryActions {
+        HomePeopleDiscoveryActions(
+            search: { query in
+                UITestProbe.append("peopleSearch \(query)", to: "home-actions.txt")
+                let needle = String(query.lowercased().drop { $0 == "@" })
+                return Self.scriptedDirectory.filter {
+                    $0.name.lowercased().contains(needle) || ($0.handle ?? "").contains(needle)
+                }
+            },
+            open: { userID in
+                UITestProbe.append("openPerson \(userID)", to: "home-actions.txt")
+                return .openRoom("!new-chat:atum.test")
+            },
+            loadMatrixThumbnail: nil,
+            directRoom: { userID in
+                roster.rooms.first { $0.isDirect && $0.members == [userID] }?.roomID
+            }
+        )
+    }
+
     private func personalMenu(_ base: HomeActions) -> HomeActions {
         var actions = base
         actions.setLowPriority = { roomID, value in
