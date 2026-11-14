@@ -64,3 +64,9 @@ Recovery with a missing old approval key cannot rotate: explicitly revoke the
 old owner registration, then enroll a fresh ID/generation at epoch 1. Current-phone
 removal must call revokePhone before deleting both local key roles; use the durable
 queue if removal/sign-out can lose network access. No stale enrollment reuse.
+
+Superseded in slice 2b (`docs/ports/phone-approvals-2b.md`): the collection
+GET now sends `Atum-Device-Service-Version: 1.3` (the server's default list is
+Macs only), a capability probe sends `0.0`, and the pinned controller keys are
+read from `/cloud/controller-keys`. Screens, registration storage and the
+lifecycle hooks described above as 2b work are implemented there.

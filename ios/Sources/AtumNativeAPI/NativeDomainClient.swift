@@ -1335,27 +1335,39 @@ public struct AgentsRead: Sendable {
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
-    /// Owner-authenticated phone registry transport; no additional wire headers.
-    func phoneDeviceServices(request: Data? = nil, revoking id: UUID? = nil) async throws -> Data {
+    /// Owner-authenticated phone registry transport (device-service 1.3).
+    /// A collection GET carries `Atum-Device-Service-Version` (`listVersion`
+    /// by default, which lists phones as well as Macs; the server's default
+    /// list is Macs only). POST and DELETE carry no extra header.
+    /// `controllerKeys` reads the public pinned controller keys.
+    func phoneDeviceServices(request: Data? = nil, revoking id: UUID? = nil,
+                             listVersion: String = PhoneRegistryContract.listVersion,
+                             controllerKeys: Bool = false) async throws -> Data {
         let root = Self.baseURL.appendingPathComponent("device-services")
-        let url = id.map { root.appendingPathComponent($0.uuidString.lowercased()) } ?? root
+        let url = controllerKeys ? Self.baseURL.appendingPathComponent("cloud/controller-keys")
+            : (id.map { root.appendingPathComponent($0.uuidString.lowercased()) } ?? root)
         let method = id != nil ? "DELETE" : (request == nil ? "GET" : "POST")
+        let headers = method == "GET" && !controllerKeys ? [PhoneRegistryContract.versionHeader: listVersion] : [:]
         let token = try await authorize(forceRefresh: false)
         try requireActiveTask()
         var result = try await perform(url: url, token: token, method: method,
             body: method == "GET" ? nil : (request ?? Data()),
-            maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000)
+            maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000, extraHeaders: headers)
         if result.status == 401 {
             let refreshed = try await authorize(forceRefresh: true)
             try requireActiveTask()
             result = try await perform(url: url, token: refreshed, method: method,
                 body: method == "GET" ? nil : (request ?? Data()),
-                maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000)
+                maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000, extraHeaders: headers)
             if result.status == 401 { authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused) }
         }
         try requireActiveTask()
         guard (method == "POST" ? [200, 201] : [200]).contains(result.status) else {
-            let failure = try JSONDecoder().decode(PhoneRegistryError.self, from: result.body)
+            // A proxy's non-JSON 5xx page is an outage, not a refusal.
+            guard let failure = try? JSONDecoder().decode(PhoneRegistryError.self, from: result.body) else {
+                throw result.status >= 500 ? NativeDomainClientFailure.transportUnavailable
+                    : NativeDomainClientFailure.invalidResponse
+            }
             guard failure.error.rawValue == "matrix_\(result.status)" else { throw NativeDomainClientFailure.invalidResponse }
             throw failure
         }
@@ -1378,6 +1390,10 @@ public struct AgentsRead: Sendable {
                           return url.path == Self.baseURL.path + "/store/purchases" && method == "POST"
                               && (try? NativeID(value)) != nil
                       }
+                  }
+                  if name == PhoneRegistryContract.versionHeader {
+                      return method == "GET" && url.path == Self.baseURL.path + "/device-services"
+                          && [PhoneRegistryContract.listVersion, PhoneRegistryContract.probeVersion].contains(value)
                   }
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
@@ -1486,6 +1502,7 @@ public struct AgentsRead: Sendable {
         let phoneRoot = Self.baseURL.path + "/device-services"
         let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
         if url.path == phoneRoot || (url.path.hasPrefix(phoneRoot + "/") && UUID(uuidString: phoneTail) != nil) { return url.query == nil }
+        if url.path == Self.baseURL.path + "/cloud/controller-keys" { return url.query == nil }
         let allowedPaths = [Self.agentsURL.path, Self.agentLifecycleURL.path,
                             Self.appsURL.path, Self.officialAccountsURL.path,
                             Self.storeCatalogURL.path,

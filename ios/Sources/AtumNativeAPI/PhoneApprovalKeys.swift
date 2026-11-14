@@ -92,6 +92,17 @@ public final class SecureEnclavePhoneKeyStore: PhoneApprovalKeyStore {
         }
         return try P256.Signing.ECDSASignature(derRepresentation: signature).rawRepresentation
     }
+    /// Without any prompt: whether this role's key still exists. A key whose
+    /// use needs authentication still answers "exists".
+    public func exists(_ role: PhoneKeyRole) -> Bool {
+        var lookup = query(role)
+        lookup[kSecReturnAttributes as String] = true
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        lookup[kSecUseAuthenticationContext as String] = context
+        let status = SecItemCopyMatching(lookup as CFDictionary, nil)
+        return status == errSecSuccess || status == errSecInteractionNotAllowed
+    }
     public func remove(_ role: PhoneKeyRole) throws {
         let status = SecItemDelete(query(role) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw PhoneApprovalFailure.keychain(status) }

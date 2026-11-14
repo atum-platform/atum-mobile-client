@@ -37,12 +37,55 @@ public extension NativeDomainClient {
     func revokePhone(id: UUID) async throws -> PhoneRegistryRecord {
         try JSONDecoder().decode(PhoneRegistryRecord.self, from: await phoneDeviceServices(revoking: id))
     }
+    /// The active pinned controller key IDs (`GET /cloud/controller-keys`), for
+    /// an enrolment body's `controllerKeys`. Retired keys are left out.
+    func phoneControllerKeyIDs() async throws -> [String] {
+        let list = try JSONDecoder().decode(PhoneControllerKeys.self, from: await phoneDeviceServices(controllerKeys: true))
+        let active = list.keys.filter { $0.state == "active" }.map(\.kid)
+        guard (1...8).contains(active.count), Set(active).count == active.count,
+              active.allSatisfy({ $0.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil })
+        else { throw NativeDomainClientFailure.invalidResponse }
+        return active
+    }
+    /// Whether this server implements the negotiated device-service 1.3 phone
+    /// registry. The contract publishes no capability flag, so this asks the
+    /// one thing only a 1.3 server does: it refuses a version it does not
+    /// know with `matrix_400` (`spec/device-service/v1.3/README.md`, "Legacy
+    /// response compatibility"). An older server ignores the header and lists
+    /// Macs (200): that is "no". Anything else (503 cloud gate, transport)
+    /// throws, so the caller keeps failing closed.
+    func phoneRegistrySupported() async throws -> Bool {
+        do {
+            _ = try await phoneDeviceServices(listVersion: PhoneRegistryContract.probeVersion)
+            return false
+        } catch let failure as PhoneRegistryError where failure.error == .invalid {
+            return true
+        }
+    }
+}
+
+/// device-service 1.3 wire constants the phone negotiates with.
+public enum PhoneRegistryContract {
+    public static let versionHeader = "Atum-Device-Service-Version"
+    /// Lists both platforms, including revoked records.
+    public static let listVersion = "1.3"
+    /// A version no server publishes; only the capability probe sends it.
+    public static let probeVersion = "0.0"
+}
+
+struct PhoneControllerKeys: Decodable {
+    struct Key: Decodable { let kid: String; let state: String }
+    let keys: [Key]
 }
 
 /// Use a new generation for rotation, retaining the previous generation until admission.
 public struct PhoneKeyNamespace: Sendable {
     public let value: String
+    public let installation: UUID
+    public let generation: UUID
     public init(owner: String, installation: UUID, generation: UUID) {
+        self.installation = installation
+        self.generation = generation
         let account = Data(SHA256.hash(data: Data(owner.utf8))).phoneBase64URL
         value = "com.atum.phone-approval.\(account).\(installation.uuidString).\(generation.uuidString)"
     }

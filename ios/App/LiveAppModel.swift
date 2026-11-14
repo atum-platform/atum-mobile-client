@@ -110,6 +110,9 @@ final class LiveAppModel {
         }
     }()
     private(set) var stage: LiveAppStage = .booting
+    /// Settings › Your devices › Approve on this iPhone for the signed-in
+    /// account (phone approvals slice 2b). Nil without a domain client.
+    private(set) var phoneApprovals: PhoneApprovalSettingsModel?
     private(set) var liveMatrix: LiveMatrixSession?
     /// True while the Matrix runtime is being replaced with a renewed token.
     /// The open chat keeps its transcript; the reconnect notice stays hidden.
@@ -328,6 +331,7 @@ final class LiveAppModel {
             default: replaced = true
             }
             guard replaced else { return }
+            rebindPhoneApprovals()
             applePurchases.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
             assistantTurnStopUnavailable.removeAll()
             officialAccountsClientGeneration &+= 1
@@ -713,6 +717,16 @@ final class LiveAppModel {
             return false
         }
         signOutInProgress = true
+        // Phone approvals: revoke this iPhone's registration while the bearer
+        // still works, or record the revocation for the next sign-in. Local
+        // keys go either way; only an unrecordable revocation stops sign-out.
+        guard await PhoneApprovalLive.signOut(owner: current.runtime.ticket.session.userID,
+                                              model: phoneApprovals) else {
+            signOutInProgress = false
+            signOutFailureToken &+= 1
+            return false
+        }
+        phoneApprovals = nil
         applePurchases.bind(accountID: nil, api: nil)
         defer {
             if let domainClient, let accountID = context?.runtime.ticket.session.userID {
@@ -3846,6 +3860,7 @@ final class LiveAppModel {
         isRefreshingDomainOnForeground = true
         defer { isRefreshingDomainOnForeground = false }
         await refreshDomainReads()
+        if let phoneApprovals { Task { await phoneApprovals.refresh() } }
         await refreshCompanyWorkspace()
         if let liveMatrix { acceptKnownInvites(liveMatrix.invites, session: liveMatrix) }
         await refreshAppBotPointers()
@@ -4962,6 +4977,20 @@ final class LiveAppModel {
     private enum OfficialAccountsAttempt: Sendable {
         case completed(ProductReadResult<OfficialAccountsResponse>, retryAfterSeconds: Int64?)
         case abandoned
+    }
+
+    /// A new domain client (sign-in, renewal, recovery) gets its own phone
+    /// approvals lifecycle; its first refresh retries owed revocations.
+    private func rebindPhoneApprovals() {
+        guard let domainClient, let owner = context?.runtime.ticket.session.userID,
+              let model = PhoneApprovalLive.model(owner: owner, server: domainClient,
+                                                  identity: { [weak self] in await self?.liveMatrix?.phoneApprovalIdentity() })
+        else {
+            phoneApprovals = nil
+            return
+        }
+        phoneApprovals = model
+        Task { await model.refresh() }
     }
 
     private func makeDomainClient(refresh: OIDCGrantRefresh,

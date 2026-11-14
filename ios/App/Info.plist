@@ -28,6 +28,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Atum dùng Face ID để chỉ bạn mới có thể cho phép những việc trợ lý xin làm.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Atum dùng micrô để chuyển giọng nói của bạn thành chữ khi bạn bấm nút micrô.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

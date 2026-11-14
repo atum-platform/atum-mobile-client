@@ -492,6 +492,15 @@ class TranscriptUITestCase: AtumUITestCase {
             return true
         }
         if issue.auditType == .contrast,
+           element?.identifier == "approvals.settings.help" {
+            // Approve on this iPhone's footer is the settings footer ink on
+            // the ground; at AX5 the audit reports it with an unbounded frame
+            // (top/bottom ±infinity). Measured on the AX5 capture: text
+            // (59, 63, 71) on (244, 245, 247), 9.7:1.
+            print("MEASURE audit.contrast ignored verified approvals footer \(frame)")
+            return true
+        }
+        if issue.auditType == .contrast,
            element?.identifier == "account.restore.lead" {
             // The lead is explicit `ink` on the system sheet background; the
             // audit sometimes samples the dimmed presenter behind the sheet.
