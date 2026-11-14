@@ -51,6 +51,36 @@ extension LiveMatrixSession {
         return data
     }
 
+    /// Where Home search's `POST /_matrix/client/v3/search` goes: the
+    /// session's own homeserver (HTTPS only) with its bearer. The pinned SDK
+    /// has no `/search` binding, so this mirrors the notifications read.
+    func companySearchEndpoint() throws -> CompanySearchEndpoint {
+        try runtime.requireCurrent()
+        let session = try runtime.client.session()
+        guard var components = URLComponents(string: session.homeserverUrl), components.scheme == "https",
+              components.host?.isEmpty == false else { throw CompanySpaceMatrixFailure.invalid }
+        components.path = (components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path)
+            + "/_matrix/client/v3/search"
+        guard let url = components.url else { throw CompanySpaceMatrixFailure.invalid }
+        let runtime = runtime
+        return CompanySearchEndpoint(url: url, bearer: session.accessToken,
+                                     stillCurrent: { try runtime.requireCurrent() })
+    }
+
+    /// `from:@name`'s matches among one room's members, every membership
+    /// (desktop `room.getMembers()`), read from the SDK store in bounded chunks
+    /// with no cap on how many are read (`CompanySearchMemberReader`). The
+    /// no-sync iterator yields every membership; nothing is filtered here.
+    func companySearchSenders(roomID: String, from: String) async -> [String] {
+        guard let room = try? room(id: roomID), let iterator = try? await room.membersNoSync() else { return [] }
+        return CompanySearchMemberReader.senders(from: from) {
+            iterator.nextChunk(chunkSize: CompanySearchMemberReader.chunkSize)?.map {
+                CompanySearchMember(userID: $0.userId, names: [$0.displayName].compactMap { $0 },
+                                    membership: String(describing: $0.membership))
+            }
+        }
+    }
+
     /// This account's Matrix user ID.
     func companyOwnUserID() throws -> String {
         try runtime.requireCurrent()
@@ -97,6 +127,33 @@ extension LiveMatrixSession {
         guard let room = try? room(id: roomID) else { return nil }
         return MatrixPersonName.name((try? await room.memberDisplayName(userId: userID)) ?? nil,
                                      userID: userID)
+    }
+}
+
+/// Home search's one transport: a single ephemeral URL session (no cookies,
+/// no cache, redirects refused) for every request; the bearer travels per
+/// request and the session is checked again when the answer lands.
+@MainActor
+final class LiveCompanySearchTransport: CompanySearchTransport {
+    private let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        return URLSession(configuration: configuration, delegate: CompanySpaceNoRedirect(), delegateQueue: nil)
+    }()
+
+    func search(body: Data, endpoint: CompanySearchEndpoint) async throws -> Data {
+        var request = URLRequest(url: endpoint.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer " + endpoint.bearer, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (data, response) = try await session.data(for: request)
+        try endpoint.stillCurrent()
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw CompanySpaceMatrixFailure.refused }
+        return data
     }
 }
 

@@ -555,12 +555,13 @@ final class HomeShellUITests: TranscriptUITestCase {
     // MARK: Home search: People (desktop roster global search)
 
     @MainActor
-    private func launchPeopleSearch(language: String = "vi", size: String = "UICTContentSizeCategoryL")
-        -> XCUIApplication {
+    private func launchPeopleSearch(language: String = "vi", size: String = "UICTContentSizeCategoryL",
+                                    extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
             + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
                "-UIPreferredContentSizeCategoryName", size]
+            + extraArguments
             + probeArguments
         app.launch()
         let search = element(app, "home.search")
@@ -674,6 +675,162 @@ final class HomeShellUITests: TranscriptUITestCase {
         let person = element(app, "home.people.@somehandle:atum.test")
         XCTAssertTrue(person.waitForExistence(timeout: 15), boundedHierarchy(app))
         XCTAssertTrue(person.isHittable, "the person row is not reachable at \(size)")
+        return app
+    }
+
+    // MARK: Channels, Messages and Files (desktop roster global search)
+
+    @MainActor
+    private func companySearches() -> [String] {
+        probeLines("home-actions.txt").map(\.text).filter { $0.hasPrefix("companySearch ") }
+    }
+
+    /// Desktop's global search block, top to bottom: Searching…, People,
+    /// Channels, Messages, Files; then the roster's own matches.
+    @MainActor
+    func testHomeSearchListsChannelsMessagesAndFilesInDesktopOrder() {
+        let app = launchPeopleSearch(language: "en")
+        let search = element(app, "home.search")
+        search.typeText("l")
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertEqual(companySearches(), [], "a single character searched the companies")
+        XCTAssertFalse(element(app, "home.section.channels").exists)
+
+        search.typeText("aunch\n")
+        let files = element(app, "home.section.files")
+        XCTAssertTrue(files.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
+        let headers = ["people", "channels", "messages", "files"].map { element(app, "home.section.\($0)") }
+        XCTAssertTrue(headers.allSatisfy(\.exists), boundedHierarchy(app))
+        let tops = headers.map(\.frame.minY)
+        XCTAssertEqual(tops, tops.sorted(), "sections out of desktop order: \(tops)")
+        XCTAssertEqual(element(app, "home.section.channels").label, "Channels and teams")
+        XCTAssertEqual(Set(companySearches()), ["companySearch messages launch", "companySearch files launch"])
+
+        // Channels: the Team Space rooms named "launch…", not "general".
+        XCTAssertTrue(element(app, "home.channels.!launch:atum.test").exists)
+        XCTAssertTrue(element(app, "home.channels.!launch-vn:atum.test").exists)
+        XCTAssertFalse(element(app, "home.channels.!general:atum.test").exists)
+        // Messages and Files: the room's name, then the words or the file's name.
+        let message = element(app, "home.messages.$launch-review")
+        XCTAssertTrue(message.label.hasPrefix("general, Can we move the launch review"), message.label)
+        XCTAssertEqual(element(app, "home.files.$launch-deck").label, "launch, launch-deck.pdf")
+
+        message.tap()
+        XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
+        XCTAssertTrue(probeLines("home-actions.txt").map(\.text).contains("openResult $launch-review"))
+    }
+
+    /// Review should-fix 3: when the re-check or the navigation fails, the
+    /// tap opens nothing and the row can be tried again (Home posts the
+    /// generic error announcement and the error haptic).
+    @MainActor
+    func testHomeSearchResultThatCannotOpenStaysOnHome() {
+        let app = launchPeopleSearch(language: "en")
+        element(app, "home.search").typeText("launch\n")
+        let draft = element(app, "home.messages.$launch-draft")
+        XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
+        draft.tap()
+        XCTAssertTrue(waitFor(10) { self.probeLines("home-actions.txt").map(\.text).contains("openResult $launch-draft") })
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(element(app, "home.scripted.destination").exists, "a refused result navigated")
+        XCTAssertTrue(draft.exists && draft.isEnabled, "the row did not come back after the failure")
+        // The next result still opens.
+        element(app, "home.messages.$launch-review").tap()
+        XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
+    }
+
+    /// Review round 2, Home rendering: rows already on screen follow the
+    /// live eligibility. The account leaves "Launch Việt Nam" after the answer
+    /// landed (same query, same companies, so no new search): its message row
+    /// goes, the others stay.
+    @MainActor
+    func testHomeSearchHidesResultsOfARoomLeftWhileShown() {
+        let app = launchPeopleSearch(language: "en",
+                                     extraArguments: ["-AtumScriptedLeaveAfterSearch", "!launch-vn:atum.test"])
+        element(app, "home.search").typeText("launch\n")
+        let draft = element(app, "home.messages.$launch-draft")
+        XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(waitFor(15) { self.probeLines("home-actions.txt").map(\.text).contains("left !launch-vn:atum.test") })
+        XCTAssertTrue(waitFor(10) { !draft.exists }, "a left room's result stayed on screen")
+        XCTAssertTrue(element(app, "home.messages.$launch-review").exists)
+        XCTAssertTrue(element(app, "home.files.$launch-deck").exists)
+        let searches = probeLines("home-actions.txt").map(\.text).filter { $0 == "companySearch messages launch" }
+        XCTAssertEqual(searches.count, 1, "the row went by rendering, not by a new search")
+    }
+
+    /// Tapping a channel opens its room, as desktop selects it.
+    @MainActor
+    func testHomeSearchChannelOpensItsRoom() {
+        let app = launchPeopleSearch(language: "en")
+        element(app, "home.search").typeText("launch viet\n")
+        let channel = element(app, "home.channels.!launch-vn:atum.test")
+        XCTAssertTrue(channel.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertFalse(element(app, "home.channels.!launch:atum.test").exists)
+        channel.tap()
+        XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
+    }
+
+    /// Evidence of the new sections: light and dark, English and Vietnamese,
+    /// and the largest accessibility size (top, then scrolled to Files).
+    @MainActor
+    func testHomeSearchChannelsMessagesFilesAppearances() {
+        addTeardownBlock { XCUIDevice.shared.appearance = .light }
+        let runs: [(String, XCUIDevice.Appearance, String)] = [
+            ("en", .light, "UICTContentSizeCategoryL"),
+            ("en", .dark, "UICTContentSizeCategoryL"),
+            ("vi", .light, "UICTContentSizeCategoryL"),
+            ("vi", .dark, "UICTContentSizeCategoryL"),
+            ("en", .light, "UICTContentSizeCategoryAccessibilityXXXL"),
+        ]
+        for (language, appearance, size) in runs {
+            XCUIDevice.shared.appearance = appearance
+            let app = showGlobalSections(language: language, size: size)
+            let tag = "\(language)-\(appearance == .dark ? "dark" : "light")-"
+                + (size.hasSuffix("AccessibilityXXXL") ? "ax5" : "l")
+            keepScreenshot("home-search-cmf-\(tag)", of: app)
+            if size.hasSuffix("AccessibilityXXXL") {
+                let file = element(app, "home.files.$launch-deck")
+                for _ in 0..<8 where !file.isHittable { app.swipeUp() }
+                XCTAssertTrue(file.isHittable, "the Files row is not reachable at \(size)")
+                keepScreenshot("home-search-cmf-\(tag)-files", of: app)
+            }
+            app.terminate()
+            XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
+        }
+    }
+
+    /// The accessibility audit of the new sections at the largest size.
+    /// "kickoff" finds a channel, a message and a file and nobody in the
+    /// directory, so the People row's quarantined monogram finding
+    /// (`testHomeSearchPeopleAccessibilityAudit`) stays out of this one.
+    @MainActor
+    func testHomeSearchChannelsMessagesFilesAccessibilityAudit() throws {
+        let app = launchPeopleSearch(language: "en", size: "UICTContentSizeCategoryAccessibilityXXXL")
+        element(app, "home.search").typeText("kickoff\n")
+        XCTAssertTrue(element(app, "home.section.channels").waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
+        XCTAssertFalse(element(app, "home.section.people").exists)
+        XCTAssertTrue(element(app, "home.channels.!kickoff:atum.test").exists)
+        try auditIgnoringScrollEdges(app)
+        // Then the Messages and Files rows, scrolled into view.
+        let file = element(app, "home.files.$kickoff-agenda")
+        for _ in 0..<8 where !file.isHittable { app.swipeUp() }
+        XCTAssertTrue(file.isHittable, "the Files row is not reachable at AX XXXL")
+        try auditIgnoringScrollEdges(app)
+    }
+
+    @MainActor
+    private func showGlobalSections(language: String, size: String) -> XCUIApplication {
+        let app = launchPeopleSearch(language: language, size: size)
+        // Return ends editing and keeps the query, so the keyboard is gone.
+        element(app, "home.search").typeText("launch\n")
+        XCTAssertTrue(element(app, "home.section.channels").waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
+        // At AX sizes the List draws only what fits; Messages may be below.
+        if !size.contains("Accessibility") {
+            XCTAssertTrue(element(app, "home.messages.$launch-review").exists, boundedHierarchy(app))
+        }
         return app
     }
 }

@@ -819,6 +819,23 @@ final class CompanyWorkspaceModel {
         prefsRevision &+= 1
     }
 
+    /// Home search: a confirmed result's own company becomes the active one
+    /// before routing, so the selection fence (`isSelected`) then holds for its
+    /// room. Only when the directory says that company owns the room. True when
+    /// that company is now active.
+    @discardableResult
+    func activateCompany(_ companyID: String, owning roomID: String) -> Bool {
+        let owner: String? = switch roomClassification(roomID) {
+        case let .company(claim): claim.companyID
+        case let .conversation(claim): claim.companyID
+        case let .privateCos(company), let .notesSelf(company): company
+        case .quarantined, .personal, .unknown: nil
+        }
+        guard owner == companyID else { return false }
+        selectCompany(companyID)
+        return activeCompanyID == companyID
+    }
+
     /// A route into a company room makes that room's company the Workplace
     /// root, so Back from the chat lands on the same company's list. A room
     /// that is not a company channel changes nothing.

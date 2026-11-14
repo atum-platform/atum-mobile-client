@@ -37,6 +37,7 @@ env:
     ChatKindsUITests/testAccessibilityAuditKinds
     HomeShellUITests/testHomeSearchPeopleAccessibilityAudit
     ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
+    HomeShellUITests/testHomeSearchChannelsMessagesFilesAccessibilityAudit
 jobs:
   plan:
     runs-on: ubuntu-latest

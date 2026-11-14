@@ -177,6 +177,53 @@ final class CompanySwitcherTests: XCTestCase {
                         notificationCount: notifications, highlightCount: highlights)
     }
 
+    // MARK: Home search result from another company (review round 2, item 1)
+
+    /// With company A shown in Workplace, a Home search result from company B
+    /// opens: B is activated first, then the selection fence (the same
+    /// `isSelected` check `AppRoot.openRoomAndRoute(_:requiringCompany:)` makes
+    /// first and after every await) holds, and the real Router opens B's room
+    /// in Workplace. Before the fix the fence ran with A active and refused.
+    @MainActor
+    func testHomeSearchResultFromAnotherCompanyActivatesItThenOpens() async throws {
+        let account = "switcher-" + UUID().uuidString
+        defer { clearPrefs(account) }
+        let workspace = try model(try api(companies: [companyA, companyB]), account: account)
+        await workspace.refresh()
+        XCTAssertEqual(workspace.activeCompanyID, companyA)
+        let router = Router()
+        // What AppRoot's route does at its first fence and its final open.
+        let route: (String, String) async -> Bool = { roomID, company in
+            guard workspace.isSelected(companyID: company, owning: roomID) else { return false }
+            router.openTeamSpace(roomId: roomID)
+            return workspace.isSelected(companyID: company, owning: roomID)
+        }
+        func result(company: String, room: String, channel: String) -> CompanySearchResult {
+            CompanySearchResult(companyID: company, channelID: channel, roomID: room, channelName: "general",
+                                eventID: "$hit", sender: "@lan:atum.test", snippet: "launch", at: 0)
+        }
+
+        // A result whose company does not own the room changes nothing.
+        let mislabeled = result(company: companyA, room: roomB, channel: channelB)
+        var opened = await HomeSearchRoute.open(mislabeled, workspace: workspace, confirm: { true }, route: route)
+        XCTAssertFalse(opened)
+        XCTAssertEqual(workspace.activeCompanyID, companyA)
+        XCTAssertNil(router.teamSpaceRoomID)
+
+        // An unconfirmed result changes nothing either.
+        let fromB = result(company: companyB, room: roomB, channel: channelB)
+        opened = await HomeSearchRoute.open(fromB, workspace: workspace, confirm: { false }, route: route)
+        XCTAssertFalse(opened)
+        XCTAssertEqual(workspace.activeCompanyID, companyA)
+
+        // The confirmed result from B: B active, B's room open in Workplace.
+        opened = await HomeSearchRoute.open(fromB, workspace: workspace, confirm: { true }, route: route)
+        XCTAssertTrue(opened, "a valid result from another company did not open")
+        XCTAssertEqual(workspace.activeCompanyID, companyB)
+        XCTAssertEqual(router.selectedTab, .teamSpace)
+        XCTAssertEqual(router.teamSpaceRoomID, roomB)
+    }
+
     // MARK: Last-used company
 
     @MainActor

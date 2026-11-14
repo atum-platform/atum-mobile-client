@@ -38,6 +38,17 @@ per run on 2026-11-11 with six lanes active).
   - `HomeShellUITests/testHomeSearchPeopleAccessibilityAudit`: the baseline
     reproduces a Dynamic Type finding with no element attached. See
     `docs/ports/home-search-people.md` and the UI-worker handoff below.
+  - `ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel`:
+    passes on the build Mac but still fails on the hosted runner (PR #51,
+    shard 2, line 241). See "Thinking-level save" below.
+  - `HomeShellUITests/testHomeSearchChannelsMessagesFilesAccessibilityAudit`
+    (added quarantined, 14 Nov): the same element-less "Dynamic Type font
+    sizes are unsupported" finding, frame zero. A build-Mac diagnostic audited
+    roster-only, People-only, Channel-only, Message-only and File-only results
+    at AX-XXXL: every global search section produced it once, the roster never
+    did, and the roster rows' button style did not change it. So it belongs to
+    the global search block, not to one row type. See
+    `docs/ports/home-search-channels-messages-files.md`.
 - 2026-11-12: `ChatInfoUITests/testAssistantCardChoosesOneServerDestinationDefault`
   failed on PR #33 (`84d891a`) because the hosted runner was slow: launch took 32 s and
   `chat.title` 30 s, then the 2 s + 3 s waits for `assistant.card.model` ran out. Its
@@ -82,6 +93,12 @@ per run on 2026-11-11 with six lanes active).
   throughout the 20 s wait; two earlier #44 heads scrolled late. The
   2026-11-14 fix below addresses the app's placement/anchor lifecycle, keeps
   the existing test waits, and restores this hosted test.
+- 2026-11-14: on PR #52 (`cb57fcf`) shard 3 failed
+  `HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` at line 124:
+  the failure message already read "Result 1 of 1. Searched 89 of 2200", so the match
+  was found just after the 15 s wait ran out (PR #49 failed the same way at 70 of 2200).
+  The app is correct and the hosted runner is slow at AX-XXXL; #52 doesn't touch chat
+  search. That wait is now 30 s.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

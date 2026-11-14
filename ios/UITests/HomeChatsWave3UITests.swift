@@ -121,7 +121,9 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         focusSearch(app, field)
         field.typeText("da lat")
         let count = element(app, "chat.search.count")
-        XCTAssertTrue(waitFor(15) { count.label.hasPrefix("Result 1 of 1") }, "count: \(count.label)")
+        // 30 s: at AX-XXXL the hosted runner walks the 2200-row transcript slowly
+        // (PR #49, PR #52: the label read "Result 1 of 1" just after 15 s ran out).
+        XCTAssertTrue(waitFor(30) { count.label.hasPrefix("Result 1 of 1") }, "count: \(count.label)")
         keepScreenshot("hc6-search-ax5-\(appearanceTag)-en", of: app)
         // Only the bar is this slice's; transcript rows have their own audits.
         let barOnly: (XCUIAccessibilityAuditIssue) -> Bool = { issue in
