@@ -166,3 +166,84 @@ python3 scripts/public_guard.py --base 161ada7 --head HEAD
 Guard result: **PASS**, one new commit; raw paths/modes, ancestry, identifiers,
 secrets and commit metadata. The guard is rerun after the documentation amendment.
 The branch is local only; the coordinator owns integration and assembly review.
+
+## UI binding (`feat/handles-ui`)
+
+Branch `feat/handles-ui` from main `161ada7`, merging
+`origin/feat/handles-own-and-backfill` (`5f9c434`, this state) and
+`origin/feat/home-search-channels-messages-files` (`bd6feb8`, Home search).
+Both merges were clean (no conflicts). Desktop reference re-read at
+`origin/main` `61aa6b81`: `matrix/person-handle-line.tsx`,
+`matrix/roster-conversations.tsx`, `matrix/roster-model.ts`,
+`matrix/start-chat.tsx`, `matrix/group-picker.tsx`,
+`matrix/conversation-controls.tsx`, `matrix/person-name.ts`,
+`app/atum/account-footer-menu.tsx`, `settings/atum-account-settings.tsx`.
+
+### Where desktop shows a handle, and what the phone now binds
+
+All handles render as `@handle` (bare value from the cache, validated by
+`MatrixPersonName.validHandle`), never a localpart guess, and never when the
+text would only repeat the name above it (desktop `shownHandle`). No new copy.
+
+| Surface | Desktop | Phone binding |
+| --- | --- | --- |
+| Account header, Settings | `@handle` under the name | `AppRoot.accountPresentation` passes `directoryHandle: model.ownHandle` to the existing `AccountPresentation` |
+| Home roster 1:1 row | `chatRowHandle`: handle as the second line while the chat has no message, and always while searching | `HomeRow.partnerUserID`/`handle` (live only) set in `HomeRow.applyingLive` from `AppRoot`'s `liveMatrix.rooms` partner (direct, ≤2 members, exactly one other member); `HomeRowView` uses `PersonHandleText.chatRow`. Founder row excluded |
+| Home search filter | `filterMatrixRoster`: a chat is found by its verified handle, leading `@` ignored | `HomeScreen.filteredRows` also matches `PersonHandleText.matches` |
+| Home People, Add friend, New group | `PersonHandleLine` with `person.handle ?? knownHandles[userId]` | `HomeDiscoveryPersonRow(handles:)` reads `person.handle ?? handles.handle(person.id)` (people only) via `HomePeopleDiscoveryActions.handles` / `HomeGroupActions.handles` |
+| Start chat | `PersonHandleLine` under each known person; search matches the handle | `HomeStartChatSheet.caption(for:)` returns `PersonHandleText.line` for a person row; `visibleRows` also matches the handle |
+| Chat info Members | `matrixMemberLabel`: `@handle` on the quiet line; a member with no name is called `@handle` | `ChatMembersPage.memberLabel` via `ChatInfoActions.handles` and `PersonHandleText.member`; confirmations use the same label |
+
+`PersonHandleLookup` (in `LiveRosterRows.swift`) is the one seam: `handle`
+reads `LiveAppModel.handle(for:)` (observed, so rows repaint when a later
+contacts read answers) and `request` calls `requestHandles(for:)`. AppRoot
+builds it once (`personHandles`). Each visible row requests its own ID with
+`.requestingHandles(_:from:)` (a `.task` keyed by the IDs): on appear, then
+every `VerifiedHandleStore.refreshInterval` (30 min) while on screen,
+matching desktop's visible-list timer. The store pools, deduplicates and
+budgets; rendering never waits.
+
+Debug scripted hosts use `ScriptedHandles` (in `ScriptedHomeHost.swift`) with
+fixed handles for the cast and write each request to `handle-requests.txt`.
+
+### Verification (locked batch)
+
+The batch ran on an earlier local commit of this same change. Before
+committing, the only difference is that two Debug/test references to the scripted cast's Lan
+became the identical literal Matrix ID string, because the public guard
+reads a member access ending in that name as a private hostname. That edit was parse-checked only and not
+re-run.
+
+One locked run (`/Volumes/AtumTestFlight/handles-ui-batch.sh`, `-jobs 2`,
+derived data `/Volumes/AtumTestFlight/dd-home-search-cmf`, iPhone 17 simulator,
+logs in `dd-home-search-cmf/handles-logs/`):
+
+- **App build** (`build-for-testing`): passed. This is also the first full app
+  compile of the handle state: `LiveAppModel`, `VerifiedHandleStore` and the
+  transport compile with no errors and no new warnings. The only
+  `LiveAppModel` warnings (unused `client` at 1847, `clients` at 5060) predate
+  this lane (`1761cc8`).
+- **AtumMobileTests**: 382 tests, 0 failures (5 new `PersonHandleBindingTests`).
+- **UI tests** (HomeShell, ChatPanel, ChatInfo): 44 finished, 40 passed, 4 failed.
+  All 4 failures are on `.github/workflows/ui-tests.yml`'s `QUARANTINE` list
+  (known failures on main, #50): `ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace`,
+  `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`,
+  `HomeShellUITests/testHomeSearchPeopleAccessibilityAudit`,
+  `HomeShellUITests/testHomeSearchChannelsMessagesFilesAccessibilityAudit`
+  (the same element-less, zero-frame Dynamic Type finding). New tests passed:
+  `testHomeSearchFindsAChatByItsPartnersHandle`,
+  `testStartChatAndNewGroupShowVerifiedHandles`,
+  `testGroupMembersShowVerifiedHandles` (each also asserts the visible row
+  requested its handle).
+- The run reached the two-hour background limit (most of it waiting for the
+  shared lock) while `testVerifiedHandlesAppearances` (Home search / Start chat /
+  New group screenshots) was in progress; it did not finish and its screenshots
+  were not kept. The result bundle was not finalized, so the four Members
+  screenshots were recovered from its data store:
+  `/Volumes/AtumTestFlight/handles-ui-shots/handles-chat-members-{en,vi}-{light,dark}.png`.
+  The simulator was shut down; no other device was booted.
+
+Remaining parity gaps (desktop shows a handle, phone does not yet): Founder
+row's handle while searching; assistant and app-bot handles in roster search;
+ignored-people list, security panel and Team space member lists; another
+server's full address and the shared-name tag in Members.

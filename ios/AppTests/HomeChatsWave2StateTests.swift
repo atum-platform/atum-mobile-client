@@ -120,3 +120,68 @@ final class HomePeopleSearchPolicyTests: XCTestCase {
                        ["@new:atum.test"])
     }
 }
+
+/// The verified-handle bindings on Home, Start chat, the pickers and chat info
+/// (desktop `person-handle-line.tsx`, `person-name.ts`, `roster-model.ts`).
+@MainActor
+final class PersonHandleBindingTests: XCTestCase {
+    private let handles = ["@lan:atum.test": "lannguyen", "@self:atum.test": "self_named"]
+
+    func testALineIsTheAtHandleUnlessItRepeatsTheName() {
+        XCTAssertEqual(PersonHandleText.line("lannguyen", name: "Lan"), "@lannguyen")
+        XCTAssertNil(PersonHandleText.line("lannguyen", name: " @lannguyen "))
+        XCTAssertNil(PersonHandleText.line(nil, name: "Lan"))
+        // Only a handle the directory could issue is ever shown.
+        XCTAssertNil(PersonHandleText.line("Lan.Nguyen", name: "Lan"))
+        XCTAssertNil(PersonHandleText.line("@lannguyen", name: "Lan"))
+    }
+
+    /// Desktop `chatRowHandle`: the second line until anyone writes, and always while searching.
+    func testAChatRowShowsTheHandleOnlyWhileEmptyOrSearching() {
+        XCTAssertEqual(PersonHandleText.chatRow("lannguyen", name: "Lan", hasMessages: false, searching: false),
+                       "@lannguyen")
+        XCTAssertNil(PersonHandleText.chatRow("lannguyen", name: "Lan", hasMessages: true, searching: false))
+        XCTAssertEqual(PersonHandleText.chatRow("lannguyen", name: "Lan", hasMessages: true, searching: true),
+                       "@lannguyen")
+    }
+
+    /// Desktop `matrixPersonLabel`: someone with no name is called by their handle.
+    func testAMemberWithoutANameIsCalledByTheirHandle() {
+        let unnamed = "Someone"
+        XCTAssertEqual(PersonHandleText.member(name: "Lan", handle: "lannguyen", unnamed: unnamed).line, "@lannguyen")
+        let nameless = PersonHandleText.member(name: unnamed, handle: "lannguyen", unnamed: unnamed)
+        XCTAssertEqual(nameless.name, "@lannguyen")
+        XCTAssertNil(nameless.line)
+        let noHandle = PersonHandleText.member(name: unnamed, handle: nil, unnamed: unnamed)
+        XCTAssertEqual(noHandle.name, unnamed)
+        XCTAssertNil(noHandle.line)
+    }
+
+    /// Desktop `filterMatrixRoster`: a chat is found by its verified handle, a leading @ ignored.
+    func testSearchMatchesAVerifiedHandle() {
+        XCTAssertTrue(PersonHandleText.matches("lannguyen", needle: "nguyen"))
+        XCTAssertTrue(PersonHandleText.matches("lannguyen", needle: "@lann"))
+        XCTAssertFalse(PersonHandleText.matches("lannguyen", needle: "@"))
+        XCTAssertFalse(PersonHandleText.matches(nil, needle: "lan"))
+    }
+
+    /// Only a real person's one-to-one row takes its partner's handle; never a
+    /// group, an assistant or the Founder, and never anything cached.
+    func testOnlyOneToOnePersonRowsTakeTheirPartnersHandle() {
+        let rows = [
+            HomeRow(id: "!lan", kind: .person, name: "Lan"),
+            HomeRow(id: "!founder", kind: .person, name: "Founder", isFounder: true),
+            HomeRow(id: "!team", kind: .group, name: "Team"),
+            HomeRow(id: "!atum", kind: .atum, name: "Atum"),
+        ]
+        let partners = ["!lan": "@lan:atum.test", "!founder": "@self:atum.test",
+                        "!team": "@lan:atum.test", "!atum": "@lan:atum.test"]
+        let live = HomeRow.applyingLive(rows, workingRoomIDs: [], memberCounts: [:], partners: partners,
+                                        handle: { self.handles[$0] })
+        XCTAssertEqual(live.first { $0.id == "!lan" }?.handle, "lannguyen")
+        XCTAssertEqual(live.first { $0.id == "!lan" }?.partnerUserID, "@lan:atum.test")
+        XCTAssertEqual(live.filter { $0.handle != nil }.map(\.id), ["!lan"])
+        let restored = live.map { HomeRow(snapshot: $0.snapshotRow) }
+        XCTAssertTrue(restored.allSatisfy { $0.handle == nil && $0.partnerUserID == nil })
+    }
+}

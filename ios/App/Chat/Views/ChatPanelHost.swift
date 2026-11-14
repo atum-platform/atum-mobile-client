@@ -225,10 +225,20 @@ struct ChatMembersPage: View {
 
     private func memberRow(_ row: Row) -> some View {
         let available = memberActions(row)
+        let label = memberLabel(row.member)
         return HStack(spacing: 12) {
             ChatInfoMemberAvatar(member: row.member, loadMatrixThumbnail: loadMatrixThumbnail)
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: row.member.name).font(.body)
+                Text(verbatim: label.name).font(.body)
+                // Their @handle on the quiet line under the name (desktop
+                // `conversation-controls.tsx`, `data-person-handle`).
+                if let handle = label.line {
+                    Text(verbatim: handle)
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.muted, scheme: scheme))
+                        .lineLimit(1)
+                        .accessibilityIdentifier("info.member.handle." + row.member.userID)
+                }
                 if row.membership != .joined {
                     Text(verbatim: design.text(row.membership == .banned
                                                ? "src.matrix.moderation-copy.copies.banned"
@@ -251,9 +261,9 @@ struct ChatMembersPage: View {
                                 // The report sheet asks for its own reason; no confirmation first.
                                 reporting = ReportPersonRequest(userID: row.member.userID)
                             } else if action == .unblock {
-                                run(Confirmation(userID: row.member.userID, name: row.member.name, action: action))
+                                run(Confirmation(userID: row.member.userID, name: label.name, action: action))
                             } else {
-                                confirming = Confirmation(userID: row.member.userID, name: row.member.name,
+                                confirming = Confirmation(userID: row.member.userID, name: label.name,
                                                           action: action)
                             }
                         } label: {
@@ -269,7 +279,7 @@ struct ChatMembersPage: View {
                 }
                 .disabled(pending == row.member.userID)
                 .accessibilityLabel(design.text("src.matrix.chat-copy.copies.memberOptions",
-                                                arguments: [.text(row.member.name)]))
+                                                arguments: [.text(label.name)]))
                 .accessibilityIdentifier("info.member.options." + row.member.userID)
             }
         }
@@ -278,6 +288,15 @@ struct ChatMembersPage: View {
         .frame(minHeight: 52)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("info.member." + row.member.userID)
+        .requestingHandles([row.member.userID], from: actions.handles)
+    }
+
+    /// A member's name and @handle line (desktop `matrixMemberLabel`, which
+    /// reads the verified cache for every member).
+    private func memberLabel(_ member: ChatInfoMember) -> (name: String, line: String?) {
+        guard let handles = actions.handles else { return (member.name, nil) }
+        return PersonHandleText.member(name: member.name, handle: handles.handle(member.userID),
+                                       unnamed: PeopleNameWords.unnamed)
     }
 
     private func run(_ confirmation: Confirmation) {

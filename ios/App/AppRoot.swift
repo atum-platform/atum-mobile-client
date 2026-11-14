@@ -577,6 +577,12 @@ struct AppRoot: View {
         }
     }
 
+    /// The model's verified-handle cache, for the lists that show people.
+    private var personHandles: PersonHandleLookup {
+        PersonHandleLookup(handle: { model.handle(for: $0) },
+                           request: { model.requestHandles(for: $0) })
+    }
+
     private func accountPresentation(_ account: LiveAccountSummary,
                                      assistants: [AccountAssistantSummary]) -> AccountPresentation {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
@@ -595,6 +601,8 @@ struct AppRoot: View {
             founderContactTitle: model.founderContactTitle,
             avatarURL: account.avatarURL,
             connection: model.accountConnection,
+            // The owner's own @handle (desktop account menu and settings).
+            directoryHandle: model.ownHandle,
             recoveryStatus: model.accountRecoveryStatus
         )
     }
@@ -715,11 +723,21 @@ struct AppRoot: View {
         let memberCounts = (model.liveMatrix?.rooms ?? []).reduce(into: [String: Int]()) {
             $0[$1.roomID] = Int(min($1.memberCount, UInt64(Int.max)))
         }
+        // A one-to-one chat's other member, by exact Matrix ID (desktop
+        // `directPartner`); its handle is read here so the list repaints
+        // when the directory answers.
+        let partners = (model.liveMatrix?.rooms ?? []).reduce(into: [String: String]()) {
+            if $1.isDirect, $1.memberCount <= 2, $1.memberUserIDs.count == 1 {
+                $0[$1.roomID] = $1.memberUserIDs[0]
+            }
+        }
         return HomePresentation(
             state: state,
             rows: HomeRow.applyingLive(rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) },
                                        workingRoomIDs: assistantActivity.workingRoomIDs,
-                                       memberCounts: memberCounts),
+                                       memberCounts: memberCounts,
+                                       partners: partners,
+                                       handle: { model.handle(for: $0) }),
             showsNotificationPrompt: source.notificationPrompt,
             showsDomainReauthentication: model.domainRecoveryState == .reauthenticationRequired,
             domainReauthenticationBusy: model.domainReauthenticationInProgress,
@@ -824,7 +842,8 @@ struct AppRoot: View {
                     // HC-7: Rename from the panel (desktop conversation menu).
                     rename: model.offersPersonalExits(roomID: roomID)
                         ? ChatRenameActions(request: { await model.renameRequest(roomID: $0) },
-                                            save: { await model.rename($0, to: $1) }) : nil
+                                            save: { await model.rename($0, to: $1) }) : nil,
+                    handles: personHandles
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),
@@ -925,14 +944,16 @@ struct AppRoot: View {
                     model.liveMatrix?.rooms.first {
                         $0.isDirect && $0.memberCount <= 2 && $0.memberUserIDs == [userID]
                     }?.roomID
-                }
+                },
+                handles: personHandles
             ) : nil,
             newGroup: model.canCreateGroup ? HomeGroupActions(
                 candidates: model.groupCandidates,
                 lookup: { handle in await model.lookupGroupPerson(handle) },
                 create: { name, members in await model.createGroup(name, selected: members) },
                 search: { await model.searchPeople($0) },
-                loadMatrixThumbnail: { await model.avatarThumbnail(uri: $0, pixelSide: $1) }
+                loadMatrixThumbnail: { await model.avatarThumbnail(uri: $0, pixelSide: $1) },
+                handles: personHandles
             ) : nil,
             newAssistant: model.canCreateAssistant ? HomeAssistantActions(
                 pending: model.hasPendingAssistantLifecycle,
@@ -950,6 +971,7 @@ struct AppRoot: View {
         actions.setLowPriority = { model.setRoomLowPriority($0, isLowPriority: $1) }
         actions.rename = ChatRenameActions(request: { await model.renameRequest(roomID: $0) },
                                            save: { await model.rename($0, to: $1) })
+        actions.handles = personHandles
         actions.blockablePeer = { model.blockablePeer(roomID: $0) }
         actions.blockedUserIDs = { await model.blockedUserIDs() }
         actions.setBlocked = { await model.setIgnored(userID: $0, ignored: $1) }

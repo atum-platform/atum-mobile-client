@@ -156,6 +156,48 @@ enum HomeAssistantLifecyclePolicy {
     }
 }
 
+/// Directory-verified handles for the people a list shows (desktop
+/// `useMatrixHandles` + `useMatrixHandleContacts`). `handle` reads the
+/// model's observable cache, so a view that calls it in `body` repaints when
+/// a later contacts read answers; `request` is fire-and-forget and pooled.
+struct PersonHandleLookup {
+    let handle: (String) -> String?
+    let request: ([String]) -> Void
+}
+
+/// How a handle is shown under a name (desktop `person-handle-line.tsx`).
+enum PersonHandleText {
+    /// `@handle`, or nil when it would only repeat the name above it.
+    static func line(_ handle: String?, name: String) -> String? {
+        guard let valid = MatrixPersonName.validHandle(handle) else { return nil }
+        let text = "@" + valid
+        return text == name.trimmingCharacters(in: .whitespacesAndNewlines) ? nil : text
+    }
+
+    /// A one-to-one chat row's second line (desktop `chatRowHandle`): the
+    /// handle while nobody has written yet, and always while searching;
+    /// once the chat has a message, the line is the conversation's own.
+    static func chatRow(_ handle: String?, name: String, hasMessages: Bool, searching: Bool) -> String? {
+        searching || !hasMessages ? line(handle, name: name) : nil
+    }
+
+    /// A chat member's name and second line (desktop `matrixPersonLabel`):
+    /// someone with no name of their own is called by their @handle.
+    static func member(name: String, handle: String?, unnamed: String) -> (name: String, line: String?) {
+        guard let valid = MatrixPersonName.validHandle(handle) else { return (name, nil) }
+        if name == unnamed { return ("@" + valid, nil) }
+        return (name, line(valid, name: name))
+    }
+
+    /// Home and Start chat find a person's chat by their verified handle too
+    /// (desktop `filterMatrixRoster`, `start-chat.tsx`), a leading @ ignored.
+    static func matches(_ handle: String?, needle: String) -> Bool {
+        guard let handle = MatrixPersonName.validHandle(handle) else { return false }
+        let stripped = needle.hasPrefix("@") ? String(needle.dropFirst()) : needle
+        return !stripped.isEmpty && handle.contains(stripped.lowercased())
+    }
+}
+
 struct HomePeopleDiscoveryActions {
     let search: (String) async -> [HomeGroupCandidate]?
     let open: (String) async -> HomeAddFriendResult
@@ -163,6 +205,8 @@ struct HomePeopleDiscoveryActions {
     /// The direct chat already held with a person, if any: Home search's
     /// People section leaves those people out (desktop `directRoomWith`).
     var directRoom: ((String) -> String?)? = nil
+    /// Verified handles for rows whose search answer carried none.
+    var handles: PersonHandleLookup? = nil
 }
 
 struct HomeGroupActions {
@@ -171,6 +215,8 @@ struct HomeGroupActions {
     let create: (String, [HomeGroupCandidate]) async -> HomeGroupCreateResult
     var search: ((String) async -> [HomeGroupCandidate]?)? = nil
     var loadMatrixThumbnail: ((String, Int) async -> Data?)? = nil
+    /// Verified handles for candidates whose answer carried none.
+    var handles: PersonHandleLookup? = nil
 }
 
 enum HomeGroupPolicy {
