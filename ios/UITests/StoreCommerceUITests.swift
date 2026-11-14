@@ -286,7 +286,8 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         assertNoTopUp(app)
 
         let acquire = element(app, "store.detail.acquire")
-        let deadline = Date().addingTimeInterval(40)
+        // The scripted settle is 45 s from launch (`slowCheckoutDelay`).
+        let deadline = Date().addingTimeInterval(70)
         var sawClosed = false
         while !acquire.exists, Date() < deadline {
             if element(app, "store.detail.closed").exists { sawClosed = true }

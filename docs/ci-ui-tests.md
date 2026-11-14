@@ -104,6 +104,12 @@ per run on 2026-11-11 with six lanes active).
   shard 3 failed with "No results. Searched 70 of 2200" even with the 30 s wait (the walk
   stopped, not slowed). `fix/chat-search-walk-stall` fixes the paging race (see below) and
   removes it from `QUARANTINE` again.
+- 2026-11-14: on PR #56 (`2e3d39f`) shard 0 failed
+  `StoreCommerceUITests/testSettlingCheckoutWaitsNeutrallyThenOffersGet` at line 281 ("a neutral
+  wait while checkout settles"). The test started 14:41:24 and failed 36 s in: launching and
+  opening the item took ~31 s on the hosted runner, longer than the scripted 20 s settle
+  (counted from launch), so the loading phase had already ended. The Debug-only
+  `ScriptedApplePurchasesAPI.slowCheckoutDelay` is now 45 s and the test's wait for Get 70 s.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
