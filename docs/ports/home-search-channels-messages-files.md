@@ -131,12 +131,39 @@ build volume.
   - `testHomeSearchChannelsMessagesFilesAppearances`: en/vi × light/dark at
     L, plus AX XXXL (top, and scrolled to Files).
   - `testHomeSearchChannelsMessagesFilesAccessibilityAudit`:
-    `performAccessibilityAudit` at AX XXXL, keyboard dismissed. The query
-    ("kickoff") finds a channel, a message and a file but no person, so the
-    People row's quarantined monogram finding
-    (`testHomeSearchPeopleAccessibilityAudit`, `docs/ci-ui-tests.md`) is not
-    part of it. It audits twice: at the top, then scrolled to Files.
-  - UI results: see the session log below.
+    `performAccessibilityAudit` at AX XXXL, keyboard dismissed. Its query
+    ("kickoff") finds a channel, a message and a file but no person. It
+    audits twice: at the top, then scrolled to Files. **Quarantined** in CI
+    next to the People audit. See "Audit finding" below.
+  - Regression: every other `HomeShellUITests` test passed (15 tests), as did
+    `HomeChatsWave3UITests` (5 passed, 1 skipped, the quarantined test left out),
+    and the People tests (find by handle, known chat not repeated, roster
+    control audit, appearances).
+### Audit finding (not fixed, documented)
+
+At AX XXXL the audit reports one "Dynamic Type font sizes are unsupported"
+finding with no element and a zero frame. A diagnostic run on the build Mac
+(a log-only test, since removed) ran a Dynamic Type audit for each case
+separately:
+
+| Results on screen | Findings |
+|---|---|
+| Roster match only ("lan") | none |
+| People only ("@somehandle") | the element-less one, plus the targeted `avatar.monogram` one already exempted |
+| Channel only | the element-less one |
+| Message only | the element-less one |
+| File only | the element-less one |
+
+So it comes from the global search block as a whole, not from one row type.
+It is also the finding behind main's quarantined
+`testHomeSearchPeopleAccessibilityAudit`, so People's monogram is not its
+cause. Drawing the rows with the roster's button style (default, tinted)
+instead of `.plain` did not change it, and that change was reverted. With no
+element attached, it can't be traced to a view. The new audit is quarantined
+under the same tracking issue (atum-platform/atum-mobile#50). See
+`docs/ci-ui-tests.md`. It still runs on the build Mac. Targeted findings would
+still fail it.
+
 - Screenshots: `home-search-cmf-{en,vi}-{light,dark}-l.png`,
   `home-search-cmf-en-light-ax5.png` and `…-ax5-files.png` (local evidence
   folder on the build volume; not committed).

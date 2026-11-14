@@ -43,7 +43,16 @@ per run on 2026-11-11 with six lanes active).
   unsupported" finding comes back with no element attached, so it can't be
   traced to a view; the control audit of the same search without the People
   section passes, and the decorative monogram is exempted by identifier. Same
-  avatar-monogram family; see `docs/ports/home-search-people.md`). Third hosted run (after #28 and #31 merged):
+  avatar-monogram family; see `docs/ports/home-search-people.md`) and
+  `HomeShellUITests/testHomeSearchChannelsMessagesFilesAccessibilityAudit`
+  (added quarantined, 14 Nov: the same element-less "Dynamic Type font sizes
+  are unsupported" finding, frame zero. A build-Mac diagnostic audited
+  roster-only, People-only, Channel-only, Message-only and File-only results
+  at AX-XXXL. Every global search section produced it once, the roster
+  never did, and the roster rows' button style did not change it. So it
+  belongs to the global search block, not to one row type, and People's
+  monogram is not its cause. See
+  `docs/ports/home-search-channels-messages-files.md`). Third hosted run (after #28 and #31 merged):
   `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`
   (Retry state not reached after a failed create, line 349) and
   `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`
