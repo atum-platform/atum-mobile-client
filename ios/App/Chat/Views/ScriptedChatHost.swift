@@ -360,7 +360,7 @@ struct ScriptedChatHost: View {
                 try? await Task.sleep(for: .seconds(3))
                 scriptedOpeningPhase = .failed
             }
-            let source: any ChatTimelineSource = UITestProbe.folder != nil || UITestProbe.lateDetails
+            let source: any ChatTimelineSource = UITestProbe.folder != nil || UITestProbe.lateDetails || UITestProbe.searchPageDelay > 0
                 ? ScriptedSourceProbe(inner: scripted, lateDetails: UITestProbe.lateDetails)
                 : scripted
             UITestProbe.append("source-start", to: "clock.txt")
@@ -805,6 +805,13 @@ enum UITestProbe {
     /// late, as the SDK delivers them (`ScriptedSourceProbe`).
     static let lateDetails = ProcessInfo.processInfo.arguments.contains("-AtumScriptedLateDetails")
 
+    /// Hostile search fixture: the call returns before the page is projected.
+    static let searchPageDelay: TimeInterval = {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-AtumScriptedSearchPageDelay"), i + 1 < args.count else { return 0 }
+        return max(0, TimeInterval(args[i + 1]) ?? 0)
+    }()
+
     static func append(_ line: String, to name: String) {
         guard let folder else { return }
         let data = Data((String(format: "%.3f ", Date().timeIntervalSince1970) + line + "\n").utf8)
@@ -849,7 +856,16 @@ actor ScriptedSourceProbe: ChatTimelineSource {
     func start() async {
         if relay == nil {
             relay = Task {
-                for await output in inner.outputs { forward(output) }
+                for await output in inner.outputs {
+                    // Reproduce a slow mapper/projector independently of the
+                    // page call's return. Preserve output order, including idle.
+                    if case let .batch(batch) = output,
+                       batch.diffs.contains(where: Self.addsAtFront), UITestProbe.searchPageDelay > 0 {
+                        try? await Task.sleep(for: .seconds(UITestProbe.searchPageDelay))
+                    }
+                    guard !Task.isCancelled else { return }
+                    forward(output)
+                }
                 continuation.finish()
             }
         }
@@ -879,6 +895,7 @@ actor ScriptedSourceProbe: ChatTimelineSource {
     func retrySend(_ item: ChatEventRef) async throws { try await inner.retrySend(item) }
     func abortSend(_ item: ChatEventRef) async throws { try await inner.abortSend(item) }
     func paginateBackwards(numEvents: UInt16) async throws -> Bool { try await inner.paginateBackwards(numEvents: numEvents) }
+    func markOutputBoundary(_ id: UUID) async -> Bool { await inner.markOutputBoundary(id) }
     func fetchReplyDetails(eventID: String) async { await inner.fetchReplyDetails(eventID: eventID) }
 
     func sendReceipt(_ receipt: ChatReceipt) async throws {
