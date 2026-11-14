@@ -12,6 +12,9 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
             + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
                "-UIPreferredContentSizeCategoryName", size]
             + probeArguments
+            // Hold each older batch beyond the former one-second row-count
+            // wait. Every search test exercises the slow-runner interleaving.
+            + (scenario == .chatSearch ? ["-AtumScriptedSearchPageDelay", "1.2"] : [])
         app.launch()
         return app
     }

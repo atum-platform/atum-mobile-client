@@ -149,6 +149,9 @@ final class TimelineController {
     private let clock: @Sendable () -> Date
     private var consumer: Task<Void, Never>?
     private var isClosed = false
+    /// A page is complete only after its ordered diff/status stream reaches
+    /// idle. The SDK call's return can overtake mapping and projection.
+    private var pagePublication: (started: Bool, completion: AsyncStream<Void>.Continuation)?
 
     /// Called on the main actor, in source order.
     var onPublication: ((TimelinePublication) -> Void)?
@@ -204,18 +207,30 @@ final class TimelineController {
                         self.onPublication?(publication)
                     } catch {
                         guard !self.isClosed else { return }
+                        self.pagePublication?.completion.finish()
                         self.onFailure?()
                         return
                     }
                 case let .pagination(state):
+                    if state == .paginating { self.pagePublication?.started = true }
                     self.onPaginationStatus?(state)
-                    guard let publication = await pipeline.setLoadingEarlier(state == .paginating, now: clock()),
-                          !self.isClosed else { continue }
-                    self.onPublication?(publication)
+                    if let publication = await pipeline.setLoadingEarlier(state == .paginating, now: clock()),
+                       !self.isClosed {
+                        self.onPublication?(publication)
+                    }
+                    // The page's batch precedes idle in the source stream.
+                    // Wake only after both it and the loading-row removal
+                    // have been published, even on a busy main actor.
+                    if state != .paginating,
+                       self.pagePublication?.started == true || state == .idle(hitTimelineStart: true) {
+                        self.pagePublication?.completion.yield(())
+                        self.pagePublication?.completion.finish()
+                    }
                 case let .typing(userIDs):
                     self.onTypingUserIDs?(userIDs)
                 }
             }
+            self?.pagePublication?.completion.finish()
         }
         await source.start()
     }
@@ -223,6 +238,7 @@ final class TimelineController {
     func close() {
         guard !isClosed else { return }
         isClosed = true
+        pagePublication?.completion.finish()
         consumer?.cancel()
         consumer = nil
         onPublication = nil
@@ -290,9 +306,23 @@ final class TimelineController {
         try await SendQueueRules.abort(ref, on: source, woke: logWake)
     }
 
-    /// B5. Returns true at the start of the room.
+    /// B5. Returns true at the start of the room, after the page is rows.
+    /// Keep the core's one-page claim until the ordered idle publication;
+    /// neither a loading row nor a timer proves that the page was projected.
     func paginateBackwards(events: UInt16) async throws -> Bool {
-        try await source.paginateBackwards(numEvents: events)
+        guard !isClosed, pagePublication == nil else { throw CancellationError() }
+        let (published, completion) = AsyncStream.makeStream(of: Void.self)
+        pagePublication = (false, completion)
+        defer {
+            completion.finish()
+            pagePublication = nil
+        }
+        let hitStart = try await source.paginateBackwards(numEvents: events)
+        for await _ in published {
+            guard !isClosed, !Task.isCancelled else { throw CancellationError() }
+            return hitStart
+        }
+        throw CancellationError()
     }
 
     /// B13 (`.readPublic` / `.readPrivate`) and B15 (`.fullyRead(eventID:)`).

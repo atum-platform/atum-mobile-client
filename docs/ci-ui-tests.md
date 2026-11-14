@@ -97,8 +97,9 @@ per run on 2026-11-11 with six lanes active).
   `HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` at line 124:
   the failure message already read "Result 1 of 1. Searched 89 of 2200", so the match
   was found just after the 15 s wait ran out (PR #49 failed the same way at 70 of 2200).
-  The app is correct and the hosted runner is slow at AX-XXXL; #52 doesn't touch chat
-  search. That wait is now 30 s.
+  That was initially attributed to runner speed, and the wait became 30 s.
+  The 2026-11-14 investigation below reproduces a real app paging race; the
+  existing 30 s wait remains unchanged.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
@@ -303,3 +304,65 @@ The final public-boundary check is
 `python3 scripts/public_guard.py --base 161ada7 --head HEAD`; its output is
 retained as `quarantine/public-guard.log` alongside the result bundles. Work is
 committed locally only; no push, pull request, hosted CI or deployment was run.
+
+
+## In-chat search page-publication race (2026-11-14)
+
+The terminal “No results. Searched 70 of 2200” label is not a walk waiting
+for row layout. `2200` is the product search bound; `chat.search` contains
+140 messages, configured for 40 cached events and older pages of 20.
+Projection hides transient events, so the observed searched counts are
+35 → 52 → 70 → 89 when the match is found on page 3.
+The Debug gated-source regression reproduces exactly `complete`, one page,
+70 searched, bound 2200 against the unchanged app while the matching page is
+still withheld. Publishing it later cannot restart that completed walk. `rowsChanged` can
+still update the match count, but does not update terminal walk progress or
+request focus, explaining late “Result 1 of 1. Searched …” labels too.
+
+`paginateBackwards` returns independently of the ordered source-output →
+mapper → projector → main-actor publication pipeline. The old search loader
+released the core's page claim at the call's return, then waited at most one
+second for **any row-count change**. Adding/removing the loading row could
+satisfy that condition, and a slow publication could outlast it. Search could
+consume its page budget or see timeline-start before searching the page's
+rows. Cancelling a query also cancelled those sleeps; after four seconds
+waiting for a claimed slot, the loader could issue a page without owning it.
+
+`TimelineController` now keeps page completion behind the ordered pagination
+idle publication, after the preceding batch and loading-row removal reach the
+store. This applies to scroll/background pages too, so their page claims
+cannot be released ahead of their rows. Closing the controller, a broken
+projection, or source-stream termination releases its publication wait.
+`LiveConversationStore` owns and shares each search-page task through that
+barrier; a new query joins the existing page, and detach/close cancels its
+owner. Slot acquisition no longer falls through after a timed polling limit.
+No transcript view structure, layout, search bound, wait, or assertion changes.
+
+Regression coverage lives in `HomeChatsWave3StateTests`: a controllable source
+returns before publishing an older match, holds the output beyond the former
+one-second fallback, and releases it explicitly. The unchanged app fails by
+completing at 70; the fixed app must remain pending and then find row 71.
+Additional tests cover query replacement during an unpublished page and
+teardown. Search UI tests now pass `-AtumScriptedSearchPageDelay 1.2`; the
+Debug probe delays older batches while retaining output order, exercising the
+slow-runner interleaving at AX-XXXL. Walk phase, page count and searched count
+join placement events in `search-placement.txt`, without logging query text.
+
+The audit test is already absent from `QUARANTINE` on the requested baseline
+(`ba594e1`); there is no remaining workflow line to remove.
+
+Verification on iPhone 17 / iOS 27, one simulator under the heavy-build
+lock, with two build jobs and a shared derived-data directory:
+
+- Before the fix: the gated publication test failed at `complete`, 70 searched
+  (three assertions); the query-replacement coverage passed.
+- After the fix: all 1,631 Swift package tests and 12 focused app state tests
+  (`HomeChatsWave3StateTests` and `HomeChatsWave2StateTests`) passed.
+- `testSearchBarAtAccessibilitySizePassesTheAudit`: 5 consecutive delayed-page
+  runs passed, zero skips. All five probes recorded 35 → 52 → 70 → 89, found
+  on page 3.
+- The complete `HomeChatsWave3UITests` class: 7/7 passed, zero skips, including
+  another AX-XXXL audit run. The delayed no-match walk completed all five
+  older pages at 128 projected event-content rows.
+- Existing search waits and assertions are unchanged. The simulator was shut
+  down before the locked batch released. No hosted CI, push or deployment.
