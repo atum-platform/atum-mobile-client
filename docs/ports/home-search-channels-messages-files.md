@@ -111,4 +111,32 @@ the vendored export (en, vi, ja, zh, zh-Hant). No `PENDING-COPY` entries.
 
 ## Verification
 
-See the end of this file (filled in after the locked test run).
+All heavy runs went through the shared `lockf` lock, with derived data on the
+build volume.
+
+- `swift test --package-path ios -j 2`: 726 tests, 0 failures. This includes
+  `CompanyMessageSearchTests` (parser, targets, admission, request body,
+  answer filtering, cap, merge order, snippet).
+- `xcodebuild … build-for-testing` (Debug, iPhone 17 simulator): succeeded.
+- `-only-testing:AtumMobileTests`: 377 tests, 0 failures. This includes
+  `HomeGlobalSearchPolicyTests` (channel match and fold, two-character
+  minimum, company key, section order, "No results" rule) and
+  `KitGlyphTests` (the new `Files` / `Messages` glyphs resolve).
+- `AtumMobileUITests/HomeShellUITests` (scripted Home, `ScriptedHomeHost`):
+  - `testHomeSearchListsChannelsMessagesAndFilesInDesktopOrder`: one
+    character asks nothing. "launch" lists People, Channels, Messages and
+    Files, headers top to bottom in that order. Both tabs are asked once.
+    Rows read "room, words". A message tap re-checks it, then opens the room.
+  - `testHomeSearchChannelOpensItsRoom`
+  - `testHomeSearchChannelsMessagesFilesAppearances`: en/vi × light/dark at
+    L, plus AX XXXL (top, and scrolled to Files).
+  - `testHomeSearchChannelsMessagesFilesAccessibilityAudit`:
+    `performAccessibilityAudit` at AX XXXL, keyboard dismissed. The query
+    ("kickoff") finds a channel, a message and a file but no person, so the
+    People row's quarantined monogram finding
+    (`testHomeSearchPeopleAccessibilityAudit`, `docs/ci-ui-tests.md`) is not
+    part of it. It audits twice: at the top, then scrolled to Files.
+  - UI results: see the session log below.
+- Screenshots: `home-search-cmf-{en,vi}-{light,dark}-l.png`,
+  `home-search-cmf-en-light-ax5.png` and `…-ax5-files.png` (local evidence
+  folder on the build volume; not committed).
