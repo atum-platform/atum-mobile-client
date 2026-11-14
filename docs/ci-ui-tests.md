@@ -93,6 +93,12 @@ per run on 2026-11-11 with six lanes active).
   throughout the 20 s wait; two earlier #44 heads scrolled late. The
   2026-11-14 fix below addresses the app's placement/anchor lifecycle, keeps
   the existing test waits, and restores this hosted test.
+- 2026-11-14: on PR #52 (`cb57fcf`) shard 3 failed
+  `HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` at line 124:
+  the failure message already read "Result 1 of 1. Searched 89 of 2200", so the match
+  was found just after the 15 s wait ran out (PR #49 failed the same way at 70 of 2200).
+  The app is correct and the hosted runner is slow at AX-XXXL; #52 doesn't touch chat
+  search. That wait is now 30 s.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
