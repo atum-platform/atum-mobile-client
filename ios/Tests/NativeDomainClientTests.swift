@@ -3238,6 +3238,111 @@ extension NativeDomainClientTests {
         XCTAssertEqual(NativeDomainProtocol.state.requests.count, 4)
     }
 
+    func testOwnerAliasCurrentUsesBareAuthenticatedGET() async throws {
+        let value = client(TestAuthorization(first: "alias-token"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://api.atumplatform.com/api/matrix/v1/aliases/current")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer alias-token")
+            XCTAssertNil(self.body(of: request))
+            return .json(Data(#"{"handle":"owner_handle","generation":1}"#.utf8))
+        }
+        let result = try await value.aliasCurrent()
+        XCTAssertEqual(result, .assigned(handle: try NativeHandle("owner_handle"), generation: 1))
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1)
+    }
+
+    func testOwnerAliasCurrentNullAndFailure() async throws {
+        let value = client(TestAuthorization(first: "alias-token"))
+        NativeDomainProtocol.state.handler = { _ in .json(Data("null".utf8)) }
+        let result = try await value.aliasCurrent()
+        XCTAssertEqual(result, .none)
+        NativeDomainProtocol.state.handler = { _ in
+            .init(status: 503, chunks: [Data(#"{"error":"matrix_503"}"#.utf8)])
+        }
+        do {
+            _ = try await value.aliasCurrent()
+            XCTFail("expected failure")
+        } catch { XCTAssertEqual(AgentAliasRefusal.from(error), .unavailable) }
+    }
+
+    func testAdditiveHandleReadsKeepAuthenticationFailureQuiet() async throws {
+        var notifications = 0
+        let value = NativeDomainClient(testAuthorization: { _ in "alias-token" },
+            protocolClasses: [NativeDomainProtocol.self], onAuthenticationFailure: { _ in notifications += 1 })
+        NativeDomainProtocol.state.handler = { _ in
+            .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)])
+        }
+        do {
+            _ = try await value.aliasCurrent()
+            XCTFail("expected authentication refusal")
+        } catch { XCTAssertEqual(AgentAliasRefusal.from(error), .authentication) }
+        do {
+            _ = try await value.aliasContacts(AliasContactsRequest(matrixUsers: ["@person:example.test"]))
+            XCTFail("expected authentication refusal")
+        } catch { XCTAssertEqual(AgentAliasRefusal.from(error), .authentication) }
+        XCTAssertEqual(notifications, 0)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 4)
+
+        let unavailable = NativeDomainClient(testAuthorization: { _ in
+            throw NativeDomainClientFailure.authenticationRefused
+        }, protocolClasses: [NativeDomainProtocol.self],
+            onAuthenticationFailure: { _ in notifications += 1 })
+        do {
+            _ = try await unavailable.aliasCurrent()
+            XCTFail("expected authorization failure")
+        } catch { XCTAssertEqual(error as? NativeDomainClientFailure, .authenticationRefused) }
+        XCTAssertEqual(notifications, 0)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 4)
+    }
+
+    func testAliasContactsUsesVersionedPOSTAndChecksIdentityOrder() async throws {
+        let value = client(TestAuthorization(first: "alias-token"))
+        let user = "@person:example.test"
+        let input = try AliasContactsRequest(matrixUsers: [user])
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://api.atumplatform.com/api/matrix/v1/aliases/contacts")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer alias-token")
+            let body = try! JSONSerialization.jsonObject(with: self.body(of: request)!) as! [String: Any]
+            XCTAssertEqual(Set(body.keys), ["matrixUsers", "schemaVersion"])
+            XCTAssertEqual(body["matrixUsers"] as? [String], [user])
+            XCTAssertEqual(body["schemaVersion"] as? Int, 2)
+            return .json(Data(#"{"contacts":[{"matrixUser":"@person:example.test","handle":"person_handle","status":"resolved","generation":1}],"schemaVersion":2,"revision":3}"#.utf8))
+        }
+        let result = try await value.aliasContacts(input)
+        XCTAssertEqual(result.revision, 3)
+        XCTAssertEqual(result.contacts.first?.handle?.rawValue, "person_handle")
+        NativeDomainProtocol.state.handler = { _ in
+            .json(Data(#"{"contacts":[{"matrixUser":"@other:example.test","handle":null,"status":"unknown","generation":null}],"schemaVersion":2,"revision":3}"#.utf8))
+        }
+        do {
+            _ = try await value.aliasContacts(input)
+            XCTFail("expected identity mismatch")
+        } catch { XCTAssertEqual(error as? NativeDomainClientFailure, .invalidResponse) }
+    }
+
+    func testAliasContactsLegacyOmitsVersionAndRejectsUnnegotiatedAnswer() async throws {
+        let value = client(TestAuthorization(first: "alias-token"))
+        NativeDomainProtocol.state.handler = { request in
+            let body = try! JSONSerialization.jsonObject(with: self.body(of: request)!) as! [String: Any]
+            XCTAssertEqual(Set(body.keys), ["matrixUsers"])
+            return .json(Data(#"{"contacts":[{"matrixUser":"@person:example.test","handle":null}]}"#.utf8))
+        }
+        let result = try await value.aliasContacts(AliasContactsRequest(matrixUsers: ["@person:example.test"], versioned: false))
+        XCTAssertNil(result.contacts.first?.handle)
+        XCTAssertNil(result.revision)
+        NativeDomainProtocol.state.handler = { _ in
+            .json(Data(#"{"contacts":[{"matrixUser":"@person:example.test","handle":null}]}"#.utf8))
+        }
+        do {
+            _ = try await value.aliasContacts(AliasContactsRequest(matrixUsers: ["@person:example.test"]))
+            XCTFail("expected schema mismatch")
+        } catch { XCTAssertEqual(error as? NativeDomainClientFailure, .invalidResponse) }
+    }
+
     func testClaimsClosedIsItsOwnRefusal() async throws {
         let value = client(TestAuthorization(first: "alias-token"))
         NativeDomainProtocol.state.handler = { _ in

@@ -319,6 +319,37 @@ final class LiveAppModel {
         apply(result, to: &walletRead)
     }
 
+    /// Directory-proven bare handles. Observation tracks reads through handle(for:)
+    /// and ownHandle, including asynchronous backfill after a search has returned.
+    private(set) var knownHandles = [String: String]()
+    var ownHandle: String? {
+        guard case let .signedIn(account) = stage else { return nil }
+        return knownHandles[account.matrixUserID]
+    }
+    func handle(for userID: String) -> String? { knownHandles[userID] }
+
+    @ObservationIgnored private lazy var handleStore: VerifiedHandleStore = {
+        let store = VerifiedHandleStore()
+        store.onChange = { [weak self] in self?.knownHandles = $0 }
+        return store
+    }()
+
+    /// A UI task can request visible identities and repeat after the refresh interval.
+    /// This never waits for the network or changes discovery/roster readiness.
+    func requestHandles(for userIDs: [String]) { handleStore.requestHandles(for: userIDs) }
+    func loadOwnHandle() async { await handleStore.loadOwnHandle() }
+
+    private func configureHandleDirectory() {
+        guard let client = domainClient, let owner = context?.runtime.ticket.session.userID else {
+            handleStore.setDirectory(current: nil, contacts: nil)
+            return
+        }
+        handleStore.bind(owner: owner)
+        handleStore.setDirectory(current: { try await client.aliasCurrent() },
+                                 contacts: { try await client.aliasContacts($0) })
+        Task { @MainActor [weak self] in await self?.loadOwnHandle() }
+    }
+
     private var domainClient: NativeDomainClient? {
         didSet {
             let replaced: Bool
@@ -328,6 +359,7 @@ final class LiveAppModel {
             default: replaced = true
             }
             guard replaced else { return }
+            configureHandleDirectory()
             applePurchases.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
             assistantTurnStopUnavailable.removeAll()
             officialAccountsClientGeneration &+= 1
@@ -922,7 +954,11 @@ final class LiveAppModel {
             }
         }
         let locale = Locale(identifier: appLanguage)
-        return newest.values.map(\.candidate).sorted {
+        return newest.values.map { value in
+            var candidate = value.candidate
+            candidate.handle = handle(for: candidate.id)
+            return candidate
+        }.sorted {
             $0.name.compare($1.name, options: [.caseInsensitive, .diacriticInsensitive],
                             range: nil, locale: locale) == .orderedAscending
         }
@@ -1187,7 +1223,16 @@ final class LiveAppModel {
             lookup: { handle in try await client?.aliasLookup(handle: handle) },
             directory: { term in await session.searchPeople(term) })
         guard liveMatrix === session, domainClient === client, !Task.isCancelled else { return nil }
-        return people
+        guard let people else { return nil }
+        for person in people {
+            if let handle = person.handle { handleStore.remember(userID: person.id, handle: handle) }
+        }
+        requestHandles(for: people.map(\.id))
+        return people.map { person in
+            var person = person
+            if person.handle == nil { person.handle = handle(for: person.id) }
+            return person
+        }
     }
 
     func openPerson(_ userID: String) async -> HomeAddFriendResult {
@@ -1217,7 +1262,7 @@ final class LiveAppModel {
         } catch {
             return .searchFailed
         }
-        guard liveMatrix === session, !Task.isCancelled else { return .searchFailed }
+        guard liveMatrix === session, domainClient === client, !Task.isCancelled else { return .searchFailed }
 
         guard case let .assigned(assignment) = lookup else {
             return .notFound(handle.rawValue)
@@ -1226,6 +1271,7 @@ final class LiveAppModel {
               let target = assignment.matrixUser,
               target.rawValue != ownUserID else { return .notMessageable }
 
+        handleStore.remember(userID: target.rawValue, handle: assignment.handle.rawValue)
         return await openDirectPerson(target, session: session)
     }
 
@@ -1275,7 +1321,8 @@ final class LiveAppModel {
                   matrixUser.rawValue != ownUserID else { return .notMessageable }
             let known = groupCandidates.first(where: { $0.id == matrixUser.rawValue })
             let profile = await session.personProfile(userID: matrixUser.rawValue)
-            guard liveMatrix === session, !Task.isCancelled else { return .failed }
+            guard liveMatrix === session, domainClient === client, !Task.isCancelled else { return .failed }
+            handleStore.remember(userID: matrixUser.rawValue, handle: assignment.handle.rawValue)
             var candidate = known ?? profile ?? HomeGroupCandidate(
                 id: matrixUser.rawValue, name: "@" + assignment.handle.rawValue, kind: .person)
             candidate.handle = assignment.handle.rawValue
@@ -3494,6 +3541,7 @@ final class LiveAppModel {
                 // Seen faces need the real member profile in assistant/app
                 // chats too, even though those chats have no Members panel.
                 self.conversationMembers = ordered
+                self.requestHandles(for: ordered.map(\.userID))
                 self.conversation?.setMentionCandidates(MentionRules.candidates(
                     members: ordered.map { (userID: $0.userID, displayName: $0.displayName) },
                     roster: roster, ownUserID: ownUserID))
@@ -4115,6 +4163,7 @@ final class LiveAppModel {
         defer { isRefreshingProduct = false }
 
         configureCompanyWorkspaceIfNeeded()
+        Task { @MainActor [weak self] in await self?.loadOwnHandle() }
         async let matrixRefresh: Void = refreshMatrix()
         async let domainRefresh: Void = refreshDomainReads()
         async let recoveryRefresh: Void = refreshRecoveryState()
@@ -4122,6 +4171,7 @@ final class LiveAppModel {
         async let companyRefresh: Void = companyWorkspace.refresh()
         _ = await (matrixRefresh, domainRefresh, recoveryRefresh, firstRunRefresh, companyRefresh)
         pruneRevealedHiddenRooms()
+        requestHandles(for: liveMatrix?.rooms.filter { $0.isDirect }.flatMap(\.memberUserIDs) ?? [])
         // Agents and apps may load after the invites arrived.
         if let liveMatrix { acceptKnownInvites(liveMatrix.invites, session: liveMatrix) }
         await refreshAppBotPointers()
@@ -4241,6 +4291,7 @@ final class LiveAppModel {
         matrix.onRoomsChanged = { [weak self, weak matrix] rooms in
             guard let self, let matrix, self.liveMatrix === matrix else { return }
             self.roomPublicationRevision &+= 1
+            self.requestHandles(for: rooms.filter { $0.isDirect }.flatMap(\.memberUserIDs))
             self.reconcileRoomMutations(with: rooms, revision: self.roomPublicationRevision)
             self.reconcileFounderBindingFromKnownMarker()
             self.notesSelfRoomsChanged(rooms)
@@ -4875,6 +4926,7 @@ final class LiveAppModel {
         }
         let fallback = LiveAccountSummary(matrixUserID: current.runtime.ticket.session.userID,
                                           displayName: nil)
+        handleStore.bind(owner: fallback.matrixUserID)
         ownerTimeZone.begin(accountID: fallback.matrixUserID)
         loadChatListSnapshot(accountID: fallback.matrixUserID)
         stage = .signedIn(fallback)
@@ -4937,6 +4989,7 @@ final class LiveAppModel {
     }
 
     private func invalidateAppAccount(nextInstallationID: UUID? = nil) {
+        handleStore.bind(owner: nil)
         cancelAppOnboarding()
         appContentPage = nil
         appOnboardingReadyRoomID = nil
