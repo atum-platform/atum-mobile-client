@@ -328,11 +328,12 @@ consume its page budget or see timeline-start before searching the page's
 rows. Cancelling a query also cancelled those sleeps; after four seconds
 waiting for a claimed slot, the loader could issue a page without owning it.
 
-`TimelineController` now keeps page completion behind the ordered pagination
-idle publication, after the preceding batch and loading-row removal reach the
-store. This applies to scroll/background pages too, so their page claims
-cannot be released ahead of their rows. Closing the controller, a broken
-projection, or source-stream termination releases its publication wait.
+`TimelineController` normally keeps page completion behind the ordered
+pagination idle publication, after the preceding batch and loading-row
+removal reach the store. This applies to scroll/background pages too. The
+review follow-up below adds an explicit queued-output flush and a five-second
+fallback for absent/deduplicated status callbacks. Closing the controller, a
+broken projection, or source-stream termination also releases the wait.
 `LiveConversationStore` owns and shares each search-page task through that
 barrier; a new query joins the existing page, and detach/close cancels its
 owner. Slot acquisition no longer falls through after a timed polling limit.
@@ -348,8 +349,12 @@ Debug probe delays older batches while retaining output order, exercising the
 slow-runner interleaving at AX-XXXL. Walk phase, page count and searched count
 join placement events in `search-placement.txt`, without logging query text.
 
-The audit test is already absent from `QUARANTINE` on the requested baseline
-(`ba594e1`); there is no remaining workflow line to remove.
+The audit test is absent from `QUARANTINE` on the requested main baseline
+(`ba594e1`). Its quarantine line exists on PR #54 (`feat/handles-ui`). After
+the coordinator merges #54, remove
+`HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` from
+`.github/workflows/ui-tests.yml` before shipping this fix. This local worker
+has not merged that branch or changed its workflow.
 
 Verification on iPhone 17 / iOS 27, one simulator under the heavy-build
 lock, with two build jobs and a shared derived-data directory:
@@ -366,3 +371,54 @@ lock, with two build jobs and a shared derived-data directory:
   older pages at 128 projected event-content rows.
 - Existing search waits and assertions are unchanged. The simulator was shut
   down before the locked batch released. No hosted CI, push or deployment.
+
+
+### Review follow-up: missing pagination statuses
+
+Review of `d6edefb` identified that SDK status notifications can be absent or
+deduplicated, so idle cannot be an unconditional completion requirement.
+Tracking is installed on the controller's main actor before the SDK call;
+the consumer cannot process a status from that call before tracking exists.
+After the call returns, an output-boundary marker drains already-queued
+publications. The SDK source inserts this marker into its **input** stream,
+behind callbacks still awaiting mapping; the scripted source and delayed
+probe preserve the same ordering. This avoids using `Task.yield`, a loading
+row, or a guessed delay as proof that queued work was published.
+
+After that flush, a call with no observed `.paginating` returns its SDK
+result immediately. A call which observed `.paginating` waits for published
+idle, with a five-second bound covering both the flush and idle wait. Timeout
+returns the SDK result and writes `search.page.timeout` to the Debug
+`search-placement.txt` probe. It also clears a remaining loading status and
+row: otherwise the core's next page could remain blocked even after the
+controller returned. Ended output streams release the wait too.
+
+Both controller callers were checked: the search loader and the common
+scroll/background effect runner. The core already claims one page at a
+time; scrolling is held while search owns that claim, and search waits while
+scrolling/background work owns it. Core tests cover both directions. An
+unexpected concurrent controller call now joins the current request and
+receives its result, rather than throwing a cancellation error for a scroll
+load. Shared-collection paging calls the SDK directly and is unchanged.
+
+`TimelinePaginationPublicationTests` uses controllable sources for no status
+(with queued rows), immediate timeline start, a status consumed before SDK
+return, statuses queued after return, missing idle, ended outputs, and
+concurrent search/scroll callers. The missing-idle test injects a 100 ms
+bound, checks completion at that bound and a cleared loading status, and
+successfully requests a second page. Production defaults to five seconds.
+The original 70-row gated regression remains unchanged.
+
+Follow-up verification (same heavy-build lock, two jobs, `dd-search-stall`,
+one iPhone 17 / iOS 27 simulator):
+
+- All 1,632 package tests passed, including both core page-ownership directions.
+- All 19 focused app tests passed, including the original stall regression and
+  seven controller cases. No-status and timeline-start cases returned in
+  1 ms; the two 100 ms missing-idle requests completed in 206 ms together.
+- The AX-XXXL audit passed 5 consecutive delayed-page runs, zero skips.
+- The full `HomeChatsWave3UITests` class passed 7/7, zero skips. All eight
+  search probes in this rerun used normal completion, with zero timeout
+  fallbacks. Existing waits and assertions remain unchanged.
+- The simulator was shut down inside the locked script before it exited.
+  The follow-up is committed locally only; no push, PR, hosted CI or deploy.

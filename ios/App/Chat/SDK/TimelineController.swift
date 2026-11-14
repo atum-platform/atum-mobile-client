@@ -149,9 +149,15 @@ final class TimelineController {
     private let clock: @Sendable () -> Date
     private var consumer: Task<Void, Never>?
     private var isClosed = false
-    /// A page is complete only after its ordered diff/status stream reaches
-    /// idle. The SDK call's return can overtake mapping and projection.
-    private var pagePublication: (started: Bool, completion: AsyncStream<Void>.Continuation)?
+    private enum PageSignal { case boundary, idle, timeout }
+    /// Installed on the main actor before invoking the source. Its consumer
+    /// cannot observe this call's early statuses before tracking exists.
+    private var pagePublication: (id: UUID, started: Bool, idle: Bool,
+                                  completion: AsyncStream<PageSignal>.Continuation)?
+    private var pageRequest: Task<Bool, Error>?
+    private var outputEnded = false
+    private var paginationState = PaginationState.idle(hitTimelineStart: false)
+    private let pagePublicationTimeout: Duration
 
     /// Called on the main actor, in source order.
     var onPublication: ((TimelinePublication) -> Void)?
@@ -183,7 +189,9 @@ final class TimelineController {
     /// Any source: the scripted one in Debug UI tests, the SDK's via `make`.
     init(source: any ChatTimelineSource, roomID: String, context: RoomContext, generation: UInt64,
          echoAliases: [String: String] = [:], calendar: Calendar = .current,
-         clock: @escaping @Sendable () -> Date) {
+         clock: @escaping @Sendable () -> Date,
+         pagePublicationTimeout: Duration = .seconds(5)) {
+        self.pagePublicationTimeout = pagePublicationTimeout
         self.roomID = roomID
         self.generation = generation
         self.source = source
@@ -207,29 +215,35 @@ final class TimelineController {
                         self.onPublication?(publication)
                     } catch {
                         guard !self.isClosed else { return }
+                        self.outputEnded = true
                         self.pagePublication?.completion.finish()
                         self.onFailure?()
                         return
                     }
                 case let .pagination(state):
-                    if state == .paginating { self.pagePublication?.started = true }
+                    self.paginationState = state
+                    if state == .paginating {
+                        self.pagePublication?.started = true
+                        self.pagePublication?.idle = false
+                    }
                     self.onPaginationStatus?(state)
                     if let publication = await pipeline.setLoadingEarlier(state == .paginating, now: clock()),
                        !self.isClosed {
                         self.onPublication?(publication)
                     }
-                    // The page's batch precedes idle in the source stream.
-                    // Wake only after both it and the loading-row removal
-                    // have been published, even on a busy main actor.
-                    if state != .paginating,
-                       self.pagePublication?.started == true || state == .idle(hitTimelineStart: true) {
-                        self.pagePublication?.completion.yield(())
-                        self.pagePublication?.completion.finish()
+                    if state != .paginating {
+                        self.pagePublication?.idle = true
+                        self.pagePublication?.completion.yield(.idle)
+                    }
+                case let .outputBoundary(id):
+                    if id == self.pagePublication?.id {
+                        self.pagePublication?.completion.yield(.boundary)
                     }
                 case let .typing(userIDs):
                     self.onTypingUserIDs?(userIDs)
                 }
             }
+            self?.outputEnded = true
             self?.pagePublication?.completion.finish()
         }
         await source.start()
@@ -238,6 +252,7 @@ final class TimelineController {
     func close() {
         guard !isClosed else { return }
         isClosed = true
+        pageRequest?.cancel()
         pagePublication?.completion.finish()
         consumer?.cancel()
         consumer = nil
@@ -306,23 +321,68 @@ final class TimelineController {
         try await SendQueueRules.abort(ref, on: source, woke: logWake)
     }
 
-    /// B5. Returns true at the start of the room, after the page is rows.
-    /// Keep the core's one-page claim until the ordered idle publication;
-    /// neither a loading row nor a timer proves that the page was projected.
+    /// B5. The core owns the page slot for search, scrolling and background
+    /// loading. Coalesce unexpected concurrent callers instead of converting
+    /// a scroll load into a failure or issuing a second SDK request.
     func paginateBackwards(events: UInt16) async throws -> Bool {
-        guard !isClosed, pagePublication == nil else { throw CancellationError() }
-        let (published, completion) = AsyncStream.makeStream(of: Void.self)
-        pagePublication = (false, completion)
-        defer {
-            completion.finish()
-            pagePublication = nil
-        }
+        guard !isClosed else { throw CancellationError() }
+        if let pageRequest { return try await pageRequest.value }
+        let request = Task { try await self.performPage(events: events) }
+        pageRequest = request
+        defer { pageRequest = nil }
+        return try await request.value
+    }
+
+    private func performPage(events: UInt16) async throws -> Bool {
+        let id = UUID()
+        let (published, completion) = AsyncStream.makeStream(of: PageSignal.self)
+        pagePublication = (id, false, false, completion)
+        defer { completion.finish(); pagePublication = nil }
         let hitStart = try await source.paginateBackwards(numEvents: events)
-        for await _ in published {
-            guard !isClosed, !Task.isCancelled else { throw CancellationError() }
-            return hitStart
+        guard !isClosed, !Task.isCancelled else { throw CancellationError() }
+        if !outputEnded {
+            // Flush queued outputs before deciding whether loading was seen.
+            // The marker itself and idle are both covered by the same bound.
+            let marker = Task { [source] in
+                if !(await source.markOutputBoundary(id)), self.outputEnded { completion.finish() }
+            }
+            let timeout = Task { [pagePublicationTimeout] in
+                do { try await Task.sleep(for: pagePublicationTimeout) } catch { return }
+                completion.yield(.timeout)
+                completion.finish()
+            }
+            defer { marker.cancel(); timeout.cancel() }
+            var flushed = false
+            for await signal in published {
+                guard !isClosed, !Task.isCancelled else { throw CancellationError() }
+                switch signal {
+                case .boundary: flushed = true
+                case .idle: break
+                case .timeout:
+                    #if DEBUG
+                    UITestProbe.append("search.page.timeout bound=\(pagePublicationTimeout)",
+                                       to: "search-placement.txt")
+                    #endif
+                    await finishPageStatusIfNeeded(hitStart: hitStart)
+                    return hitStart
+                }
+                if flushed, pagePublication?.started == false || pagePublication?.idle == true { break }
+            }
         }
-        throw CancellationError()
+        guard !isClosed, !Task.isCancelled else { throw CancellationError() }
+        await finishPageStatusIfNeeded(hitStart: hitStart)
+        return hitStart
+    }
+
+    /// A missing idle must not leave the core/pager at `.paginating` after
+    /// the call completed: that would make the next search wait forever too.
+    private func finishPageStatusIfNeeded(hitStart: Bool) async {
+        guard paginationState == .paginating else { return }
+        paginationState = .idle(hitTimelineStart: hitStart)
+        onPaginationStatus?(paginationState)
+        if let publication = await pipeline.setLoadingEarlier(false, now: clock()), !isClosed {
+            onPublication?(publication)
+        }
     }
 
     /// B13 (`.readPublic` / `.readPrivate`) and B15 (`.fullyRead(eventID:)`).

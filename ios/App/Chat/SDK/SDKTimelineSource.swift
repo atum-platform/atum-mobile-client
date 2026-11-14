@@ -21,6 +21,7 @@ import MatrixRustSDK
 private enum SDKTimelineInput: Sendable {
     case diffs([TimelineDiff])
     case pagination(PaginationState)
+    case outputBoundary(UUID)
 }
 
 actor SDKTimelineSource: ChatTimelineSource {
@@ -148,6 +149,8 @@ actor SDKTimelineSource: ChatTimelineSource {
             outputContinuation.yield(.batch(map(diffs)))
         case let .pagination(state):
             outputContinuation.yield(.pagination(state))
+        case let .outputBoundary(id):
+            outputContinuation.yield(.outputBoundary(id))
         }
     }
 
@@ -339,6 +342,14 @@ actor SDKTimelineSource: ChatTimelineSource {
 
     func paginateBackwards(numEvents: UInt16) async throws -> Bool {
         try await timeline.paginateBackwards(numEvents: numEvents)
+    }
+
+    func markOutputBoundary(_ id: UUID) -> Bool {
+        guard !isStopped else { return false }
+        // The same input stream holds listener callbacks awaiting mapping.
+        // A marker in outputs directly would overtake those queued batches.
+        if case .terminated = inputContinuation.yield(.outputBoundary(id)) { return false }
+        return true
     }
 
     func sendReceipt(_ receipt: ChatReceipt) async throws {

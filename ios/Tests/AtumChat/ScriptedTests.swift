@@ -571,7 +571,7 @@ final class ScriptedTests: XCTestCase {
         XCTAssertFalse(hit)
         await source.stop()
         var received: [Output] = []
-        for await output in source.outputs { received.append(Self.playerOutput(output)) }
+        for await output in source.outputs { if let value = Self.playerOutput(output) { received.append(value) } }
         guard case let .diffs(first)? = received.first, case .reset = first.first else {
             return XCTFail("the open's reset comes first: \(received.prefix(1))")
         }
@@ -591,11 +591,12 @@ final class ScriptedTests: XCTestCase {
     private struct EchoMissing: Error {}
 
     /// The source's output back in the player's terms (reply details dropped).
-    private static func playerOutput(_ output: ChatTimelineOutput) -> Output {
+    private static func playerOutput(_ output: ChatTimelineOutput) -> Output? {
         switch output {
         case let .batch(batch): .diffs(batch.diffs)
         case let .typing(userIDs): .typing(userIDs)
         case let .pagination(state): .pagination(state)
+        case .outputBoundary: nil
         }
     }
 
@@ -700,7 +701,7 @@ final class ScriptedTests: XCTestCase {
         try await source.abortSend(.transaction("txn-" + id))
         await source.stop()
         var mirror = Mirror()
-        for await output in source.outputs { mirror.take([Self.playerOutput(output)]) }
+        for await output in source.outputs { if let value = Self.playerOutput(output) { mirror.take([value]) } }
         XCTAssertFalse(mirror.buffer.items.contains { $0.id == id }, "Xóa removed the pending send")
     }
 

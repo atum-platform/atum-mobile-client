@@ -894,6 +894,7 @@ actor ScriptedSourceProbe: ChatTimelineSource {
     func retrySend(_ item: ChatEventRef) async throws { try await inner.retrySend(item) }
     func abortSend(_ item: ChatEventRef) async throws { try await inner.abortSend(item) }
     func paginateBackwards(numEvents: UInt16) async throws -> Bool { try await inner.paginateBackwards(numEvents: numEvents) }
+    func markOutputBoundary(_ id: UUID) async -> Bool { await inner.markOutputBoundary(id) }
     func fetchReplyDetails(eventID: String) async { await inner.fetchReplyDetails(eventID: eventID) }
 
     func sendReceipt(_ receipt: ChatReceipt) async throws {

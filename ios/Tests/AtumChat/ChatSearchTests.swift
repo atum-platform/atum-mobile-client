@@ -174,4 +174,25 @@ final class ChatSearchTests: XCTestCase {
         XCTAssertTrue(core.reachedTimelineStart)
         XCTAssertFalse(core.startSearchPage(now: now), "nothing older than the start")
     }
+
+    func testSearchWaitsForAScrollPageAndCanClaimAfterItsCompletion() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var core = ConversationCore(context: F.assistantRoom())
+        _ = core.attached(now: now)
+        let rows = Projection.rows((0..<30).map { F.text("m\($0)", from: F.agent, minute: $0) },
+                                   context: F.assistantRoom(), options: .s1)
+        _ = core.receive(ProjectedTimeline(snapshot: Snapshot(rows: rows, change: .reset, generation: 1),
+                                           nextNoAnswerChange: nil, sequence: 1, touchedItemIDs: []), now: now)
+        let effects = core.handle(.geometry(distanceFromBottom: 400, distanceFromTop: 0, viewportHeight: 800,
+                                            motion: .user), now: now)
+        XCTAssertTrue(effects.contains { if case .paginateBackwards = $0 { true } else { false } })
+        XCTAssertFalse(core.startSearchPage(now: now), "search must not steal scrolling's page slot")
+        // The reader moves away from the trigger, so completion does not
+        // immediately claim another scroll page.
+        _ = core.handle(.geometry(distanceFromBottom: 400, distanceFromTop: 3000, viewportHeight: 800,
+                                   motion: .user), now: now)
+        _ = core.paginationFinished(hitTimelineStart: false, now: now)
+        XCTAssertTrue(core.startSearchPage(now: now), "the completed scroll request leaves a usable search slot")
+    }
+
 }
