@@ -93,7 +93,7 @@ final class HomeShellUITests: TranscriptUITestCase {
         XCTAssertEqual(homeTab.value as? String ?? "", "")
         XCTAssertFalse(app.buttons["phone.tab.account"].exists)
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
-        // centre and the glass pencil share one row. The tab bar has no search.
+        // centre and the glass plus share one row. The tab bar has no search.
         let account = app.buttons.matching(identifier: "home.account").firstMatch
         let search = app.textFields.matching(identifier: "home.search").firstMatch
         let plus = app.buttons.matching(identifier: "home.create").firstMatch
@@ -187,6 +187,42 @@ final class HomeShellUITests: TranscriptUITestCase {
         XCTAssertTrue(app.buttons.matching(identifier: "home.create").firstMatch.waitForExistence(timeout: 2),
                       "Cancel did not restore the header controls")
         XCTAssertTrue(field.exists, "the search field stays at the top")
+    }
+
+    /// atum-desktop#48 on the phone: the search reads just "Search" /
+    /// "Tìm kiếm" (spoken "Search everything" / "Tìm mọi thứ", desktop's
+    /// aria-label), and New chat is the plus to the right of the field, on the
+    /// same row, with its old name. en/vi, light and dark, at L.
+    @MainActor
+    func testHeaderShortSearchAndPlusAppearances() {
+        addTeardownBlock { XCUIDevice.shared.appearance = .light }
+        let words: [String: (placeholder: String, label: String, create: String)] = [
+            "en": ("Search", "Search everything", "Start a chat"),
+            "vi": ("Tìm kiếm", "Tìm mọi thứ", "Bắt đầu trò chuyện"),
+        ]
+        for language in ["en", "vi"] {
+            for appearance in [XCUIDevice.Appearance.light, .dark] {
+                XCUIDevice.shared.appearance = appearance
+                let app = XCUIApplication()
+                app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+                    + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
+                       "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+                app.launch()
+                let search = app.textFields.matching(identifier: "home.search").firstMatch
+                let plus = app.buttons.matching(identifier: "home.create").firstMatch
+                XCTAssertTrue(search.waitForExistence(timeout: 15), boundedHierarchy(app))
+                XCTAssertTrue(plus.waitForExistence(timeout: 3), boundedHierarchy(app))
+                let expected = words[language]!
+                XCTAssertEqual(search.placeholderValue, expected.placeholder)
+                XCTAssertEqual(search.label, expected.label)
+                XCTAssertEqual(plus.label, expected.create)
+                XCTAssertLessThan(search.frame.maxX, plus.frame.minX + Self.framePoints, "plus right of search")
+                XCTAssertEqual(plus.frame.midY, search.frame.midY, accuracy: Self.framePoints, "one row")
+                keepScreenshot("roster-plus-\(language)-\(appearance == .dark ? "dark" : "light")", of: app)
+                app.terminate()
+                XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
+            }
+        }
     }
 
     @MainActor
