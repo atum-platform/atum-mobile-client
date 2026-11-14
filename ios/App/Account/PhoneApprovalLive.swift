@@ -51,17 +51,19 @@ enum PhoneApprovalLive {
 
     /// Sign-out: through the live model while the bearer works; else through
     /// a lifecycle on the shared files (offline: revocations wait for this
-    /// owner's next sign-in); else, when the files cannot be opened, the
-    /// stateless path (delete every key of the owner, revoke on the server
-    /// whatever is bound to this Matrix device). Credentials may go only when
-    /// the result allows it.
+    /// owner's next sign-in; with no client at all, confirmed key deletion
+    /// releases it); else, when the files cannot be opened, the stateless path
+    /// (delete every key of the owner, which releases it, and best effort
+    /// revoke on the server whatever is bound to this Matrix device).
+    /// Credentials may go only when the result allows it.
     static func signOut(owner: String, model: PhoneApprovalSettingsModel?, matrixDeviceID: String?,
                         server: PhoneApprovalServer?) async -> Bool {
         let result: PhoneApprovalSignOutResult
         if let model, model.owner == owner {
             result = await model.signOut(matrixDeviceID: matrixDeviceID)
         } else if let lifecycle = lifecycle(server: server ?? PhoneApprovalUnreachableServer()) {
-            result = await lifecycle.signOut(owner: owner, matrixDeviceID: matrixDeviceID)
+            // No client: confirmed key deletion is what releases sign-out.
+            result = await lifecycle.signOut(owner: owner, matrixDeviceID: matrixDeviceID, hasClient: server != nil)
         } else {
             result = await PhoneApprovalLifecycle.signOutWithoutState(owner: owner, matrixDeviceID: matrixDeviceID,
                                                                        server: server, vault: SecureEnclavePhoneKeyVault())

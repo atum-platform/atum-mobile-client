@@ -259,8 +259,26 @@ public final class PhoneApprovalSoftwareKeyVault: PhoneApprovalKeyVault, @unchec
             return key
         }
     }
+    /// Holds the next system prompt open (the person is looking at Face ID)
+    /// until `releasePrompt()`. It blocks the signing thread, as the real
+    /// prompt does.
+    public func holdNextPrompt() { lock.locked { holdPrompt = true } }
+    public var promptIsHeld: Bool { lock.locked { promptHeld } }
+    public func releasePrompt() { promptGate.signal() }
+    private var holdPrompt = false, promptHeld = false
+    private let promptGate = DispatchSemaphore(value: 0)
+
     fileprivate func prompt() -> Prompt {
-        lock.locked {
+        let hold = lock.locked { () -> Bool in
+            defer { holdPrompt = false }
+            if holdPrompt { promptHeld = true }
+            return holdPrompt
+        }
+        if hold {
+            promptGate.wait()
+            lock.locked { promptHeld = false }
+        }
+        return lock.locked {
             signatures += 1
             return prompts.isEmpty ? .match : prompts.removeFirst()
         }

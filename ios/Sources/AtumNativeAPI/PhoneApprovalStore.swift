@@ -251,6 +251,17 @@ public actor PhoneApprovalRegistrationStore {
 
     // MARK: Orphan keys
 
+    /// Whether a registration (current or pending generation) or a live
+    /// attempt still uses `namespace`.
+    public func inUse(_ namespace: PhoneKeyNamespace) -> Bool {
+        for registration in state.registrations.values {
+            if registration.namespace.value == namespace.value || registration.pendingNamespace?.value == namespace.value {
+                return true
+            }
+        }
+        return state.pending.contains { inFlight.contains($0.deviceServiceId) && $0.namespace.value == namespace.value }
+    }
+
     public func orphans() -> [PhoneApprovalOrphanKeys] { state.orphans }
     public func addOrphan(_ orphan: PhoneApprovalOrphanKeys) throws {
         guard !state.orphans.contains(orphan) else { return }

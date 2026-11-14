@@ -97,7 +97,7 @@ Behaviour:
 - **Two iPhones**: each has its own installation, keys and
   `deviceServiceId`; removing one never touches the other. Another account
   never sees this account's registration.
-- **Rotation** (lifecycle only, no screen: the UX has no rotate control):
+- **Rotation** (internal, tests only since review round 2: no screen, and not reachable from the app):
   new generation, next epoch, `previousApprovalKid`, signed by the new keys
   and the current approval key (two prompts). A lost answer keeps both
   generations; the next refresh promotes whichever the server holds. With
@@ -218,11 +218,22 @@ conditional.
 | 5 | A stale refresh deletes the replacement | Refresh re-reads the registration after the list returns and applies nothing unless it is still the same ID and generation; `remove(expected:)` and `replace(expected:with:)` refuse a different registration | `testAStaleRefreshNeverDropsTheReplacement` |
 | 6 | Keychain deletion failures ignored | `PhoneApprovalKeyVault.delete` reports whether both roles are gone; a failure records the namespace as an orphan (kept until deletion is confirmed, retried on every refresh). Remove throws `keysRemain` (the page shows the exported error line); sign-out records orphans and is **held** if keys remain and the server has not confirmed revocation | `testAKeychainFailureKeepsTheNamespaceAndIsRetried`, `testSignOutIsHeldWhileAKeyCannotBeDeletedAndTheServerIsUnreachable` |
 
-**Sign-out rule** (`PhoneApprovalSignOutResult.allowsSignOut`): a signed-out
-iPhone must not keep a usable approval key. Credentials may go only when
-(keys deleted **or** the server confirmed revocation) **and** (revocation
-recorded **or** confirmed). Otherwise `LiveAppModel.signOut` returns false and
-the existing sign-out error alert offers Try again.
+**Sign-out rule** (`PhoneApprovalSignOutResult.allowsSignOut`, as revised in
+review round 2): a signed-out iPhone must not keep a usable approval key.
+
+- When deleting keys is all that can be done (no client because the session
+  was refused, or no local state at all), **confirmed key deletion** releases
+  sign-out. A registration without its Secure Enclave key cannot sign.
+- Otherwise credentials may go only when (keys deleted **or** the server
+  confirmed revocation) **and** (revocation recorded **or** confirmed). Server
+  evidence never stands in for key deletion while a journalled attempt is
+  unresolved: a 404 or an empty list taken before the server admits the
+  attempt proves nothing about it.
+- While keys remain, sign-out forgets nothing: the registration and every
+  attempt stay recorded (they name the keys), so a retry is judged the same way.
+
+Otherwise `LiveAppModel.signOut` returns false and the existing sign-out error
+alert offers Try again.
 
 **Finding 4, what was chosen and why.** Two layers:
 
@@ -244,24 +255,36 @@ the existing sign-out error alert offers Try again.
    recorded or revoked, a revoked-or-not registration without its Secure
    Enclave key cannot sign, and holding sign-out would trap the person.
 
-Residual risk, accepted: if the app dies between sign-out's DELETE (404, the
-attempt not yet admitted) and a late admission, the server holds an active
-registration whose key sign-out already deleted. It cannot sign; the next
-sign-in's sweep would not see it unless the same Matrix device is used, and
-Your devices removal elsewhere covers it.
+### Review round 2 (14 Nov 2026)
 
-Verification of the fixes (locked runs, derived data
-`/Volumes/AtumTestFlight/dd-approvals-2b-fix`, iPhone 17 simulator booted
-and shut down inside the run): `swift test --filter 'PhoneApproval|PhoneRegistry'`
-**49 passed, 0 failed** (`PhoneApprovalLifecycleTests` 34, of which 10 are new
-for the findings; `PhoneApprovalKeyTests` 10; negotiation 2; transport 1;
-copy 2); `swift build -c release --target AtumNativeAPI` passes;
+| # | Finding | Fix | Test (fails without the fix because…) |
+| --- | --- | --- | --- |
+| R2-1 | Unadmitted attempt + stuck Keychain: a 404 and an empty list counted as "server revoked" | Server evidence does not count for keys while an attempt is unresolved; an attempt (or a registration) is forgotten only once its keys are confirmed gone | `testAnUnadmittedAttemptWithAStuckKeychainHoldsSignOut` (the 404 and empty list made `allowsSignOut` true with the keys still there) |
+| R2-2 | No client + unwritable queue trapped sign-out; stateless offline stayed blocked; a missing device ID blocked the sweep path | `PhoneApprovalLive` passes `hasClient: server != nil`; no client and the stateless path release on confirmed key deletion; the sweep is best effort | `testNoClientWithAnUnwritableQueueIsReleasedOnceKeysAreGone` (the stateful path always claimed a client and stayed held), `testStatelessSignOutWithoutADeviceIDIsReleasedByKeyDeletion`, `testSignOutWithoutStateDeletesKeysAndRevokesByDevice` (offline stayed held) |
+| R2-3 | Orphan cleanup could delete a live rotation's or the current generation's keys | **Option (b): rotation is internal (tests only)** until it has a screen and a single-write promotion; as a guard, orphan cleanup skips any namespace a registration or a live attempt uses | `testOrphanCleanupNeverDeletesTheCurrentRegistrationsKeys` (cleanup deleted the current keys, turning the phone to "set up again") |
+| R2-4 | A failed orphan write was swallowed and the registration record removed anyway | `deleteOrRemember` reports failure and `discard` keeps the record | `testAFailedOrphanWriteKeepsTheRegistrationRecord` (the next write removed the only record naming the keys) |
+| — | The prompt-window test only exercised `store.begin` | Suspends the real Face ID prompt, signs out, resumes, asserts zero POSTs | `testSignOutDuringThePromptSendsNothing` (without the lifecycle's pre-POST epoch check the set-up POSTs once) |
+
+Verification of round 2 (one locked run, `dd-approvals-2b-fix`):
+`swift test --filter 'PhoneApproval|PhoneRegistry'` **54 passed, 0 failed**
+(`PhoneApprovalLifecycleTests` 39, of which 5 are new for round 2 and one
+rewritten); `swift build -c release --target AtumNativeAPI` passes;
 `AtumMobileTests` **373 passed, 0 failed**; approvals UI tests plus the Your
-devices regression **10 passed, 0 failed** (screenshots in
-`/Volumes/AtumTestFlight/approvals-2b-fix-shots/ui-evidence/`). The app and
-UI runs used the final product code; only two test files changed after them
-(a typed-throws closure and one assertion that wrongly expected another
-phone's queued revocation to have run).
+devices regression **10 passed, 0 failed**.
+
+**Residual risk, accepted (corrected).** A registration can outlive
+sign-out only **without its key**: sign-out is released only once every key
+of the owner is confirmed deleted, or (with no attempt unresolved) the server
+confirmed revocation. If the app dies after such a sign-out and the server
+later admits an in-flight attempt, that registration has no key on the phone,
+so it cannot sign; removal from another device clears it. A path where the
+key **also** survives (an unadmitted attempt plus a Keychain that will not
+delete) is no longer released: sign-out stays held until the keys are gone.
+
+**Known limit.** The attempt journal and the orphan list have no bound under
+sustained failure (a Keychain or disk that keeps refusing): each failed
+set-up adds an entry until a refresh or sign-out settles it. Acceptable for
+now; a cap and a "repair" path belong with a later hardening pass.
 
 ## Owner on-device checklist (physical iPhone; not faked here)
 

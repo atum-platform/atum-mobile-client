@@ -227,17 +227,24 @@ public struct PhoneApprovalSignOutResult: Equatable, Sendable {
     public let revocationRecorded: Bool
     /// The server confirmed no active registration of this iPhone remains.
     public let serverRevoked: Bool
-    /// No client existed at all, so nothing could ever be recorded or revoked.
-    public let noClient: Bool
+    /// A journalled attempt was unresolved at sign-out: the server may admit
+    /// it later, so a 404 or an empty list proves nothing about it.
+    public let unresolvedAttempt: Bool
+    /// Deleting the keys is all that can be done: there is no client (the
+    /// session was refused), or there is no local state to record anything in.
+    public let keysSuffice: Bool
 
-    /// A signed-out iPhone must not keep a usable approval key: either the
-    /// keys are gone or the server has revoked them; and the revocation must
-    /// be recorded or confirmed. Without any client the keys being gone is
-    /// all that can ever be done, so it is enough (trapping the person in a
-    /// session whose credentials were refused helps nobody).
+    /// A signed-out iPhone must not keep a usable approval key.
+    /// - When only key deletion can be done, confirmed deletion is enough: a
+    ///   registration without its Secure Enclave key cannot sign, and holding
+    ///   sign-out would trap the person.
+    /// - Otherwise the keys must be gone, or the server must have revoked
+    ///   them (which never counts while an attempt is unresolved); and the
+    ///   revocation must be recorded or confirmed.
     public var allowsSignOut: Bool {
-        if noClient { return keysDeleted }
-        return (keysDeleted || serverRevoked) && (revocationRecorded || serverRevoked)
+        if keysSuffice { return keysDeleted }
+        let serverCoversKeys = serverRevoked && !unresolvedAttempt
+        return (keysDeleted || serverCoversKeys) && (revocationRecorded || serverRevoked)
     }
 }
 
@@ -388,8 +395,8 @@ public actor PhoneApprovalLifecycle {
                 matrixUserID: identity.userID, matrixDeviceID: identity.deviceID,
                 matrixFingerprint: identity.fingerprint, controllerKeyIDs: controllers,
                 issuedAt: Int64(now().timeIntervalSince1970 * 1_000), keys: keys)
-            request = try PhoneEnrollment.request(body: body, keys: keys, reason: reason)
             approvalKid = PhoneEnrollment.keyID(spki: try keys.publicKey(.approval))
+            request = try PhoneEnrollment.request(body: body, keys: keys, reason: reason)
         } catch {
             await abandon(attempt, mayHaveLanded: false)
             throw Self.signingFailure(error)
@@ -434,17 +441,14 @@ public actor PhoneApprovalLifecycle {
     }
 
     /// Ends an attempt that did not register: records its revocation when it
-    /// may have reached the server, deletes its keys (or remembers them), and
-    /// drops the journal entry only when both are durably settled.
+    /// may have reached the server and deletes its keys. The journal entry
+    /// (which names the keys) is dropped only when the keys are confirmed
+    /// gone and the revocation, if needed, is recorded; until then the
+    /// attempt stays unresolved and every refresh and sign-out retries it.
     private func abandon(_ attempt: PhoneApprovalPendingAttempt, mayHaveLanded: Bool) async {
-        var settled = true
+        var settled = vault.delete(attempt.namespace)
         if mayHaveLanded {
             if (try? await revocations.enqueue(owner: attempt.owner, id: attempt.deviceServiceId)) == nil { settled = false }
-        }
-        if !vault.delete(attempt.namespace) {
-            if (try? await registrations.addOrphan(PhoneApprovalOrphanKeys(attempt.namespace, owner: attempt.owner))) == nil {
-                settled = false
-            }
         }
         if settled { try? await registrations.resolve(attempt.deviceServiceId) }
         if mayHaveLanded { await retryRevocations(owner: attempt.owner) }
@@ -481,7 +485,9 @@ public actor PhoneApprovalLifecycle {
     /// asks the server to revoke them and sweeps any other active
     /// registration bound to this Matrix device, then deletes every approval
     /// key of the owner. Credentials may go only when `allowsSignOut`.
-    public func signOut(owner: String, matrixDeviceID: String?) async -> PhoneApprovalSignOutResult {
+    /// `hasClient` false: the session was refused and `server` cannot reach
+    /// anything, so confirmed key deletion is all that can be asked.
+    public func signOut(owner: String, matrixDeviceID: String?, hasClient: Bool = true) async -> PhoneApprovalSignOutResult {
         await registrations.fence(owner: owner)
         let attempts = await registrations.pending(owner: owner)
         let registration = await registrations.registration(owner: owner)
@@ -499,34 +505,29 @@ public actor PhoneApprovalLifecycle {
             for orphan in await registrations.orphans() where orphan.owner == owner {
                 try? await registrations.removeOrphan(orphan)
             }
-        } else {
-            // Keep every known namespace until its keys are confirmed gone.
-            var namespaces = attempts.map(\.namespace)
-            if let registration {
-                namespaces.append(registration.namespace)
-                if let pending = registration.pendingNamespace { namespaces.append(pending) }
-            }
-            for namespace in namespaces {
-                try? await registrations.addOrphan(PhoneApprovalOrphanKeys(namespace, owner: owner))
-            }
         }
-        if recorded { try? await registrations.forget(owner: owner) }
+        // Forget only what is settled: while keys remain, the registration and
+        // every attempt stay recorded (they name the keys), so a later
+        // sign-out still treats them as unresolved.
+        if keysDeleted && recorded { try? await registrations.forget(owner: owner) }
         supported = nil
         return PhoneApprovalSignOutResult(keysDeleted: keysDeleted, revocationRecorded: recorded,
-                                          serverRevoked: serverRevoked, noClient: false)
+                                          serverRevoked: serverRevoked, unresolvedAttempt: !attempts.isEmpty,
+                                          keysSuffice: !hasClient)
     }
 
-    /// Sign-out when the state files cannot be opened at all: nothing is
-    /// recorded locally, so it deletes every key of the owner and revokes, on
-    /// the server, every active registration bound to this Matrix device.
-    /// `server` nil means there is no client.
+    /// Sign-out when the state files cannot be opened at all: nothing can be
+    /// recorded locally, so it deletes every key of the owner (which is what
+    /// releases sign-out) and, best effort, revokes on the server every active
+    /// registration bound to this Matrix device. Offline, without a client or
+    /// without a Matrix device ID, the sweep is skipped, never a blocker.
     public static func signOutWithoutState(owner: String, matrixDeviceID: String?, server: PhoneApprovalServer?,
                                            vault: PhoneApprovalKeyVault) async -> PhoneApprovalSignOutResult {
         var keysDeleted = vault.wipe(owner: owner)
         if !keysDeleted { keysDeleted = vault.wipe(owner: owner) }
         let swept = await sweep(server: server, matrixDeviceID: matrixDeviceID)
         return PhoneApprovalSignOutResult(keysDeleted: keysDeleted, revocationRecorded: false,
-                                          serverRevoked: swept, noClient: server == nil)
+                                          serverRevoked: swept, unresolvedAttempt: false, keysSuffice: true)
     }
 
     /// Revokes every active iOS registration bound to `matrixDeviceID`. True
@@ -544,7 +545,12 @@ public actor PhoneApprovalLifecycle {
 
     /// Rotation: new keys in a new generation, signed by them and by the
     /// current approval key (two system prompts), at the next epoch.
-    public func rotate(owner: String, identity: PhoneApprovalMatrixIdentity, device: PhoneApprovalDeviceFacts,
+    ///
+    /// Not reachable from the app (review round 2, option b): it has no
+    /// screen, and its orphan journalling of the new generation is not yet
+    /// safe against a crash mid-promotion. Internal, for tests only, until
+    /// rotation gets a screen and a single-write promotion.
+    func rotate(owner: String, identity: PhoneApprovalMatrixIdentity, device: PhoneApprovalDeviceFacts,
                        reason: String) async throws(PhoneApprovalSetupFailure) -> PhoneApprovalStatus {
         guard device.authentication != .noPasscode else { throw .noPasscode }
         let epoch = await registrations.epoch(owner: owner)
@@ -658,20 +664,26 @@ public actor PhoneApprovalLifecycle {
         }
     }
 
+    /// Retries deleting orphaned keys, never a namespace a registration or a
+    /// live attempt still uses.
     private func retryOrphans() async {
-        for orphan in await registrations.orphans() where vault.delete(orphan.namespace) {
-            try? await registrations.removeOrphan(orphan)
+        for orphan in await registrations.orphans() {
+            guard await !registrations.inUse(orphan.namespace) else { continue }
+            if vault.delete(orphan.namespace) { try? await registrations.removeOrphan(orphan) }
         }
     }
 
     /// Deletes a namespace's keys, or records it as an orphan to retry.
+    /// False when the keys remain and recording them failed: the caller must
+    /// keep whatever record still names them.
+    @discardableResult
     private func deleteOrRemember(_ namespace: PhoneKeyNamespace, owner: String,
-                                  clearing journal: PhoneApprovalOrphanKeys? = nil) async {
+                                  clearing journal: PhoneApprovalOrphanKeys? = nil) async -> Bool {
         if vault.delete(namespace) {
             if let journal { try? await registrations.removeOrphan(journal) }
-        } else {
-            try? await registrations.addOrphan(PhoneApprovalOrphanKeys(namespace, owner: owner))
+            return true
         }
+        return (try? await registrations.addOrphan(PhoneApprovalOrphanKeys(namespace, owner: owner))) != nil
     }
 
     /// Drops `registration` (only if it is still the owner's current one),
@@ -683,8 +695,10 @@ public actor PhoneApprovalLifecycle {
                 return false
             }
         }
-        await deleteOrRemember(registration.namespace, owner: registration.owner)
-        if let pending = registration.pendingNamespace { await deleteOrRemember(pending, owner: registration.owner) }
+        guard await deleteOrRemember(registration.namespace, owner: registration.owner) else { return false }
+        if let pending = registration.pendingNamespace {
+            guard await deleteOrRemember(pending, owner: registration.owner) else { return false }
+        }
         _ = try? await registrations.remove(expected: registration, needsSetUpAgain: needsSetUpAgain)
         if revoke { await retryRevocations(owner: registration.owner) }
         return true
