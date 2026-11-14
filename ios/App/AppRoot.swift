@@ -961,8 +961,10 @@ struct AppRoot: View {
                 eligibility: model.homeSearchEligibility(),
                 search: { await model.homeCompanySearch($0, tab: $1) },
                 open: { result in
-                    guard await model.openHomeSearchResult(result) else { return false }
-                    return await openRoomAndRoute(result.roomID, requiringCompany: result.companyID)
+                    await HomeSearchRoute.open(
+                        result, workspace: model.companyWorkspace,
+                        confirm: { await model.openHomeSearchResult(result) },
+                        route: { await openRoomAndRoute($0, requiringCompany: $1) })
                 })
         }
         return actions

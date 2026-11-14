@@ -35,6 +35,21 @@ struct HomeGlobalSearchActions {
     var open: @MainActor (CompanySearchResult) async -> Bool
 }
 
+/// Desktop `openGlobalEvent`, end to end: the result is confirmed (message
+/// still there, room still eligible), then its company is activated (Home is
+/// in no company, and the result may be another company's than the one
+/// Workplace shows), then the route runs with that company as its selection
+/// fence. `AppRoot` passes `openRoomAndRoute(_:requiringCompany:)` as `route`.
+enum HomeSearchRoute {
+    @MainActor
+    static func open(_ result: CompanySearchResult, workspace: CompanyWorkspaceModel,
+                     confirm: () async -> Bool,
+                     route: (_ roomID: String, _ requiringCompany: String) async -> Bool) async -> Bool {
+        guard await confirm(), workspace.activateCompany(result.companyID, owning: result.roomID) else { return false }
+        return await route(result.roomID, result.companyID)
+    }
+}
+
 /// The global search's sections, top to bottom (desktop
 /// `data-matrix-global-search-results`), all above the roster's own matches.
 enum HomeGlobalSearchSection: String, CaseIterable, Equatable {

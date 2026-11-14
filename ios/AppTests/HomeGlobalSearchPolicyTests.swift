@@ -72,4 +72,16 @@ final class HomeGlobalSearchPolicyTests: XCTestCase {
         XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: leftA).map(\.eventID), ["$b"])
         XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: CompanySearchEligibility()), [])
     }
+
+    /// Review round 2: `homeCompanySearch` serves both tabs from this one
+    /// service, so both share its one queue (four at a time) and its one
+    /// transport (one URL session). The service's own tests prove it builds
+    /// each once and runs both tabs through them.
+    @MainActor
+    func testHomeSearchTabsShareOneServiceQueueAndSession() {
+        let service = LiveAppModel.homeCompanySearchService
+        XCTAssertTrue(service === LiveAppModel.homeCompanySearchService)
+        XCTAssertEqual(service.limiter.limit, 4)
+        XCTAssertTrue(service.transport is LiveCompanySearchTransport)
+    }
 }

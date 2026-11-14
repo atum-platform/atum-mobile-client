@@ -129,6 +129,69 @@ Tests: `CompanyMessageSearchTests.testEligibilityDropsResultsWhoseRoomIsNoLonger
 `HomeGlobalSearchPolicyTests.testShownResultsFollowCurrentEligibility`;
 `HomeShellUITests.testHomeSearchResultThatCannotOpenStaysOnHome`.
 
+## Review fixes, round 2 (follow-up review of `91c342c`)
+
+1. **Opening another company's result (regression).** Passing
+   `requiringCompany` ran the selection fence (`isSelected`, active company
+   == the result's) before anything activated the result's company. So with
+   company A shown in Workplace, every result from company B failed.
+   `HomeSearchRoute.open` (called by `AppRoot`) now confirms the result, then
+   `CompanyWorkspaceModel.activateCompany(_:owning:)` makes its company
+   active (only when the directory says that company owns the room), and only
+   then routes with the fence.
+2. **Eligibility after the queue.** The company fan-out moved into
+   `CompanySearchService` (AtumNativeAPI), with the live session injected
+   (`Environment`). A company's rooms are admitted when it is queued, checked
+   again when the job gets its slot, again after its `from:` member reads,
+   and its answer is filtered on arrival. A room encrypted, left or unlisted
+   while queued is never sent to `/search`.
+3. **Member reader with no total cap.** `CompanySearchMemberReader` reads
+   the SDK's member iterator (every membership) in chunks of 200 until it
+   ends, and matches as it goes. Only matches are capped (500). The SDK adapter
+   `companySearchSenders` maps `RoomMember` to `CompanySearchMember` and
+   filters nothing.
+4. **One queue, one session.** `LiveAppModel.homeCompanySearchService` is
+   built once, with one `CompanySearchLimiter(limit: 4)` and one
+   `LiveCompanySearchTransport` (a single ephemeral `URLSession`). Both tabs
+   go through it.
+
+Tests, and what each would catch:
+
+- `CompanySwitcherTests.testHomeSearchResultFromAnotherCompanyActivatesItThenOpens`:
+  real `CompanyWorkspaceModel` (companies A and B from the switcher harness),
+  real fence, real `Router`. With A active, B's result opens, B is active and
+  B's room is open in Workplace. Without the activation step, the fence
+  refuses.
+- `CompanySearchServiceTests.testARoomEncryptedWhileItsJobIsQueuedIsNeverSearched`
+  and `testARoomLeftDuringTheMemberReadsIsNeverSearched`: the recorded
+  request bodies never name the room. Without the re-checks, they do.
+- `CompanySearchServiceTests.testAnAnswerForARoomLeftInFlightIsDropped`:
+  through `search`, the read entry point. Without the arrival filter, the
+  left room's result comes back.
+- `HomeShellUITests.testHomeSearchHidesResultsOfARoomLeftWhileShown`:
+  through HomeScreen's real render. A room left after its answer landed
+  loses its row with no new search. Without the render filter, the row stays.
+- `CompanySearchServiceTests.testBothTabsShareOneQueueAndOneSession`:
+  counting factories build the queue once and the transport once. Both
+  tabs' four requests go through them, never more than the queue's limit at
+  once, in company-id order. With one queue per tab, or one per company, the
+  counts or the peak are higher.
+  `HomeGlobalSearchPolicyTests.testHomeSearchTabsShareOneServiceQueueAndSession`
+  pins the app's single service (limit 4, the live transport).
+- `CompanyMessageSearchTests.testMemberReaderFindsASenderPastTenThousandRecords`:
+  a joined sender at record 10,001 behind 10,000 departed records, and a
+  departed sender behind 12,000. With the old 10,000-record cap, both are
+  missed. Only matches are capped.
+- `CompanySearchServiceTests.testFromFindsAFormerMembersHistoricalMessageThroughTheReader`:
+  through `search` and `CompanySearchMemberReader`. A member who left
+  becomes the sender filter, and their old message comes back. A reader that
+  keeps joined members only would ask for no senders and find nothing.
+- `CompanySearchServiceTests.testACancelledSearchStartsNothingMore`.
+
+Not covered by a test: the SDK call itself (`membersNoSync`, which yields
+every membership; the old joined-only reader had to filter `.join` out of the
+same iterator) and `LiveCompanySearchTransport`'s network request.
+
 ## Left for later (known gaps)
 
 - **Reveal on open.** Desktop scrolls the room to the message and opens its

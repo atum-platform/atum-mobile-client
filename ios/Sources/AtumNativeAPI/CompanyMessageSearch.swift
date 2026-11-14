@@ -320,14 +320,17 @@ public enum CompanyMessageSearch {
         return readable.filter { ChatSearchText.needle($0.channelName) == wanted }
     }
 
-    /// Desktop `senderIds`: `from:me` is this account; `from:@name` is every
-    /// known member of the searched rooms whose localpart or name matches,
-    /// whatever their membership now (a former member's old messages are
-    /// still theirs; desktop reads `room.getMembers()`, all states).
-    public static func senders(from: String, ownUserID: String?, members: [CompanySearchMember]) -> [String] {
-        if from == "me" { return ownUserID.map { [$0] } ?? [] }
-        let matches = members.filter { memberMatches(userID: $0.userID, names: $0.names, from: from) }.map(\.userID)
-        return Set(matches).filter(isUserID).sorted()
+    /// The rooms one company's search may ask about: those the current
+    /// eligibility allows (listed with this binding, joined, known
+    /// unencrypted), narrowed by `in:#channel`.
+    public static func admitted(_ targets: [CompanySearchTarget], query: CompanySearchQuery, companyID: String,
+                                eligibility: CompanySearchEligibility) -> [CompanySearchTarget] {
+        let readable = targets.filter {
+            eligibility.allows(companyID: companyID, channelID: $0.channelID, roomID: $0.roomID)
+        }
+        guard let channel = query.inChannel else { return readable }
+        let wanted = ChatSearchText.needle(String(channel.dropFirst()))
+        return readable.filter { ChatSearchText.needle($0.channelName) == wanted }
     }
 
     /// Desktop `senderIds`' member rule for `from:@name`: a member whose

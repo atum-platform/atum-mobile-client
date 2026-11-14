@@ -181,34 +181,44 @@ final class CompanyMessageSearchTests: XCTestCase {
         XCTAssertFalse(opened)
     }
 
-    /// Review should-fix 5: `from:@name` keeps a former member, so a
-    /// historical message they wrote is still found.
-    func testFromFindsAFormerMembersHistoricalMessage() throws {
-        let members = [
-            CompanySearchMember(userID: "@lan:atum.test", names: ["Lan"], membership: "join"),
-            CompanySearchMember(userID: "@minh:atum.test", names: ["Minh"], membership: "leave"),
-            CompanySearchMember(userID: "@minh:atum.test", names: ["Minh"], membership: "leave"),
-            CompanySearchMember(userID: "@banned:atum.test", names: ["Minh"], membership: "ban"),
-        ]
-        XCTAssertEqual(CompanyMessageSearch.senders(from: "@minh", ownUserID: "@me:atum.test", members: members),
-                       ["@banned:atum.test", "@minh:atum.test"])
-        XCTAssertEqual(CompanyMessageSearch.senders(from: "me", ownUserID: "@me:atum.test", members: members),
-                       ["@me:atum.test"])
-        XCTAssertEqual(CompanyMessageSearch.senders(from: "@nobody", ownUserID: nil, members: members), [])
+    /// Round 2, item 3: the member reader reads the whole list in bounded
+    /// chunks and caps only matches. With the old 10,000-record total cap, a
+    /// sender at record 10,001, here behind 10,000 departed records, was missed.
+    func testMemberReaderFindsASenderPastTenThousandRecords() {
+        var departed = (0..<10_000).map {
+            CompanySearchMember(userID: "@gone\($0):atum.test", names: ["Gone \($0)"], membership: "leave")
+        }
+        departed.append(CompanySearchMember(userID: "@minh:atum.test", names: ["Minh"], membership: "join"))
+        let chunks = Counter()
+        XCTAssertEqual(CompanySearchMemberReader.senders(from: "@minh", next: chunked(departed, count: chunks)),
+                       ["@minh:atum.test"])
+        XCTAssertEqual(chunks.value, 52, "10,001 records in 51 chunks of up to 200, then the end")
 
-        let query = try XCTUnwrap(CompanyMessageSearch.query("launch from:@minh"))
-        let senders = CompanyMessageSearch.senders(from: "@minh", ownUserID: nil, members: members)
-        let body = try CompanyMessageSearch.requestBody(query: query, tab: .messages, roomIDs: [general.roomID],
-                                                        senders: senders)
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-        let filter = ((object["search_categories"] as? [String: Any])?["room_events"] as? [String: Any])?["filter"]
-            as? [String: Any]
-        XCTAssertEqual(filter?["senders"] as? [String], ["@banned:atum.test", "@minh:atum.test"])
-        // Minh's old message, sent while still a member, comes back.
-        let old = response([event("$old", room: general.roomID, body: "launch plan from last year")])
-        let found = try XCTUnwrap(CompanyMessageSearch.results(responseJSON: old, companyID: company, tab: .messages,
-                                                                query: query, targets: [general]))
-        XCTAssertEqual(found.map(\.sender), ["@minh:atum.test"])
+        // A departed match past 10,000 counts too.
+        var behind = (0..<12_000).map {
+            CompanySearchMember(userID: "@gone\($0):atum.test", names: ["Gone"], membership: "leave")
+        }
+        behind.append(CompanySearchMember(userID: "@minh:atum.test", names: ["Minh"], membership: "leave"))
+        XCTAssertEqual(CompanySearchMemberReader.senders(from: "@minh", next: chunked(behind, count: chunks)),
+                       ["@minh:atum.test"])
+
+        // Only matches are capped.
+        let many = (0..<600).map { CompanySearchMember(userID: "@minh\($0):atum.test", names: ["Minh"], membership: "join") }
+        XCTAssertEqual(CompanySearchMemberReader.senders(from: "@minh", next: chunked(many, count: chunks)).count,
+                       CompanySearchMemberReader.maximumMatches)
+    }
+
+    private final class Counter { var value = 0 }
+
+    private func chunked(_ members: [CompanySearchMember], count: Counter) -> () -> [CompanySearchMember]? {
+        var offset = 0
+        return {
+            count.value += 1
+            guard offset < members.count else { return nil }
+            let end = min(offset + Int(CompanySearchMemberReader.chunkSize), members.count)
+            defer { offset = end }
+            return Array(members[offset..<end])
+        }
     }
 
     /// Review should-fix 4: one queue, at most four at once, in arrival

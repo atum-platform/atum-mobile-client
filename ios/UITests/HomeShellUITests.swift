@@ -545,12 +545,13 @@ final class HomeShellUITests: TranscriptUITestCase {
     // MARK: Home search: People (desktop roster global search)
 
     @MainActor
-    private func launchPeopleSearch(language: String = "vi", size: String = "UICTContentSizeCategoryL")
-        -> XCUIApplication {
+    private func launchPeopleSearch(language: String = "vi", size: String = "UICTContentSizeCategoryL",
+                                    extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
             + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
                "-UIPreferredContentSizeCategoryName", size]
+            + extraArguments
             + probeArguments
         app.launch()
         let search = element(app, "home.search")
@@ -727,6 +728,25 @@ final class HomeShellUITests: TranscriptUITestCase {
         // The next result still opens.
         element(app, "home.messages.$launch-review").tap()
         XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
+    }
+
+    /// Review round 2, Home rendering: rows already on screen follow the
+    /// live eligibility. The account leaves "Launch Việt Nam" after the answer
+    /// landed (same query, same companies, so no new search): its message row
+    /// goes, the others stay.
+    @MainActor
+    func testHomeSearchHidesResultsOfARoomLeftWhileShown() {
+        let app = launchPeopleSearch(language: "en",
+                                     extraArguments: ["-AtumScriptedLeaveAfterSearch", "!launch-vn:atum.test"])
+        element(app, "home.search").typeText("launch\n")
+        let draft = element(app, "home.messages.$launch-draft")
+        XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(waitFor(15) { self.probeLines("home-actions.txt").map(\.text).contains("left !launch-vn:atum.test") })
+        XCTAssertTrue(waitFor(10) { !draft.exists }, "a left room's result stayed on screen")
+        XCTAssertTrue(element(app, "home.messages.$launch-review").exists)
+        XCTAssertTrue(element(app, "home.files.$launch-deck").exists)
+        let searches = probeLines("home-actions.txt").map(\.text).filter { $0 == "companySearch messages launch" }
+        XCTAssertEqual(searches.count, 1, "the row went by rendering, not by a new search")
     }
 
     /// Tapping a channel opens its room, as desktop selects it.

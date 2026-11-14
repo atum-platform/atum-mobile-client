@@ -51,13 +51,10 @@ extension LiveMatrixSession {
         return data
     }
 
-    /// `POST /_matrix/client/v3/search`: Home search's Messages and Files
-    /// (desktop `searchCompanyMessages`, server side). The pinned SDK has no
-    /// binding for it, so it goes the same way as the notifications read:
-    /// the session's own homeserver, its bearer, HTTPS only, no cookies, no
-    /// redirects followed. The body names only rooms the company directory
-    /// lists (`CompanyMessageSearch.requestBody`).
-    func companySearchJSON(body: Data) async throws -> Data {
+    /// Where Home search's `POST /_matrix/client/v3/search` goes: the
+    /// session's own homeserver (HTTPS only) with its bearer. The pinned SDK
+    /// has no `/search` binding, so this mirrors the notifications read.
+    func companySearchEndpoint() throws -> CompanySearchEndpoint {
         try runtime.requireCurrent()
         let session = try runtime.client.session()
         guard var components = URLComponents(string: session.homeserverUrl), components.scheme == "https",
@@ -65,46 +62,23 @@ extension LiveMatrixSession {
         components.path = (components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path)
             + "/_matrix/client/v3/search"
         guard let url = components.url else { throw CompanySpaceMatrixFailure.invalid }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.httpShouldHandleCookies = false
-        request.setValue("Bearer " + session.accessToken, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
-        let (data, response) = try await Self.companySearchTransport.data(for: request)
-        try runtime.requireCurrent()
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw CompanySpaceMatrixFailure.refused }
-        return data
+        let runtime = runtime
+        return CompanySearchEndpoint(url: url, bearer: session.accessToken,
+                                     stillCurrent: { try runtime.requireCurrent() })
     }
 
-    /// One ephemeral session for every Home search request: no cookies, no
-    /// cache, redirects refused. The bearer travels per request.
-    private static let companySearchTransport: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.urlCache = nil
-        configuration.httpShouldSetCookies = false
-        return URLSession(configuration: configuration, delegate: CompanySpaceNoRedirect(), delegateQueue: nil)
-    }()
-
-    /// A room's members as `from:@name` matches them, every membership
-    /// (desktop `room.getMembers()`): someone who left still wrote their old
-    /// messages. Read from the SDK's store; no sync is started.
-    func companySearchMembers(roomID: String) async -> [CompanySearchMember] {
-        guard let room = try? room(id: roomID),
-              let iterator = try? await room.membersNoSync() else { return [] }
-        var members = [CompanySearchMember]()
-        let maximum = min(Int(iterator.len()), 10_000)
-        while members.count < maximum,
-              let chunk = iterator.nextChunk(chunkSize: UInt32(min(100, maximum - members.count))),
-              !chunk.isEmpty {
-            for member in chunk {
-                members.append(CompanySearchMember(
-                    userID: member.userId, names: [member.displayName].compactMap { $0 },
-                    membership: String(describing: member.membership)))
+    /// `from:@name`'s matches among one room's members, every membership
+    /// (desktop `room.getMembers()`), read from the SDK store in bounded chunks
+    /// with no cap on how many are read (`CompanySearchMemberReader`). The
+    /// no-sync iterator yields every membership; nothing is filtered here.
+    func companySearchSenders(roomID: String, from: String) async -> [String] {
+        guard let room = try? room(id: roomID), let iterator = try? await room.membersNoSync() else { return [] }
+        return CompanySearchMemberReader.senders(from: from) {
+            iterator.nextChunk(chunkSize: CompanySearchMemberReader.chunkSize)?.map {
+                CompanySearchMember(userID: $0.userId, names: [$0.displayName].compactMap { $0 },
+                                    membership: String(describing: $0.membership))
             }
         }
-        return members
     }
 
     /// This account's Matrix user ID.
@@ -153,6 +127,33 @@ extension LiveMatrixSession {
         guard let room = try? room(id: roomID) else { return nil }
         return MatrixPersonName.name((try? await room.memberDisplayName(userId: userID)) ?? nil,
                                      userID: userID)
+    }
+}
+
+/// Home search's one transport: a single ephemeral URL session (no cookies,
+/// no cache, redirects refused) for every request; the bearer travels per
+/// request and the session is checked again when the answer lands.
+@MainActor
+final class LiveCompanySearchTransport: CompanySearchTransport {
+    private let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        return URLSession(configuration: configuration, delegate: CompanySpaceNoRedirect(), delegateQueue: nil)
+    }()
+
+    func search(body: Data, endpoint: CompanySearchEndpoint) async throws -> Data {
+        var request = URLRequest(url: endpoint.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer " + endpoint.bearer, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (data, response) = try await session.data(for: request)
+        try endpoint.stillCurrent()
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw CompanySpaceMatrixFailure.refused }
+        return data
     }
 }
 
