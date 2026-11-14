@@ -113,6 +113,24 @@ class TranscriptUITestCase: AtumUITestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    /// Reveal a control inside its own scroll container before tapping it.
+    /// XCTest's implicit scroll during tap can consume the tap or dismiss a
+    /// sheet. Existence alone also includes controls outside the viewport.
+    @MainActor
+    func revealByScrolling(_ target: XCUIElement, in container: XCUIElement,
+                           up: Bool = true, maxSwipes: Int = 6) -> Bool {
+        func visible() -> Bool {
+            target.exists && target.isHittable && !target.frame.isEmpty
+                && container.frame.contains(target.frame)
+        }
+        for _ in 0..<maxSwipes {
+            if visible() { return true }
+            if up { container.swipeUp(velocity: .slow) }
+            else { container.swipeDown(velocity: .slow) }
+        }
+        return visible()
+    }
+
     /// Keeps a failed boundary useful in the hosted log when its result
     /// bundle cannot be downloaded. The cap avoids flooding the single UI
     /// job with an unbounded accessibility dump.
@@ -489,6 +507,15 @@ class TranscriptUITestCase: AtumUITestCase {
             // AX5 evidence shows the complete sentence. Keep this exception
             // narrower than the existing generic scroll-edge exceptions.
             print("MEASURE audit.textClipped ignored verified S6 restore lead \(frame)")
+            return true
+        }
+        if issue.auditType == .contrast,
+           element?.identifier == "approvals.settings.help" {
+            // Approve on this iPhone's footer is the settings footer ink on
+            // the ground; at AX5 the audit reports it with an unbounded frame
+            // (top/bottom ±infinity). Measured on the AX5 capture: text
+            // (59, 63, 71) on (244, 245, 247), 9.7:1.
+            print("MEASURE audit.contrast ignored verified approvals footer \(frame)")
             return true
         }
         if issue.auditType == .contrast,

@@ -1,5 +1,6 @@
 #if DEBUG
 import AtumChat
+import AtumNativeAPI
 import SwiftUI
 
 /// A plain reference count: changing it is not a SwiftUI state change.
@@ -19,6 +20,7 @@ struct S6ScriptedHost: View {
     /// and read the list again, hiding the failed first read.
     @State private var deviceReads = ScriptedReadCounter()
     @State private var openedDeviceSignOut: URL?
+    @State private var phoneApprovals: PhoneApprovalSettingsModel?
 
     var body: some View {
         Group {
@@ -52,6 +54,10 @@ struct S6ScriptedHost: View {
                  .accountKey, .signOutPlain, .signOutSaveKey, .accountLegal,
                  .accountDevices, .accountDevicesFailed:
                 accountHost
+            case .approvalsOff, .approvalsCancel, .approvalsOn, .approvalsNoPasscode,
+                 .approvalsPasscodeOnly, .approvalsKeyMissing, .approvalsLegacy, .approvalsOffline:
+                accountHost
+                    .task { phoneApprovals = await ScriptedPhoneApprovals.make(scenario) }
             }
         }
         .foregroundStyle(design.color("ink", scheme: scheme))
@@ -209,6 +215,7 @@ struct S6ScriptedHost: View {
             openWebPage: { legalLinks.open($0.absoluteString) },
             saveProfileName: { _ in .saved }
         )
+        actions.phoneApprovals = phoneApprovals
         if scriptedDevices {
             actions.loadDevices = { scriptedDeviceList() }
             actions.deviceSignOutURL = { deviceID in

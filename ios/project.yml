@@ -44,6 +44,10 @@ targets:
         # supplies every locale. The Info.plist key itself must exist.
         NSMicrophoneUsageDescription: Atum dùng micrô để chuyển giọng nói của bạn thành chữ khi bạn bấm nút micrô.
         NSSpeechRecognitionUsageDescription: Atum dùng nhận dạng giọng nói để chuyển lời bạn nói thành chữ trong khung soạn tin.
+        # Phone approvals (slice 2b): Face ID confirms an enrolment and, later,
+        # each approval. Base-language (vi) text; InfoPlist.xcstrings carries
+        # every locale (PENDING-COPY until the export has it).
+        NSFaceIDUsageDescription: Atum dùng Face ID để chỉ bạn mới có thể cho phép những việc trợ lý xin làm.
         UILaunchScreen:
           UIColorName: ground
         # Communication notifications (sender/group face as the big image):

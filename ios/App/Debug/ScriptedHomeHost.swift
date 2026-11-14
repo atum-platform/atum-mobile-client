@@ -117,7 +117,8 @@ struct ScriptedHomeHost: View {
                                 UITestProbe.append("newGroup \(name) \(members.count)",
                                                    to: "home-actions.txt")
                                 return .openRoom("!gia-dinh:atum.test")
-                            }
+                            },
+                            handles: ScriptedHandles.lookup
                         ),
                         newAssistant: HomeAssistantActions(
                             pending: false,
@@ -438,7 +439,8 @@ struct ScriptedHomeHost: View {
             loadMatrixThumbnail: nil,
             directRoom: { userID in
                 roster.rooms.first { $0.isDirect && $0.members == [userID] }?.roomID
-            }
+            },
+            handles: ScriptedHandles.lookup
         )
     }
 
@@ -536,6 +538,7 @@ struct ScriptedHomeHost: View {
     private func personalMenu(_ base: HomeActions) -> HomeActions {
         var actions = base
         actions.globalSearch = scriptedGlobalSearch
+        actions.handles = ScriptedHandles.lookup
         actions.setLowPriority = { roomID, value in
             update(roomID) { $0.withRosterState(lowPriorityOverride: value) }
             UITestProbe.append("lowPriority \(roomID) \(value)", to: "home-actions.txt")
@@ -588,8 +591,14 @@ struct ScriptedHomeHost: View {
         return HomeRow.applyingLive(rows, workingRoomIDs: [first.roomID], memberCounts: [:])
     }
 
-    static func homeRows(_: ScriptedRoster, productRows: [LiveProductRoom]) -> [HomeRow] {
-        return productRows.map { HomeRow(product: $0, locale: Locale(identifier: locale)) }
+    static func homeRows(_ roster: ScriptedRoster, productRows: [LiveProductRoom]) -> [HomeRow] {
+        let rows = productRows.map { HomeRow(product: $0, locale: Locale(identifier: locale)) }
+        // The live path's one-to-one partners and their verified handles.
+        let partners = roster.rooms.reduce(into: [String: String]()) {
+            if $1.isDirect, $1.members.count == 1 { $0[$1.roomID] = $1.members[0] }
+        }
+        return HomeRow.applyingLive(rows, workingRoomIDs: [], memberCounts: [:], partners: partners,
+                                    handle: { ScriptedHandles.byUser[$0] })
     }
 
     /// A bounded synthetic tail lets the shell UI test measure the actual last
@@ -775,6 +784,29 @@ struct ScriptedHomeHost: View {
         } catch {
             preconditionFailure("scripted roster: \(T.self) does not decode: \(error)")
         }
+    }
+}
+
+/// The scripted directory's verified handles for the cast (Debug only), so the
+/// Home roster, Start chat, the pickers and chat info show the same @handle
+/// lines the live cache fills in. Every visible-row request is written to
+/// `handle-requests.txt` for UI tests.
+enum ScriptedHandles {
+    static let byUser: [String: String] = [
+        "@lan:atum.test": "lannguyen",
+        ScriptedCast.hoa: "hoatran",
+        ScriptedCast.tuan: "tuanle",
+        ScriptedCast.minh: "minhpham",
+        ScriptedCast.huy: "huydo",
+        ScriptedCast.anhKhoa: "anhkhoa",
+        ScriptedCast.chiMai: "chimai",
+    ]
+
+    static var lookup: PersonHandleLookup {
+        PersonHandleLookup(
+            handle: { byUser[$0] },
+            request: { UITestProbe.append("request \($0.sorted().joined(separator: ","))", to: "handle-requests.txt") }
+        )
     }
 }
 #endif

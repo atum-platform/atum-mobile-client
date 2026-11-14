@@ -46,6 +46,7 @@ public struct AgentsRead: Sendable {
     private static let walletHistoryURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet/history")!
     private static let aliasLookupURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/lookup")!
     private static let aliasCheckURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/check")!
+    private static let aliasContactsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/contacts")!
     private static let aliasCurrentURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/current")!
     private static let aliasClaimURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/claim")!
     private static let aliasRenameURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/rename")!
@@ -454,6 +455,29 @@ public struct AgentsRead: Sendable {
         let check = try await read(AgentAliasCheck.self, url: url, maximumResponseBodyBytes: 4_096)
         if let returned = check.handle, returned != handle { throw NativeDomainClientFailure.invalidResponse }
         return check
+    }
+
+    /// The signed-in human's handle. No assistant selector; the bearer names the owner.
+    public func aliasCurrent() async throws -> AliasCurrentResponse {
+        let result = try await response(url: Self.aliasCurrentURL, method: "GET", body: nil,
+                                        maximumRequestBodyBytes: 0, maximumResponseBodyBytes: 4_096,
+                                        reportsAuthenticationFailure: false)
+        return try decode(AliasCurrentResponse.self, data: result.body)
+    }
+
+    /// One answer per requested identity, in request order. Version 2 carries
+    /// directory revisions; older servers can be queried with a legacy request.
+    public func aliasContacts(_ input: AliasContactsRequest) async throws -> AliasContactsResponse {
+        let body = try JSONEncoder().encode(input)
+        let wire = try await response(url: Self.aliasContactsURL, method: "POST", body: body,
+                                      maximumRequestBodyBytes: 16_384, maximumResponseBodyBytes: 32_768,
+                                      reportsAuthenticationFailure: false)
+        let result = try decode(AliasContactsResponse.self, data: wire.body)
+        guard result.contacts.map({ $0.matrixUser.rawValue }) == input.matrixUsers,
+              (result.revision != nil) == (input.schemaVersion != nil) else {
+            throw NativeDomainClientFailure.invalidResponse
+        }
+        return result
     }
 
     /// This assistant's assigned handle, or `.none`.
@@ -1237,10 +1261,12 @@ public struct AgentsRead: Sendable {
                           maximumRequestBodyBytes: Int,
                           maximumResponseBodyBytes: Int,
                           extraHeaders: [String: String] = [:],
-                          acceptedStatuses: Set<Int> = [200]) async throws -> NativeDomainHTTPResponse {
+                          acceptedStatuses: Set<Int> = [200],
+                          reportsAuthenticationFailure: Bool = true) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
-        let firstToken = try await authorize(forceRefresh: false)
+        let firstToken = try await authorize(forceRefresh: false,
+                                             reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
         let first = try await perform(url: url, token: firstToken, method: method, body: body,
                                       companyWire: companyWire,
@@ -1258,7 +1284,8 @@ public struct AgentsRead: Sendable {
         // A domain 401 is the only automatic retry. The coordinator enforces
         // single-flight rotation and persists the replacement before exposure.
         try requireActiveTask()
-        let refreshedToken = try await authorize(forceRefresh: true)
+        let refreshedToken = try await authorize(forceRefresh: true,
+                                                 reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
         let second = try await perform(url: url, token: refreshedToken, method: method, body: body,
                                        companyWire: companyWire,
@@ -1271,7 +1298,8 @@ public struct AgentsRead: Sendable {
             throw NativeDomainClientFailure.assistantName(try assistantNameRefusal(second.body))
         }
         let failure = NativeDomainClientFailure.http(try httpFailure(second))
-        if case let .http(http) = failure, http.response.error == .unauthenticated {
+        if reportsAuthenticationFailure,
+           case let .http(http) = failure, http.response.error == .unauthenticated {
             authenticationFailureObserver(failure)
         }
         throw failure
@@ -1306,11 +1334,11 @@ public struct AgentsRead: Sendable {
         return second
     }
 
-    func authorize(forceRefresh: Bool) async throws -> String {
+    func authorize(forceRefresh: Bool, reportsAuthenticationFailure: Bool = true) async throws -> String {
         do {
             return try await authorization(forceRefresh)
         } catch {
-            authenticationFailureObserver(error)
+            if reportsAuthenticationFailure { authenticationFailureObserver(error) }
             throw error
         }
     }
@@ -1335,6 +1363,45 @@ public struct AgentsRead: Sendable {
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
+    /// Owner-authenticated phone registry transport (device-service 1.3).
+    /// A collection GET carries `Atum-Device-Service-Version` (`listVersion`
+    /// by default, which lists phones as well as Macs; the server's default
+    /// list is Macs only). POST and DELETE carry no extra header.
+    /// `controllerKeys` reads the public pinned controller keys.
+    func phoneDeviceServices(request: Data? = nil, revoking id: UUID? = nil,
+                             listVersion: String = PhoneRegistryContract.listVersion,
+                             controllerKeys: Bool = false) async throws -> Data {
+        let root = Self.baseURL.appendingPathComponent("device-services")
+        let url = controllerKeys ? Self.baseURL.appendingPathComponent("cloud/controller-keys")
+            : (id.map { root.appendingPathComponent($0.uuidString.lowercased()) } ?? root)
+        let method = id != nil ? "DELETE" : (request == nil ? "GET" : "POST")
+        let headers = method == "GET" && !controllerKeys ? [PhoneRegistryContract.versionHeader: listVersion] : [:]
+        let token = try await authorize(forceRefresh: false)
+        try requireActiveTask()
+        var result = try await perform(url: url, token: token, method: method,
+            body: method == "GET" ? nil : (request ?? Data()),
+            maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000, extraHeaders: headers)
+        if result.status == 401 {
+            let refreshed = try await authorize(forceRefresh: true)
+            try requireActiveTask()
+            result = try await perform(url: url, token: refreshed, method: method,
+                body: method == "GET" ? nil : (request ?? Data()),
+                maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000, extraHeaders: headers)
+            if result.status == 401 { authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused) }
+        }
+        try requireActiveTask()
+        guard (method == "POST" ? [200, 201] : [200]).contains(result.status) else {
+            // A proxy's non-JSON 5xx page is an outage, not a refusal.
+            guard let failure = try? JSONDecoder().decode(PhoneRegistryError.self, from: result.body) else {
+                throw result.status >= 500 ? NativeDomainClientFailure.transportUnavailable
+                    : NativeDomainClientFailure.invalidResponse
+            }
+            guard failure.error.rawValue == "matrix_\(result.status)" else { throw NativeDomainClientFailure.invalidResponse }
+            throw failure
+        }
+        return result.body
+    }
+
     private func perform(url: URL, token: String, method: String,
                          body: Data?, companyWire: CompanyWire? = nil, maximumRequestBodyBytes: Int,
                          maximumResponseBodyBytes: Int,
@@ -1351,6 +1418,10 @@ public struct AgentsRead: Sendable {
                           return url.path == Self.baseURL.path + "/store/purchases" && method == "POST"
                               && (try? NativeID(value)) != nil
                       }
+                  }
+                  if name == PhoneRegistryContract.versionHeader {
+                      return method == "GET" && url.path == Self.baseURL.path + "/device-services"
+                          && [PhoneRegistryContract.listVersion, PhoneRegistryContract.probeVersion].contains(value)
                   }
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
@@ -1456,11 +1527,15 @@ public struct AgentsRead: Sendable {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
         guard url.path.hasPrefix(Self.baseURL.path + "/") else { return false }
+        let phoneRoot = Self.baseURL.path + "/device-services"
+        let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
+        if url.path == phoneRoot || (url.path.hasPrefix(phoneRoot + "/") && UUID(uuidString: phoneTail) != nil) { return url.query == nil }
+        if url.path == Self.baseURL.path + "/cloud/controller-keys" { return url.query == nil }
         let allowedPaths = [Self.agentsURL.path, Self.agentLifecycleURL.path,
                             Self.appsURL.path, Self.officialAccountsURL.path,
                             Self.storeCatalogURL.path,
                             Self.walletURL.path, Self.walletHistoryURL.path, Self.aliasLookupURL.path,
-                            Self.aliasCheckURL.path, Self.aliasCurrentURL.path,
+                            Self.aliasCheckURL.path, Self.aliasCurrentURL.path, Self.aliasContactsURL.path,
                             Self.aliasClaimURL.path, Self.aliasRenameURL.path,
                             Self.assistantURL.path, Self.cloudDisclosureURL.path, CloudTurnStop.path,
                             Self.companiesURL.path, Self.companyCapabilitiesURL.path,
@@ -1494,6 +1569,7 @@ public struct AgentsRead: Sendable {
             return true
         }
         if url.path == Self.aliasCurrentURL.path {
+            if query.isEmpty { return url.query == nil }
             guard query.count == 1, query[0].name == "assistantId", let value = query[0].value,
                   (try? NativeID(value)) != nil else { return false }
             return true

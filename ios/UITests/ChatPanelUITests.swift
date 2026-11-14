@@ -89,7 +89,8 @@ final class ChatPanelUITests: TranscriptUITestCase {
         XCTAssertTrue(waitFor(3) { low.value as? String == "1" }, "low priority did not turn on")
 
         let block = element(app, "info.block")
-        XCTAssertTrue(block.waitForExistence(timeout: 3))
+        let scroll = panel(app).scrollViews.firstMatch
+        XCTAssertTrue(revealByScrolling(block, in: scroll), boundedHierarchy(app))
         block.tap()
         // iOS 26 no longer presents the dialog as a sheet element.
         let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@",
@@ -177,5 +178,33 @@ final class ChatPanelUITests: TranscriptUITestCase {
         XCTAssertTrue(element(app, "info.members").waitForExistence(timeout: 3))
         keepScreenshot("m2-ipad-members-\(appearanceTag)-vi", of: app)
         XCUIDevice.shared.orientation = .portrait
+    }
+
+    /// Members shows each person's verified @handle on the quiet line under
+    /// their name (desktop `MatrixMembers`); each visible row asks for it.
+    /// Evidence in English and Vietnamese, light and dark.
+    @MainActor
+    func testGroupMembersShowVerifiedHandles() throws {
+        try XCTSkipIf(isPad, "iPhone sheet")
+        addTeardownBlock { XCUIDevice.shared.appearance = .light }
+        for language in ["en", "vi"] {
+            for appearance in [XCUIDevice.Appearance.light, .dark] {
+                XCUIDevice.shared.appearance = appearance
+                let app = launchPanelChat(.chatKinds, language: language)
+                element(app, "chat.title").tap()
+                XCTAssertTrue(panel(app).waitForExistence(timeout: 3))
+                element(app, "info.members.open").tap()
+                XCTAssertTrue(element(app, "info.members").waitForExistence(timeout: 3), boundedHierarchy(app))
+                let huy = element(app, "info.member.handle." + ScriptedCast.huy)
+                XCTAssertTrue(huy.waitForExistence(timeout: 3), boundedHierarchy(app))
+                XCTAssertEqual(huy.label, "@huydo")
+                XCTAssertTrue(waitFor(5) {
+                    self.probeLines("handle-requests.txt").contains { $0.text.contains(ScriptedCast.huy) }
+                }, "the member row did not ask for its handle")
+                keepScreenshot("handles-chat-members-\(language)-\(appearanceTag)", of: app)
+                app.terminate()
+                XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
+            }
+        }
     }
 }

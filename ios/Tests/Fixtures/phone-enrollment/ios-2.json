@@ -1,0 +1,27 @@
+{
+  "body": {
+    "deviceServiceId": "13cab138-abaf-4ded-9391-a808d6923938",
+    "displayName": "iPhone 2",
+    "platform": "ios",
+    "osVersion": "26.1",
+    "matrix": {
+      "userId": "@owner-3f9a1c7e5b2d:atumplatform.com",
+      "deviceId": "IPHONE2",
+      "fingerprint": "aI0n6ZGXFokRaoRUNI2blPYRIkCBcXfENFad4dxrhho"
+    },
+    "enrollmentEpoch": 1,
+    "scopes": [],
+    "controllerKeys": [
+      "plJGzaJ5hHeUynWfTlm_C9mDvu1-KPgOm21oBLYWsxg"
+    ],
+    "issuedAt": 1791014400000
+  },
+  "sigs": {
+    "identity": "TeYvJ_JsLbn1FVAI7qSiaSbB2HonH0UFGjzTJg1MAUEYChZAKCqajttTwx8JPf-S-Gy7_cXwLvQ0WO3gkUzmOQ",
+    "approval": "uW19RiPUn2E0dtbMr7vmjRM6CEPBkb5pNxB7uVM0J_B4SuC3Jb73FzqknoYDrPkUrYghg3D8K_w2DBjf-MS_iw"
+  },
+  "identityPublicDERHex": "3059301306072a8648ce3d020106082a8648ce3d03010703420004ab460d470daa6ba2fd2956380ce9972e842de091f8067c4541e79fed1e04f8b813af8c4f3342f67562e83da5fd189532897eaac6d224f2f8c6c68afb65c30dfb",
+  "approvalPublicDERHex": "3059301306072a8648ce3d020106082a8648ce3d03010703420004036313e7d7baaa18800a20d814b45da54c1e579c6bf10aa4ab2027c3ec34cf2519bb1f0f6b5e932e71b5009d467cac264cad01864bee43e89bee4215f7d57744",
+  "expectedIdentityId": "hWE1XRgB5igXQGYe4pVRySDzuQFyHc8KN_iSxwAqmhg",
+  "expectedApprovalId": "GOqVxmq22ZzLWNjltgX2mctW4E_T2rIzeyGE1rCP8Qw"
+}

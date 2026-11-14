@@ -50,7 +50,9 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         // was not loaded within a separate 5 s existence wait after the count,
         // but the failure dump moments later shows it in the window; one 20 s
         // wait now covers loading and scrolling. "In view" means some element
-        // carrying the word lies inside the window. `firstMatch.isHittable`
+        // carrying the word lies inside the window and between the title
+        // and search bar, so a match behind the keyboard cannot pass.
+        // `firstMatch.isHittable`
         // proved unreliable on
         // hosted runners: on #44 shard 3 (12 Nov) the recording shows the
         // match in view and highlighted from ~34 s, and a 10 s isHittable wait
@@ -59,8 +61,11 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let window = app.windows.firstMatch
         XCTAssertTrue(waitFor(20) {
             let bounds = window.frame
+            let top = self.visibleTop(app)
+            let bottom = self.element(app, "chat.search").frame.minY
             return matches.allElementsBoundByIndex.contains { element in
                 element.exists && !element.frame.isEmpty && bounds.contains(element.frame)
+                    && element.frame.minY >= top && element.frame.maxY <= bottom
             }
         }, "the match was not brought into view\n\(boundedHierarchy(app))")
         keepScreenshot("hc6-search-found-\(appearanceTag)-en", of: app)
@@ -116,7 +121,9 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         focusSearch(app, field)
         field.typeText("da lat")
         let count = element(app, "chat.search.count")
-        XCTAssertTrue(waitFor(15) { count.label.hasPrefix("Result 1 of 1") }, "count: \(count.label)")
+        // 30 s: at AX-XXXL the hosted runner walks the 2200-row transcript slowly
+        // (PR #49, PR #52: the label read "Result 1 of 1" just after 15 s ran out).
+        XCTAssertTrue(waitFor(30) { count.label.hasPrefix("Result 1 of 1") }, "count: \(count.label)")
         keepScreenshot("hc6-search-ax5-\(appearanceTag)-en", of: app)
         // Only the bar is this slice's; transcript rows have their own audits.
         let barOnly: (XCUIAccessibilityAuditIssue) -> Bool = { issue in

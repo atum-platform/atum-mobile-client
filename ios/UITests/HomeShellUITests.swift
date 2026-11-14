@@ -374,9 +374,19 @@ final class HomeShellUITests: TranscriptUITestCase {
         newAssistant.tap()
 
         let disclosure = app.staticTexts.matching(identifier: "home.newAssistant.disclosure").firstMatch
-        XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
         let name = app.textFields.matching(identifier: "home.newAssistant.name").firstMatch
-        XCTAssertTrue(name.exists)
+        XCTAssertTrue(name.waitForExistence(timeout: 3))
+        // Resolve the form by index while its name field is visible. A live
+        // `containing(name)` query would stop matching when scrolling unloads
+        // that cell; firstMatch can be the Home list behind the sheet.
+        guard let form = app.collectionViews.allElementsBoundByIndex.first(where: {
+            $0.textFields.matching(identifier: "home.newAssistant.name").firstMatch.exists
+        }) else {
+            XCTFail("no new-assistant form\n\(boundedHierarchy(app))")
+            return
+        }
+        XCTAssertTrue(revealByScrolling(disclosure, in: form), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(name, in: form, up: false), boundedHierarchy(app))
         name.tap()
         // Not "Alfred": the scripted roster already has one, and the sheet
         // refuses a duplicate before anything is created (AS-3, desktop
@@ -857,6 +867,92 @@ final class HomeShellUITests: TranscriptUITestCase {
         if !size.contains("Accessibility") {
             XCTAssertTrue(element(app, "home.messages.$launch-review").exists, boundedHierarchy(app))
         }
+        return app
+    }
+
+    // MARK: Verified @handles (desktop `PersonHandleLine`, `chatRowHandle`)
+
+    @MainActor
+    private func handleRequests() -> [String] {
+        probeLines("handle-requests.txt").map(\.text)
+    }
+
+    /// A one-to-one chat is found by its partner's verified handle, which then
+    /// stands in for the latest message (desktop shows it while searching);
+    /// the row asks the directory for that handle when it appears.
+    @MainActor
+    func testHomeSearchFindsAChatByItsPartnersHandle() {
+        let app = launchPeopleSearch()
+        element(app, "home.search").typeText("lannguyen")
+        let lan = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Lan'")).firstMatch
+        XCTAssertTrue(lan.waitForExistence(timeout: 5), boundedHierarchy(app))
+        XCTAssertTrue(lan.label.contains("@lannguyen"), lan.label)
+        XCTAssertTrue(waitFor(5) { self.handleRequests().contains { $0.contains("@lan:atum.test") } },
+                      "the visible row did not ask for its handle")
+    }
+
+    /// Start chat captions a person with their @handle; New group fills a
+    /// candidate's handle from the cache when its answer carried none.
+    @MainActor
+    func testStartChatAndNewGroupShowVerifiedHandles() {
+        let app = launchHandleRoster(language: "vi", appearance: .light)
+        let lan = element(app, "home.startChat.row.!lan:atum.test")
+        XCTAssertTrue(lan.waitForExistence(timeout: 5), boundedHierarchy(app))
+        XCTAssertTrue(lan.label.contains("@lannguyen"), lan.label)
+        XCTAssertTrue(waitFor(5) { self.handleRequests().contains { $0.contains("@lan:atum.test") } })
+
+        let newGroup = revealStartChatNewGroup(app)
+        XCTAssertTrue(newGroup.exists, "no inline New group row")
+        newGroup.tap()
+        let member = app.buttons.matching(identifier: "home.newGroup.member.@lan:atum.test").firstMatch
+        XCTAssertTrue(member.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(member.label.contains("@lannguyen"), member.label)
+    }
+
+    /// Evidence: Home search by handle, Start chat and New group in English
+    /// and Vietnamese, light and dark.
+    @MainActor
+    func testVerifiedHandlesAppearances() {
+        addTeardownBlock { XCUIDevice.shared.appearance = .light }
+        for language in ["en", "vi"] {
+            for appearance in [XCUIDevice.Appearance.light, .dark] {
+                let tag = "\(language)-\(appearance == .dark ? "dark" : "light")"
+                XCUIDevice.shared.appearance = appearance
+                let search = launchPeopleSearch(language: language)
+                element(search, "home.search").typeText("lan\n")
+                XCTAssertTrue(search.buttons.matching(NSPredicate(format: "label CONTAINS '@lannguyen'")).firstMatch
+                    .waitForExistence(timeout: 5), boundedHierarchy(search))
+                keepScreenshot("handles-home-search-\(tag)", of: search)
+                search.terminate()
+                XCTAssertTrue(search.wait(for: .notRunning, timeout: 5))
+
+                let app = launchHandleRoster(language: language, appearance: appearance)
+                XCTAssertTrue(element(app, "home.startChat.row.!lan:atum.test").waitForExistence(timeout: 5))
+                keepScreenshot("handles-start-chat-\(tag)", of: app)
+                let newGroup = revealStartChatNewGroup(app)
+                newGroup.tap()
+                XCTAssertTrue(app.buttons.matching(identifier: "home.newGroup.member.@lan:atum.test").firstMatch
+                    .waitForExistence(timeout: 3))
+                keepScreenshot("handles-new-group-\(tag)", of: app)
+                app.terminate()
+                XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
+            }
+        }
+    }
+
+    @MainActor
+    private func launchHandleRoster(language: String, appearance: XCUIDevice.Appearance) -> XCUIApplication {
+        XCUIDevice.shared.appearance = appearance
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+            + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
+               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+            + probeArguments
+        app.launch()
+        let create = app.buttons.matching(identifier: "home.create").firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 15), boundedHierarchy(app))
+        create.tap()
+        XCTAssertTrue(element(app, "home.startChat").waitForExistence(timeout: 3))
         return app
     }
 }
