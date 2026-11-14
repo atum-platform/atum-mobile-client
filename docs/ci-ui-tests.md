@@ -113,6 +113,13 @@ per run on 2026-11-11 with six lanes active).
   ("Searching 70 / 108 of 2200…", still in progress). The build Mac (iOS 27) passes them.
   Under diagnosis on `fix/chat-search-walk-stall` (PR #56). Remove these lines when the
   walk is fixed on iOS 26.
+- 2026-11-14: `TranscriptKeyboardAndFoldUITests/testALiveLongAnswerFoldsOnceFinalAndOpensInPlace`
+  failed twice on PR #55 (header-only change) at two different steps: run 1 "Show more is out
+  of view" (checked 0.6 s after the fold, before layout settled) and run 2 "the answer finished
+  before it was seen growing" (the scripted answer's last growth at 9.5 s and typing's end at
+  13.5 s left a 4 s window the hosted runner missed). The scripted stream in
+  `chat.bubbles-live` now grows every 8 s (Debug-only), and the hittable check waits up to
+  5 s for the settled layout instead of a fixed pause.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

@@ -60,8 +60,9 @@ extension ScriptedChats {
     /// The fold's reader rules (owner, 2026-11-12), in my assistant's chat.
     /// Nothing happens until I send (the trigger, so a UI test sees every
     /// phase however long the launch takes): Atum types 0.8 s after the send,
-    /// its answer arrives at 1.5 s and grows in place every 4 s, to about two
-    /// screens, while it types; typing stops 4 s after the last growth, the
+    /// its answer arrives at 1.5 s and grows in place every 8 s, to about two
+    /// screens, while it types; typing stops 8 s after the last growth, the
+    /// (8 s, not 4: the hosted runner needs the room to see it growing.)
     /// answer is final and folds, its "Show more" at the bottom of the chat.
     static func chatBubblesLive(_ env: ScriptedEnvironment) -> ScriptedScript {
         let name = ScriptedScenario.chatBubblesLive.rawValue
@@ -70,7 +71,7 @@ extension ScriptedChats {
         let paragraphs = full.components(separatedBy: "\n\n")
         func part(_ count: Int) -> String { paragraphs.prefix(count).joined(separator: "\n\n") }
         let replies = ScriptedReplies(sender: Cast.atum, seenAfter: 0.5, typingAfter: 0.8, answerAfter: 1.5,
-                                      bodies: [full], stream: ScriptedStream(bodies: [part(3), part(7), full], every: 4))
+                                      bodies: [full], stream: ScriptedStream(bodies: [part(3), part(7), full], every: 8))
         return ScriptedScript(name: name, title: "Atum", context: assistant, initial: initial, replies: replies,
                               names: Cast.names)
     }

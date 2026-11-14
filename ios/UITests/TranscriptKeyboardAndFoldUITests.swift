@@ -107,9 +107,10 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the final answer shows no toggle")
         XCTAssertTrue(eventually(5) { toggle.label == "Xem thêm" }, "the final answer did not fold")
         XCTAssertTrue(eventually { transcript.value as? String == "following" }, "the chat left its bottom")
-        pause(0.6)
+        // Wait for the fold's layout to settle rather than a fixed pause: on the
+        // hosted runner it can take longer than 0.6 s (PR #55 run 1).
+        XCTAssertTrue(eventually(5) { toggle.isHittable }, "Show more is out of view")
         let composer = element(app, "composer.pill").frame.minY
-        XCTAssertTrue(toggle.isHittable, "Show more is out of view")
         XCTAssertLessThanOrEqual(toggle.frame.maxY, composer + 1, "Show more is under the composer")
         XCTAssertGreaterThan(toggle.frame.maxY, composer - 160, "the folded answer is not at the bottom")
         let bodyTop = body.frame.minY
