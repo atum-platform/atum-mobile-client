@@ -184,3 +184,41 @@ struct HomeSearchEventRow: View {
         .accessibilityLabel(Text(verbatim: "\(result.channelName), \(result.text)"))
     }
 }
+
+/// The Home search's placeholder (atum-desktop#48, `8fb1bd3`): just "Search",
+/// as desktop's roster search now reads, while its spoken name stays "Search
+/// everything" (desktop `aria-label={roster.search}`,
+/// `placeholder={roster.searchPlaceholder}`).
+///
+/// PENDING-COPY:desktop.atum.roster.searchPlaceholder — the pinned export
+/// still carries desktop's retired words ("Search chats, people, apps…"). Until
+/// the repin those words lose to desktop's current ones below; once the pin
+/// carries anything else, the export wins and this table is dead weight to
+/// delete with the repin.
+enum HomeSearchPromptCopy {
+    static let placeholderKey = "desktop.atum.roster.searchPlaceholder"
+
+    /// Desktop's words before #48, as the pinned export (`4f193a16`) has them.
+    static let retired: Set<String> = [
+        "Search chats, people, apps…",
+        "Tìm cuộc trò chuyện, người và ứng dụng…",
+        "チャット、人、アプリを検索…",
+        "搜索聊天、联系人和应用…",
+        "搜尋聊天、聯絡人和應用程式…",
+    ]
+
+    /// Desktop's words since #48, in the export's five locales.
+    static let current: [String: String] = [
+        "en": "Search",
+        "vi": "Tìm kiếm",
+        "ja": "検索",
+        "zh": "搜索",
+        "zh-Hant": "搜尋",
+    ]
+
+    /// The export's placeholder, unless it is missing or still a retired one.
+    static func placeholder(locale: String, exported: String?) -> String {
+        if let exported, !exported.isEmpty, !retired.contains(exported) { return exported }
+        return current[locale] ?? "Search"
+    }
+}
