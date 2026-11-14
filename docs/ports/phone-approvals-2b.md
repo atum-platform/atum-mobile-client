@@ -120,7 +120,7 @@ with `matrix_400 invalid`; an older server ignores the header and lists Macs
 (200). So the probe sends version `0.0` once per client: 400 → supported;
 200 → not supported (no row, set up refused as `unavailable`); 503 (cloud
 gate) or transport → unknown, which stays closed. Only "yes" is cached.
-**Owner/platform decision needed** (below): prefer an explicit advertisement.
+**Owner ruled 14 Nov** (below): keep the probe; an explicit advertisement is a platform follow-up.
 
 ## PENDING-COPY
 
@@ -177,19 +177,24 @@ Reused exported keys: `src.matrix.security-copy.copies.recoveryOn` ("On"),
   `approvalNoPasscodeHelp` (they say Face ID): needs desktop copy variants.
 - Desktop export of every key above, in five locales (UX C-5).
 
-## Owner decisions needed
+## Owner decisions (ruled 14 Nov 2026: "go with your recommendations")
 
-1. **Capability advertisement.** Accept the version-refusal probe, or have
-   the platform add an explicit signal (e.g. echo
-   `Atum-Device-Service-Version: 1.3` on negotiated responses, or a field in
-   an existing capability read). The phone would accept either; the probe
-   stays closed on any doubt.
-2. **Ship the row before slice 3?** Enrolment alone gives the owner nothing
-   to approve yet, and `approvalSettingsHelp` promises answering requests.
-   Today the row only appears once the server advertises phone registration
-   (0453 deployed), so it stays hidden in production until then; the
-   coordinator may still want a build flag until slice 3.
-3. The three phone-proposed keys and the phone-written ja/zh/zh-Hant.
+1. **Capability advertisement: keep the version-refusal probe.** It fails
+   closed on any doubt, and the phone needs no server change. An explicit
+   signal (for example, echoing `Atum-Device-Service-Version: 1.3`) is a
+   platform follow-up for slice 1 (#843). The phone already accepts either.
+2. **Ship the row before slice 3: yes, no build flag.** The row appears only
+   once the server advertises phone registration (0453 deployed), so it stays
+   hidden in production until then. Slice 1 and slice 3 are expected to reach
+   production together. If 0453 ships alone, the only effect is an enrolment
+   with nothing to approve yet: the device is internal TestFlight only, and
+   nothing is lost or exposed. Revisit if 0453 is scheduled ahead of slice 3
+   for a wider audience.
+3. **Copy: accept** the three phone-proposed keys (`approvalSetUpTouchID`,
+   `approvalSetUpPasscode`, the `approvalEnrollReason` key name) and the
+   phone-written ja/zh/zh-Hant strings until desktop exports them, the same
+   way the earlier Show more/Show less ruling worked. Desktop still needs to
+   export every key, including Touch ID variants (PENDING-COPY above).
 
 ## Owner on-device checklist (physical iPhone; not faked here)
 
