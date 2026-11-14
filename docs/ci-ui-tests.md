@@ -99,6 +99,12 @@ per run on 2026-11-11 with six lanes active).
   was found just after the 15 s wait ran out (PR #49 failed the same way at 70 of 2200).
   The app is correct and the hosted runner is slow at AX-XXXL; #52 doesn't touch chat
   search. That wait is now 30 s.
+- 2026-11-14: `HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` is
+  **quarantined** (atum-mobile#50). With the 30 s wait, PR #54 (`285c443`, shard 3) still
+  failed at line 126 with "No results. Searched 70 of 2200": the in-chat search walk
+  stopped, not slowed (PR #49: 70 of 2200; PR #52 run 1: 89 of 2200). None of those PRs
+  touch chat search. This reads as an intermittent stall in the search walk on the hosted
+  runner, so it is under diagnosis as an app bug. Remove the line when the stall is fixed.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
