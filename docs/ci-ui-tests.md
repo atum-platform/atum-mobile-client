@@ -35,8 +35,6 @@ per run on 2026-11-11 with six lanes active).
   - `ChatKindsUITests/testAccessibilityAuditKinds`: avatar Dynamic Type debt;
     the new baseline also reproduces the quote-preview contrast finding
     documented in `docs/ports/quote-contrast.md`.
-  - `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses`:
-    passes once locally; the recorded hosted scroll race still needs a fix.
   - `HomeShellUITests/testHomeSearchPeopleAccessibilityAudit`: the baseline
     reproduces a Dynamic Type finding with no element attached. See
     `docs/ports/home-search-people.md` and the UI-worker handoff below.
@@ -79,12 +77,11 @@ per run on 2026-11-11 with six lanes active).
 - 2026-11-12: on `86228cb` shard 2 failed `ChatInfoUITests.testAssistantCardChoosesOneServerDestinationDefault`
   (it passed on both earlier #44 heads): the model sheet's first row did not appear within 3 s of the
   tap. In `ChatInfoUITests`, each wait for the sheet's first row after opening it is now 10 s.
-- 2026-11-12: `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses` is
-  **quarantined** (atum-mobile#50). On `86228cb` the CI recording shows the count reaching
-  "1/1" while the transcript stayed at the bottom for the rest of the 20 s wait. The search
-  found the match but never scrolled to it. On the two earlier #44 heads it did scroll, late.
-  That reads as an intermittent app race in scroll-to-result on a slow host, not test timing.
-  It still runs locally. Remove the line when the race is fixed.
+- 2026-11-12: the search quarantine originated in atum-mobile#50. On `86228cb`
+  the CI recording showed "1/1" while the transcript stayed at the bottom
+  throughout the 20 s wait; two earlier #44 heads scrolled late. The
+  2026-11-14 fix below addresses the app's placement/anchor lifecycle, keeps
+  the existing test waits, and restores this hosted test.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
@@ -228,3 +225,53 @@ including the marks test again (21.058 s). Mention, unread, muted and tab-count
 assertions are unchanged, and the stale quarantine entry is removed.
 Evidence: `assembly-1-TeamSpaceDailyUITests-repeat.xcresult` / `.log` and
 `assembly-1-TeamSpaceDailyUITests-class.xcresult` / `.log`.
+
+### In-chat search: retain the requested match through late layout
+
+The untouched baseline's search pass is insufficient to clear the recorded
+intermittent race. The first local fix preserved a pending request through
+missing geometry and stopped follow/hold callbacks from overriding placement,
+but its fresh-run check was **2 passes, 1 failure** (45.945, 33.464,
+103.064 s). The failed recording still says `1/1` while showing earlier rows,
+and the hold probe records an ordinary reading anchor on `chat.search.0030`
+instead of the requested match. A single apparent successful placement had
+released the search anchor before the page's remaining layout arrived.
+Evidence: `assembly-1-HomeChatsWave3UITests-repeat.xcresult` / `.log`, exported
+recording/activity attachments and `search-attempt-1-last.png` in the scratch
+folder. The existing 15-second count and 20-second visibility waits are intact;
+the visibility assertion now also requires the match between the navigation
+bar and search bar, above the keyboard.
+
+The fix keeps the explicitly requested row as the anchor after
+its first successful position. Row/viewport geometry can correct that anchor
+later; no polling timer remains while it is in place. Near-bottom samples keep
+following detached while Find owns the position; actual visibility still
+drives read receipts. A drag, explicit jump,
+new query, close, row removal or disappearance cancels it. Repeated scroll
+commands against unchanged layout measurements remain bounded at 14. Search close and a
+query with no current match clear the stale focus and return the settled
+position to the normal follow/hold rules. The Debug-only
+`search-placement.txt` probe records target, focus, geometry, motion and
+cancellation for scripted runs; it contains no message body and is compiled
+out of Release. No layout, font, copy, test timeout or audit exemption changed.
+
+The revised fix passed **3/3 fresh-run repetitions** (32.764, 26.969,
+23.213 s), then the complete `HomeChatsWave3UITests` class passed **7/7**,
+including search again (33.781 s), the largest-text search-bar audit (27.978 s)
+and the no-results walk (32.342 s). The Debug probes retain the requested
+`chat.search.0052` anchor through placement and report cancellation with
+`focus=nil`, `open=false` when Close is tapped. Its quarantine entry is removed.
+No timeout, skipped assertion or audit exemption was added.
+Evidence: `search-2-repeat.xcresult` / `.log`, `search-2-class.xcresult` / `.log`
+and the three fresh `search-placement.txt` probe files. Other restored tests'
+successful repeat/class runs exercise paths that do not open in-chat search;
+their test fixes and assertions are unchanged by this revision.
+
+Final quarantine: only `ChatKindsUITests/testAccessibilityAuditKinds` and
+`HomeShellUITests/testHomeSearchPeopleAccessibilityAudit`, with the visual
+causes/proposals recorded above. Five entries are restored. No Home search
+view, avatar, quote styling, layout or product copy was changed by this lane.
+The final public-boundary check is
+`python3 scripts/public_guard.py --base 161ada7 --head HEAD`; its output is
+retained as `quarantine/public-guard.log` alongside the result bundles. Work is
+committed locally only; no push, pull request, hosted CI or deployment was run.
