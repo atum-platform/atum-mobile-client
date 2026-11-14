@@ -89,7 +89,8 @@ final class ChatPanelUITests: TranscriptUITestCase {
         XCTAssertTrue(waitFor(3) { low.value as? String == "1" }, "low priority did not turn on")
 
         let block = element(app, "info.block")
-        XCTAssertTrue(block.waitForExistence(timeout: 3))
+        let scroll = panel(app).scrollViews.firstMatch
+        XCTAssertTrue(revealByScrolling(block, in: scroll), boundedHierarchy(app))
         block.tap()
         // iOS 26 no longer presents the dialog as a sheet element.
         let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@",

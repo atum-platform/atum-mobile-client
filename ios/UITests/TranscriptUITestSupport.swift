@@ -113,6 +113,24 @@ class TranscriptUITestCase: AtumUITestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    /// Reveal a control inside its own scroll container before tapping it.
+    /// XCTest's implicit scroll during tap can consume the tap or dismiss a
+    /// sheet. Existence alone also includes controls outside the viewport.
+    @MainActor
+    func revealByScrolling(_ target: XCUIElement, in container: XCUIElement,
+                           up: Bool = true, maxSwipes: Int = 6) -> Bool {
+        func visible() -> Bool {
+            target.exists && target.isHittable && !target.frame.isEmpty
+                && container.frame.contains(target.frame)
+        }
+        for _ in 0..<maxSwipes {
+            if visible() { return true }
+            if up { container.swipeUp(velocity: .slow) }
+            else { container.swipeDown(velocity: .slow) }
+        }
+        return visible()
+    }
+
     /// Keeps a failed boundary useful in the hosted log when its result
     /// bundle cannot be downloaded. The cap avoids flooding the single UI
     /// job with an unbounded accessibility dump.

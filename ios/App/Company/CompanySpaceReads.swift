@@ -114,3 +114,82 @@ extension LiveAppModel {
             pinnedCount: pinned?.count)
     }
 }
+
+// MARK: Home search: Channels, Messages and Files (desktop roster global search)
+
+extension LiveAppModel {
+    /// Desktop `globalChannels`' source: the joined Team Space rooms, channels
+    /// and conversations, named as the room list names them (`room.name`), in
+    /// the room list's order. "You" and the Chief of Staff are left out, as
+    /// desktop leaves out `isCompanyPrivateCosClaim` rooms.
+    func homeSearchChannels() -> [HomeSearchChannel] {
+        guard let liveMatrix else { return [] }
+        return liveMatrix.rooms.compactMap { row in
+            guard companyWorkspace.isCompanyChannel(row.roomID)
+                || companyWorkspace.conversations.claim(roomID: row.roomID) != nil else { return nil }
+            return HomeSearchChannel(roomID: row.roomID, name: row.displayName)
+        }
+    }
+
+    /// Each company Home search may ask, with the rooms its directory lists.
+    /// A company is asked once one of its rooms is joined (desktop
+    /// `globalCompanyIds`: companies of the rooms in the roster's snapshot).
+    func homeSearchTargets() -> [String: [CompanySearchTarget]] {
+        guard let liveMatrix else { return [:] }
+        let joined = Set(liveMatrix.rooms.map(\.roomID))
+        let companies = Set(companyWorkspace.channelsByCompany.keys)
+            .union(companyWorkspace.conversations.directories.keys)
+        var result = [String: [CompanySearchTarget]]()
+        for company in companies {
+            let targets = CompanySearchTarget.targets(
+                channels: companyWorkspace.channelsByCompany[company],
+                conversations: companyWorkspace.conversations.directories[company])
+            if targets.contains(where: { joined.contains($0.roomID) }) { result[company] = targets }
+        }
+        return result
+    }
+
+    /// Home search's company rooms that may be read and shown right now:
+    /// directory-listed (exact binding), joined, and known unencrypted.
+    func homeSearchEligibility() -> CompanySearchEligibility {
+        guard let liveMatrix else { return CompanySearchEligibility() }
+        let rows = Dictionary(liveMatrix.rooms.map { ($0.roomID, $0) }, uniquingKeysWith: { first, _ in first })
+        return CompanySearchEligibility(targets: homeSearchTargets(), isJoined: { rows[$0] != nil },
+                                        encryption: { rows[$0]?.isEncrypted ?? nil })
+    }
+
+    /// Messages and Files share this one service: one queue (at most four
+    /// company searches at a time across both tabs, each with its `from:`
+    /// member reads) and one URL session.
+    static let homeCompanySearchService = CompanySearchService(
+        makeLimiter: { CompanySearchLimiter(limit: 4) },
+        makeTransport: { LiveCompanySearchTransport() })
+
+    /// Desktop `searchCompanies` (see `CompanySearchService`): every room is
+    /// checked against the live eligibility when queued, when it gets its
+    /// slot, after its member reads, and when its answer arrives.
+    func homeCompanySearch(_ term: String, tab: CompanySearchTab) async -> [CompanySearchResult] {
+        guard let liveMatrix else { return [] }
+        let environment = CompanySearchService.Environment(
+            targets: { [weak self] in self?.homeSearchTargets() ?? [:] },
+            eligibility: { [weak self] in self?.homeSearchEligibility() ?? CompanySearchEligibility() },
+            ownUserID: { try? liveMatrix.companyOwnUserID() },
+            senders: { roomID, from in await liveMatrix.companySearchSenders(roomID: roomID, from: from) },
+            endpoint: { try liveMatrix.companySearchEndpoint() })
+        return await Self.homeCompanySearchService.search(term, tab: tab, environment: environment)
+    }
+
+    /// Desktop `openGlobalEvent` → `openCompanyMessage`: the room is still
+    /// joined, unencrypted and bound to the same company and channel before
+    /// and after the event is read, and it is the same message in the same
+    /// thread. Home then routes to the room; any failure is the generic error.
+    func openHomeSearchResult(_ result: CompanySearchResult) async -> Bool {
+        guard let liveMatrix else { return false }
+        return await CompanyMessageSearch.confirmOpen(
+            result, eligibility: { homeSearchEligibility() },
+            read: {
+                await liveMatrix.companyEventSummary(roomID: result.roomID, eventID: result.eventID)
+                    .map { (sender: $0.senderID, threadRootID: $0.threadRootID) }
+            })
+    }
+}
