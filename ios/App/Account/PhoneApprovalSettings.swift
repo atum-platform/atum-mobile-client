@@ -77,14 +77,18 @@ final class PhoneApprovalSettingsModel {
         failure = nil
         removeFailed = false
         defer { busy = nil; outcomeToken &+= 1 }
-        do { status = try await lifecycle.remove(owner: owner) } catch { removeFailed = true }
+        do { status = try await lifecycle.remove(owner: owner) } catch {
+            // Not recorded: nothing changed. Keys remain: off, deletion retried.
+            removeFailed = true
+            status = await lifecycle.status(owner: owner)
+        }
     }
 
-    /// Sign-out: false keeps credentials (the revocation could not be recorded).
-    func signOut() async -> Bool {
-        let allowed = await lifecycle.signOut(owner: owner)
-        if allowed { status = .unavailable }
-        return allowed
+    /// Sign-out: credentials may go only when the result allows it.
+    func signOut(matrixDeviceID: String?) async -> PhoneApprovalSignOutResult {
+        let result = await lifecycle.signOut(owner: owner, matrixDeviceID: matrixDeviceID)
+        if result.allowsSignOut { status = .unavailable }
+        return result
     }
 
     func retryRevocations() async { await lifecycle.retryRevocations(owner: owner) }

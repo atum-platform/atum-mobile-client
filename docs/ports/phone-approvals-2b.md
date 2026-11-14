@@ -196,6 +196,73 @@ Reused exported keys: `src.matrix.security-copy.copies.recoveryOn` ("On"),
    way the earlier Show more/Show less ruling worked. Desktop still needs to
    export every key, including Touch ID variants (PENDING-COPY above).
 
+## Review fixes (cross-family review, 14 Nov 2026)
+
+The Codex review returned ship-after-fixes with six findings. All six are
+fixed in the package; each has a test in `PhoneApprovalLifecycleTests` that
+drives the interleaving or failure through the DEBUG doubles (a suspendable
+POST and list, scripted enrolment steps, a disk that fills on demand, a
+Keychain that refuses to delete).
+
+The shape of the fix: **one app-wide store** (`PhoneApprovalStore.swift`) now
+carries an attempt journal, a per-owner fence and orphan-key records, and
+every write that depends on what a refresh or set-up saw earlier is
+conditional.
+
+| # | Finding | Fix | Test |
+| --- | --- | --- | --- |
+| 1 | Sign-out races an in-flight enrolment | Set-up journals the attempt (ID and key namespace) **before** any key or request exists, under the owner's epoch. Sign-out moves the fence (`fence(owner:)`, in the shared store, so it covers lifecycles made for replacement clients), records revocation of the registration and of every journalled attempt, sweeps the server for active registrations bound to this Matrix device, and deletes **every** approval key of the owner (`wipe(owner:)`, by Keychain tag prefix). Set-up checks the epoch again before sending; a completion after the fence fails `commit`, is revoked and its keys deleted, and set-up reports a failure | `testSignOutDuringAnInFlightEnrolmentRevokesTheLateSuccess`, `testSignOutBeforeThePostSendsNothing` |
+| 2 | A lost answer then a 401/403 hides a landed POST | `post` keeps `mayHaveLanded` across all attempts: once any answer was lost, the attempt is revoked whatever the last answer was | `testARefusalAfterALostAnswerStillRevokes` |
+| 3 | Disk full after a successful POST loses the ID | The journal entry is written before sending and removed only when the attempt is registered (`commit` drops it in the same write) or its revocation is recorded and its keys deleted. A refresh resolves stale entries (revoke and delete); sign-out revokes them all | `testAFullDiskAfterThePostKeepsTheIDUntilItIsRevoked` |
+| 4 | Unreadable state lets sign-out discard credentials with no cleanup | See below | `testAnUndecodableStateFileIsSalvagedAndStillRevoked`, `testAnUndecodableQueueIsSalvaged`, `testSignOutWithoutStateDeletesKeysAndRevokesByDevice` |
+| 5 | A stale refresh deletes the replacement | Refresh re-reads the registration after the list returns and applies nothing unless it is still the same ID and generation; `remove(expected:)` and `replace(expected:with:)` refuse a different registration | `testAStaleRefreshNeverDropsTheReplacement` |
+| 6 | Keychain deletion failures ignored | `PhoneApprovalKeyVault.delete` reports whether both roles are gone; a failure records the namespace as an orphan (kept until deletion is confirmed, retried on every refresh). Remove throws `keysRemain` (the page shows the exported error line); sign-out records orphans and is **held** if keys remain and the server has not confirmed revocation | `testAKeychainFailureKeepsTheNamespaceAndIsRetried`, `testSignOutIsHeldWhileAKeyCannotBeDeletedAndTheServerIsUnreachable` |
+
+**Sign-out rule** (`PhoneApprovalSignOutResult.allowsSignOut`): a signed-out
+iPhone must not keep a usable approval key. Credentials may go only when
+(keys deleted **or** the server confirmed revocation) **and** (revocation
+recorded **or** confirmed). Otherwise `LiveAppModel.signOut` returns false and
+the existing sign-out error alert offers Try again.
+
+**Finding 4, what was chosen and why.** Two layers:
+
+1. *Damaged file*: `PhoneApprovalRegistrationStore.recovering` and
+   `PhoneRevocationQueue.recovering` (used by the app; the strict `init` still
+   throws, as 2a's test requires) move an undecodable file aside, keeping it,
+   and salvage every registration, attempt, orphan or `{owner, id}` still
+   readable into a fresh file. Salvaged registrations become journalled
+   attempts, so the next refresh or sign-out revokes them and deletes their
+   keys. This keeps the row and normal sign-out working for the common case
+   (a damaged or older-format file).
+2. *No state at all* (the folder cannot be read or written):
+   `PhoneApprovalLifecycle.signOutWithoutState` deletes every approval key of
+   the owner by Keychain tag prefix and revokes, on the server, every active
+   iOS registration bound to this Matrix device (the sweep needs no local
+   metadata). It allows sign-out when keys are gone and the server confirmed;
+   offline it is held (Try again when online). With **no client at all**
+   (the session was refused) deleted keys are enough: nothing could ever be
+   recorded or revoked, a revoked-or-not registration without its Secure
+   Enclave key cannot sign, and holding sign-out would trap the person.
+
+Residual risk, accepted: if the app dies between sign-out's DELETE (404, the
+attempt not yet admitted) and a late admission, the server holds an active
+registration whose key sign-out already deleted. It cannot sign; the next
+sign-in's sweep would not see it unless the same Matrix device is used, and
+Your devices removal elsewhere covers it.
+
+Verification of the fixes (locked runs, derived data
+`/Volumes/AtumTestFlight/dd-approvals-2b-fix`, iPhone 17 simulator booted
+and shut down inside the run): `swift test --filter 'PhoneApproval|PhoneRegistry'`
+**49 passed, 0 failed** (`PhoneApprovalLifecycleTests` 34, of which 10 are new
+for the findings; `PhoneApprovalKeyTests` 10; negotiation 2; transport 1;
+copy 2); `swift build -c release --target AtumNativeAPI` passes;
+`AtumMobileTests` **373 passed, 0 failed**; approvals UI tests plus the Your
+devices regression **10 passed, 0 failed** (screenshots in
+`/Volumes/AtumTestFlight/approvals-2b-fix-shots/ui-evidence/`). The app and
+UI runs used the final product code; only two test files changed after them
+(a typed-throws closure and one assertion that wrongly expected another
+phone's queued revocation to have run).
+
 ## Owner on-device checklist (physical iPhone; not faked here)
 
 The simulator runs use software keys and an in-memory registry. These need a

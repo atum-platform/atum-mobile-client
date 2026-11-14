@@ -86,8 +86,11 @@ public struct PhoneKeyNamespace: Sendable {
     public init(owner: String, installation: UUID, generation: UUID) {
         self.installation = installation
         self.generation = generation
-        let account = Data(SHA256.hash(data: Data(owner.utf8))).phoneBase64URL
-        value = "com.atum.phone-approval.\(account).\(installation.uuidString).\(generation.uuidString)"
+        value = Self.ownerPrefix(owner) + "\(installation.uuidString).\(generation.uuidString)"
+    }
+    /// Every namespace of `owner` starts with this.
+    public static func ownerPrefix(_ owner: String) -> String {
+        "com.atum.phone-approval.\(Data(SHA256.hash(data: Data(owner.utf8))).phoneBase64URL)."
     }
 }
 
@@ -96,17 +99,43 @@ public struct PhoneKeyNamespace: Sendable {
 public actor PhoneRevocationQueue {
     public struct Entry: Codable, Equatable, Sendable { public let owner: String; public let id: UUID }
     private let file: URL
+    private let writer: PhoneApprovalFileWriter
     private var entries: [Entry]
-    public init(file: URL) throws {
+    /// Strict: an unreadable file throws, so nothing is silently lost.
+    public init(file: URL, writer: PhoneApprovalFileWriter = .atomic) throws {
         self.file = file
+        self.writer = writer
         if FileManager.default.fileExists(atPath: file.path) {
             entries = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: file))
         } else { entries = [] }
     }
+    private init(file: URL, writer: PhoneApprovalFileWriter, entries: [Entry]) {
+        self.file = file
+        self.writer = writer
+        self.entries = entries
+    }
+    /// For the app: an undecodable file is moved aside (kept, never deleted)
+    /// and every `{owner, id}` pair still readable in it is carried over, so
+    /// a damaged file cannot turn into "nothing to revoke". Throws only when
+    /// the file cannot be read or set aside at all.
+    public static func recovering(file: URL, writer: PhoneApprovalFileWriter = .atomic) throws -> PhoneRevocationQueue {
+        do { return try PhoneRevocationQueue(file: file, writer: writer) } catch {
+            let data = try Data(contentsOf: file)
+            try PhoneApprovalSalvage.setAside(file)
+            var salvaged: [Entry] = []
+            PhoneApprovalSalvage.objects(in: data) { object in
+                if let owner = object["owner"] as? String, let text = object["id"] as? String, let id = UUID(uuidString: text),
+                   !salvaged.contains(Entry(owner: owner, id: id)) {
+                    salvaged.append(Entry(owner: owner, id: id))
+                }
+            }
+            try writer.write(JSONEncoder().encode(salvaged), file)
+            return PhoneRevocationQueue(file: file, writer: writer, entries: salvaged)
+        }
+    }
     public func pending(owner: String) -> [Entry] { entries.filter { $0.owner == owner } }
     private func write(_ next: [Entry]) throws {
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(next).write(to: file, options: .atomic)
+        try writer.write(JSONEncoder().encode(next), file)
         entries = next
     }
     public func enqueue(owner: String, id: UUID) throws {

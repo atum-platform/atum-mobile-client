@@ -38,6 +38,24 @@ public actor PhoneApprovalScriptedServer: PhoneApprovalServer {
     public func set(mode: Mode) { self.mode = mode }
     public func set(offline: Bool) { self.offline = offline }
     public func failNextEnrolls(_ errors: [Error]) { enrollFailures = errors }
+
+    /// One scripted answer per enrolment, consumed in order before the
+    /// older knobs: refuse before admitting, or admit then lose the answer.
+    public enum EnrollStep: Sendable { case fail(PhoneRegistryError), lose, pass }
+    private var steps: [EnrollStep] = []
+    public func script(_ next: [EnrollStep]) { steps = next }
+
+    /// Suspends the next enrolment (or list) where it is, until released:
+    /// the POST has left the phone but no answer has come back.
+    private var holdEnroll = false, holdList = false
+    private var heldEnroll: CheckedContinuation<Void, Never>?
+    private var heldList: CheckedContinuation<Void, Never>?
+    public func holdNextEnroll() { holdEnroll = true }
+    public func holdNextList() { holdList = true }
+    public var enrollIsHeld: Bool { heldEnroll != nil }
+    public var listIsHeld: Bool { heldList != nil }
+    public func releaseEnroll() { heldEnroll?.resume(); heldEnroll = nil }
+    public func releaseList() { heldList?.resume(); heldList = nil }
     public func loseNextEnrollAnswer() { dropNextEnrollAnswer = true }
     /// Holds each enrolment this long, so a screen can show "Setting up…".
     public var enrollDelay: Duration = .zero
@@ -64,6 +82,10 @@ public actor PhoneApprovalScriptedServer: PhoneApprovalServer {
 
     public func registrations() async throws -> [PhoneRegistryRecord] {
         try reachable()
+        if holdList {
+            holdList = false
+            await withCheckedContinuation { heldList = $0 }
+        }
         let all = records.values.sorted { $0.createdAt < $1.createdAt }
         return mode == .phoneRegistry ? all : all.filter { $0.platform == .macos }
     }
@@ -85,6 +107,19 @@ public actor PhoneApprovalScriptedServer: PhoneApprovalServer {
         enrollCalls += 1
         if enrollDelay > .zero { try? await Task.sleep(for: enrollDelay) }
         try reachable()
+        if holdEnroll {
+            holdEnroll = false
+            await withCheckedContinuation { heldEnroll = $0 }
+        }
+        if !steps.isEmpty {
+            switch steps.removeFirst() {
+            case let .fail(error): throw error
+            case .lose:
+                _ = try admit(request)
+                throw NativeDomainClientFailure.transportUnavailable
+            case .pass: break
+            }
+        }
         if !enrollFailures.isEmpty { throw enrollFailures.removeFirst() }
         guard mode == .phoneRegistry else { throw Self.error(400, "invalid") }
         let record = try admit(request)
@@ -185,6 +220,25 @@ public final class PhoneApprovalSoftwareKeyVault: PhoneApprovalKeyVault, @unchec
     /// Simulates a restore or the passcode being turned off.
     public func loseAllKeys() { lock.locked { keys.removeAll() } }
     public var keyCount: Int { lock.locked { keys.count } }
+    /// While true every key deletion fails, as a locked or broken Keychain would.
+    public var failDeletes: Bool {
+        get { lock.locked { deletesFail } }
+        set { lock.locked { deletesFail = newValue } }
+    }
+    private var deletesFail = false
+    /// Keys still held for `owner`, whatever namespace.
+    public func keyCount(owner: String) -> Int {
+        let prefix = PhoneKeyNamespace.ownerPrefix(owner)
+        return lock.locked { keys.keys.filter { $0.hasPrefix(prefix) }.count }
+    }
+    public func wipe(owner: String) -> Bool {
+        let prefix = PhoneKeyNamespace.ownerPrefix(owner)
+        return lock.locked {
+            guard !deletesFail else { return keys.keys.allSatisfy { !$0.hasPrefix(prefix) } }
+            keys = keys.filter { !$0.key.hasPrefix(prefix) }
+            return true
+        }
+    }
 
     public func store(for namespace: PhoneKeyNamespace) -> PhoneApprovalKeyStore {
         Store(vault: self, namespace: namespace.value)
@@ -211,7 +265,12 @@ public final class PhoneApprovalSoftwareKeyVault: PhoneApprovalKeyVault, @unchec
             return prompts.isEmpty ? .match : prompts.removeFirst()
         }
     }
-    fileprivate func remove(_ tag: String) { lock.locked { _ = keys.removeValue(forKey: tag) } }
+    fileprivate func remove(_ tag: String) throws {
+        try lock.locked {
+            if deletesFail && keys[tag] != nil { throw PhoneApprovalFailure.keychain(errSecInteractionNotAllowed) }
+            _ = keys.removeValue(forKey: tag)
+        }
+    }
 
     private final class Store: PhoneApprovalKeyStore {
         let vault: PhoneApprovalSoftwareKeyVault
@@ -236,7 +295,7 @@ public final class PhoneApprovalSoftwareKeyVault: PhoneApprovalKeyVault, @unchec
             }
             return try key.signature(for: bytes).rawRepresentation
         }
-        func remove(_ role: PhoneKeyRole) throws { vault.remove(namespace + "." + role.rawValue) }
+        func remove(_ role: PhoneKeyRole) throws { try vault.remove(namespace + "." + role.rawValue) }
     }
 }
 

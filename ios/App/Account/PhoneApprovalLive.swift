@@ -11,17 +11,21 @@ private let phoneApprovalLog = Logger(subsystem: "com.atum.mobile", category: "p
 @MainActor
 enum PhoneApprovalLive {
     /// One registration store and one revocation queue per app, shared by
-    /// every lifecycle, so two clients never write the same file at once.
+    /// every lifecycle, so the sign-out fence covers lifecycles created for
+    /// replacement clients and two clients never write the same file at once.
+    /// An undecodable file is set aside and salvaged (`recovering`); nil only
+    /// when the folder cannot be read or written at all.
     private static let files: (PhoneApprovalRegistrationStore, PhoneRevocationQueue)? = {
         do {
             let folder = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                      appropriateFor: nil, create: true)
                 .appendingPathComponent("PhoneApprovals", isDirectory: true)
-            return (try PhoneApprovalRegistrationStore(file: folder.appendingPathComponent("registrations.json")),
-                    try PhoneRevocationQueue(file: folder.appendingPathComponent("revocations.json")))
+            return (try PhoneApprovalRegistrationStore.recovering(file: folder.appendingPathComponent("registrations.json")),
+                    try PhoneRevocationQueue.recovering(file: folder.appendingPathComponent("revocations.json")))
         } catch {
-            // Fail closed: no Settings row, nothing enrolled from this run.
-            phoneApprovalLog.error("Phone approval state could not be read")
+            // No row and nothing enrolled from this run; sign-out takes the
+            // stateless path below.
+            phoneApprovalLog.error("Phone approval state could not be opened")
             return nil
         }
     }()
@@ -45,13 +49,27 @@ enum PhoneApprovalLive {
                                  authentication: .current())
     }
 
-    /// Sign-out: through the live model while the bearer works, else offline
-    /// (the revocation waits for this owner's next sign-in). False only when
-    /// the revocation could not be recorded.
-    static func signOut(owner: String, model: PhoneApprovalSettingsModel?) async -> Bool {
-        if let model, model.owner == owner { return await model.signOut() }
-        guard let lifecycle = lifecycle(server: PhoneApprovalUnreachableServer()) else { return true }
-        return await lifecycle.signOut(owner: owner)
+    /// Sign-out: through the live model while the bearer works; else through
+    /// a lifecycle on the shared files (offline: revocations wait for this
+    /// owner's next sign-in); else, when the files cannot be opened, the
+    /// stateless path (delete every key of the owner, revoke on the server
+    /// whatever is bound to this Matrix device). Credentials may go only when
+    /// the result allows it.
+    static func signOut(owner: String, model: PhoneApprovalSettingsModel?, matrixDeviceID: String?,
+                        server: PhoneApprovalServer?) async -> Bool {
+        let result: PhoneApprovalSignOutResult
+        if let model, model.owner == owner {
+            result = await model.signOut(matrixDeviceID: matrixDeviceID)
+        } else if let lifecycle = lifecycle(server: server ?? PhoneApprovalUnreachableServer()) {
+            result = await lifecycle.signOut(owner: owner, matrixDeviceID: matrixDeviceID)
+        } else {
+            result = await PhoneApprovalLifecycle.signOutWithoutState(owner: owner, matrixDeviceID: matrixDeviceID,
+                                                                       server: server, vault: SecureEnclavePhoneKeyVault())
+        }
+        if !result.allowsSignOut {
+            phoneApprovalLog.error("Sign-out held: phone approval cleanup not settled (keys \(result.keysDeleted), recorded \(result.revocationRecorded), revoked \(result.serverRevoked))")
+        }
+        return result.allowsSignOut
     }
 }
 

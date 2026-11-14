@@ -717,11 +717,14 @@ final class LiveAppModel {
             return false
         }
         signOutInProgress = true
-        // Phone approvals: revoke this iPhone's registration while the bearer
-        // still works, or record the revocation for the next sign-in. Local
-        // keys go either way; only an unrecordable revocation stops sign-out.
+        // Phone approvals: fence any in-flight set-up, revoke this iPhone's
+        // registrations while the bearer still works (or record them for the
+        // next sign-in) and delete every approval key. Sign-out is held while
+        // a usable key could survive it (see PhoneApprovalSignOutResult).
         guard await PhoneApprovalLive.signOut(owner: current.runtime.ticket.session.userID,
-                                              model: phoneApprovals) else {
+                                              model: phoneApprovals,
+                                              matrixDeviceID: try? liveMatrix?.ownDeviceID(),
+                                              server: domainClient) else {
             signOutInProgress = false
             signOutFailureToken &+= 1
             return false

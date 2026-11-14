@@ -28,9 +28,12 @@ final class PhoneApprovalLifecycleTests: XCTestCase {
 
     private func phone(_ name: String = "a", server: PhoneApprovalScriptedServer,
                        vault: PhoneApprovalSoftwareKeyVault = PhoneApprovalSoftwareKeyVault(),
-                       queueFile: URL? = nil) throws -> Phone {
-        let store = try PhoneApprovalRegistrationStore(file: folder.appendingPathComponent("\(name)/registrations.json"))
-        let queue = try PhoneRevocationQueue(file: queueFile ?? folder.appendingPathComponent("\(name)/revocations.json"))
+                       queueFile: URL? = nil, writer: PhoneApprovalFileWriter = .atomic,
+                       sharing: Phone? = nil) throws -> Phone {
+        let store = try sharing?.store
+            ?? PhoneApprovalRegistrationStore(file: folder.appendingPathComponent("\(name)/registrations.json"), writer: writer)
+        let queue = try sharing?.queue
+            ?? PhoneRevocationQueue(file: queueFile ?? folder.appendingPathComponent("\(name)/revocations.json"), writer: writer)
         let lifecycle = PhoneApprovalLifecycle(server: server, vault: vault, registrations: store,
                                                revocations: queue, retryDelays: [.zero, .zero])
         return Phone(lifecycle: lifecycle, vault: vault, store: store, queue: queue)
@@ -268,8 +271,10 @@ final class PhoneApprovalLifecycleTests: XCTestCase {
         let phone = try phone(server: server)
         _ = try await setUp(phone)
         await server.set(offline: true)
-        let allowed = await phone.lifecycle.signOut(owner: owner)
-        XCTAssertTrue(allowed)
+        let result = await phone.lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEA")
+        XCTAssertTrue(result.allowsSignOut, "keys gone and the revocation recorded")
+        XCTAssertTrue(result.keysDeleted)
+        XCTAssertFalse(result.serverRevoked)
         XCTAssertEqual(phone.vault.keyCount, 0)
         let pending = await phone.lifecycle.pendingRevocations(owner: owner)
         XCTAssertEqual(pending.count, 1)
@@ -280,17 +285,26 @@ final class PhoneApprovalLifecycleTests: XCTestCase {
         try Data("x".utf8).write(to: blocker)
         let stuck = try self.phone("b", server: server, queueFile: blocker.appendingPathComponent("revocations.json"))
         _ = try await setUp(stuck, device: "PHONEB")
-        let kept = await stuck.lifecycle.signOut(owner: owner)
-        XCTAssertFalse(kept, "credentials must stay when the revocation cannot be recorded")
+        let stuckID = try unwrap(await stuck.store.registration(owner: owner)).deviceServiceId
+        await server.set(offline: true)
+        let kept = await stuck.lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEB")
+        XCTAssertFalse(kept.allowsSignOut, "credentials must stay when the revocation cannot be recorded")
+        XCTAssertFalse(kept.revocationRecorded)
         let registration = await stuck.store.registration(owner: owner)
-        XCTAssertNotNil(registration, "nothing was removed")
-        XCTAssertGreaterThan(stuck.vault.keyCount, 0)
+        XCTAssertNotNil(registration, "the registration is kept to record its revocation later")
+        // Online, the server confirms the revocation itself: sign-out may go.
+        await server.set(offline: false)
+        let online = await stuck.lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEB")
+        XCTAssertTrue(online.serverRevoked)
+        XCTAssertTrue(online.allowsSignOut)
+        let state = await server.record(stuckID)?.state
+        XCTAssertEqual(state, .revoked, "the sweep revoked this iPhone's registration")
     }
 
     func testSignOutWithoutARegistrationIsAllowed() async throws {
         let phone = try phone(server: PhoneApprovalScriptedServer(owner: owner))
-        let allowed = await phone.lifecycle.signOut(owner: owner)
-        XCTAssertTrue(allowed)
+        let result = await phone.lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEA")
+        XCTAssertTrue(result.allowsSignOut)
     }
 
     // MARK: Key loss, removal elsewhere, two devices
@@ -453,5 +467,253 @@ final class PhoneApprovalLifecycleTests: XCTestCase {
         XCTAssertEqual(PhoneApprovalDeviceFacts.registryName("  Lan\u{0007}’s iPhone "), "Lan’s iPhone")
         XCTAssertEqual(PhoneApprovalDeviceFacts.registryName(String(repeating: "😀", count: 40)).utf16.count, 64)
         XCTAssertEqual(PhoneApprovalDeviceFacts.registryName("\u{0001}"), "iPhone")
+    }
+}
+
+/// A disk that can fill up on demand, for the store and the queue.
+private final class DiskSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isFull = false
+    var full: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return isFull }
+        set { lock.lock(); isFull = newValue; lock.unlock() }
+    }
+    var writer: PhoneApprovalFileWriter {
+        PhoneApprovalFileWriter { [self] data, url in
+            if full { throw CocoaError(.fileWriteOutOfSpace) }
+            try PhoneApprovalFileWriter.atomic.write(data, url)
+        }
+    }
+}
+
+/// Review findings on slice 2b (cross-family review, 14 Nov): each is an
+/// interleaving or failure the lifecycle must survive.
+extension PhoneApprovalLifecycleTests {
+    private func waitUntil(_ condition: () async -> Bool, line: UInt = #line) async {
+        for _ in 0..<2_000 {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        XCTFail("timed out", line: line)
+    }
+
+    // Finding 1: sign-out while the enrolment POST is in flight, from a
+    // lifecycle made for a replacement client (sharing the app's store).
+    func testSignOutDuringAnInFlightEnrolmentRevokesTheLateSuccess() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let first = try phone(server: server)
+        let replacement = try phone(server: server, vault: first.vault, sharing: first)
+        _ = await first.lifecycle.refresh(owner: owner)
+        await server.holdNextEnroll()
+        let setUpTask = Task { () -> PhoneApprovalSetupFailure? in
+            do { _ = try await self.setUp(first); return nil } catch { return error as? PhoneApprovalSetupFailure }
+        }
+        await waitUntil { await server.enrollIsHeld }
+        let journalled = await first.store.pending(owner: owner)
+        XCTAssertEqual(journalled.count, 1, "the attempt is journalled before the POST")
+        let result = await replacement.lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEA")
+        XCTAssertTrue(result.allowsSignOut)
+        XCTAssertEqual(first.vault.keyCount(owner: owner), 0, "sign-out deleted the attempt's keys")
+        await server.releaseEnroll()
+        let failure = await setUpTask.value
+        XCTAssertEqual(failure, .generic, "a completion after sign-out is never reported as set up")
+        let registration = await first.store.registration(owner: owner)
+        XCTAssertNil(registration, "the late success was not saved")
+        XCTAssertEqual(first.vault.keyCount(owner: owner), 0)
+        let active = await server.activePhones()
+        XCTAssertTrue(active.isEmpty, "the late registration was revoked")
+        let pending = await first.store.pending(owner: owner)
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    // Finding 1, the other window: sign-out during the prompt sends nothing.
+    func testSignOutBeforeThePostSendsNothing() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let first = try phone(server: server)
+        _ = await first.lifecycle.refresh(owner: owner)
+        let epoch = await first.store.epoch(owner: owner)
+        await first.store.fence(owner: owner)   // as if sign-out ran during Face ID
+        let moved = await first.store.epoch(owner: owner)
+        XCTAssertNotEqual(epoch, moved)
+        // A set-up that began before the fence cannot even journal.
+        let attempt = PhoneApprovalPendingAttempt(owner: owner, deviceServiceId: UUID(), installation: UUID(),
+                                                  generation: UUID(), kind: .enroll)
+        do { try await first.store.begin(attempt, epoch: epoch); XCTFail("began after a fence") }
+        catch { XCTAssertEqual(error as? PhoneApprovalStoreFailure, .fenced) }
+    }
+
+    // Finding 2: the first POST lands but its answer is lost; the retry is
+    // refused. The registration that exists must still be revoked.
+    func testARefusalAfterALostAnswerStillRevokes() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let phone = try phone(server: server)
+        await server.script([.lose, .fail(PhoneApprovalScriptedServer.error(403, "rotation_unauthorized"))])
+        await expectFailure(.refused, phone)
+        let active = await server.activePhones()
+        XCTAssertTrue(active.isEmpty, "the first, admitted attempt was revoked")
+        let revokes = await server.revokeCalls
+        XCTAssertEqual(revokes.count, 1)
+        XCTAssertEqual(phone.vault.keyCount, 0)
+        let pending = await phone.store.pending(owner: owner)
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    // Finding 3: the POST succeeds, then the disk is full: neither the
+    // registration nor the revocation can be written. The journalled ID
+    // survives on disk and a later refresh revokes it.
+    func testAFullDiskAfterThePostKeepsTheIDUntilItIsRevoked() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let disk = DiskSwitch()
+        let phone = try phone(server: server, writer: disk.writer)
+        _ = await phone.lifecycle.refresh(owner: owner)
+        await server.holdNextEnroll()
+        let setUpTask = Task { () -> PhoneApprovalSetupFailure? in
+            do { _ = try await self.setUp(phone); return nil } catch { return error as? PhoneApprovalSetupFailure }
+        }
+        await waitUntil { await server.enrollIsHeld }
+        disk.full = true
+        await server.releaseEnroll()
+        let failure = await setUpTask.value
+        XCTAssertEqual(failure, .generic)
+        let admitted = await server.activePhones()
+        XCTAssertEqual(admitted.count, 1, "the server registered it")
+        // Restart: the file still names the attempt.
+        let reopened = try PhoneApprovalRegistrationStore(file: folder.appendingPathComponent("a/registrations.json"))
+        let journal = await reopened.pending(owner: owner)
+        XCTAssertEqual(journal.map(\.deviceServiceId), admitted.map(\.deviceServiceId))
+        disk.full = false
+        let queue = try PhoneRevocationQueue(file: folder.appendingPathComponent("a/revocations.json"))
+        let restarted = PhoneApprovalLifecycle(server: server, vault: phone.vault, registrations: reopened,
+                                               revocations: queue, retryDelays: [])
+        _ = await restarted.refresh(owner: owner)
+        let active = await server.activePhones()
+        XCTAssertTrue(active.isEmpty, "the journalled ID was revoked")
+        let after = await reopened.pending(owner: owner)
+        XCTAssertTrue(after.isEmpty)
+    }
+
+    // Finding 4: an undecodable state file is set aside and salvaged, so a
+    // registration in it is still revoked and its keys deleted.
+    func testAnUndecodableStateFileIsSalvagedAndStillRevoked() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let phone = try phone(server: server)
+        _ = try await setUp(phone)
+        let id = try unwrap(await phone.store.registration(owner: owner)).deviceServiceId
+        let file = folder.appendingPathComponent("a/registrations.json")
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        root["installation"] = 42   // no longer decodes
+        try JSONSerialization.data(withJSONObject: root).write(to: file)
+        XCTAssertThrowsError(try PhoneApprovalRegistrationStore(file: file))
+        let recovered = try PhoneApprovalRegistrationStore.recovering(file: file)
+        let salvaged = await recovered.pending(owner: owner)
+        XCTAssertEqual(salvaged.map(\.deviceServiceId), [id])
+        let kept = try FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent("a").path)
+        XCTAssertTrue(kept.contains { $0.contains("corrupt-") }, "the damaged file is kept, not deleted")
+        let lifecycle = PhoneApprovalLifecycle(server: server, vault: phone.vault, registrations: recovered,
+                                               revocations: phone.queue, retryDelays: [])
+        let result = await lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEA")
+        XCTAssertTrue(result.allowsSignOut)
+        XCTAssertEqual(phone.vault.keyCount(owner: owner), 0)
+        let state = await server.record(id)?.state
+        XCTAssertEqual(state, .revoked)
+    }
+
+    func testAnUndecodableQueueIsSalvaged() async throws {
+        let file = folder.appendingPathComponent("q/revocations.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let id = UUID()
+        try Data("{\"entries\":[{\"owner\":\"\(owner)\",\"id\":\"\(id.uuidString)\"}]}".utf8).write(to: file)
+        XCTAssertThrowsError(try PhoneRevocationQueue(file: file))
+        let queue = try PhoneRevocationQueue.recovering(file: file)
+        let pending = await queue.pending(owner: owner)
+        XCTAssertEqual(pending.map(\.id), [id])
+    }
+
+    // Finding 4: no state files at all. Sign-out deletes every key of the
+    // owner and revokes by Matrix device; offline it is held; with no client
+    // the deleted keys are enough.
+    func testSignOutWithoutStateDeletesKeysAndRevokesByDevice() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let phone = try phone(server: server)
+        _ = try await setUp(phone)
+        await server.set(offline: true)
+        let offline = await PhoneApprovalLifecycle.signOutWithoutState(owner: owner, matrixDeviceID: "PHONEA",
+                                                                        server: server, vault: phone.vault)
+        XCTAssertTrue(offline.keysDeleted)
+        XCTAssertFalse(offline.allowsSignOut, "nothing recorded and nothing revoked: held until online")
+        await server.set(offline: false)
+        let online = await PhoneApprovalLifecycle.signOutWithoutState(owner: owner, matrixDeviceID: "PHONEA",
+                                                                       server: server, vault: phone.vault)
+        XCTAssertTrue(online.allowsSignOut)
+        let active = await server.activePhones()
+        XCTAssertTrue(active.isEmpty)
+        let noClient = await PhoneApprovalLifecycle.signOutWithoutState(owner: owner, matrixDeviceID: "PHONEA",
+                                                                         server: nil, vault: phone.vault)
+        XCTAssertTrue(noClient.allowsSignOut)
+        phone.vault.failDeletes = true
+        let other = try self.phone("b", server: server, vault: phone.vault)
+        _ = try? await setUp(other, device: "PHONEB")
+        let stuck = await PhoneApprovalLifecycle.signOutWithoutState(owner: owner, matrixDeviceID: "PHONEB",
+                                                                      server: nil, vault: phone.vault)
+        XCTAssertFalse(stuck.allowsSignOut, "a key that cannot be deleted holds sign-out")
+    }
+
+    // Finding 5: a refresh whose list answer arrives after the person
+    // removed A and set up B must not drop B.
+    func testAStaleRefreshNeverDropsTheReplacement() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let phone = try phone(server: server)
+        _ = try await setUp(phone)
+        await server.holdNextList()
+        let refreshTask = Task { await phone.lifecycle.refresh(owner: owner) }
+        await waitUntil { await server.listIsHeld }
+        _ = try await phone.lifecycle.remove(owner: owner)
+        _ = try await setUp(phone)
+        let replacement = try unwrap(await phone.store.registration(owner: owner))
+        await server.releaseList()   // answers with A revoked, B active
+        _ = await refreshTask.value
+        let after = await phone.store.registration(owner: owner)
+        XCTAssertEqual(after, replacement, "the stale answer was not applied to B")
+        XCTAssertTrue(phone.vault.keysExist(for: replacement.namespace))
+        let record = await server.record(replacement.deviceServiceId)
+        XCTAssertEqual(record?.state, .active)
+    }
+
+    // Finding 6: offline removal with a Keychain that refuses to delete.
+    func testAKeychainFailureKeepsTheNamespaceAndIsRetried() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let phone = try phone(server: server)
+        _ = try await setUp(phone)
+        let registration = try unwrap(await phone.store.registration(owner: owner))
+        await server.set(offline: true)
+        phone.vault.failDeletes = true
+        do { _ = try await phone.lifecycle.remove(owner: owner); XCTFail("removal hid a key it could not delete") }
+        catch { XCTAssertEqual(error, .keysRemain) }
+        let orphans = await phone.store.orphans()
+        XCTAssertEqual(orphans.map(\.generation), [registration.generation])
+        XCTAssertTrue(phone.vault.keysExist(for: registration.namespace))
+        let pending = await phone.lifecycle.pendingRevocations(owner: owner)
+        XCTAssertEqual(pending, [registration.deviceServiceId], "the revocation is still recorded")
+        phone.vault.failDeletes = false
+        await server.set(offline: false)
+        _ = await phone.lifecycle.refresh(owner: owner)
+        XCTAssertFalse(phone.vault.keysExist(for: registration.namespace), "deletion was retried")
+        let cleared = await phone.store.orphans()
+        XCTAssertTrue(cleared.isEmpty)
+    }
+
+    func testSignOutIsHeldWhileAKeyCannotBeDeletedAndTheServerIsUnreachable() async throws {
+        let server = PhoneApprovalScriptedServer(owner: owner)
+        let phone = try phone(server: server)
+        _ = try await setUp(phone)
+        phone.vault.failDeletes = true
+        await server.set(offline: true)
+        let held = await phone.lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEA")
+        XCTAssertFalse(held.keysDeleted)
+        XCTAssertFalse(held.allowsSignOut, "a usable key would survive sign-out")
+        await server.set(offline: false)
+        let revoked = await phone.lifecycle.signOut(owner: owner, matrixDeviceID: "PHONEA")
+        XCTAssertTrue(revoked.serverRevoked)
+        XCTAssertTrue(revoked.allowsSignOut, "the server revoked the key that is still here")
     }
 }
