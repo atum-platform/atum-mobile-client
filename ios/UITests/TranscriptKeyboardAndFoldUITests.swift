@@ -95,7 +95,8 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
 
         // Growing: long (two of its three growths in) while Atum still types.
         XCTAssertTrue(body.waitForExistence(timeout: 15), "the live answer never arrived")
-        XCTAssertTrue(eventually(12) { body.frame.height > 800 }, "the live answer did not grow long")
+        // The second growth lands 9.5 s after the send.
+        XCTAssertTrue(eventually(20) { body.frame.height > 800 }, "the live answer did not grow long")
         let toggleWhileGrowing = toggle.exists
         let stillTyping = typing.exists
         XCTAssertTrue(stillTyping, "the answer finished before it was seen growing")
@@ -103,7 +104,8 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
         keepScreenshot("fold-live-growing", of: app)
 
         // Final: folded at the bottom, still following.
-        XCTAssertTrue(eventually(15) { !typing.exists }, "Atum never stopped typing")
+        // Typing stops 8 s after the last growth (25.5 s after the send).
+        XCTAssertTrue(eventually(30) { !typing.exists }, "Atum never stopped typing")
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the final answer shows no toggle")
         XCTAssertTrue(eventually(5) { toggle.label == "Xem thêm" }, "the final answer did not fold")
         XCTAssertTrue(eventually { transcript.value as? String == "following" }, "the chat left its bottom")

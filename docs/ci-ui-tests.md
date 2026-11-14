@@ -119,7 +119,8 @@ per run on 2026-11-11 with six lanes active).
   before it was seen growing" (the scripted answer's last growth at 9.5 s and typing's end at
   13.5 s left a 4 s window the hosted runner missed). The scripted stream in
   `chat.bubbles-live` now grows every 8 s (Debug-only), and the hittable check waits up to
-  5 s for the settled layout instead of a fixed pause.
+  5 s for the settled layout instead of a fixed pause. The waits that follow the stream
+  scale with it: growth to long 20 s (lands at 9.5 s), typing's end 30 s (at 25.5 s).
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
