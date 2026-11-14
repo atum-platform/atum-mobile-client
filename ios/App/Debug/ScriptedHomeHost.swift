@@ -32,6 +32,9 @@ struct ScriptedHomeHost: View {
     @State private var scriptedMuted = [String: Bool]()
     @State private var scriptedLater = Set<String>()
     @State private var scriptedBlocked = Set<String>()
+    /// Rooms the scripted account has left since launch (Home search's
+    /// eligibility drops their results).
+    @State private var scriptedLeftRooms = Set<String>()
     @Environment(\.colorScheme) private var scheme
     private let design: LiveDesign
 
@@ -495,8 +498,28 @@ struct ScriptedHomeHost: View {
         HomeGlobalSearchActions(
             channels: Self.scriptedSearchChannels,
             companyIDs: ["11111111-1111-4111-8111-111111111111"],
+            // Every scripted result's room is joined, unencrypted and listed.
+            eligibility: CompanySearchEligibility(bindings: [
+                "11111111-1111-4111-8111-111111111111": Dictionary(
+                    Self.scriptedCompanyResults.values.flatMap { $0 }
+                        .filter { !scriptedLeftRooms.contains($0.roomID) }
+                        .map { ($0.roomID, $0.channelID) },
+                    uniquingKeysWith: { first, _ in first }),
+            ]),
             search: { term, tab in
                 UITestProbe.append("companySearch \(tab.rawValue) \(term)", to: "home-actions.txt")
+                // `-AtumScriptedLeaveAfterSearch <roomID>`: that room is left
+                // two seconds after the answer lands, with the answer on screen.
+                let arguments = ProcessInfo.processInfo.arguments
+                if let index = arguments.firstIndex(of: "-AtumScriptedLeaveAfterSearch"),
+                   arguments.indices.contains(index + 1) {
+                    let room = arguments[index + 1]
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(2))
+                        scriptedLeftRooms.insert(room)
+                        UITestProbe.append("left \(room)", to: "home-actions.txt")
+                    }
+                }
                 let needle = HomeGlobalSearchPolicy.normalize(term)
                 return (Self.scriptedCompanyResults[tab] ?? []).filter {
                     HomeGlobalSearchPolicy.normalize($0.text).contains(needle)
@@ -504,6 +527,10 @@ struct ScriptedHomeHost: View {
             },
             open: { result in
                 UITestProbe.append("openResult \(result.eventID)", to: "home-actions.txt")
+                // "$launch-draft" stands for a room the phone can no longer
+                // open (left, or the router refused): Home says so.
+                guard result.eventID != "$launch-draft" else { return false }
+                router.open(roomId: result.roomID)
                 return true
             })
     }

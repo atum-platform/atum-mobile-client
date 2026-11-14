@@ -338,9 +338,19 @@ final class HomeShellUITests: TranscriptUITestCase {
         newAssistant.tap()
 
         let disclosure = app.staticTexts.matching(identifier: "home.newAssistant.disclosure").firstMatch
-        XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
         let name = app.textFields.matching(identifier: "home.newAssistant.name").firstMatch
-        XCTAssertTrue(name.exists)
+        XCTAssertTrue(name.waitForExistence(timeout: 3))
+        // Resolve the form by index while its name field is visible. A live
+        // `containing(name)` query would stop matching when scrolling unloads
+        // that cell; firstMatch can be the Home list behind the sheet.
+        guard let form = app.collectionViews.allElementsBoundByIndex.first(where: {
+            $0.textFields.matching(identifier: "home.newAssistant.name").firstMatch.exists
+        }) else {
+            XCTFail("no new-assistant form\n\(boundedHierarchy(app))")
+            return
+        }
+        XCTAssertTrue(revealByScrolling(disclosure, in: form), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(name, in: form, up: false), boundedHierarchy(app))
         name.tap()
         // Not "Alfred": the scripted roster already has one, and the sheet
         // refuses a duplicate before anything is created (AS-3, desktop
@@ -545,12 +555,13 @@ final class HomeShellUITests: TranscriptUITestCase {
     // MARK: Home search: People (desktop roster global search)
 
     @MainActor
-    private func launchPeopleSearch(language: String = "vi", size: String = "UICTContentSizeCategoryL")
-        -> XCUIApplication {
+    private func launchPeopleSearch(language: String = "vi", size: String = "UICTContentSizeCategoryL",
+                                    extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
             + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
                "-UIPreferredContentSizeCategoryName", size]
+            + extraArguments
             + probeArguments
         app.launch()
         let search = element(app, "home.search")
@@ -708,6 +719,44 @@ final class HomeShellUITests: TranscriptUITestCase {
         message.tap()
         XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
         XCTAssertTrue(probeLines("home-actions.txt").map(\.text).contains("openResult $launch-review"))
+    }
+
+    /// Review should-fix 3: when the re-check or the navigation fails, the
+    /// tap opens nothing and the row can be tried again (Home posts the
+    /// generic error announcement and the error haptic).
+    @MainActor
+    func testHomeSearchResultThatCannotOpenStaysOnHome() {
+        let app = launchPeopleSearch(language: "en")
+        element(app, "home.search").typeText("launch\n")
+        let draft = element(app, "home.messages.$launch-draft")
+        XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
+        draft.tap()
+        XCTAssertTrue(waitFor(10) { self.probeLines("home-actions.txt").map(\.text).contains("openResult $launch-draft") })
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(element(app, "home.scripted.destination").exists, "a refused result navigated")
+        XCTAssertTrue(draft.exists && draft.isEnabled, "the row did not come back after the failure")
+        // The next result still opens.
+        element(app, "home.messages.$launch-review").tap()
+        XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
+    }
+
+    /// Review round 2, Home rendering: rows already on screen follow the
+    /// live eligibility. The account leaves "Launch Việt Nam" after the answer
+    /// landed (same query, same companies, so no new search): its message row
+    /// goes, the others stay.
+    @MainActor
+    func testHomeSearchHidesResultsOfARoomLeftWhileShown() {
+        let app = launchPeopleSearch(language: "en",
+                                     extraArguments: ["-AtumScriptedLeaveAfterSearch", "!launch-vn:atum.test"])
+        element(app, "home.search").typeText("launch\n")
+        let draft = element(app, "home.messages.$launch-draft")
+        XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(waitFor(15) { self.probeLines("home-actions.txt").map(\.text).contains("left !launch-vn:atum.test") })
+        XCTAssertTrue(waitFor(10) { !draft.exists }, "a left room's result stayed on screen")
+        XCTAssertTrue(element(app, "home.messages.$launch-review").exists)
+        XCTAssertTrue(element(app, "home.files.$launch-deck").exists)
+        let searches = probeLines("home-actions.txt").map(\.text).filter { $0 == "companySearch messages launch" }
+        XCTAssertEqual(searches.count, 1, "the row went by rendering, not by a new search")
     }
 
     /// Tapping a channel opens its room, as desktop selects it.

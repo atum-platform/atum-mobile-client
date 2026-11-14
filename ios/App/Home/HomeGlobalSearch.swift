@@ -22,12 +22,32 @@ struct HomeGlobalSearchActions {
     /// The companies Messages and Files ask. Empty: both complete at once
     /// with nothing, without asking (desktop `completeWithoutRequest`).
     var companyIDs: [String]
+    /// The company rooms whose results may show right now (joined, known
+    /// unencrypted, listed with the same binding). Results outside it are
+    /// hidden at once: a leave, encryption or directory change removes them.
+    var eligibility: CompanySearchEligibility
     /// Desktop `searchCompanies`: one tab, every company, companies in id
     /// order. A failure answers nothing.
     var search: @MainActor (String, CompanySearchTab) async -> [CompanySearchResult]
-    /// Desktop `openGlobalEvent`'s check: the message is still there in a
-    /// room its company lists. True: Home opens the result's room.
+    /// Desktop `openGlobalEvent`: the message is checked again and its room
+    /// opened. False when the check or the navigation fails; Home then posts
+    /// the generic error.
     var open: @MainActor (CompanySearchResult) async -> Bool
+}
+
+/// Desktop `openGlobalEvent`, end to end: the result is confirmed (message
+/// still there, room still eligible), then its company is activated (Home is
+/// in no company, and the result may be another company's than the one
+/// Workplace shows), then the route runs with that company as its selection
+/// fence. `AppRoot` passes `openRoomAndRoute(_:requiringCompany:)` as `route`.
+enum HomeSearchRoute {
+    @MainActor
+    static func open(_ result: CompanySearchResult, workspace: CompanyWorkspaceModel,
+                     confirm: () async -> Bool,
+                     route: (_ roomID: String, _ requiringCompany: String) async -> Bool) async -> Bool {
+        guard await confirm(), workspace.activateCompany(result.companyID, owning: result.roomID) else { return false }
+        return await route(result.roomID, result.companyID)
+    }
 }
 
 /// The global search's sections, top to bottom (desktop
@@ -67,6 +87,13 @@ enum HomeGlobalSearchPolicy {
     static func companyKey(term: String?, companyIDs: [String]) -> String? {
         guard let term, !companyIDs.isEmpty else { return nil }
         return ([term] + Set(companyIDs).sorted()).joined(separator: "\u{0}")
+    }
+
+    /// Desktop shows a source's rows for the current query; the phone also
+    /// keeps only rows whose room is still eligible.
+    static func visible(_ results: [CompanySearchResult],
+                        eligibility: CompanySearchEligibility) -> [CompanySearchResult] {
+        eligibility.retained(results)
     }
 
     /// The sections that have something to show, in desktop's order.

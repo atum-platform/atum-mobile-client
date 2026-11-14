@@ -980,8 +980,14 @@ struct AppRoot: View {
             actions.globalSearch = HomeGlobalSearchActions(
                 channels: model.homeSearchChannels(),
                 companyIDs: Array(model.homeSearchTargets().keys),
+                eligibility: model.homeSearchEligibility(),
                 search: { await model.homeCompanySearch($0, tab: $1) },
-                open: { await model.openHomeSearchResult($0) })
+                open: { result in
+                    await HomeSearchRoute.open(
+                        result, workspace: model.companyWorkspace,
+                        confirm: { await model.openHomeSearchResult(result) },
+                        route: { await openRoomAndRoute($0, requiringCompany: $1) })
+                })
         }
         return actions
     }

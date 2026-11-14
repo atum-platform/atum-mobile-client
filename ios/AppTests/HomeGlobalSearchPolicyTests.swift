@@ -56,4 +56,32 @@ final class HomeGlobalSearchPolicyTests: XCTestCase {
         XCTAssertFalse(HomeGlobalSearchPolicy.showsNoResults(searching: false, globalCount: 0, rosterCount: 1))
         XCTAssertTrue(HomeGlobalSearchPolicy.showsNoResults(searching: false, globalCount: 0, rosterCount: 0))
     }
+
+    /// Review blocker 1, on screen: a completed answer keeps only rows whose
+    /// room is still eligible, so leaving a room hides its rows at once.
+    func testShownResultsFollowCurrentEligibility() {
+        func result(_ room: String, _ id: String) -> CompanySearchResult {
+            CompanySearchResult(companyID: "c", channelID: "ch-" + room, roomID: room, channelName: room,
+                                eventID: id, sender: "@s:atum.test", snippet: "launch", at: 0)
+        }
+        let answer = [result("!a:atum.test", "$a"), result("!b:atum.test", "$b")]
+        let both = CompanySearchEligibility(bindings: ["c": ["!a:atum.test": "ch-!a:atum.test",
+                                                            "!b:atum.test": "ch-!b:atum.test"]])
+        XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: both).map(\.eventID), ["$a", "$b"])
+        let leftA = CompanySearchEligibility(bindings: ["c": ["!b:atum.test": "ch-!b:atum.test"]])
+        XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: leftA).map(\.eventID), ["$b"])
+        XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: CompanySearchEligibility()), [])
+    }
+
+    /// Review round 2: `homeCompanySearch` serves both tabs from this one
+    /// service, so both share its one queue (four at a time) and its one
+    /// transport (one URL session). The service's own tests prove it builds
+    /// each once and runs both tabs through them.
+    @MainActor
+    func testHomeSearchTabsShareOneServiceQueueAndSession() {
+        let service = LiveAppModel.homeCompanySearchService
+        XCTAssertTrue(service === LiveAppModel.homeCompanySearchService)
+        XCTAssertEqual(service.limiter.limit, 4)
+        XCTAssertTrue(service.transport is LiveCompanySearchTransport)
+    }
 }
