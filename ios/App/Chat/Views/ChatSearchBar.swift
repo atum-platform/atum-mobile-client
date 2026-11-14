@@ -49,6 +49,7 @@ final class ChatSearchSession {
         current = 0
         progress = nil
         highlights = [:]
+        focus = nil
         index = ChatSearchIndex()
     }
 
@@ -113,7 +114,7 @@ final class ChatSearchSession {
     }
 
     private func requestFocus() {
-        guard matches.indices.contains(current) else { return }
+        guard matches.indices.contains(current) else { focus = nil; return }
         focusSequence &+= 1
         focus = Focus(rowID: matches[current].rowID, sequence: focusSequence)
     }

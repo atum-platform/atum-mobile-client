@@ -34,13 +34,9 @@ env:
   # Known failures on main, tracked in atum-platform/atum-mobile#50. Remove a line
   # when its fix lands; never add one without a tracking entry.
   QUARANTINE: >-
-    ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace
-    ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
     ChatKindsUITests/testAccessibilityAuditKinds
-    HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning
-    TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet
-    HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses
     HomeShellUITests/testHomeSearchPeopleAccessibilityAudit
+    ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
 jobs:
   plan:
     runs-on: ubuntu-latest
