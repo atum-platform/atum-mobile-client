@@ -48,6 +48,8 @@ enum AtumGlyph: String, Sendable, CaseIterable {
     case eye = "Eye"
     case deviceMobile = "DeviceMobile"
     case fileText = "FileText"
+    /// Home search's Files rows (desktop `Files`, Phosphor `files`).
+    case files = "Files"
     case folder = "Folder"
     case folderFilled = "FolderFilled"
     case globe = "Globe"
@@ -57,6 +59,8 @@ enum AtumGlyph: String, Sendable, CaseIterable {
     case history = "History"
     case keyRound = "KeyRound"
     case messageCircle = "MessageCircle"
+    /// Home search's Messages rows (desktop `Messages`, Phosphor `chats-circle`).
+    case messages = "Messages"
     case link = "Link"
     case logOut = "LogOut"
     case mail = "Mail"

@@ -369,6 +369,9 @@ struct HomeActions {
     var declineInvitation: ((String) -> Void)?
     var addFriend: ((String) async -> HomeAddFriendResult)?
     var peopleDiscovery: HomePeopleDiscoveryActions?
+    /// Home search's Channels, Messages and Files (desktop roster global
+    /// search). Nil hides all three.
+    var globalSearch: HomeGlobalSearchActions?
     var newGroup: HomeGroupActions?
     var newAssistant: HomeAssistantActions?
     var founderDraft: FounderDraftActions?
@@ -478,6 +481,11 @@ struct HomeScreen: View {
     /// Home search's People section (desktop roster global search).
     @State private var peopleSearch = HomePeopleSearchState.idle
     @State private var openingPersonID: String?
+    /// Home search's Messages and Files (desktop `searchCompanies`), one
+    /// answer per tab, and the result being opened.
+    @State private var messageSearch = HomeEventSearchState.idle
+    @State private var fileSearch = HomeEventSearchState.idle
+    @State private var openingResultID: String?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -500,7 +508,9 @@ struct HomeScreen: View {
             Group {
                 if presentation.rows.isEmpty {
                     emptyContent
-                } else if filteredRows.isEmpty && !showsPeopleResults {
+                } else if HomeGlobalSearchPolicy.showsNoResults(searching: globalSearching,
+                                                                 globalCount: globalSections.count,
+                                                                 rosterCount: filteredRows.count) {
                     noSearchResults
                 } else {
                     roster
@@ -559,6 +569,8 @@ struct HomeScreen: View {
             await actions.refresh()
         }
         .task(id: peopleSearchTerm) { await searchPeople() }
+        .task(id: eventSearchKey) { await searchEvents(.messages) }
+        .task(id: eventSearchKey) { await searchEvents(.files) }
         .onChange(of: scenePhase) { old, new in
             guard old != .active, new == .active, waitingRow != nil else { return }
             Task { await actions.refresh() }
@@ -809,16 +821,17 @@ struct HomeScreen: View {
                             .id(topID)
                     }
 
-                    // Desktop draws the search's People above the roster's
-                    // own matches (`data-matrix-global-search-results`).
-                    peopleResults(isTop: !presentation.showsNotificationPrompt)
+                    // Desktop draws the search's People, Channels, Messages
+                    // and Files above the roster's own matches
+                    // (`data-matrix-global-search-results`).
+                    globalResults(isTop: !presentation.showsNotificationPrompt)
                     section(copy(.assistants), id: "assistants", rows: assistantRows, now: clock.date,
-                            isTop: !presentation.showsNotificationPrompt && !showsPeopleResults)
+                            isTop: !presentation.showsNotificationPrompt && !showsGlobalResults)
                     // Desktop parity: the roster labels its second block
                     // "Chats" too. Without it apps and people read as more
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
                     section(copy(.chats), id: "chats", rows: chatRows, now: clock.date,
-                            isTop: !presentation.showsNotificationPrompt && !showsPeopleResults
+                            isTop: !presentation.showsNotificationPrompt && !showsGlobalResults
                                 && assistantRows.isEmpty)
                 }
                 .listStyle(.plain)
@@ -1010,9 +1023,155 @@ struct HomeScreen: View {
         return HomePeopleSearchPolicy.shown(current.people) { directRoom?($0) != nil }
     }
 
-    /// While searching or showing people, the list stays instead of
+    // MARK: Channels, Messages and Files (desktop roster global search)
+
+    /// Desktop `globalChannels`: Team Space rooms whose name holds the query.
+    private var shownChannels: [HomeSearchChannel] {
+        HomeGlobalSearchPolicy.channels(actions.globalSearch?.channels ?? [], query: query)
+    }
+
+    /// The query and companies Messages and Files ask; nil when there is no
+    /// company to ask (both complete empty at once, as on desktop).
+    private var eventSearchKey: String? {
+        guard let global = actions.globalSearch else { return nil }
+        return HomeGlobalSearchPolicy.companyKey(term: HomePeopleSearchPolicy.term(query),
+                                                 companyIDs: global.companyIDs)
+    }
+
+    private func currentEvents(_ tab: CompanySearchTab) -> HomeEventSearchState? {
+        let state = tab == .messages ? messageSearch : fileSearch
+        guard let key = eventSearchKey, state.key == key else { return nil }
+        return state
+    }
+
+    private var shownMessages: [CompanySearchResult] { currentEvents(.messages)?.results ?? [] }
+    private var shownFiles: [CompanySearchResult] { currentEvents(.files)?.results ?? [] }
+
+    /// Desktop `globalSearching`: any source still out, debounce included.
+    private var globalSearching: Bool {
+        peopleSearching || (eventSearchKey != nil
+            && ((currentEvents(.messages)?.pending ?? true) || (currentEvents(.files)?.pending ?? true)))
+    }
+
+    private var globalSections: [HomeGlobalSearchSection] {
+        HomeGlobalSearchPolicy.sections(people: shownPeople.count, channels: shownChannels.count,
+                                        messages: shownMessages.count, files: shownFiles.count)
+    }
+
+    /// While searching or showing anything found, the list stays instead of
     /// "No results" (desktop: `!externalSearching && totalResultCount === 0`).
-    private var showsPeopleResults: Bool { peopleSearching || !shownPeople.isEmpty }
+    private var showsGlobalResults: Bool { globalSearching || !globalSections.isEmpty }
+
+    private func searchEvents(_ tab: CompanySearchTab) async {
+        guard let key = eventSearchKey, let term = HomePeopleSearchPolicy.term(query),
+              let global = actions.globalSearch else {
+            if tab == .messages { messageSearch = .idle } else { fileSearch = .idle }
+            return
+        }
+        setEvents(tab, HomeEventSearchState(key: key, pending: true))
+        do { try await Task.sleep(for: HomePeopleSearchPolicy.debounce) } catch { return }
+        let found = await global.search(term, tab)
+        // A newer query cancelled this one: its late answer is dropped.
+        guard !Task.isCancelled, eventSearchKey == key else { return }
+        setEvents(tab, HomeEventSearchState(key: key, pending: false, results: found))
+    }
+
+    private func setEvents(_ tab: CompanySearchTab, _ state: HomeEventSearchState) {
+        if tab == .messages { messageSearch = state } else { fileSearch = state }
+    }
+
+    /// The whole global search block, top to bottom: "Searching…", then
+    /// People, Channels, Messages and Files. The first thing drawn is the
+    /// list's top, so a scroll-to-top lands on it.
+    @ViewBuilder private func globalResults(isTop: Bool) -> some View {
+        if globalSearching {
+            Text(verbatim: copy(.searching))
+                .font(.footnote)
+                .foregroundStyle(atum.color(.muted, scheme: scheme))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, isTop ? 6 : 12)
+                .accessibilityIdentifier("home.people.searching")
+                .id(isTop ? topID : "home.people.searching")
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+        let sections = globalSections
+        let firstIsTop = isTop && !globalSearching
+        ForEach(sections, id: \.self) { section in
+            let headerIsTop = firstIsTop && section == sections.first
+            switch section {
+            case .people: peopleResults(headerIsTop: headerIsTop)
+            case .channels: channelResults(headerIsTop: headerIsTop)
+            case .messages: eventResults(.messages, results: shownMessages, headerIsTop: headerIsTop)
+            case .files: eventResults(.files, results: shownFiles, headerIsTop: headerIsTop)
+            }
+        }
+    }
+
+    private func searchHeader(_ title: String, id: String, isTop: Bool) -> some View {
+        Text(verbatim: title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(atum.color(.muted, scheme: scheme))
+            .textCase(nil)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, isTop ? 6 : 12)
+            .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("home.section.\(id)")
+            .id(isTop ? topID : "home.header.\(id)")
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+
+    @ViewBuilder private func channelResults(headerIsTop: Bool) -> some View {
+        searchHeader(copy(.channels), id: "channels", isTop: headerIsTop)
+        ForEach(shownChannels) { channel in
+            // Desktop selects the room; a Team Space room opens in Team Space.
+            Button { actions.openRoom(channel.roomID) } label: {
+                HomeSearchChannelRow(design: design, channel: channel)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("home.channels.\(channel.roomID)")
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    @ViewBuilder private func eventResults(_ section: HomeGlobalSearchSection, results: [CompanySearchResult],
+                                           headerIsTop: Bool) -> some View {
+        searchHeader(copy(section == .files ? .files : .messages), id: section.rawValue, isTop: headerIsTop)
+        ForEach(results) { result in
+            Button { openResult(result) } label: {
+                HomeSearchEventRow(design: design, result: result, section: section)
+            }
+            .buttonStyle(.plain)
+            .disabled(openingResultID != nil)
+            .accessibilityIdentifier("home.\(section.rawValue).\(result.eventID)")
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    /// Desktop `openGlobalEvent`: the message is checked again, then its room
+    /// opens. A failure is the generic error, as there.
+    private func openResult(_ result: CompanySearchResult) {
+        guard let global = actions.globalSearch, openingResultID == nil else { return }
+        openingResultID = result.id
+        Task { @MainActor in
+            let opened = await global.open(result)
+            openingResultID = nil
+            if opened {
+                actions.openRoom(result.roomID)
+            } else {
+                actionFailure &+= 1
+                AccessibilityNotification.Announcement(copy(.errorGeneric)).post()
+            }
+        }
+    }
 
     private func searchPeople() async {
         guard let term = peopleSearchTerm, let discovery = actions.peopleDiscovery else {
@@ -1027,35 +1186,10 @@ struct HomeScreen: View {
         peopleSearch = HomePeopleSearchState(term: term, pending: false, people: found ?? [])
     }
 
-    @ViewBuilder private func peopleResults(isTop: Bool) -> some View {
-        if peopleSearching {
-            Text(verbatim: copy(.searching))
-                .font(.footnote)
-                .foregroundStyle(atum.color(.muted, scheme: scheme))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, isTop ? 6 : 12)
-                .accessibilityIdentifier("home.people.searching")
-                .id(isTop ? topID : "home.people.searching")
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-        }
+    @ViewBuilder private func peopleResults(headerIsTop: Bool) -> some View {
         let people = shownPeople
         if !people.isEmpty {
-            let headerIsTop = isTop && !peopleSearching
-            Text(verbatim: copy(.people))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(atum.color(.muted, scheme: scheme))
-                .textCase(nil)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, headerIsTop ? 6 : 12)
-                .padding(.bottom, 2)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("home.section.people")
-                .id(headerIsTop ? topID : "home.header.people")
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+            searchHeader(copy(.people), id: "people", isTop: headerIsTop)
             ForEach(people) { person in
                 Button { openPerson(person) } label: {
                     HomeDiscoveryPersonRow(design: design, person: person,
@@ -2945,6 +3079,10 @@ private enum HomeCopyKey: String {
     /// Home search's People section and its pending line (desktop roster).
     case people = "desktop.atum.roster.people"
     case searching = "desktop.atum.roster.searching"
+    /// Home search's Channels, Messages and Files headers (desktop roster).
+    case channels = "desktop.atum.roster.channels"
+    case messages = "desktop.atum.roster.messages"
+    case files = "desktop.atum.roster.files"
     case loadFailed = "desktop.atum.roster.loadFailed"
     case retry = "src.matrix.chat-copy.copies.retry"
     case offline = "src.matrix.chat-copy.copies.errorOffline"

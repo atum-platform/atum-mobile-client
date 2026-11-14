@@ -114,3 +114,105 @@ extension LiveAppModel {
             pinnedCount: pinned?.count)
     }
 }
+
+// MARK: Home search: Channels, Messages and Files (desktop roster global search)
+
+extension LiveAppModel {
+    /// Desktop `globalChannels`' source: the joined Team Space rooms, channels
+    /// and conversations, named as the room list names them (`room.name`), in
+    /// the room list's order. "You" and the Chief of Staff are left out, as
+    /// desktop leaves out `isCompanyPrivateCosClaim` rooms.
+    func homeSearchChannels() -> [HomeSearchChannel] {
+        guard let liveMatrix else { return [] }
+        return liveMatrix.rooms.compactMap { row in
+            guard companyWorkspace.isCompanyChannel(row.roomID)
+                || companyWorkspace.conversations.claim(roomID: row.roomID) != nil else { return nil }
+            return HomeSearchChannel(roomID: row.roomID, name: row.displayName)
+        }
+    }
+
+    /// Each company Home search may ask, with the rooms its directory lists.
+    /// A company is asked once one of its rooms is joined (desktop
+    /// `globalCompanyIds`: companies of the rooms in the roster's snapshot).
+    func homeSearchTargets() -> [String: [CompanySearchTarget]] {
+        guard let liveMatrix else { return [:] }
+        let joined = Set(liveMatrix.rooms.map(\.roomID))
+        let companies = Set(companyWorkspace.channelsByCompany.keys)
+            .union(companyWorkspace.conversations.directories.keys)
+        var result = [String: [CompanySearchTarget]]()
+        for company in companies {
+            let targets = CompanySearchTarget.targets(
+                channels: companyWorkspace.channelsByCompany[company],
+                conversations: companyWorkspace.conversations.directories[company])
+            if targets.contains(where: { joined.contains($0.roomID) }) { result[company] = targets }
+        }
+        return result
+    }
+
+    /// Desktop `searchCompanies`: every company asked at once for ten of one
+    /// tab, companies in id order. A company that fails answers nothing; there
+    /// is no error row and no retry.
+    func homeCompanySearch(_ term: String, tab: CompanySearchTab) async -> [CompanySearchResult] {
+        guard let liveMatrix, let query = CompanyMessageSearch.query(term) else { return [] }
+        let rows = Dictionary(liveMatrix.rooms.map { ($0.roomID, $0) }, uniquingKeysWith: { first, _ in first })
+        let companies = homeSearchTargets()
+        // Every company is asked at once (desktop `Promise.all`); each page is
+        // a main-actor task because the session is main-actor state.
+        let tasks: [(String, Task<[CompanySearchResult], Never>)] = companies.map { entry in
+            let company = entry.key
+            let admitted = CompanyMessageSearch.admitted(
+                entry.value, query: query, isJoined: { rows[$0] != nil },
+                isEncrypted: { rows[$0]?.isEncrypted == true })
+            return (company, Task { @MainActor in
+                await Self.companySearchPage(liveMatrix: liveMatrix, companyID: company,
+                                             admitted: admitted, query: query, tab: tab)
+            })
+        }
+        var pages = [String: [CompanySearchResult]]()
+        await withTaskCancellationHandler {
+            for entry in tasks { pages[entry.0] = await entry.1.value }
+        } onCancel: {
+            for entry in tasks { entry.1.cancel() }
+        }
+        return CompanyMessageSearch.merged(pages)
+    }
+
+    private static func companySearchPage(liveMatrix: LiveMatrixSession, companyID: String,
+                                          admitted: [CompanySearchTarget], query: CompanySearchQuery,
+                                          tab: CompanySearchTab) async -> [CompanySearchResult] {
+        // An operator-only query (`from:me`) is answered from the loaded
+        // timeline on desktop; the phone has no such read yet.
+        guard !admitted.isEmpty, !query.needsLoadedHistory else { return [] }
+        var senders: [String]?
+        if let from = query.from {
+            if from == "me" {
+                senders = (try? liveMatrix.companyOwnUserID()).map { [$0] } ?? []
+            } else {
+                var matches = Set<String>()
+                for target in admitted {
+                    for member in await liveMatrix.companySearchMembers(roomID: target.roomID)
+                    where CompanyMessageSearch.memberMatches(userID: member.userID, names: member.names, from: from) {
+                        matches.insert(member.userID)
+                    }
+                }
+                senders = matches.sorted()
+            }
+        }
+        if senders?.isEmpty == true { return [] }
+        guard let body = try? CompanyMessageSearch.requestBody(query: query, tab: tab,
+                                                                roomIDs: admitted.map(\.roomID), senders: senders),
+              let data = try? await liveMatrix.companySearchJSON(body: body) else { return [] }
+        return CompanyMessageSearch.results(responseJSON: data, companyID: companyID, tab: tab,
+                                            query: query, targets: admitted) ?? []
+    }
+
+    /// Desktop `openGlobalEvent` → `openCompanyMessage`: the room is still one
+    /// the company lists, and the message is still there, the same message
+    /// in the same thread. Then Home opens its room.
+    func openHomeSearchResult(_ result: CompanySearchResult) async -> Bool {
+        guard companyWorkspace.teamSpaceRoomLabel(roomID: result.roomID)?.companyID == result.companyID,
+              let summary = await liveMatrix?.companyEventSummary(roomID: result.roomID, eventID: result.eventID)
+        else { return false }
+        return summary.senderID == result.sender && summary.threadRootID == result.threadRootID
+    }
+}

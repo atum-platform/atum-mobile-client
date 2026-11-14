@@ -413,6 +413,10 @@ struct ScriptedHomeHost: View {
                            handle: "somehandle"),
         HomeGroupCandidate(id: "@lan:atum.test", name: "Lan", kind: .person, handle: "lan"),
         HomeGroupCandidate(id: "@some-assistant:atum.test", name: "Some assistant", kind: .assistant),
+        // Found by "launch" with the scripted channels and company answers,
+        // so one query shows all four global sections.
+        HomeGroupCandidate(id: "@launchlead:atum.test", name: "Mai Phương", kind: .person,
+                           handle: "launchlead"),
     ]
 
     private var scriptedPeopleDiscovery: HomePeopleDiscoveryActions {
@@ -435,8 +439,76 @@ struct ScriptedHomeHost: View {
         )
     }
 
+    /// Home search's Channels, Messages and Files: two Team Space rooms named
+    /// "launch…", and company answers whose words or file names hold the
+    /// query. Every ask and open is written to `home-actions.txt`.
+    static let scriptedSearchChannels = [
+        HomeSearchChannel(roomID: "!launch:atum.test", name: "launch"),
+        HomeSearchChannel(roomID: "!general:atum.test", name: "general"),
+        HomeSearchChannel(roomID: "!launch-vn:atum.test", name: "Launch Việt Nam"),
+        // "kickoff" finds a channel, a message and a file but nobody in the
+        // scripted directory: the audit's query without the People row.
+        HomeSearchChannel(roomID: "!kickoff:atum.test", name: "Kickoff Q4"),
+    ]
+
+    static let scriptedCompanyResults: [CompanySearchTab: [CompanySearchResult]] = [
+        .messages: [
+            CompanySearchResult(companyID: "11111111-1111-4111-8111-111111111111",
+                                channelID: "22222222-2222-4222-8222-222222222222",
+                                roomID: "!general:atum.test", channelName: "general",
+                                eventID: "$launch-review", sender: "@minh:atum.test",
+                                snippet: "Can we move the launch review to Thursday? The deck needs one more pass.",
+                                at: 1_762_000_000_000),
+            CompanySearchResult(companyID: "11111111-1111-4111-8111-111111111111",
+                                channelID: "33333333-3333-4333-8333-333333333333",
+                                roomID: "!launch-vn:atum.test", channelName: "Launch Việt Nam",
+                                eventID: "$launch-draft", sender: "@thao:atum.test",
+                                snippet: "Bản nháp launch đã sẵn sàng.", at: 1_761_900_000_000,
+                                threadRootID: "$launch-thread"),
+            CompanySearchResult(companyID: "11111111-1111-4111-8111-111111111111",
+                                channelID: "22222222-2222-4222-8222-222222222222",
+                                roomID: "!general:atum.test", channelName: "general",
+                                eventID: "$kickoff-notes", sender: "@minh:atum.test",
+                                snippet: "Kickoff notes are pinned in the channel.", at: 1_761_700_000_000),
+        ],
+        .files: [
+            CompanySearchResult(companyID: "11111111-1111-4111-8111-111111111111",
+                                channelID: "44444444-4444-4444-8444-444444444444",
+                                roomID: "!launch:atum.test", channelName: "launch",
+                                eventID: "$launch-deck", sender: "@minh:atum.test",
+                                snippet: "launch-deck.pdf", at: 1_761_800_000_000,
+                                file: CompanySearchResult.File(name: "launch-deck.pdf", mimeType: "application/pdf",
+                                                               size: 1_200_000, type: .pdfs)),
+            CompanySearchResult(companyID: "11111111-1111-4111-8111-111111111111",
+                                channelID: "55555555-5555-4555-8555-555555555555",
+                                roomID: "!kickoff:atum.test", channelName: "Kickoff Q4",
+                                eventID: "$kickoff-agenda", sender: "@thao:atum.test",
+                                snippet: "kickoff-agenda.pdf", at: 1_761_600_000_000,
+                                file: CompanySearchResult.File(name: "kickoff-agenda.pdf", mimeType: "application/pdf",
+                                                               size: 300_000, type: .pdfs)),
+        ],
+    ]
+
+    private var scriptedGlobalSearch: HomeGlobalSearchActions {
+        HomeGlobalSearchActions(
+            channels: Self.scriptedSearchChannels,
+            companyIDs: ["11111111-1111-4111-8111-111111111111"],
+            search: { term, tab in
+                UITestProbe.append("companySearch \(tab.rawValue) \(term)", to: "home-actions.txt")
+                let needle = HomeGlobalSearchPolicy.normalize(term)
+                return (Self.scriptedCompanyResults[tab] ?? []).filter {
+                    HomeGlobalSearchPolicy.normalize($0.text).contains(needle)
+                }
+            },
+            open: { result in
+                UITestProbe.append("openResult \(result.eventID)", to: "home-actions.txt")
+                return true
+            })
+    }
+
     private func personalMenu(_ base: HomeActions) -> HomeActions {
         var actions = base
+        actions.globalSearch = scriptedGlobalSearch
         actions.setLowPriority = { roomID, value in
             update(roomID) { $0.withRosterState(lowPriorityOverride: value) }
             UITestProbe.append("lowPriority \(roomID) \(value)", to: "home-actions.txt")

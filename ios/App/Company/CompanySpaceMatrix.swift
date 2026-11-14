@@ -51,6 +51,43 @@ extension LiveMatrixSession {
         return data
     }
 
+    /// `POST /_matrix/client/v3/search`: Home search's Messages and Files
+    /// (desktop `searchCompanyMessages`, server side). The pinned SDK has no
+    /// binding for it, so it goes the same way as the notifications read:
+    /// the session's own homeserver, its bearer, HTTPS only, no cookies, no
+    /// redirects followed. The body names only rooms the company directory
+    /// lists (`CompanyMessageSearch.requestBody`).
+    func companySearchJSON(body: Data) async throws -> Data {
+        try runtime.requireCurrent()
+        let session = try runtime.client.session()
+        guard var components = URLComponents(string: session.homeserverUrl), components.scheme == "https",
+              components.host?.isEmpty == false else { throw CompanySpaceMatrixFailure.invalid }
+        components.path = (components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path)
+            + "/_matrix/client/v3/search"
+        guard let url = components.url else { throw CompanySpaceMatrixFailure.invalid }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer " + session.accessToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        let transport = URLSession(configuration: configuration, delegate: CompanySpaceNoRedirect(),
+                                   delegateQueue: nil)
+        defer { transport.finishTasksAndInvalidate() }
+        let (data, response) = try await transport.data(for: request)
+        try runtime.requireCurrent()
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw CompanySpaceMatrixFailure.refused }
+        return data
+    }
+
+    /// A room's members as `from:@name` matches them: user ID and names.
+    func companySearchMembers(roomID: String) async -> [(userID: String, names: [String])] {
+        (await members(roomID: roomID) ?? []).map { ($0.userID, [$0.displayName]) }
+    }
+
     /// This account's Matrix user ID.
     func companyOwnUserID() throws -> String {
         try runtime.requireCurrent()

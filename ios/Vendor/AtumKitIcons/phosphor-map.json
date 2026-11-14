@@ -42,6 +42,7 @@
     "FileTypePdf": "file-pdf",
     "FileTypePpt": "file-ppt",
     "FileZip": "file-zip",
+    "Files": "files",
     "Folder": "folder-simple",
     "FolderFilled": {
       "name": "folder-simple",
@@ -67,6 +68,7 @@
       "name": "chat-circle",
       "weight": "fill"
     },
+    "Messages": "chats-circle",
     "Mic": "microphone",
     "MoreHorizontal": "dots-three",
     "Movie": "film-strip",

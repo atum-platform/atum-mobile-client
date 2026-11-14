@@ -953,6 +953,14 @@ struct AppRoot: View {
         actions.blockablePeer = { model.blockablePeer(roomID: $0) }
         actions.blockedUserIDs = { await model.blockedUserIDs() }
         actions.setBlocked = { await model.setIgnored(userID: $0, ignored: $1) }
+        // Home search's Channels, Messages and Files (desktop roster global search).
+        if model.liveMatrix != nil {
+            actions.globalSearch = HomeGlobalSearchActions(
+                channels: model.homeSearchChannels(),
+                companyIDs: Array(model.homeSearchTargets().keys),
+                search: { await model.homeCompanySearch($0, tab: $1) },
+                open: { await model.openHomeSearchResult($0) })
+        }
         return actions
     }
 

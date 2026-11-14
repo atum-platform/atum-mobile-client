@@ -74,9 +74,12 @@ needs no `PENDING-COPY` entries.
 
 ## Left for later
 
-- **Messages and Files** (company search, `searchCompanies` in
+- ~~**Messages and Files** (company search, `searchCompanies` in
   `roster-global-search.ts`) and **Channels** (team-space rooms matched by
-  name) are not ported. The phone shows People only.
+  name) are not ported.~~ Ported on 2026-11-14: see
+  [home-search-channels-messages-files.md](home-search-channels-messages-files.md).
+  The "Searching…" line now covers all three sources, and People's own
+  pending line moved into the shared block.
 - Desktop backfills a missing handle from its handle cache
   (`knownHandles[userId]`, `requestMatrixHandles`). The phone shows a handle
   only when the search result has one. The handle/email lookup work in
