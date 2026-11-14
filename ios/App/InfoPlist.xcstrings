@@ -1,6 +1,40 @@
 {
   "sourceLanguage": "vi",
   "strings": {
+    "NSFaceIDUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum uses Face ID so only you can approve what your assistants ask to do."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタントが求める操作をあなただけが許可できるよう、Atum は Face ID を使用します。"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum dùng Face ID để chỉ bạn mới có thể cho phép những việc trợ lý xin làm."
+          }
+        },
+        "zh": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum 使用面容 ID，确保只有你能批准助手请求执行的操作。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atum 使用 Face ID，確保只有你能核准助理請求執行的操作。"
+          }
+        }
+      }
+    },
     "NSMicrophoneUsageDescription": {
       "localizations": {
         "en": {

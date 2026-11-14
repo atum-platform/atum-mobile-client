@@ -645,7 +645,8 @@ struct AppRoot: View {
             ignoredPeople: { await model.ignoredPeople() },
             setIgnored: { await model.setIgnored(userID: $0, ignored: $1) },
             loadDevices: { await model.ownDevices() },
-            deviceSignOutURL: { await model.deviceSignOutURL(deviceID: $0) }
+            deviceSignOutURL: { await model.deviceSignOutURL(deviceID: $0) },
+            phoneApprovals: model.phoneApprovals
         )
     }
 

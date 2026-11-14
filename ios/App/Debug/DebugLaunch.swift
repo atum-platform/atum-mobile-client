@@ -88,6 +88,25 @@ enum S6ScriptedScenario: String, CaseIterable {
     case accountDevices = "account.devices"
     /// Your devices when the list cannot be read; Try again then loads it.
     case accountDevicesFailed = "account.devices-failed"
+    /// Your devices › Approve on this iPhone (phone approvals slice 2b) over
+    /// the DEBUG in-memory registry and software keys: off with Face ID.
+    case approvalsOff = "approvals.off"
+    /// Off; the system prompt is cancelled.
+    case approvalsCancel = "approvals.cancel"
+    /// Already set up.
+    case approvalsOn = "approvals.on"
+    /// No device passcode.
+    case approvalsNoPasscode = "approvals.no-passcode"
+    /// A passcode but no Face ID enrolled.
+    case approvalsPasscodeOnly = "approvals.passcode-only"
+    /// Set up earlier, then the key was lost (restore, passcode off).
+    case approvalsKeyMissing = "approvals.key-missing"
+    /// The server does not advertise phone registration: no row.
+    case approvalsLegacy = "approvals.legacy"
+    /// Setting up while offline.
+    case approvalsOffline = "approvals.offline"
+
+    var isPhoneApprovals: Bool { rawValue.hasPrefix("approvals.") }
 }
 
 /// The preview host for `-AtumExpiredSessionPreview`: the same S6 welcome

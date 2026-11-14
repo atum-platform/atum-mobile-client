@@ -53,6 +53,7 @@ struct AccountSettingsDetail: View {
     @State private var deviceToSignOut: AccountDevice?
     @State private var deviceSignOutPending = false
     @State private var deviceSignOutFailed = false
+    @State private var showsPhoneApprovals = false
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
@@ -88,6 +89,11 @@ struct AccountSettingsDetail: View {
         .navigationDestination(item: $openedAssistant) { assistant in
             if let card = callbacks.assistantCard {
                 card(assistant)
+            }
+        }
+        .navigationDestination(isPresented: $showsPhoneApprovals) {
+            if let model = actions.phoneApprovals {
+                PhoneApprovalSettingsPage(design: design, model: model)
             }
         }
         .sheet(isPresented: $deletesAccount) {
@@ -223,6 +229,11 @@ struct AccountSettingsDetail: View {
                       value: AccountSettingsCopy.sectionTitle(.devices, design: design)
                           + " · " + connectionText,
                       identifier: "account.settings.privacy.devices.current")
+            // Approve on this iPhone sits with This iPhone: it is this
+            // phone's own security setting (UX §4.7).
+            if let approvals = actions.phoneApprovals, approvals.showsRow {
+                PhoneApprovalSettingsRow(design: design, model: approvals) { showsPhoneApprovals = true }
+            }
             if actions.loadDevices != nil {
                 otherDeviceRows
             } else {
@@ -371,6 +382,7 @@ struct AccountSettingsDetail: View {
 
     /// Reads the list again; a list already on screen stays while it does.
     private func reloadDevices() async {
+        if let approvals = actions.phoneApprovals { Task { await approvals.refresh() } }
         guard let load = actions.loadDevices else { return }
         if case .failed = deviceLoad { deviceLoad = .loading }
         if let devices = await load() {
