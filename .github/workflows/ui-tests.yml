@@ -34,7 +34,6 @@ env:
   # Known failures on main, tracked in atum-platform/atum-mobile#50. Remove a line
   # when its fix lands; never add one without a tracking entry.
   QUARANTINE: >-
-    ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace
     ChatKindsUITests/testAccessibilityAuditKinds
     HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning
     TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet

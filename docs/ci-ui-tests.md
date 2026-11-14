@@ -32,8 +32,6 @@ per run on 2026-11-11 with six lanes active).
   2026-11-14 baseline recheck below distinguishes stale entries from remaining
   failures. Entries are removed only after repeated local verification; this
   lane does not trigger hosted CI.
-  - `ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace`:
-    Block is auto-scrolled during its tap; confirmation does not appear.
   - `ChatKindsUITests/testAccessibilityAuditKinds`: avatar Dynamic Type debt;
     the new baseline also reproduces the quote-preview contrast finding
     documented in `docs/ports/quote-contrast.md`.
@@ -179,3 +177,22 @@ test), plus `baseline-model-class.xcresult` / `.log`, under the same quarantine
 scratch folder. This repeat/class build also compiles the pending search and
 scroll-interaction fixes; the model save path and its test are unchanged.
 No hosted workflow was triggered.
+
+### Person-panel Block: reveal before tapping
+
+`ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace` failed
+on the baseline after XCTest implicitly scrolled `info.block` during `tap()`;
+the confirmation never appeared. The test now reveals the whole button inside
+the panel's own scroll view, then taps it. The additive
+`TranscriptUITestSupport.revealByScrolling` helper requires existence,
+hittability and full containment in that scroll container. It scrolls only
+while the target is outside the viewport, with a bounded number of gestures;
+it adds no sleep or timeout. No existing support method was rewritten.
+
+The Block confirmation, Unblock transition, low-priority switch and two scripted
+ignore writes remain asserted. No app or visual change was needed. Fresh-run
+repetitions passed **3/3** (57.641, 39.878, 41.175 s). The entire
+`ChatPanelUITests` class passed **4 tests with 1 existing iPad-only skip**, no
+failures; Block passed again in 31.243 s. Its quarantine entry is removed.
+Evidence: `assembly-1-ChatPanelUITests-repeat.xcresult` / `.log` and
+`assembly-1-ChatPanelUITests-class.xcresult` / `.log`.
