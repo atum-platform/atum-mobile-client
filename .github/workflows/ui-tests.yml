@@ -36,6 +36,7 @@ env:
   QUARANTINE: >-
     ChatKindsUITests/testAccessibilityAuditKinds
     HomeShellUITests/testHomeSearchPeopleAccessibilityAudit
+    ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
 jobs:
   plan:
     runs-on: ubuntu-latest

@@ -154,7 +154,18 @@ No visual, layout, copy or audit-exemption change belongs to this lane.
 
 ## Verified removals (2026-11-14)
 
-### Thinking-level save: already passing
+### Thinking-level save: passes locally, fails hosted (re-quarantined)
+
+**Correction, 2026-11-14:** the removal below was wrong. On PR #51's first hosted
+run (`9d34aee`, UI shard 2) the test failed at `ChatInfoUITests.swift:241`, "The
+thinking level did not reach the scripted save boundary" (16.3 s), the same
+failure that put it in quarantine. The local evidence (iOS 27 on the build Mac)
+does not carry over to the hosted macos-26 runner, so the test is back in
+`QUARANTINE` (atum-mobile#50) until the hosted-only cause is found. The four
+other removals in this change passed on hosted CI.
+
+The original (local-only) note follows.
+
 
 `ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel`
 needs no app or test change. It passed the untouched `161ada7` baseline, then
