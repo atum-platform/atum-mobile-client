@@ -28,26 +28,24 @@ per run on 2026-11-11 with six lanes active).
   (3 s push window) and
   `ChatKindsUITests/testLinksGoThroughLinkPolicyAndNothingIsReadWhileCovered`
   (UI query timed out after 195 s). All three pass on the build Mac.
-- **Quarantine:** `QUARANTINE` lists tests that fail on `main` today, each
-  tracked in atum-mobile#50. As of the first hosted run (PR #29):
-  `ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace` (the
-  Block button isn't found in the sheet; the wave 3 chats lane is fixing it) and
-  `ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel`
-  (the thinking level never reaches the scripted save, still under investigation) and
-  `ChatKindsUITests/testAccessibilityAuditKinds` ("Dynamic Type font sizes are
-  partially unsupported": the known avatar-monogram Dynamic Type debt, wave 2
-  carry-over; its quote-preview contrast finding is a size-driven audit
-  false positive, see `docs/ports/quote-contrast.md`) and
-  `HomeShellUITests/testHomeSearchPeopleAccessibilityAudit` (added quarantined,
-  13 Nov: at AX-XXXL one intermittent "Dynamic Type font sizes are partially
-  unsupported" finding comes back with no element attached, so it can't be
-  traced to a view; the control audit of the same search without the People
-  section passes, and the decorative monogram is exempted by identifier. Same
-  avatar-monogram family; see `docs/ports/home-search-people.md`). Third hosted run (after #28 and #31 merged):
-  `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`
-  (Retry state not reached after a failed create, line 349) and
-  `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`
-  (`company.channel.ops` row not found); both under diagnosis. Remove a line when its fix lands.
+- **Quarantine:** `QUARANTINE` tracks failures in atum-mobile#50. The
+  2026-11-14 baseline recheck below distinguishes stale entries from remaining
+  failures. Entries are removed only after repeated local verification; this
+  lane does not trigger hosted CI.
+  - `ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace`:
+    Block is auto-scrolled during its tap; confirmation does not appear.
+  - `ChatKindsUITests/testAccessibilityAuditKinds`: avatar Dynamic Type debt;
+    the new baseline also reproduces the quote-preview contrast finding
+    documented in `docs/ports/quote-contrast.md`.
+  - `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`:
+    the expanded form's disclosure is below the keyboard and is not revealed.
+  - `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`:
+    passes on the unmodified baseline; repeat/class confirmation pending.
+  - `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses`:
+    passes once locally; the recorded hosted scroll race still needs a fix.
+  - `HomeShellUITests/testHomeSearchPeopleAccessibilityAudit`: the baseline
+    reproduces a Dynamic Type finding with no element attached. See
+    `docs/ports/home-search-people.md` and the UI-worker handoff below.
 - 2026-11-12: `ChatInfoUITests/testAssistantCardChoosesOneServerDestinationDefault`
   failed on PR #33 (`84d891a`) because the hosted runner was slow: launch took 32 s and
   `chat.title` 30 s, then the 2 s + 3 s waits for `assistant.card.model` ran out. Its
@@ -111,3 +109,73 @@ chat). The test also never scrolled the sheet, whose list is lazy and opens at t
 for the sheet's `composer.model.close` button and scrolls inside the sheet until the header exists.
 Which bar `firstMatch` returns differs between the hosted runtime and the local iOS 27.0 runtime; that is the likely
 reason hosted passed, but it was not verified on a hosted runner. After the fix the test passes locally on both devices.
+
+## Quarantine baseline recheck (2026-11-14)
+
+Before source edits, all seven quarantined tests ran against `161ada7` on one
+locked iPhone 17 simulator (iOS 27.0, Xcode 27). There were **3 passes, 4 failures,
+0 skips**. The result bundle is `dd-approvals-2b/quarantine/baseline.xcresult`
+inside the assigned build/scratch volume. Use that bundle and the extracted
+`baseline-tests.json` / activity JSON files as the baseline evidence: the local
+shell wrapper overwrote its console log after the suite completed. The bundle
+retains all seven outcomes and durations.
+
+| Quarantined test | Baseline result | First observed boundary |
+| --- | --- | --- |
+| `ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel` | PASS, 25.100 s | The scripted save and unchanged current-model check both pass. |
+| `ChatKindsUITests/testAccessibilityAuditKinds` | FAIL, 78.103 s | Contrast on the quote preview “Mình đi được, hẹn 12 giờ nhé.”; existing Dynamic Type debt remains. |
+| `ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace` | FAIL, 41.251 s | `info.block` exists; XCTest scrolls it during the tap, then the confirmation is absent. |
+| `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses` | PASS, 34.621 s | One local pass does not resolve the documented intermittent hosted race. |
+| `HomeShellUITests/testHomeSearchPeopleAccessibilityAudit` | FAIL, 27.099 s | Dynamic Type unsupported, no target, zero frame. |
+| `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning` | FAIL, 30.542 s | The disclosure is not found at the old line 341; creation/Retry is never reached. |
+| `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet` | PASS, 38.936 s | The existing `f08450a` reveal logic reaches every channel and checks the marks. |
+
+All local heavy commands use `TMPDIR=/Volumes/AtumTestFlight/tmp`, the shared
+`.heavy-build.lock`, two build jobs and the existing `dd-approvals-2b` derived
+data/scratch tree. Each verification batch boots one simulator and shuts down
+all simulators on exit. The cached SDK packages are APFS clones within that
+scratch tree. Subsequent runs use `-collect-test-diagnostics never` to avoid
+Xcode's 600-second post-failure simulator-log collection; assertions, ordinary
+failure attachments, logs and result bundles remain enabled.
+
+## UI-worker handoff: audits retained
+
+No visual, layout, copy or audit-exemption change belongs to this lane.
+
+- `AtumAvatar` (`ios/App/DesignSystem/AtumAvatar.swift`) resolves its face through
+  `@ScaledMetric`, then caps the face at `baseSize * 1.35` in `cappedPointSize`.
+  The monogram font is `.system(size: size * monogramScale)`, so it inherits that
+  cap and stops growing at accessibility sizes. Proposal for the UI owner:
+  scale the glyph independently with a second `@ScaledMetric(relativeTo: .body)`
+  initialized from `baseSize * monogramScale`, then check its fit inside the
+  prescribed face across the full Dynamic Type range. The UI owner decides any
+  necessary face/fit adjustment. Do not hide the finding or enlarge exemptions.
+- The People audit reproduces an untargeted, zero-frame Dynamic Type issue.
+  This run cannot attribute that issue to a particular view. The capped glyph
+  is a concrete shared limitation and a candidate for an isolated view change,
+  not proof that it is the only cause of the untargeted finding. Re-run the
+  People audit and its roster-only control after the view change.
+- The kinds audit also fails on footnote-size quote-preview contrast in this
+  baseline. `docs/ports/quote-contrast.md` records passing measured token/pixel
+  ratios and a finding that follows font size even with darker ink. The UI
+  owner must evaluate the proposed semantic quote-font adjustment and re-run
+  the audit; no quote colour/font/layout change or new exemption was made here.
+
+## Verified removals (2026-11-14)
+
+### Thinking-level save: already passing
+
+`ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel`
+needs no app or test change. It passed the untouched `161ada7` baseline, then
+three consecutive repetitions in fresh test-runner processes (36.638, 38.466,
+30.135 s). The entire `ChatInfoUITests` class passed **12/12**, including this
+test again (32.871 s). Every run retained the scripted save boundary
+`saved nguyet-thuc 2 high`, the selected thorough
+level and the unchanged current-model check. The quarantine was stale.
+
+Evidence: `baseline-model-repeat.xcresult` and `baseline-model-repeat.log`
+(the log has all three repetition outcomes; XCTest's summary counts one unique
+test), plus `baseline-model-class.xcresult` / `.log`, under the same quarantine
+scratch folder. This repeat/class build also compiles the pending search and
+scroll-interaction fixes; the model save path and its test are unchanged.
+No hosted workflow was triggered.

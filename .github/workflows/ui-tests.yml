@@ -35,7 +35,6 @@ env:
   # when its fix lands; never add one without a tracking entry.
   QUARANTINE: >-
     ChatPanelUITests/testPersonPanelShowsConversationFactsAndBlocksInPlace
-    ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
     ChatKindsUITests/testAccessibilityAuditKinds
     HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning
     TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet
