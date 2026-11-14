@@ -35,7 +35,6 @@ env:
   # when its fix lands; never add one without a tracking entry.
   QUARANTINE: >-
     ChatKindsUITests/testAccessibilityAuditKinds
-    TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet
     HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses
     HomeShellUITests/testHomeSearchPeopleAccessibilityAudit
 jobs:

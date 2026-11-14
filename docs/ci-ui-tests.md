@@ -35,8 +35,6 @@ per run on 2026-11-11 with six lanes active).
   - `ChatKindsUITests/testAccessibilityAuditKinds`: avatar Dynamic Type debt;
     the new baseline also reproduces the quote-preview contrast finding
     documented in `docs/ports/quote-contrast.md`.
-  - `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`:
-    passes on the unmodified baseline; repeat/class confirmation pending.
   - `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses`:
     passes once locally; the recorded hosted scroll race still needs a fix.
   - `HomeShellUITests/testHomeSearchPeopleAccessibilityAudit`: the baseline
@@ -217,3 +215,16 @@ Evidence: `assembly-1-HomeShellUITests-repeat.xcresult` / `.log` and
 `assembly-1-HomeShellUITests-class.xcresult` / `.log`. In `HomeShellUITests.swift`,
 only this test method is edited; `HomeScreen.swift`, its search sections and
 `LiveRosterRows.swift` are untouched.
+
+### Channel marks: already passing
+
+`TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`
+already passes on `161ada7`. `f08450a` fixed the old test's lookup of lazy
+below-fold channel rows by revealing them before reading their marks, but the
+quarantine entry remained. No badge logic or test change is needed here.
+The baseline passed in 38.936 s; fresh-run repetitions passed **3/3** (21.129,
+22.408, 27.398 s). The complete `TeamSpaceDailyUITests` class passed **10/10**,
+including the marks test again (21.058 s). Mention, unread, muted and tab-count
+assertions are unchanged, and the stale quarantine entry is removed.
+Evidence: `assembly-1-TeamSpaceDailyUITests-repeat.xcresult` / `.log` and
+`assembly-1-TeamSpaceDailyUITests-class.xcresult` / `.log`.
