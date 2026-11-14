@@ -111,6 +111,12 @@ per run on 2026-11-11 with six lanes active).
   (counted from launch), so the loading phase had already ended. The Debug-only
   `ScriptedApplePurchasesAPI.slowCheckoutDelay` is now 45 s; the wait for Get and
   `testSettlingCheckoutKeepsHeaderEntryHiddenUntilOpen`'s wait for the header entry are 70 s.
+- 2026-11-14: PR #56's paging fix let `testSearchFindsAWordThreePagesBackAndCloses` pass on
+  both hosted runs, and the AX-XXXL audit passed on run 1 (`2e3d39f`), but run 2 (`bac7589`,
+  shard 3) failed it with "No results. Searched 128 of 2200" at line 129. The walk gets
+  further than before (70 → 128) but still doesn't finish within the wait at AX-XXXL on the
+  hosted runner. `testSearchBarAtAccessibilitySizePassesTheAudit` is **quarantined again**
+  (atum-mobile#50) while the remaining slowness or stall is diagnosed from that run's result bundle.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

@@ -38,6 +38,7 @@ env:
     HomeShellUITests/testHomeSearchPeopleAccessibilityAudit
     ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
     HomeShellUITests/testHomeSearchChannelsMessagesFilesAccessibilityAudit
+    HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit
 jobs:
   plan:
     runs-on: ubuntu-latest
