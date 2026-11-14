@@ -212,6 +212,10 @@ struct AccountActions {
     /// where the person confirms (desktop `endDeviceSession`). Nil: the rows
     /// offer no sign-out. A nil answer means the page could not be found.
     var deviceSignOutURL: (@MainActor (String) async -> URL?)? = nil
+    /// Your devices › Approve on this iPhone (phone approvals slice 2b). Nil,
+    /// or a model whose server has not advertised phone registration, hides
+    /// the row.
+    var phoneApprovals: PhoneApprovalSettingsModel? = nil
 }
 
 /// The desktop's display-name rule (`matrixProfileDisplayName`,
