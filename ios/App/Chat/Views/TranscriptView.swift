@@ -113,14 +113,23 @@ struct TranscriptView: View {
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         .onScrollPhaseChange { _, phase in
             scratch.motion = ScrollMotion(phase)
-            if scratch.motion == .user { scratch.pendingHold = nil }
+            if scratch.motion == .user {
+                scratch.pendingHold = nil
+                stopSearchPlacement()
+            }
             updateHeldRows()
         }
         .onScrollGeometryChange(for: TranscriptGeometry.self) { TranscriptGeometry($0) } action: { old, new in
             geometryChanged(from: old, to: new)
         }
         .onChange(of: search?.focus) { _, focus in
-            guard let focus else { return }
+            guard let focus else {
+                stopSearchPlacement()
+                // Find released its anchor: normal holds/following learn
+                // the settled position even if no further geometry arrives.
+                scheduleSettle(after: Self.settleSeconds)
+                return
+            }
             showSearchMatch(focus.rowID)
         }
         .onChange(of: store.scrollRequest) { _, request in
@@ -160,6 +169,7 @@ struct TranscriptView: View {
             markMemory("chat.open")
         }
         .onDisappear {
+            stopSearchPlacement()
             scratch.isOnScreen = false
             updateBottomVisible()
             noteReading()
@@ -192,6 +202,17 @@ struct TranscriptView: View {
         scratch.holdProbe?.observe(new, contentChanged: contentChanged)
         scratch.holdProbe?.inset(new.insetTop)
         #endif
+        if scratch.placingSearchMatch {
+            // The first layout can still be at the bottom after search has
+            // detached it. Feeding that transient pass to FollowPolicy would
+            // reattach and pin the transcript before the match is placed.
+            if contentChanged || new.viewportHeight != old.viewportHeight || new.insetTop != old.insetTop {
+                scratch.searchAttempts = 0
+            }
+            scheduleSearchPlacement()
+            updateBottomVisible()
+            return
+        }
         if retryPendingHold() { return }
         // Rows change only while the scroll is still (`heldRows`), so where
         // the row being read sat when it was chosen is where it goes back to.
@@ -242,6 +263,11 @@ struct TranscriptView: View {
     /// A row's top moved in the content: something above it changed height.
     private func rowMoved(_ id: String, minY: Double) {
         scratch.rowMinY[id] = minY
+        if id == scratch.searchRowID {
+            scratch.searchAttempts = 0
+            recordSearchPlacement("row", minY: minY)
+            scheduleSearchPlacement()
+        }
         if id == scratch.anchor?.id { holdAnchor() }
     }
 
@@ -283,6 +309,7 @@ struct TranscriptView: View {
     }
 
     private func settle() {
+        guard !scratch.placingSearchMatch else { return }
         if retryPendingHold() { return }
         if let quiet = scratch.quietUntil, Date() < quiet {
             return scheduleSettle(after: quiet.timeIntervalSinceNow + 0.05)
@@ -341,6 +368,13 @@ struct TranscriptView: View {
         case .none:
             break
         case let .scrollToBottom(animated):
+            if scratch.placingSearchMatch {
+                // A queued command from before detaching must not win over
+                // search. An explicit jump reattaches the store and cancels
+                // placement, so the person's newer action still wins.
+                guard store.follow.isFollowing else { return }
+                stopSearchPlacement()
+            }
             if animated {
                 withAnimation(.smooth(duration: 0.3)) { position.scrollTo(edge: .bottom) }
             } else {
@@ -376,6 +410,10 @@ struct TranscriptView: View {
     private func rowsShown(from old: [String], to new: [String]) {
         scratch.rowOrder = new
         let ids = Set(new)
+        if let rowID = scratch.searchRowID, !ids.contains(rowID) {
+            stopSearchPlacement()
+            scheduleSettle(after: Self.settleSeconds)
+        }
         if let anchor = scratch.anchor, !ids.contains(anchor.id),
            let index = old.firstIndex(of: anchor.id) {
             scratch.anchor = old[(index + 1)...].lazy
@@ -480,7 +518,9 @@ struct TranscriptView: View {
     /// (the follow rule would otherwise pin it back). One scroll is not
     /// enough: a walk's rows have only just landed, and they still change
     /// height (layout, parsed markdown), so the row is placed from its
-    /// measured top and placed again until it stays. A drag ends it.
+    /// measured top. Keep that row as the anchor after the first successful
+    /// placement too: a page's remaining layout can arrive afterwards. A
+    /// drag, jump, new query or closing search ends it.
     private func showSearchMatch(_ rowID: String) {
         guard store.snapshot.rows.contains(where: { $0.id == rowID }) else { return }
         let geometry = scratch.geometry
@@ -490,42 +530,104 @@ struct TranscriptView: View {
         syncFollowState()
         scratch.pendingHold = nil
         scratch.anchor = nil
-        scratch.searchGeneration &+= 1
-        scratch.placingSearchMatch = true
-        placeSearchMatch(rowID, generation: scratch.searchGeneration, attempt: 0)
+        stopSearchPlacement()
+        scratch.searchRowID = rowID
+        recordSearchPlacement("request")
+        scheduleSearchPlacement()
     }
 
-    private func placeSearchMatch(_ rowID: String, generation: UInt64, attempt: Int) {
+    private func stopSearchPlacement() {
+        recordSearchPlacement("cancel")
+        scratch.searchGeneration &+= 1
+        scratch.searchRowID = nil
+        scratch.searchAttempts = 0
+        scratch.searchHasScrolled = false
+        scratch.searchTickScheduled = false
+    }
+
+    /// Coalesce layout and scroll callbacks. Missing row geometry waits for
+    /// a real layout event instead of consuming a wall-clock retry budget.
+    private func scheduleSearchPlacement(after delay: TimeInterval = 0) {
+        guard let rowID = scratch.searchRowID, !scratch.searchTickScheduled else { return }
+        scratch.searchTickScheduled = true
+        let generation = scratch.searchGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard generation == scratch.searchGeneration else { return }
+            scratch.searchTickScheduled = false
+            placeSearchMatch(rowID, generation: generation)
+        }
+    }
+
+    private func placeSearchMatch(_ rowID: String, generation: UInt64) {
         guard generation == scratch.searchGeneration else { return }
-        guard scratch.motion != .user, attempt < Self.searchPlacementAttempts else {
-            scratch.placingSearchMatch = false
+        guard scratch.isOnScreen, scratch.motion != .user,
+              search?.isOpen == true, search?.focus?.rowID == rowID else {
+            stopSearchPlacement()
             return
         }
         let geometry = scratch.geometry
-        if let minY = scratch.rowMinY[rowID], geometry.viewportHeight > 0 {
+        if let minY = scratch.rowMinY[rowID], geometry.viewportHeight > 0,
+           geometry.contentHeight >= minY {
             // A third of the way down the visible area, so the start of a
             // long message shows above the search bar.
             let desired = max(0, minY - geometry.viewportHeight * 0.3)
             let current = geometry.offsetY + geometry.insetTop
             let atEnd = geometry.distanceFromBottom <= 0.5 && current < desired
-            if attempt > 0, abs(current - desired) <= 2 || atEnd {
-                scratch.placingSearchMatch = false
-                scheduleSettle(after: Self.settleSeconds)
+                && minY >= current && minY < current + geometry.viewportHeight
+            if scratch.searchHasScrolled, abs(current - desired) <= 2 || atEnd {
+                recordSearchPlacement("placed", minY: minY, desired: desired)
+                // One matching geometry sample is not the end of layout.
+                // Keep the requested row as the anchor, without a polling
+                // timer, so later row/viewport measurements can correct it.
+                // Choosing an ordinary reading anchor here can select a
+                // different row from a still-stale page layout.
+                // Find owns the reading position until cancelled. Even a
+                // transient bottom sample must not reattach following.
+                store.handle(.geometry(distanceFromBottom: max(geometry.distanceFromBottom,
+                                                               FollowPolicy.nearBottomPoints + 1),
+                                       distanceFromTop: geometry.distanceFromTop,
+                                       viewportHeight: geometry.viewportHeight, motion: scratch.motion))
+                syncFollowState()
+                updateBottomVisible()
                 return
             }
+            // Bound repeated commands against unchanged geometry, but retain
+            // the request. A late row/viewport layout wakes it again.
+            guard scratch.searchAttempts < Self.searchPlacementAttempts else {
+                recordSearchPlacement("waiting", minY: minY, desired: desired)
+                return
+            }
+            recordSearchPlacement("scroll", minY: minY, desired: desired)
+            scratch.searchAttempts += 1
             scratch.pendingHold = nil
-            if attempt == 0 {
+            let animate = !scratch.searchHasScrolled
+            scratch.searchHasScrolled = true
+            if animate {
                 withAnimation(.smooth(duration: 0.25)) { position.scrollTo(y: desired) }
             } else {
                 position.scrollTo(y: desired)
             }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (attempt == 0 ? 0.3 : 0.12)) {
-            placeSearchMatch(rowID, generation: generation, attempt: attempt + 1)
+            scheduleSearchPlacement(after: animate ? 0.3 : 0.12)
         }
     }
 
     private static let searchPlacementAttempts = 14
+
+    /// Retained only for scripted Debug runs, like the existing hold probe.
+    private func recordSearchPlacement(_ event: String, minY: Double? = nil, desired: Double? = nil) {
+        #if DEBUG
+        guard UITestProbe.folder != nil, let rowID = scratch.searchRowID else { return }
+        let geometry = scratch.geometry
+        let value = "search.\(event) row=\(rowID) focus=\(search?.focus?.rowID ?? "nil")"
+            + " open=\(search?.isOpen == true) motion=\(scratch.motion) following=\(store.follow.isFollowing)"
+            + " minY=\(minY.map(String.init(describing:)) ?? "nil") desired=\(desired.map(String.init(describing:)) ?? "nil")"
+            + " current=\(geometry.offsetY + geometry.insetTop) viewport=\(geometry.viewportHeight)"
+            + " content=\(geometry.contentHeight) bottom=\(geometry.distanceFromBottom) attempts=\(scratch.searchAttempts)"
+        guard value != scratch.searchProbeValue else { return }
+        scratch.searchProbeValue = value
+        UITestProbe.append(value, to: "search-placement.txt")
+        #endif
+    }
 
     // MARK: B3: VoiceOver announces incoming messages while following
 
@@ -643,11 +745,16 @@ private final class TranscriptScratch {
     var quietUntil: Date?
     /// The latest `scheduleSettle` (older ones do nothing).
     var settleGeneration: UInt64 = 0
-    /// HC-6: a search match is being placed; holds wait until it stays.
-    var placingSearchMatch = false
+    /// HC-6: the explicitly requested match owns the anchor until cancelled.
+    var placingSearchMatch: Bool { searchRowID != nil }
+    var searchRowID: String?
+    var searchAttempts = 0
+    var searchHasScrolled = false
+    var searchTickScheduled = false
     /// The latest `showSearchMatch` (older ones stop).
     var searchGeneration: UInt64 = 0
     #if DEBUG
+    var searchProbeValue: String?
     /// `-AtumUITestProbeDir`: how each hold landed, for G-scroll check 4.
     var holdProbe: HoldProbe? = UITestProbe.folder == nil ? nil : HoldProbe()
     #endif

@@ -50,7 +50,9 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         // was not loaded within a separate 5 s existence wait after the count,
         // but the failure dump moments later shows it in the window; one 20 s
         // wait now covers loading and scrolling. "In view" means some element
-        // carrying the word lies inside the window. `firstMatch.isHittable`
+        // carrying the word lies inside the window and between the title
+        // and search bar, so a match behind the keyboard cannot pass.
+        // `firstMatch.isHittable`
         // proved unreliable on
         // hosted runners: on #44 shard 3 (12 Nov) the recording shows the
         // match in view and highlighted from ~34 s, and a 10 s isHittable wait
@@ -59,8 +61,11 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let window = app.windows.firstMatch
         XCTAssertTrue(waitFor(20) {
             let bounds = window.frame
+            let top = self.visibleTop(app)
+            let bottom = self.element(app, "chat.search").frame.minY
             return matches.allElementsBoundByIndex.contains { element in
                 element.exists && !element.frame.isEmpty && bounds.contains(element.frame)
+                    && element.frame.minY >= top && element.frame.maxY <= bottom
             }
         }, "the match was not brought into view\n\(boundedHierarchy(app))")
         keepScreenshot("hc6-search-found-\(appearanceTag)-en", of: app)

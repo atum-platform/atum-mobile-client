@@ -338,9 +338,19 @@ final class HomeShellUITests: TranscriptUITestCase {
         newAssistant.tap()
 
         let disclosure = app.staticTexts.matching(identifier: "home.newAssistant.disclosure").firstMatch
-        XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
         let name = app.textFields.matching(identifier: "home.newAssistant.name").firstMatch
-        XCTAssertTrue(name.exists)
+        XCTAssertTrue(name.waitForExistence(timeout: 3))
+        // Resolve the form by index while its name field is visible. A live
+        // `containing(name)` query would stop matching when scrolling unloads
+        // that cell; firstMatch can be the Home list behind the sheet.
+        guard let form = app.collectionViews.allElementsBoundByIndex.first(where: {
+            $0.textFields.matching(identifier: "home.newAssistant.name").firstMatch.exists
+        }) else {
+            XCTFail("no new-assistant form\n\(boundedHierarchy(app))")
+            return
+        }
+        XCTAssertTrue(revealByScrolling(disclosure, in: form), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(name, in: form, up: false), boundedHierarchy(app))
         name.tap()
         // Not "Alfred": the scripted roster already has one, and the sheet
         // refuses a duplicate before anything is created (AS-3, desktop
