@@ -35,8 +35,6 @@ per run on 2026-11-11 with six lanes active).
   - `ChatKindsUITests/testAccessibilityAuditKinds`: avatar Dynamic Type debt;
     the new baseline also reproduces the quote-preview contrast finding
     documented in `docs/ports/quote-contrast.md`.
-  - `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`:
-    the expanded form's disclosure is below the keyboard and is not revealed.
   - `TeamSpaceDailyUITests/testChannelMarksRenderFromCountsAndMutedStaysQuiet`:
     passes on the unmodified baseline; repeat/class confirmation pending.
   - `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses`:
@@ -196,3 +194,26 @@ repetitions passed **3/3** (57.641, 39.878, 41.175 s). The entire
 failures; Block passed again in 31.243 s. Its quarantine entry is removed.
 Evidence: `assembly-1-ChatPanelUITests-repeat.xcresult` / `.log` and
 `assembly-1-ChatPanelUITests-class.xcresult` / `.log`.
+
+### New assistant: reveal the disclosure in its form
+
+`HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning`
+failed on the baseline before any create/Retry assertion: the added photo,
+handle and persona fields put the disclosure below the keyboard in the lazy
+form. The test now identifies the form containing the visible name field,
+resolves that container by index so it remains addressable when cells unload,
+reveals the disclosure, then scrolls back to the name field. It still checks
+the disclosure before Create, the disabled name plus Retry state, and the two
+unchanged `newAssistant Mây` probe writes. The prior `f08450a` nonduplicate-name
+fix remains intact. No assistant creation state, layout or copy changed.
+
+Fresh-run repetitions passed **3/3** (48.722, 32.094, 32.698 s), and the test
+passed inside the full class (31.438 s). `HomeShellUITests` ran all **21 tests:
+20 passed, 1 failed**. The sole failure is the retained People accessibility
+audit with the same untargeted Dynamic Type finding; the roster-only control
+and the full roster audit both passed. That visual audit remains quarantined;
+only the new-assistant entry is removed.
+Evidence: `assembly-1-HomeShellUITests-repeat.xcresult` / `.log` and
+`assembly-1-HomeShellUITests-class.xcresult` / `.log`. In `HomeShellUITests.swift`,
+only this test method is edited; `HomeScreen.swift`, its search sections and
+`LiveRosterRows.swift` are untouched.
