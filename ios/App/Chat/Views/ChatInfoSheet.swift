@@ -221,6 +221,9 @@ struct ChatInfoActions {
     var appPanel: AppPanelActions?
     /// HC-7: Rename a person or group chat (desktop conversation menu).
     var rename: ChatRenameActions?
+    /// Members' verified @handles, on the line under each name (desktop
+    /// `MatrixMembers`). Nil shows none.
+    var handles: PersonHandleLookup?
 }
 
 /// What the panel reads when it opens. Every field may be unknown; an unknown

@@ -85,6 +85,10 @@ struct HomeRow: Identifiable, Equatable {
     /// HC-7: the room's `m.lowpriority` tag, for the long-press toggle. Live
     /// rows only (a cached row reads false until the live list arrives).
     var isLowPriority = false
+    /// A one-to-one chat's other member (never a room ID) and their bare,
+    /// directory-verified handle. Live only, like `memberCount`.
+    var partnerUserID: String?
+    var handle: String?
 
     /// HC-7: Low priority, Rename and Block apply to ordinary person and
     /// group chats (desktop `lowPriorityEligible`, `personalChatActions`);
@@ -132,12 +136,19 @@ struct HomeRow: Identifiable, Equatable {
     /// Applies the session's live-only facts to rows that may have come from
     /// the cached chat list (HC-3, HC-5). Only assistant rows ever work.
     static func applyingLive(_ rows: [HomeRow], workingRoomIDs: Set<String>,
-                             memberCounts: [String: Int]) -> [HomeRow] {
-        guard !workingRoomIDs.isEmpty || !memberCounts.isEmpty else { return rows }
+                             memberCounts: [String: Int],
+                             partners: [String: String] = [:],
+                             handle: (String) -> String? = { _ in nil }) -> [HomeRow] {
+        guard !workingRoomIDs.isEmpty || !memberCounts.isEmpty || !partners.isEmpty else { return rows }
         return rows.map { row in
             var row = row
             row.isWorking = row.kind.isAssistant && workingRoomIDs.contains(row.roomID)
             if row.kind == .group { row.memberCount = memberCounts[row.roomID] }
+            // The Founder's row carries the app's own identity line instead.
+            if row.kind == .person, !row.isFounder, let partner = partners[row.roomID] {
+                row.partnerUserID = partner
+                row.handle = handle(partner)
+            }
             return row
         }
     }
@@ -372,6 +383,9 @@ struct HomeActions {
     /// Home search's Channels, Messages and Files (desktop roster global
     /// search). Nil hides all three.
     var globalSearch: HomeGlobalSearchActions?
+    /// Verified handles for one-to-one chat rows (desktop `roomHandle`).
+    /// Nil shows no handle and asks for none.
+    var handles: PersonHandleLookup?
     var newGroup: HomeGroupActions?
     var newAssistant: HomeAssistantActions?
     var founderDraft: FounderDraftActions?
@@ -793,7 +807,10 @@ struct HomeScreen: View {
         let locale = Locale(identifier: design.locale)
         let needle = HomeSearch.normalize(query, locale: locale)
         guard !needle.isEmpty else { return presentation.rows }
-        return presentation.rows.filter { HomeSearch.normalize($0.name, locale: locale).contains(needle) }
+        return presentation.rows.filter {
+            HomeSearch.normalize($0.name, locale: locale).contains(needle)
+                || PersonHandleText.matches($0.handle, needle: needle)
+        }
     }
 
     private var assistantRows: [HomeRow] { filteredRows.filter { $0.kind.isAssistant } }
@@ -913,6 +930,7 @@ struct HomeScreen: View {
                     loadMatrixThumbnail: actions.loadMatrixThumbnail,
                     isJoining: joiningRoomID == row.roomID,
                     isSearching: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .requestingHandles(row.partnerUserID.map { [$0] } ?? [], from: actions.handles)
     }
 
     private func decoratedRow<Content: View>(_ content: Content, row: HomeRow) -> some View {
@@ -1198,6 +1216,7 @@ struct HomeScreen: View {
                 Button { openPerson(person) } label: {
                     HomeDiscoveryPersonRow(design: design, person: person,
                                            load: actions.peopleDiscovery?.loadMatrixThumbnail,
+                                           handles: actions.peopleDiscovery?.handles,
                                            avatarSize: 52)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -1477,17 +1496,20 @@ private struct HomeStartChatSheet: View {
                     }
                     .disabled(!row.canOpen && !row.isFounderDraft)
                     .accessibilityIdentifier("home.startChat.row.\(row.id)")
+                    .requestingHandles(row.partnerUserID.map { [$0] } ?? [], from: actions.handles)
                 }
                 extra
             }
         }
     }
 
-    /// Desktop's captions: a group's "N members", and an assistant whose
-    /// chat is still on its way says so ("Getting ready") instead of being
-    /// left out. A person's @handle needs the directory's reverse read
-    /// (plan SV-4), which the phone does not have yet.
+    /// Desktop's captions: a person's @handle (`PersonHandleLine`), a
+    /// group's "N members", and an assistant whose chat is still on its way
+    /// says so ("Getting ready") instead of being left out.
     private func caption(for row: HomeRow) -> String? {
+        if row.kind == .person, !row.isFounder {
+            return PersonHandleText.line(row.handle, name: row.name)
+        }
         if row.kind == .group, let count = row.memberCount {
             return design.text(StartChatCopyKey.members.rawValue,
                                arguments: [.number(Int64(max(1, count)))])
@@ -1683,7 +1705,8 @@ private struct HomeStartChatSheet: View {
             // Every assistant is listed, one whose chat is still on its way
             // too (desktop lists every projected agent); it opens once ready.
             !row.isInvitation && (row.canOpen || (row.kind.isAssistant && row.isWaitingForRoom))
-                && (needle.isEmpty || HomeSearch.normalize(row.name, locale: locale).contains(needle))
+                && (needle.isEmpty || HomeSearch.normalize(row.name, locale: locale).contains(needle)
+                    || PersonHandleText.matches(row.handle, needle: needle))
         }
     }
 
@@ -1782,7 +1805,8 @@ private struct HomeAddFriendView: View {
                                 else { presentation = .startFailed }
                             }
                         } label: {
-                            HomeDiscoveryPersonRow(design: design, person: person, load: discovery?.loadMatrixThumbnail)
+                            HomeDiscoveryPersonRow(design: design, person: person, load: discovery?.loadMatrixThumbnail,
+                                                   handles: discovery?.handles)
                         }
                         .disabled(presentation == .searching)
                     }
@@ -2154,7 +2178,8 @@ private struct HomeNewGroupView: View {
             }
         } label: {
             HStack(spacing: 12) {
-                HomeDiscoveryPersonRow(design: design, person: candidate, load: actions.loadMatrixThumbnail)
+                HomeDiscoveryPersonRow(design: design, person: candidate, load: actions.loadMatrixThumbnail,
+                                       handles: actions.handles)
                 Spacer(minLength: 8)
                 if isSelected {
                     Image(atum.symbol(.check))
@@ -2275,7 +2300,15 @@ private struct HomeRowView: View {
     }
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
-    private var previewText: String { HomePreviewText.text(row.preview, design: design) }
+    private var messageText: String { HomePreviewText.text(row.preview, design: design) }
+    /// A person's @handle stands in for the latest message while the chat
+    /// is empty, and while searching (desktop `chatRowHandle`).
+    private var handleLine: String? {
+        guard row.kind == .person, !row.isFounder else { return nil }
+        return PersonHandleText.chatRow(row.handle, name: row.name,
+                                        hasMessages: !messageText.isEmpty, searching: isSearching)
+    }
+    private var previewText: String { handleLine ?? messageText }
     private var timeText: String {
         guard let date = row.latestEventAt else { return "" }
         return HomeTimeText.text(date: date, now: now, design: design)
@@ -2308,7 +2341,7 @@ private struct HomeRowView: View {
                         ProgressView()
                             .controlSize(.mini)
                             .accessibilityHidden(true)
-                    } else {
+                    } else if handleLine == nil {
                         sendStateGlyph
                     }
                     Text(verbatim: previewText.isEmpty ? " " : previewText)
@@ -2343,7 +2376,7 @@ private struct HomeRowView: View {
                     ProgressView()
                         .controlSize(.mini)
                         .accessibilityHidden(true)
-                } else {
+                } else if handleLine == nil {
                     sendStateGlyph
                 }
                 Text(verbatim: previewText.isEmpty ? " " : previewText)
@@ -2431,7 +2464,7 @@ private struct HomeRowView: View {
         }
         if row.isMuted { parts.append(design.text(HomeCopyKey.muted.rawValue)) }
         if row.isPinned { parts.append(design.text(HomeCopyKey.pinned.rawValue)) }
-        switch row.preview.sendState {
+        switch handleLine == nil ? row.preview.sendState : .sent {
         case .sending: parts.append(design.text(HomeCopyKey.pending.rawValue))
         case .cannotBeSent: parts.append(design.text(HomeCopyKey.notSent.rawValue))
         case .sent: break
@@ -3190,6 +3223,9 @@ private struct HomeDiscoveryPersonRow: View {
     let design: LiveDesign
     let person: HomeGroupCandidate
     let load: ((String, Int) async -> Data?)?
+    /// The cache's handle for someone whose answer carried none (desktop
+    /// `person.handle ?? knownHandles[person.userId]`).
+    var handles: PersonHandleLookup? = nil
     /// Home search's People rows use the roster's 52 pt face (desktop draws
     /// them at the roster's avatar size); the pickers keep 36.
     var avatarSize: CGFloat = 36
@@ -3220,6 +3256,7 @@ private struct HomeDiscoveryPersonRow: View {
         // avatar's initial is drawn to the face, not read on its own.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: [person.name, shownHandle].compactMap { $0 }.joined(separator: ", ")))
+        .requestingHandles(person.kind == .person ? [person.id] : [], from: handles)
         .task(id: person.avatarURL) {
             art = nil
             guard let uri = person.avatarURL, let load,
@@ -3232,8 +3269,32 @@ private struct HomeDiscoveryPersonRow: View {
     private var lineLimit: Int { dynamicTypeSize.isAccessibilitySize ? 3 : 1 }
 
     private var shownHandle: String? {
-        guard let handle = person.handle, "@" + handle != person.name.trimmingCharacters(in: .whitespaces)
-        else { return nil }
-        return "@" + handle
+        let handle = person.handle ?? (person.kind == .person ? handles?.handle(person.id) : nil)
+        return PersonHandleText.line(handle, name: person.name)
+    }
+}
+
+/// Asks the directory for the handles of the people a row shows, when the row
+/// appears and again every `VerifiedHandleStore.refreshInterval` while it
+/// stays on screen (desktop `useMatrixHandleContacts`' visible-list timer).
+/// The store pools, deduplicates and budgets the reads; rendering never waits.
+private struct HandleRequest: ViewModifier {
+    let userIDs: [String]
+    let lookup: PersonHandleLookup?
+
+    func body(content: Content) -> some View {
+        content.task(id: userIDs) {
+            guard let lookup, !userIDs.isEmpty else { return }
+            while !Task.isCancelled {
+                lookup.request(userIDs)
+                do { try await Task.sleep(for: .seconds(VerifiedHandleStore.refreshInterval)) } catch { return }
+            }
+        }
+    }
+}
+
+extension View {
+    func requestingHandles(_ userIDs: [String], from lookup: PersonHandleLookup?) -> some View {
+        modifier(HandleRequest(userIDs: userIDs, lookup: lookup))
     }
 }

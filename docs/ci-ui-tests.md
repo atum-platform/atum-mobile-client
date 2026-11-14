@@ -100,6 +100,10 @@ per run on 2026-11-11 with six lanes active).
   That was initially attributed to runner speed, and the wait became 30 s.
   The 2026-11-14 investigation below reproduces a real app paging race; the
   existing 30 s wait remains unchanged.
+- 2026-11-14: the test was **quarantined** (atum-mobile#50) by PR #54 after `285c443`
+  shard 3 failed with "No results. Searched 70 of 2200" even with the 30 s wait (the walk
+  stopped, not slowed). `fix/chat-search-walk-stall` fixes the paging race (see below) and
+  removes it from `QUARANTINE` again.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
