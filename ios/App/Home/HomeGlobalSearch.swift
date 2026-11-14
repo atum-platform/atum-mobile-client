@@ -22,11 +22,16 @@ struct HomeGlobalSearchActions {
     /// The companies Messages and Files ask. Empty: both complete at once
     /// with nothing, without asking (desktop `completeWithoutRequest`).
     var companyIDs: [String]
+    /// The company rooms whose results may show right now (joined, known
+    /// unencrypted, listed with the same binding). Results outside it are
+    /// hidden at once: a leave, encryption or directory change removes them.
+    var eligibility: CompanySearchEligibility
     /// Desktop `searchCompanies`: one tab, every company, companies in id
     /// order. A failure answers nothing.
     var search: @MainActor (String, CompanySearchTab) async -> [CompanySearchResult]
-    /// Desktop `openGlobalEvent`'s check: the message is still there in a
-    /// room its company lists. True: Home opens the result's room.
+    /// Desktop `openGlobalEvent`: the message is checked again and its room
+    /// opened. False when the check or the navigation fails; Home then posts
+    /// the generic error.
     var open: @MainActor (CompanySearchResult) async -> Bool
 }
 
@@ -67,6 +72,13 @@ enum HomeGlobalSearchPolicy {
     static func companyKey(term: String?, companyIDs: [String]) -> String? {
         guard let term, !companyIDs.isEmpty else { return nil }
         return ([term] + Set(companyIDs).sorted()).joined(separator: "\u{0}")
+    }
+
+    /// Desktop shows a source's rows for the current query; the phone also
+    /// keeps only rows whose room is still eligible.
+    static func visible(_ results: [CompanySearchResult],
+                        eligibility: CompanySearchEligibility) -> [CompanySearchResult] {
+        eligibility.retained(results)
     }
 
     /// The sections that have something to show, in desktop's order.

@@ -309,14 +309,25 @@ public enum CompanyMessageSearch {
         return parsed.problems.isEmpty ? parsed : nil
     }
 
-    /// The rooms one company's search reads: joined, not encrypted (the
-    /// server cannot search those), narrowed by `in:#channel`.
+    /// The rooms one company's search reads: joined and known to be
+    /// unencrypted (`false`; unknown is not admitted, the server cannot search
+    /// an encrypted room), narrowed by `in:#channel`.
     public static func admitted(_ targets: [CompanySearchTarget], query: CompanySearchQuery,
-                                isJoined: (String) -> Bool, isEncrypted: (String) -> Bool) -> [CompanySearchTarget] {
-        let readable = targets.filter { isJoined($0.roomID) && !isEncrypted($0.roomID) }
+                                isJoined: (String) -> Bool, encryption: (String) -> Bool?) -> [CompanySearchTarget] {
+        let readable = targets.filter { isJoined($0.roomID) && encryption($0.roomID) == false }
         guard let channel = query.inChannel else { return readable }
         let wanted = ChatSearchText.needle(String(channel.dropFirst()))
         return readable.filter { ChatSearchText.needle($0.channelName) == wanted }
+    }
+
+    /// Desktop `senderIds`: `from:me` is this account; `from:@name` is every
+    /// known member of the searched rooms whose localpart or name matches,
+    /// whatever their membership now (a former member's old messages are
+    /// still theirs; desktop reads `room.getMembers()`, all states).
+    public static func senders(from: String, ownUserID: String?, members: [CompanySearchMember]) -> [String] {
+        if from == "me" { return ownUserID.map { [$0] } ?? [] }
+        let matches = members.filter { memberMatches(userID: $0.userID, names: $0.names, from: from) }.map(\.userID)
+        return Set(matches).filter(isUserID).sorted()
     }
 
     /// Desktop `senderIds`' member rule for `from:@name`: a member whose
@@ -477,5 +488,132 @@ public enum CompanyMessageSearch {
         return !local.isEmpty && local.utf8.count <= 255 && !server.isEmpty && server.utf8.count <= 255
             && local.unicodeScalars.allSatisfy { (0x21...0x7E).contains($0.value) && $0 != ":" }
             && server.unicodeScalars.allSatisfy { (0x21...0x7E).contains($0.value) }
+    }
+}
+
+/// One room member as `from:@name` reads it, any membership.
+public struct CompanySearchMember: Equatable, Sendable {
+    public let userID: String
+    public let names: [String]
+    /// `join`, `invite`, `leave`, `ban`, `knock`: kept for the record only;
+    /// every state counts.
+    public let membership: String
+
+    public init(userID: String, names: [String], membership: String) {
+        self.userID = userID
+        self.names = names
+        self.membership = membership
+    }
+}
+
+/// Which company rooms Home search may show right now: each company's
+/// directory-listed rooms (exact channel binding) that are joined and known
+/// to be unencrypted. Results are kept only while their room still is; a
+/// leave, encryption turned on or a directory change drops them, before they
+/// are accepted and while they are on screen.
+public struct CompanySearchEligibility: Equatable, Sendable {
+    /// company → room → channel (or conversation) id.
+    private var bindings: [String: [String: String]]
+
+    public init(bindings: [String: [String: String]] = [:]) {
+        self.bindings = bindings
+    }
+
+    public init(targets: [String: [CompanySearchTarget]], isJoined: (String) -> Bool,
+                encryption: (String) -> Bool?) {
+        var bindings = [String: [String: String]]()
+        for (company, rooms) in targets {
+            for target in rooms where isJoined(target.roomID) && encryption(target.roomID) == false {
+                bindings[company, default: [:]][target.roomID] = target.channelID
+            }
+        }
+        self.bindings = bindings
+    }
+
+    public var companyIDs: [String] { bindings.keys.sorted() }
+
+    public func allows(companyID: String, channelID: String, roomID: String) -> Bool {
+        bindings[companyID]?[roomID] == channelID
+    }
+
+    public func allows(_ result: CompanySearchResult) -> Bool {
+        allows(companyID: result.companyID, channelID: result.channelID, roomID: result.roomID)
+    }
+
+    public func retained(_ results: [CompanySearchResult]) -> [CompanySearchResult] {
+        results.filter(allows)
+    }
+}
+
+public extension CompanyMessageSearch {
+    /// Desktop `openCompanyMessage`: the result's room is still joined,
+    /// unencrypted and bound to the same company and channel before the
+    /// event is read and again after (the read is async; a leave can land in
+    /// between), and the event is the same message in the same thread.
+    @MainActor
+    static func confirmOpen(_ result: CompanySearchResult,
+                            eligibility: () -> CompanySearchEligibility,
+                            read: () async -> (sender: String, threadRootID: String?)?) async -> Bool {
+        guard eligibility().allows(result), let event = await read() else { return false }
+        return eligibility().allows(result) && event.sender == result.sender
+            && event.threadRootID == result.threadRootID
+    }
+}
+
+/// At most `limit` jobs at once, in arrival order, shared by everything that
+/// holds it (Home search's Messages and Files share one). A job whose task is
+/// cancelled while waiting never starts.
+@MainActor
+public final class CompanySearchLimiter {
+    public let limit: Int
+    public private(set) var running = 0
+    private var waiters: [(id: UInt64, resume: CheckedContinuation<Bool, Never>)] = []
+    private var nextID: UInt64 = 0
+
+    public init(limit: Int) {
+        self.limit = max(1, limit)
+    }
+
+    /// The job's answer, or nil when the task was cancelled before it started.
+    public func run<Value>(_ job: () async -> Value) async -> Value? {
+        guard await acquire() else { return nil }
+        defer { release() }
+        guard !Task.isCancelled else { return nil }
+        return await job()
+    }
+
+    private func acquire() async -> Bool {
+        if Task.isCancelled { return false }
+        if running < limit {
+            running += 1
+            return true
+        }
+        let id = nextID
+        nextID &+= 1
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(returning: false)
+                } else {
+                    waiters.append((id, continuation))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancelWaiter(id) }
+        }
+    }
+
+    private func cancelWaiter(_ id: UInt64) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).resume.resume(returning: false)
+    }
+
+    private func release() {
+        if waiters.isEmpty {
+            running -= 1
+        } else {
+            // The slot passes straight to the next job.
+            waiters.removeFirst().resume.resume(returning: true)
+        }
     }
 }

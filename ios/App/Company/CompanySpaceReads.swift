@@ -149,24 +149,39 @@ extension LiveAppModel {
         return result
     }
 
-    /// Desktop `searchCompanies`: every company asked at once for ten of one
-    /// tab, companies in id order. A company that fails answers nothing; there
-    /// is no error row and no retry.
+    /// Home search's company rooms that may be read and shown right now:
+    /// directory-listed (exact binding), joined, and known unencrypted.
+    func homeSearchEligibility() -> CompanySearchEligibility {
+        guard let liveMatrix else { return CompanySearchEligibility() }
+        let rows = Dictionary(liveMatrix.rooms.map { ($0.roomID, $0) }, uniquingKeysWith: { first, _ in first })
+        return CompanySearchEligibility(targets: homeSearchTargets(), isJoined: { rows[$0] != nil },
+                                        encryption: { rows[$0]?.isEncrypted ?? nil })
+    }
+
+    /// Messages and Files share one queue: at most four company searches at
+    /// a time across both tabs (each with its `from:` member reads).
+    static let homeCompanySearchLimiter = CompanySearchLimiter(limit: 4)
+
+    /// Desktop `searchCompanies`: every company asked for ten of one tab,
+    /// companies in id order. A company that fails answers nothing; there is
+    /// no error row and no retry. Work waits in the shared queue and is not
+    /// started once the search is cancelled.
     func homeCompanySearch(_ term: String, tab: CompanySearchTab) async -> [CompanySearchResult] {
         guard let liveMatrix, let query = CompanyMessageSearch.query(term) else { return [] }
         let rows = Dictionary(liveMatrix.rooms.map { ($0.roomID, $0) }, uniquingKeysWith: { first, _ in first })
-        let companies = homeSearchTargets()
-        // Every company is asked at once (desktop `Promise.all`); each page is
-        // a main-actor task because the session is main-actor state.
-        let tasks: [(String, Task<[CompanySearchResult], Never>)] = companies.map { entry in
-            let company = entry.key
+        let limiter = Self.homeCompanySearchLimiter
+        var tasks = [(String, Task<[CompanySearchResult], Never>)]()
+        for (company, targets) in homeSearchTargets().sorted(by: { $0.key < $1.key }) {
+            if Task.isCancelled { break }
             let admitted = CompanyMessageSearch.admitted(
-                entry.value, query: query, isJoined: { rows[$0] != nil },
-                isEncrypted: { rows[$0]?.isEncrypted == true })
-            return (company, Task { @MainActor in
-                await Self.companySearchPage(liveMatrix: liveMatrix, companyID: company,
-                                             admitted: admitted, query: query, tab: tab)
-            })
+                targets, query: query, isJoined: { rows[$0] != nil },
+                encryption: { rows[$0]?.isEncrypted ?? nil })
+            tasks.append((company, Task { @MainActor in
+                await limiter.run {
+                    await self.companySearchPage(liveMatrix: liveMatrix, companyID: company,
+                                                 admitted: admitted, query: query, tab: tab)
+                } ?? []
+            }))
         }
         var pages = [String: [CompanySearchResult]]()
         await withTaskCancellationHandler {
@@ -177,42 +192,46 @@ extension LiveAppModel {
         return CompanyMessageSearch.merged(pages)
     }
 
-    private static func companySearchPage(liveMatrix: LiveMatrixSession, companyID: String,
-                                          admitted: [CompanySearchTarget], query: CompanySearchQuery,
-                                          tab: CompanySearchTab) async -> [CompanySearchResult] {
+    private func companySearchPage(liveMatrix: LiveMatrixSession, companyID: String,
+                                   admitted: [CompanySearchTarget], query: CompanySearchQuery,
+                                   tab: CompanySearchTab) async -> [CompanySearchResult] {
         // An operator-only query (`from:me`) is answered from the loaded
         // timeline on desktop; the phone has no such read yet.
         guard !admitted.isEmpty, !query.needsLoadedHistory else { return [] }
         var senders: [String]?
         if let from = query.from {
-            if from == "me" {
-                senders = (try? liveMatrix.companyOwnUserID()).map { [$0] } ?? []
-            } else {
-                var matches = Set<String>()
+            var members = [CompanySearchMember]()
+            if from != "me" {
                 for target in admitted {
-                    for member in await liveMatrix.companySearchMembers(roomID: target.roomID)
-                    where CompanyMessageSearch.memberMatches(userID: member.userID, names: member.names, from: from) {
-                        matches.insert(member.userID)
-                    }
+                    if Task.isCancelled { return [] }
+                    members += await liveMatrix.companySearchMembers(roomID: target.roomID)
                 }
-                senders = matches.sorted()
             }
+            senders = CompanyMessageSearch.senders(from: from, ownUserID: try? liveMatrix.companyOwnUserID(),
+                                                   members: members)
         }
-        if senders?.isEmpty == true { return [] }
+        if senders?.isEmpty == true || Task.isCancelled { return [] }
         guard let body = try? CompanyMessageSearch.requestBody(query: query, tab: tab,
                                                                 roomIDs: admitted.map(\.roomID), senders: senders),
-              let data = try? await liveMatrix.companySearchJSON(body: body) else { return [] }
-        return CompanyMessageSearch.results(responseJSON: data, companyID: companyID, tab: tab,
-                                            query: query, targets: admitted) ?? []
+              let data = try? await liveMatrix.companySearchJSON(body: body),
+              let found = CompanyMessageSearch.results(responseJSON: data, companyID: companyID, tab: tab,
+                                                       query: query, targets: admitted) else { return [] }
+        // The answer was asked for the rooms admitted then. A room left,
+        // encrypted or dropped from the directory meanwhile shows nothing.
+        return homeSearchEligibility().retained(found)
     }
 
-    /// Desktop `openGlobalEvent` → `openCompanyMessage`: the room is still one
-    /// the company lists, and the message is still there, the same message
-    /// in the same thread. Then Home opens its room.
+    /// Desktop `openGlobalEvent` → `openCompanyMessage`: the room is still
+    /// joined, unencrypted and bound to the same company and channel before
+    /// and after the event is read, and it is the same message in the same
+    /// thread. Home then routes to the room; any failure is the generic error.
     func openHomeSearchResult(_ result: CompanySearchResult) async -> Bool {
-        guard companyWorkspace.teamSpaceRoomLabel(roomID: result.roomID)?.companyID == result.companyID,
-              let summary = await liveMatrix?.companyEventSummary(roomID: result.roomID, eventID: result.eventID)
-        else { return false }
-        return summary.senderID == result.sender && summary.threadRootID == result.threadRootID
+        guard let liveMatrix else { return false }
+        return await CompanyMessageSearch.confirmOpen(
+            result, eligibility: { homeSearchEligibility() },
+            read: {
+                await liveMatrix.companyEventSummary(roomID: result.roomID, eventID: result.eventID)
+                    .map { (sender: $0.senderID, threadRootID: $0.threadRootID) }
+            })
     }
 }

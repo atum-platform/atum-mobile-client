@@ -1044,8 +1044,14 @@ struct HomeScreen: View {
         return state
     }
 
-    private var shownMessages: [CompanySearchResult] { currentEvents(.messages)?.results ?? [] }
-    private var shownFiles: [CompanySearchResult] { currentEvents(.files)?.results ?? [] }
+    private var shownMessages: [CompanySearchResult] { visibleEvents(.messages) }
+    private var shownFiles: [CompanySearchResult] { visibleEvents(.files) }
+
+    /// A completed answer stays only for rooms still eligible now.
+    private func visibleEvents(_ tab: CompanySearchTab) -> [CompanySearchResult] {
+        guard let global = actions.globalSearch, let current = currentEvents(tab) else { return [] }
+        return HomeGlobalSearchPolicy.visible(current.results, eligibility: global.eligibility)
+    }
 
     /// Desktop `globalSearching`: any source still out, debounce included.
     private var globalSearching: Bool {
@@ -1164,9 +1170,7 @@ struct HomeScreen: View {
         Task { @MainActor in
             let opened = await global.open(result)
             openingResultID = nil
-            if opened {
-                actions.openRoom(result.roomID)
-            } else {
+            if !opened {
                 actionFailure &+= 1
                 AccessibilityNotification.Announcement(copy(.errorGeneric)).post()
             }

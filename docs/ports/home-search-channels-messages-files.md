@@ -91,6 +91,44 @@ whole company.
 Copy: `desktop.atum.roster.channels`, `.messages` and `.files` are already in
 the vendored export (en, vi, ja, zh, zh-Hant). No `PENDING-COPY` entries.
 
+## Review fixes (cross-family review of `bd6feb8`)
+
+1. **Eligibility after the search (privacy).** `CompanySearchEligibility`
+   (AtumNativeAPI) is each company's directory-listed rooms, with their exact
+   channel binding, that are joined and known unencrypted.
+   `homeCompanySearch` decodes an answer against the rooms admitted when it
+   asked, then keeps only results whose room is still eligible. Home also
+   filters what is on screen through the current eligibility
+   (`HomeGlobalSearchActions.eligibility`, recomputed with the room list and
+   the directories), so a leave, encryption turned on or a directory change
+   hides those rows at once.
+2. **Unknown encryption (privacy).** A room is admitted only when the SDK
+   says `isEncrypted == false`. While the SDK does not know yet (`nil`), the
+   room is not searched or shown.
+3. **Opening a result.** `CompanyMessageSearch.confirmOpen` checks
+   eligibility (joined, unencrypted, same company, channel and room) before
+   the event read, and again after it. Then it checks sender and thread.
+   `AppRoot` then routes with `openRoomAndRoute(_:requiringCompany:)`. A
+   failed check or a refused route returns false, and Home plays the error
+   haptic and posts the generic error announcement.
+4. **Bounded fan-out.** Both tabs share one `CompanySearchLimiter` (4 at a
+   time). Each company's whole page, its `from:` member reads included, is
+   one job. Jobs start in arrival order (companies in id order), and a job
+   cancelled while waiting never starts. Requests share one ephemeral
+   `URLSession` (no cookies, no cache, no redirects). The merge is still in
+   company-id order.
+5. **Former members in `from:`.** `companySearchMembers` reads every
+   membership from the SDK store (`membersNoSync`, no join filter), as
+   desktop's `room.getMembers()` does. `CompanyMessageSearch.senders` keeps
+   every matching member.
+
+Tests: `CompanyMessageSearchTests.testEligibilityDropsResultsWhoseRoomIsNoLongerReadable`,
+`testUnknownEncryptionIsNotAdmitted`, `testOpenIsCheckedBeforeAndAfterTheEventRead`,
+`testSearchQueueRunsAtMostFourInOrderAndSkipsCancelledWork`,
+`testFromFindsAFormerMembersHistoricalMessage`;
+`HomeGlobalSearchPolicyTests.testShownResultsFollowCurrentEligibility`;
+`HomeShellUITests.testHomeSearchResultThatCannotOpenStaysOnHome`.
+
 ## Left for later (known gaps)
 
 - **Reveal on open.** Desktop scrolls the room to the message and opens its
@@ -112,13 +150,18 @@ the vendored export (en, vi, ja, zh, zh-Hant). No `PENDING-COPY` entries.
 ## Verification
 
 All heavy runs went through the shared `lockf` lock, with derived data on the
-build volume.
+build volume. The counts below are from the run after the review fixes
+(derived data `dd-home-search-cmf-fix`).
 
-- `swift test --package-path ios -j 2`: 726 tests, 0 failures. This includes
-  `CompanyMessageSearchTests` (parser, targets, admission, request body,
-  answer filtering, cap, merge order, snippet).
+- `swift test --package-path ios -j 2`: 1,571 tests, 0 failures. That is
+  AtumDesignTests 807 (including the 19 `CompanyMessageSearchTests`:
+  parser, targets, admission and unknown encryption, eligibility, open
+  checks, queue, former members, request body, answer filtering, cap, merge
+  order, snippet), AtumChatTests 726, AtumDriveTests 22 and
+  AtumTelemetryTests 16. An earlier note and commit message said "726": that
+  is the AtumChatTests bundle alone, not the package total.
 - `xcodebuild … build-for-testing` (Debug, iPhone 17 simulator): succeeded.
-- `-only-testing:AtumMobileTests`: 377 tests, 0 failures. This includes
+- `-only-testing:AtumMobileTests`: 378 tests, 0 failures. This includes
   `HomeGlobalSearchPolicyTests` (channel match and fold, two-character
   minimum, company key, section order, "No results" rule) and
   `KitGlyphTests` (the new `Files` / `Messages` glyphs resolve).
@@ -135,7 +178,10 @@ build volume.
     ("kickoff") finds a channel, a message and a file but no person. It
     audits twice: at the top, then scrolled to Files. **Quarantined** in CI
     next to the People audit. See "Audit finding" below.
-  - Regression: every other `HomeShellUITests` test passed (15 tests), as did
+  - `testHomeSearchResultThatCannotOpenStaysOnHome` (review fix 3).
+  - Whole class after the review fixes: 23 run, 23 passed. The three
+    quarantined tests were skipped, as CI skips them.
+  - Before the review fixes: every other `HomeShellUITests` test passed (15 tests), as did
     `HomeChatsWave3UITests` (5 passed, 1 skipped, the quarantined test left out),
     and the People tests (find by handle, known chat not repeated, roster
     control audit, appearances).

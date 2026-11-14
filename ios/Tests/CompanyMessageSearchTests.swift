@@ -85,15 +85,180 @@ final class CompanyMessageSearchTests: XCTestCase {
         let joined: (String) -> Bool = { $0 != "!left:example.invalid" }
         let plain = try XCTUnwrap(CompanyMessageSearch.query("launch"))
         XCTAssertEqual(CompanyMessageSearch.admitted(all, query: plain, isJoined: joined,
-                                                     isEncrypted: { $0 == self.design.roomID }), [general])
+                                                     encryption: { $0 == self.design.roomID }), [general])
         let inDesign = try XCTUnwrap(CompanyMessageSearch.query("launch in:#thiet-ke"))
-        XCTAssertEqual(CompanyMessageSearch.admitted(all, query: inDesign, isJoined: joined, isEncrypted: { _ in false }), [])
+        XCTAssertEqual(CompanyMessageSearch.admitted(all, query: inDesign, isJoined: joined, encryption: { _ in false }), [])
         let inDesignSpaced = try XCTUnwrap(CompanyMessageSearch.query("launch in:#THIẾT"))
         XCTAssertEqual(CompanyMessageSearch.admitted([general, design], query: inDesignSpaced, isJoined: joined,
-                                                     isEncrypted: { _ in false }), [])
+                                                     encryption: { _ in false }), [])
         let inGeneral = try XCTUnwrap(CompanyMessageSearch.query("launch in:#General"))
         XCTAssertEqual(CompanyMessageSearch.admitted(all, query: inGeneral, isJoined: joined,
-                                                     isEncrypted: { _ in false }), [general])
+                                                     encryption: { _ in false }), [general])
+    }
+
+    /// Review blocker 2: unknown encryption (nil, the SDK does not know yet)
+    /// is not admitted; only an explicit `false` is.
+    func testUnknownEncryptionIsNotAdmitted() throws {
+        let plain = try XCTUnwrap(CompanyMessageSearch.query("launch"))
+        let encryption: (String) -> Bool? = { $0 == self.general.roomID ? false : nil }
+        XCTAssertEqual(CompanyMessageSearch.admitted([general, design], query: plain, isJoined: { _ in true },
+                                                     encryption: encryption), [general])
+        XCTAssertEqual(CompanyMessageSearch.admitted([general, design], query: plain, isJoined: { _ in true },
+                                                     encryption: { _ in nil }), [])
+        let eligibility = CompanySearchEligibility(targets: [company: [general, design]], isJoined: { _ in true },
+                                                   encryption: encryption)
+        XCTAssertTrue(eligibility.allows(companyID: company, channelID: general.channelID, roomID: general.roomID))
+        XCTAssertFalse(eligibility.allows(companyID: company, channelID: design.channelID, roomID: design.roomID))
+    }
+
+    /// Review blocker 1: an answer, or a result already on screen, keeps
+    /// only rooms still joined, known unencrypted and listed with the same
+    /// company and channel binding.
+    func testEligibilityDropsResultsWhoseRoomIsNoLongerReadable() {
+        let results = [result(general, "$g"), result(design, "$d")]
+        let readable = CompanySearchEligibility(targets: [company: [general, design]], isJoined: { _ in true },
+                                                encryption: { _ in false })
+        XCTAssertEqual(readable.retained(results).map(\.eventID), ["$g", "$d"])
+        // Room A (design) left while its search was pending; B still joined.
+        let left = CompanySearchEligibility(targets: [company: [general, design]],
+                                            isJoined: { $0 != self.design.roomID }, encryption: { _ in false })
+        XCTAssertEqual(left.retained(results).map(\.eventID), ["$g"])
+        // Encryption turned on in general.
+        let encrypted = CompanySearchEligibility(targets: [company: [general, design]], isJoined: { _ in true },
+                                                 encryption: { $0 == self.general.roomID })
+        XCTAssertEqual(encrypted.retained(results).map(\.eventID), ["$d"])
+        // The directory no longer lists design.
+        let unlisted = CompanySearchEligibility(targets: [company: [general]], isJoined: { _ in true },
+                                                encryption: { _ in false })
+        XCTAssertEqual(unlisted.retained(results).map(\.eventID), ["$g"])
+        // Same room, another channel binding or another company: not this result.
+        let rebound = CompanySearchEligibility(bindings: [company: [general.roomID: "other-channel"],
+                                                          "other-company": [design.roomID: design.channelID]])
+        XCTAssertEqual(rebound.retained(results), [])
+        XCTAssertEqual(CompanySearchEligibility().retained(results), [])
+    }
+
+    /// Review should-fix 3: a tap is checked before and after the async
+    /// event read; access lost during the read fails the open.
+    @MainActor
+    func testOpenIsCheckedBeforeAndAfterTheEventRead() async {
+        let target = result(general, "$g", thread: "$root")
+        var current = CompanySearchEligibility(targets: [company: [general]], isJoined: { _ in true },
+                                               encryption: { _ in false })
+        var reads = 0
+        let same: () async -> (sender: String, threadRootID: String?)? = {
+            reads += 1
+            return (sender: target.sender, threadRootID: "$root")
+        }
+        var opened = await CompanyMessageSearch.confirmOpen(target, eligibility: { current }, read: same)
+        XCTAssertTrue(opened)
+
+        // Left during the read.
+        opened = await CompanyMessageSearch.confirmOpen(target, eligibility: { current }, read: {
+            current = CompanySearchEligibility()
+            return (sender: target.sender, threadRootID: "$root")
+        })
+        XCTAssertFalse(opened)
+
+        // Already gone before: the event is not read at all.
+        reads = 0
+        opened = await CompanyMessageSearch.confirmOpen(target, eligibility: { current }, read: same)
+        XCTAssertFalse(opened)
+        XCTAssertEqual(reads, 0)
+
+        // Still readable, but another message or thread: refused.
+        current = CompanySearchEligibility(targets: [company: [general]], isJoined: { _ in true },
+                                           encryption: { _ in false })
+        opened = await CompanyMessageSearch.confirmOpen(target, eligibility: { current }, read: {
+            (sender: "@other:atum.test", threadRootID: "$root")
+        })
+        XCTAssertFalse(opened)
+        opened = await CompanyMessageSearch.confirmOpen(target, eligibility: { current }, read: {
+            (sender: target.sender, threadRootID: nil)
+        })
+        XCTAssertFalse(opened)
+        opened = await CompanyMessageSearch.confirmOpen(target, eligibility: { current }, read: { nil })
+        XCTAssertFalse(opened)
+    }
+
+    /// Review should-fix 5: `from:@name` keeps a former member, so a
+    /// historical message they wrote is still found.
+    func testFromFindsAFormerMembersHistoricalMessage() throws {
+        let members = [
+            CompanySearchMember(userID: "@lan:atum.test", names: ["Lan"], membership: "join"),
+            CompanySearchMember(userID: "@minh:atum.test", names: ["Minh"], membership: "leave"),
+            CompanySearchMember(userID: "@minh:atum.test", names: ["Minh"], membership: "leave"),
+            CompanySearchMember(userID: "@banned:atum.test", names: ["Minh"], membership: "ban"),
+        ]
+        XCTAssertEqual(CompanyMessageSearch.senders(from: "@minh", ownUserID: "@me:atum.test", members: members),
+                       ["@banned:atum.test", "@minh:atum.test"])
+        XCTAssertEqual(CompanyMessageSearch.senders(from: "me", ownUserID: "@me:atum.test", members: members),
+                       ["@me:atum.test"])
+        XCTAssertEqual(CompanyMessageSearch.senders(from: "@nobody", ownUserID: nil, members: members), [])
+
+        let query = try XCTUnwrap(CompanyMessageSearch.query("launch from:@minh"))
+        let senders = CompanyMessageSearch.senders(from: "@minh", ownUserID: nil, members: members)
+        let body = try CompanyMessageSearch.requestBody(query: query, tab: .messages, roomIDs: [general.roomID],
+                                                        senders: senders)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let filter = ((object["search_categories"] as? [String: Any])?["room_events"] as? [String: Any])?["filter"]
+            as? [String: Any]
+        XCTAssertEqual(filter?["senders"] as? [String], ["@banned:atum.test", "@minh:atum.test"])
+        // Minh's old message, sent while still a member, comes back.
+        let old = response([event("$old", room: general.roomID, body: "launch plan from last year")])
+        let found = try XCTUnwrap(CompanyMessageSearch.results(responseJSON: old, companyID: company, tab: .messages,
+                                                                query: query, targets: [general]))
+        XCTAssertEqual(found.map(\.sender), ["@minh:atum.test"])
+    }
+
+    /// Review should-fix 4: one queue, at most four at once, in arrival
+    /// order; a job cancelled while it waits never starts.
+    @MainActor
+    func testSearchQueueRunsAtMostFourInOrderAndSkipsCancelledWork() async {
+        let limiter = CompanySearchLimiter(limit: 4)
+        var active = 0
+        var peak = 0
+        var started = [Int]()
+        var gates = [Int: CheckedContinuation<Void, Never>]()
+        let tasks = (0..<10).map { index in
+            Task { @MainActor in
+                await limiter.run { () async -> Int in
+                    active += 1
+                    peak = max(peak, active)
+                    started.append(index)
+                    await withCheckedContinuation { gates[index] = $0 }
+                    active -= 1
+                    return index
+                }
+            }
+        }
+        while started.count < 4 { await Task.yield() }
+        XCTAssertEqual(started, [0, 1, 2, 3])
+        XCTAssertEqual(limiter.running, 4)
+        // Cancel two waiting jobs; they never start.
+        tasks[4].cancel()
+        tasks[7].cancel()
+        for _ in 0..<50 { await Task.yield() }
+        // Let the running jobs finish one by one; each frees its slot to the
+        // next waiting job in arrival order.
+        var released = 0
+        var spins = 0
+        while released < 8, spins < 100_000 {
+            spins += 1
+            if let index = started.first(where: { gates[$0] != nil }), let gate = gates.removeValue(forKey: index) {
+                gate.resume()
+                released += 1
+            }
+            await Task.yield()
+        }
+        XCTAssertEqual(released, 8, "the queue stalled")
+        var answers = [Int?]()
+        for task in tasks { answers.append(await task.value) }
+        XCTAssertEqual(peak, 4)
+        XCTAssertEqual(answers[4], nil)
+        XCTAssertEqual(answers[7], nil)
+        XCTAssertEqual(started, [0, 1, 2, 3, 5, 6, 8, 9])
+        XCTAssertEqual(limiter.running, 0)
     }
 
     func testFromMatchesALocalpartOrAName() {
@@ -208,6 +373,12 @@ final class CompanyMessageSearchTests: XCTestCase {
     }
 
     // MARK: Helpers
+
+    private func result(_ target: CompanySearchTarget, _ id: String, thread: String? = nil) -> CompanySearchResult {
+        CompanySearchResult(companyID: company, channelID: target.channelID, roomID: target.roomID,
+                            channelName: target.channelName, eventID: id, sender: "@minh:atum.test",
+                            snippet: "launch", at: 0, threadRootID: thread)
+    }
 
     private func channelEntry(id: String, name: String, state: String, room: String?) -> String {
         let roomJSON = room.map { #"{"state":"ready","roomId":"\#($0)"}"# } ?? #"{"state":"provisioning","roomId":null}"#

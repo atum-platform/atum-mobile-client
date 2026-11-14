@@ -710,6 +710,25 @@ final class HomeShellUITests: TranscriptUITestCase {
         XCTAssertTrue(probeLines("home-actions.txt").map(\.text).contains("openResult $launch-review"))
     }
 
+    /// Review should-fix 3: when the re-check or the navigation fails, the
+    /// tap opens nothing and the row can be tried again (Home posts the
+    /// generic error announcement and the error haptic).
+    @MainActor
+    func testHomeSearchResultThatCannotOpenStaysOnHome() {
+        let app = launchPeopleSearch(language: "en")
+        element(app, "home.search").typeText("launch\n")
+        let draft = element(app, "home.messages.$launch-draft")
+        XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
+        draft.tap()
+        XCTAssertTrue(waitFor(10) { self.probeLines("home-actions.txt").map(\.text).contains("openResult $launch-draft") })
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(element(app, "home.scripted.destination").exists, "a refused result navigated")
+        XCTAssertTrue(draft.exists && draft.isEnabled, "the row did not come back after the failure")
+        // The next result still opens.
+        element(app, "home.messages.$launch-review").tap()
+        XCTAssertTrue(element(app, "home.scripted.destination").waitForExistence(timeout: 15))
+    }
+
     /// Tapping a channel opens its room, as desktop selects it.
     @MainActor
     func testHomeSearchChannelOpensItsRoom() {

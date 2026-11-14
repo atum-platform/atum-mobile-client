@@ -493,6 +493,12 @@ struct ScriptedHomeHost: View {
         HomeGlobalSearchActions(
             channels: Self.scriptedSearchChannels,
             companyIDs: ["11111111-1111-4111-8111-111111111111"],
+            // Every scripted result's room is joined, unencrypted and listed.
+            eligibility: CompanySearchEligibility(bindings: [
+                "11111111-1111-4111-8111-111111111111": Dictionary(
+                    Self.scriptedCompanyResults.values.flatMap { $0 }.map { ($0.roomID, $0.channelID) },
+                    uniquingKeysWith: { first, _ in first }),
+            ]),
             search: { term, tab in
                 UITestProbe.append("companySearch \(tab.rawValue) \(term)", to: "home-actions.txt")
                 let needle = HomeGlobalSearchPolicy.normalize(term)
@@ -502,6 +508,10 @@ struct ScriptedHomeHost: View {
             },
             open: { result in
                 UITestProbe.append("openResult \(result.eventID)", to: "home-actions.txt")
+                // "$launch-draft" stands for a room the phone can no longer
+                // open (left, or the router refused): Home says so.
+                guard result.eventID != "$launch-draft" else { return false }
+                router.open(roomId: result.roomID)
                 return true
             })
     }

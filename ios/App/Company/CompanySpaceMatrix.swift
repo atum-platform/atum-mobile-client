@@ -71,21 +71,40 @@ extension LiveMatrixSession {
         request.setValue("Bearer " + session.accessToken, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.urlCache = nil
-        let transport = URLSession(configuration: configuration, delegate: CompanySpaceNoRedirect(),
-                                   delegateQueue: nil)
-        defer { transport.finishTasksAndInvalidate() }
-        let (data, response) = try await transport.data(for: request)
+        let (data, response) = try await Self.companySearchTransport.data(for: request)
         try runtime.requireCurrent()
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw CompanySpaceMatrixFailure.refused }
         return data
     }
 
-    /// A room's members as `from:@name` matches them: user ID and names.
-    func companySearchMembers(roomID: String) async -> [(userID: String, names: [String])] {
-        (await members(roomID: roomID) ?? []).map { ($0.userID, [$0.displayName]) }
+    /// One ephemeral session for every Home search request: no cookies, no
+    /// cache, redirects refused. The bearer travels per request.
+    private static let companySearchTransport: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        return URLSession(configuration: configuration, delegate: CompanySpaceNoRedirect(), delegateQueue: nil)
+    }()
+
+    /// A room's members as `from:@name` matches them, every membership
+    /// (desktop `room.getMembers()`): someone who left still wrote their old
+    /// messages. Read from the SDK's store; no sync is started.
+    func companySearchMembers(roomID: String) async -> [CompanySearchMember] {
+        guard let room = try? room(id: roomID),
+              let iterator = try? await room.membersNoSync() else { return [] }
+        var members = [CompanySearchMember]()
+        let maximum = min(Int(iterator.len()), 10_000)
+        while members.count < maximum,
+              let chunk = iterator.nextChunk(chunkSize: UInt32(min(100, maximum - members.count))),
+              !chunk.isEmpty {
+            for member in chunk {
+                members.append(CompanySearchMember(
+                    userID: member.userId, names: [member.displayName].compactMap { $0 },
+                    membership: String(describing: member.membership)))
+            }
+        }
+        return members
     }
 
     /// This account's Matrix user ID.

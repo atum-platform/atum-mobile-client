@@ -56,4 +56,20 @@ final class HomeGlobalSearchPolicyTests: XCTestCase {
         XCTAssertFalse(HomeGlobalSearchPolicy.showsNoResults(searching: false, globalCount: 0, rosterCount: 1))
         XCTAssertTrue(HomeGlobalSearchPolicy.showsNoResults(searching: false, globalCount: 0, rosterCount: 0))
     }
+
+    /// Review blocker 1, on screen: a completed answer keeps only rows whose
+    /// room is still eligible, so leaving a room hides its rows at once.
+    func testShownResultsFollowCurrentEligibility() {
+        func result(_ room: String, _ id: String) -> CompanySearchResult {
+            CompanySearchResult(companyID: "c", channelID: "ch-" + room, roomID: room, channelName: room,
+                                eventID: id, sender: "@s:atum.test", snippet: "launch", at: 0)
+        }
+        let answer = [result("!a:atum.test", "$a"), result("!b:atum.test", "$b")]
+        let both = CompanySearchEligibility(bindings: ["c": ["!a:atum.test": "ch-!a:atum.test",
+                                                            "!b:atum.test": "ch-!b:atum.test"]])
+        XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: both).map(\.eventID), ["$a", "$b"])
+        let leftA = CompanySearchEligibility(bindings: ["c": ["!b:atum.test": "ch-!b:atum.test"]])
+        XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: leftA).map(\.eventID), ["$b"])
+        XCTAssertEqual(HomeGlobalSearchPolicy.visible(answer, eligibility: CompanySearchEligibility()), [])
+    }
 }
