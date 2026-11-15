@@ -38,9 +38,6 @@ env:
     HomeShellUITests/testHomeSearchPeopleAccessibilityAudit
     ChatInfoUITests/testAssistantComposerThinkingLevelSavesTheCurrentModelWithTheChosenLevel
     HomeShellUITests/testHomeSearchChannelsMessagesFilesAccessibilityAudit
-    HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit
-    HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses
-    HomeChatsWave3UITests/testSearchWithNoMatchSaysNoResultsInVietnamese
 jobs:
   plan:
     runs-on: ubuntu-latest

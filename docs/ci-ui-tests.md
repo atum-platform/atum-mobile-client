@@ -528,6 +528,16 @@ The three-pages-back test failed after 46.8 s, still searching 70 of 2200 rows;
 its count reads were several seconds apart. This confirms incomplete progress,
 but does not establish that the redundant boundary wait caused that run.
 All three chat search walk tests remain quarantined under atum-mobile#50.
+
+### Search walk quarantine lifted (2026-11-15)
+
+PR #56 (search waits for page publication, bounded) merged on an all-green head, but its
+hosted shards skipped the three walk tests. This change removes
+`testSearchBarAtAccessibilitySizePassesTheAudit`, `testSearchFindsAWordThreePagesBackAndCloses`
+and `testSearchWithNoMatchSaysNoResultsInVietnamese` from `QUARANTINE`, so the hosted
+iPhone 16e / iOS 26.2 shards run them again. That hosted run is the evidence for
+atum-mobile#50; iOS 27 results on the build Mac are not. If the walk runs short again,
+restore the lines with the failing run linked here rather than extending any wait.
 Local AtumChat verification passed all 730 tests under the shared lock. The
 state/UI verification initially failed before building because device lookup
 required the exact name `iPhone 16e` (the device is `Atum iPhone 16e`). The
