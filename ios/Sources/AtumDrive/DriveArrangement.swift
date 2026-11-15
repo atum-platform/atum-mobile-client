@@ -160,8 +160,9 @@ public enum DriveGroupKey: Hashable, Sendable {
     }
 
     /// A month's or a year's name as `Intl.DateTimeFormat` writes it
-    /// (`{ month: 'long' }`, `{ year: 'numeric' }`); nil for the named groups.
-    public func dateLabel(locale: Locale, calendar: Calendar = .current) -> String? {
+    /// (`{ month: 'long' }`, `{ year: 'numeric' }`), in the Gregorian
+    /// calendar as desktop's are; nil for the named groups.
+    public func dateLabel(locale: Locale, timeZone: TimeZone = .current) -> String? {
         var components = DateComponents()
         let template: String
         switch self {
@@ -178,13 +179,18 @@ public enum DriveGroupKey: Hashable, Sendable {
         default:
             return nil
         }
-        var calendar = calendar
-        calendar.locale = locale
+        // The locale's words without its calendar preference: a
+        // `@calendar=japanese` locale would otherwise write "西暦2025年".
+        var parts = Locale.components(fromIdentifier: locale.identifier)
+        parts.removeValue(forKey: "calendar")
+        let plain = Locale(identifier: Locale.identifier(fromComponents: parts))
+        var calendar = DriveArrangement.gregorian(timeZone)
+        calendar.locale = plain
         guard let date = calendar.date(from: components) else { return nil }
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-        formatter.locale = locale
+        formatter.locale = plain
         formatter.setLocalizedDateFormatFromTemplate(template)
         return formatter.string(from: date)
     }
@@ -202,6 +208,15 @@ public struct DriveGroup: Identifiable, Equatable, Sendable {
 public enum DriveArrangement {
     /// Desktop cuts an icon's name at 22 characters (`ICON_LABEL_LENGTH`).
     public static let iconLabelLength = 22
+
+    /// Desktop's dates are Gregorian in the local time zone (JavaScript
+    /// `Date`), whatever calendar the device uses: a Japanese-calendar
+    /// iPhone still groups by 2025, not by an era year.
+    public static func gregorian(_ timeZone: TimeZone = .current) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar
+    }
 
     /// `sortDriveRows`: names as a person reads them ("Report 2" before
     /// "Report 10", case and accents aside), folders mixed in. A folder has no
@@ -242,9 +257,10 @@ public enum DriveArrangement {
     /// Finder's groups; each group keeps that order. Kinds sort by their name
     /// with Other last; sizes and dates by rank. Ungrouped is one unlabelled group.
     public static func groups(_ items: [DriveItem], by groupBy: DriveGroupBy, now: Date,
-                              calendar: Calendar = .current, locale: Locale,
+                              timeZone: TimeZone = .current, locale: Locale,
                               label: (DriveGroupKey) -> String) -> [DriveGroup] {
         guard !items.isEmpty else { return [] }
+        let calendar = gregorian(timeZone)
         guard groupBy != .none else { return [DriveGroup(key: .all, label: "", items: items)] }
 
         var order = [DriveGroupKey]()
@@ -345,5 +361,33 @@ public enum DriveGalleryPolicy {
 
     public static func items(_ shown: [DriveItem]) -> [DriveItem] {
         shown.filter { kind($0) != nil }
+    }
+
+    /// The gallery's pages in the order the screen draws them: group by
+    /// group, each in its sort order.
+    public static func items(in groups: [DriveGroup]) -> [DriveItem] {
+        items(groups.flatMap(\.items))
+    }
+}
+
+/// Why a gallery page that has its file still can't draw it.
+public enum DriveGalleryRenderFailure: Equatable, Sendable {
+    /// The bytes don't decode (a damaged or partial file): say so and offer
+    /// Retry, which downloads it again.
+    case unreadable
+    /// A PDF that opens but can't be shown here (password-protected): say a
+    /// preview isn't available; Share still works. Retry would not help.
+    case unsupported
+
+    public var allowsRetry: Bool { self == .unreadable }
+
+    public static func image(decoded: Bool) -> DriveGalleryRenderFailure? {
+        decoded ? nil : .unreadable
+    }
+
+    public static func pdf(opened: Bool, locked: Bool, pageCount: Int) -> DriveGalleryRenderFailure? {
+        guard opened else { return .unreadable }
+        if locked { return .unsupported }
+        return pageCount > 0 ? nil : .unreadable
     }
 }

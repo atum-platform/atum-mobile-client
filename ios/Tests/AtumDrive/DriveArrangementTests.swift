@@ -8,11 +8,7 @@ import XCTest
 /// stored choices and the swipeable preview's items.
 final class DriveArrangementTests: XCTestCase {
     private let en = Locale(identifier: "en_US")
-    private let utc: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        return calendar
-    }()
+    private let utc = TimeZone(identifier: "UTC")!
     /// 2027-06-14 12:00 UTC.
     private let now = Date(timeIntervalSince1970: 1_812_974_400)
 
@@ -100,7 +96,7 @@ final class DriveArrangementTests: XCTestCase {
                                  "other": "Other"][family.rawValue] ?? family.rawValue
         case let .size(band): band.rawValue
         case let .period(period): period.rawValue
-        case .month, .year: key.dateLabel(locale: en, calendar: utc) ?? "?"
+        case .month, .year: key.dateLabel(locale: en, timeZone: utc) ?? "?"
         case .undated: "Other"
         }
     }
@@ -110,7 +106,7 @@ final class DriveArrangementTests: XCTestCase {
             try file("z.png"), try file("notes.md"), try file("a.HEIC"), try file("plan.pdf"),
             try file("README"), try folder("Work"), try file("clip.mov"), try file("data.json"),
         ], by: .name, locale: en)
-        let groups = DriveArrangement.groups(items, by: .kind, now: now, calendar: utc,
+        let groups = DriveArrangement.groups(items, by: .kind, now: now, timeZone: utc,
                                              locale: en, label: label)
         XCTAssertEqual(groups.map(\.label),
                        ["code", "Folders", "Images", "Movies", "PDF Documents", "Text Documents", "Other"])
@@ -123,7 +119,7 @@ final class DriveArrangementTests: XCTestCase {
                      try file("huge", size: 1_000_000_000), try file("mid", size: 10_000_000),
                      try file("mb", size: 1_000_000), try file("kb", size: 100_000),
                      try file("big", size: 100_000_000)]
-        let groups = DriveArrangement.groups(items, by: .size, now: now, calendar: utc,
+        let groups = DriveArrangement.groups(items, by: .size, now: now, timeZone: utc,
                                              locale: en, label: label)
         XCTAssertEqual(groups.map(\.label),
                        ["gb", "hundredsMb", "tensMb", "mb", "hundredsKb", "small", "empty", "folders"])
@@ -142,7 +138,7 @@ final class DriveArrangementTests: XCTestCase {
             try file("long ago", modified: Date(timeIntervalSince1970: 1_700_000_000)),
             try file("undated"),
         ]
-        let groups = DriveArrangement.groups(items, by: .modified, now: now, calendar: utc,
+        let groups = DriveArrangement.groups(items, by: .modified, now: now, timeZone: utc,
                                              locale: en, label: label)
         XCTAssertEqual(groups.map(\.label),
                        ["today", "yesterday", "week", "month", "February", "January", "2026", "2023", "Other"])
@@ -151,10 +147,25 @@ final class DriveArrangementTests: XCTestCase {
 
     func testMonthAndYearNamesFollowTheLocale() {
         let vi = Locale(identifier: "vi")
-        XCTAssertEqual(DriveGroupKey.month(11).dateLabel(locale: en, calendar: utc), "November")
-        XCTAssertEqual(DriveGroupKey.month(11).dateLabel(locale: vi, calendar: utc)?.lowercased(), "tháng 11")
-        XCTAssertEqual(DriveGroupKey.year(2025).dateLabel(locale: en, calendar: utc), "2025")
+        XCTAssertEqual(DriveGroupKey.month(11).dateLabel(locale: en, timeZone: utc), "November")
+        XCTAssertEqual(DriveGroupKey.month(11).dateLabel(locale: vi, timeZone: utc)?.lowercased(), "tháng 11")
+        XCTAssertEqual(DriveGroupKey.year(2025).dateLabel(locale: en, timeZone: utc), "2025")
         XCTAssertNil(DriveGroupKey.period(.today).dateLabel(locale: en))
+    }
+
+    func testDatesAreGregorianWhateverTheDeviceCalendar() throws {
+        XCTAssertEqual(DriveArrangement.gregorian(utc).identifier, .gregorian)
+        XCTAssertEqual(DriveArrangement.gregorian(utc).timeZone, utc)
+        let items = [try file("2026", modified: Date(timeIntervalSince1970: 1_790_000_000)),
+                     try file("2023", modified: Date(timeIntervalSince1970: 1_700_000_000))]
+        let groups = DriveArrangement.groups(items, by: .modified, now: now, timeZone: utc,
+                                             locale: Locale(identifier: "ja_JP@calendar=japanese"),
+                                             label: label)
+        XCTAssertEqual(groups.map(\.key), [.year(2026), .year(2023)], "Gregorian years, newest first")
+        // A Japanese-calendar device still reads the Gregorian year, as desktop's Intl does.
+        let ja = Locale(identifier: "ja_JP@calendar=japanese")
+        XCTAssertEqual(DriveGroupKey.year(2025).dateLabel(locale: ja, timeZone: utc), "2025年")
+        XCTAssertEqual(DriveGroupKey.month(11).dateLabel(locale: ja, timeZone: utc), "11月")
     }
 
     func testNoGroupingIsOneUnlabelledGroupAndNothingIsNoGroups() throws {
@@ -200,6 +211,27 @@ final class DriveArrangementTests: XCTestCase {
     }
 
     // MARK: Gallery
+
+    func testTheGalleryFollowsTheGroupedOrderOnScreen() throws {
+        // Name A to Z puts a.pdf first, but Kind draws Images above PDF Documents.
+        let sorted = DriveArrangement.sort([try file("z.jpg"), try file("a.pdf"), try file("m.png")],
+                                           by: .name, locale: en)
+        XCTAssertEqual(DriveGalleryPolicy.items(sorted).map(\.name), ["a.pdf", "m.png", "z.jpg"])
+        let groups = DriveArrangement.groups(sorted, by: .kind, now: now, timeZone: utc,
+                                             locale: en, label: label)
+        XCTAssertEqual(DriveGalleryPolicy.items(in: groups).map(\.name), ["m.png", "z.jpg", "a.pdf"])
+    }
+
+    func testRenderFailuresSayWhatWentWrongAndWhetherRetryHelps() {
+        XCTAssertNil(DriveGalleryRenderFailure.image(decoded: true))
+        XCTAssertEqual(DriveGalleryRenderFailure.image(decoded: false), .unreadable)
+        XCTAssertNil(DriveGalleryRenderFailure.pdf(opened: true, locked: false, pageCount: 3))
+        XCTAssertEqual(DriveGalleryRenderFailure.pdf(opened: false, locked: false, pageCount: 0), .unreadable)
+        XCTAssertEqual(DriveGalleryRenderFailure.pdf(opened: true, locked: true, pageCount: 2), .unsupported)
+        XCTAssertEqual(DriveGalleryRenderFailure.pdf(opened: true, locked: false, pageCount: 0), .unreadable)
+        XCTAssertTrue(DriveGalleryRenderFailure.unreadable.allowsRetry)
+        XCTAssertFalse(DriveGalleryRenderFailure.unsupported.allowsRetry)
+    }
 
     func testTheGalleryHoldsPicturesAndPDFsInTheShownOrder() throws {
         let shown = [try file("b.png"), try folder("Folder"), try file("c.pdf"), try file("d.svg"),

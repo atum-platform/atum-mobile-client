@@ -50,7 +50,10 @@ struct DriveScreen: View {
                 .ignoresSafeArea(edges: .bottom)
             }
             // Pictures and PDFs: desktop's gallery as a swipeable preview.
-            .sheet(item: $model.gallery, onDismiss: model.dismissGallery) { gallery in
+            .sheet(item: $model.gallery, onDismiss: {
+                model.dismissGallery()
+                DriveShareFile.clear()
+            }) { gallery in
                 DriveGalleryView(design: design, model: model, gallery: gallery)
                     .atumDesign(design)
             }
@@ -313,10 +316,11 @@ private struct DriveDirectoryView: View {
     // MARK: Opening
 
     /// A picture or PDF opens the swipeable preview over the folder's others,
-    /// in the order shown; anything else opens as before.
+    /// in the order shown (grouped); anything else opens as before.
     private func open(_ item: DriveItem) {
         if DriveGalleryPolicy.kind(item) != nil {
-            model.openGallery(shownItems, startingAt: item)
+            // The order the screen draws: group by group, each sorted.
+            model.openGallery(DriveGalleryPolicy.items(in: groups(shownItems)), startingAt: item)
         } else {
             Task { await model.open(item) }
         }

@@ -45,7 +45,7 @@ At the root, Drive shows desktop's two places, Recents and All files, as a segme
   - A failure is said on the page, with Try again. It never raises the screen's alert behind the sheet.
   - An older kept copy shown while offline says so.
   - Other files open as before: Quick Look for safe types, the share sheet for the rest.
-- **Share.** Share is in the gallery's toolbar and in each file's menu (the row's "…", or long-press in List and Icons). It downloads the file if needed, then opens the iOS share sheet. The file goes out under its own name: `DriveShareFile` hard-links or copies it out of the cache's opaque key into a temporary folder, which is cleared when the sheet closes.
+- **Share.** Share is in the gallery's toolbar and in each file's menu (the row's "…", or long-press in List and Icons). It downloads the file if needed, then opens the iOS share sheet. The file goes out under its own name: when Share is tapped, `DriveShareFile` hard-links or copies it out of the cache's opaque key into a temporary folder, which is removed when the sheet closes.
 - **Recents board removed.** Desktop dropped the four-tile Recents board in #43. Recents is now the root listing, newest first, in the chosen view. The phone follows.
 
 ## Capability map
@@ -134,6 +134,21 @@ Desktop's scope bar reads "Search: [This Drive] [<folder>]". The phone shows "Se
   - The host forgets the view, sort and Group By at launch unless `-AtumScriptedDriveKeep` is passed.
 - `ios/AtumMobile.xcodeproj`: the four new app and UI-test files were added by hand (16 lines), matching what `project.yml`'s folder globs produce. A full `xcodegen generate` (2.46.0) reshuffles every ID of the committed project and mints one with a 13-digit run that `public_guard.py` refuses, so it was not committed.
 
+## Review fixes (PR #57, cross-family review)
+
+1. **A gallery page could point at an evicted file (P1).** The Drive cache's 250 MiB budget could evict a page's file while another page downloaded. For example, open a 200 MB PDF, then prefetch a 100 MB one: the first is removed, and going back would hand PDFKit a missing URL.
+   - `DriveCache.holdPreview(_:)` keeps the shown page's file out of budget eviction. The gallery holds the shown page before it prefetches the next; `releasePreview()` lets it go.
+   - Each time a page is shown, the gallery re-checks its file. If the file is gone, it resolves it again through the cache, downloading it if needed. A page whose file has vanished waits rather than failing.
+   - Tests: `testTheShownPageSurvivesThePrefetchOfTheNext` and `testAnEvictedPageIsDownloadedAgainWhenShown`.
+2. **PDFs opened on the main thread (P2).** A page now opens its `PDFDocument` on a detached task and attaches it on the main actor. `DrivePDFView` only displays a document it is given.
+3. **Silent render failures (P2).** A page draws a failure state instead of spinning forever or going blank. `DriveGalleryRenderFailure` is pure and tested:
+   - `unreadable`: a picture that doesn't decode, a PDF that doesn't open, or one with no pages. It says "Couldn't open this preview." with Try again. Try again drops this iPhone's copy (`DriveCache.discard`) and downloads it again.
+   - `unsupported`: a password-protected PDF. It says "A preview isn't available for this file." with no retry; Share still works.
+   - Tests: `testRenderFailuresSayWhatWentWrongAndWhetherRetryHelps` and `testRetryForAnUnreadablePageDownloadsItAgain`.
+4. **Share copies piled up (P2).** The named share file is staged only when Share is tapped, in the gallery and in file menus. It is removed when the sheet closes, so there is one at a time. A pass on gallery close clears anything left over. Test: `DriveShareFileTests` (app unit tests).
+5. **Gallery order ignored grouping.** The gallery now takes its pages from the screen's grouped, flattened order (`DriveGalleryPolicy.items(in:)`). Test: `testTheGalleryFollowsTheGroupedOrderOnScreen`.
+6. **Device calendar.** Date groups and their month and year names now always use the Gregorian calendar in the local time zone (`DriveArrangement.gregorian`), as desktop's JavaScript dates do. A Japanese-calendar iPhone groups by 2025, not by an era year. Test: `testDatesAreGregorianWhateverTheDeviceCalendar`.
+
 ## Known risks and follow-ups
 
 - **Folders mixed in by name.** All files now mixes folders in by name, as desktop's Finder sort does. AC-4's folders-first order is retired.
@@ -158,6 +173,14 @@ Every heavy step ran under the shared lock (`lockf -k /Volumes/AtumTestFlight/.h
   - `testGallerySwipesThroughTheFolderAndShares`: the picture opens at its caption; a drag moves to the PDF; the strip jumps back; Share shows the system sheet.
   - `testRowMenuShares`: a long-press on a row, then Share, shows the system sheet.
   - `testCaptureDriveSurfaces`: en/vi × light/dark, eight surfaces each.
+
+**After the review fixes** (run 8, one locked run, then run 9 for AtumDriveTests alone):
+
+- **`swift test --filter AtumDriveTests`**: 45 tests, 0 failures (run 9). Run 8 had found one failure in a new test: with a `@calendar=japanese` locale, the Gregorian year read "西暦2025年". The fix drops the locale's calendar preference when naming months and years. The app always passes a plain export locale such as `ja`, so the app was not affected.
+- **`xcodebuild build-for-testing`**: succeeded.
+- **`AtumMobileTests`**: 391 tests, 0 failures. This includes the 4 new `DriveShareFileTests`.
+- **`DriveRevampUITests`**: 5 of 5 passed, with no `DRIVE-SWIPE-MISS`.
+- Run 9 changed only `DriveGroupKey.dateLabel`'s locale handling inside AtumDrive, so the app and UI runs were not repeated for it.
 
 Earlier runs found and fixed these:
 

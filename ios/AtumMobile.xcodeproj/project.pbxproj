@@ -100,6 +100,7 @@
 		631F909CD568BED2EABE1B4D /* AccountProfileHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500A588601B2984113B22779 /* AccountProfileHeader.swift */; };
 		64D080E030F35F0DBFAED30B /* AccountSettingsStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE9832C39E8B526348BAD2F0 /* AccountSettingsStateTests.swift */; };
 		A3D0C1E2B4F5061728394A57 /* AccountDevicesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D0C1E2B4F5061728394A58 /* AccountDevicesTests.swift */; };
+		D7A1E0C2F4B6A8D0C2E4F6B1 /* DriveShareFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A1E0C2F4B6A8D0C2E4F6B2 /* DriveShareFileTests.swift */; };
 		64D6DE9BC3FA1B4C2D081B8C /* LaunchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C7861959DAC2456AC4C87C6 /* LaunchUITests.swift */; };
 		65A715CD0B9DDC7F9585B768 /* WorkingLineRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC53C31588CE85624FA04E61 /* WorkingLineRow.swift */; };
 		65CCD6C57981869C01537BC3 /* HomeShellUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B6B1F163B1FF44576CFFB31 /* HomeShellUITests.swift */; };
@@ -594,6 +595,7 @@
 		FE09EC837F5D02840D34BB11 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		FE9832C39E8B526348BAD2F0 /* AccountSettingsStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsStateTests.swift; sourceTree = "<group>"; };
 		A3D0C1E2B4F5061728394A58 /* AccountDevicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDevicesTests.swift; sourceTree = "<group>"; };
+		D7A1E0C2F4B6A8D0C2E4F6B2 /* DriveShareFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveShareFileTests.swift; sourceTree = "<group>"; };
 		FF24603753D3B4F72078B922 /* AttachSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachSheet.swift; sourceTree = "<group>"; };
 		FFAAC357B5A8394814F318E4 /* SessionLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLifecycle.swift; sourceTree = "<group>"; };
 		FFC664004AF714C51541782F /* ChatPanelUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelUITests.swift; sourceTree = "<group>"; };
@@ -907,6 +909,7 @@
 				B50C197752B5EB15B984BC58 /* AccountProfileEditorTests.swift */,
 				FE9832C39E8B526348BAD2F0 /* AccountSettingsStateTests.swift */,
 				A3D0C1E2B4F5061728394A58 /* AccountDevicesTests.swift */,
+				D7A1E0C2F4B6A8D0C2E4F6B2 /* DriveShareFileTests.swift */,
 				5773C98F5EB80B08BB493152 /* AppOnboardingCopyTests.swift */,
 				C1A0C0F10D4B0C71919E63FF /* AppStartRosterTests.swift */,
 				93960FED6AB07E82F8C85CAB /* AppSidePanelStateTests.swift */,
@@ -1455,6 +1458,7 @@
 				EB925D4B5D2C88977BCFA56A /* AccountProfileEditorTests.swift in Sources */,
 				64D080E030F35F0DBFAED30B /* AccountSettingsStateTests.swift in Sources */,
 				A3D0C1E2B4F5061728394A57 /* AccountDevicesTests.swift in Sources */,
+				D7A1E0C2F4B6A8D0C2E4F6B1 /* DriveShareFileTests.swift in Sources */,
 				29DA3E212073130210A58D9D /* AppOnboardingCopyTests.swift in Sources */,
 				45E78DFFE89ED387187AF82D /* AppStartRosterTests.swift in Sources */,
 				F70C049ECA07AB571B66094F /* AppSidePanelStateTests.swift in Sources */,

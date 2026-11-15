@@ -338,6 +338,19 @@ public final class DriveFeatureModel {
         }
     }
 
+    /// The gallery's current page: its file is kept from budget eviction while
+    /// shown (a prefetch of the next page can't delete it).
+    public func holdGalleryPage(_ item: DriveItem) async {
+        try? await cache?.holdPreview(item)
+    }
+
+    /// Retry for a page whose file would not render: drop this iPhone's copy
+    /// and download it again.
+    public func retryGalleryPage(_ item: DriveItem) async -> DriveGalleryFile {
+        try? await cache?.discard(item)
+        return await galleryFile(for: item)
+    }
+
     public func dismissGallery() {
         gallery = nil
         guard let cache else { return }

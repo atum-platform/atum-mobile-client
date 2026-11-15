@@ -72,6 +72,7 @@ struct DriveCopy {
     var groupTitle: String { pending("groups.title") }          // PENDING-COPY:matrixDriveCopy.groups.title
     var previewError: String { pending("preview.error") }       // PENDING-COPY:matrixDriveCopy.preview.error
     var previewLoading: String { pending("preview.loading") }   // PENDING-COPY:matrixDriveCopy.preview.loading
+    var previewUnavailable: String { pending("preview.unavailable") } // PENDING-COPY:matrixDriveCopy.preview.unavailable
     /// Phone-only: the phone searches the open folder's listing only.
     var searchFolderOnly: String {                              // PENDING-COPY:mobilePhoneCopy.drive.searchFolderOnly
         let key = "src.matrix.mobile-copy.mobilePhoneCopy.drive.searchFolderOnly"

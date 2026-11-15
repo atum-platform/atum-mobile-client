@@ -299,6 +299,82 @@ final class DriveFeatureModelTests: XCTestCase {
         XCTAssertNil(model.gallery)
     }
 
+    /// A cache that holds one 5-byte file within its budget: the next commit
+    /// evicts the oldest unheld one.
+    private func tinyCache() throws -> DriveCache {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("atum-drive-model-" + UUID().uuidString, isDirectory: true)
+        roots.append(root)
+        return try DriveCache(
+            root: root.appendingPathComponent("v1/scope", isDirectory: true),
+            configuration: .init(evictableBudgetBytes: 8, minimumFreeBytes: 0),
+            availableCapacity: { 1_000_000 }
+        )
+    }
+
+    private func galleryModel(cache: DriveCache, items: [DriveItem],
+                              downloads: MainActorCounter) throws -> DriveFeatureModel {
+        let reader = FakeDriveReader(rootResults: [.success(try page(items: items))])
+        reader.download = { item, url, progress in
+            downloads.value += 1
+            progress(item.size, item.size)
+            try Data(repeating: 3, count: Int(item.size)).write(to: url)
+        }
+        let model = DriveFeatureModel()
+        model.configure(accountID: "owner", resume: {
+            LiveDriveAccess(cache: cache, state: .active(reader))
+        }, connect: { LiveDriveAccess(cache: cache, state: .active(reader)) })
+        return model
+    }
+
+    func testTheShownPageSurvivesThePrefetchOfTheNext() async throws {
+        let cache = try tinyCache()
+        let big = try named("Scan.pdf", id: "a"), next = try named("Next.pdf", id: "b")
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [big, next], downloads: downloads)
+        await model.start()
+
+        await model.holdGalleryPage(big)
+        guard case let .ready(shown, _) = await model.galleryFile(for: big) else { return XCTFail() }
+        _ = await model.galleryFile(for: next)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: shown.path),
+                      "the page on screen was evicted by the prefetch")
+        XCTAssertEqual(downloads.value, 2)
+    }
+
+    func testAnEvictedPageIsDownloadedAgainWhenShown() async throws {
+        let cache = try tinyCache()
+        let first = try named("One.pdf", id: "a"), second = try named("Two.pdf", id: "b")
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [first, second], downloads: downloads)
+        await model.start()
+
+        guard case let .ready(old, _) = await model.galleryFile(for: first) else { return XCTFail() }
+        await model.holdGalleryPage(second)
+        _ = await model.galleryFile(for: second)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path), "budget evicts the unheld page")
+
+        // Back on the first page: the gallery re-resolves it before drawing.
+        await model.holdGalleryPage(first)
+        guard case let .ready(again, _) = await model.galleryFile(for: first) else { return XCTFail() }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: again.path))
+        XCTAssertEqual(downloads.value, 3)
+    }
+
+    func testRetryForAnUnreadablePageDownloadsItAgain() async throws {
+        let cache = try cache()
+        let photo = try named("Broken.jpg", id: "a")
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [photo], downloads: downloads)
+        await model.start()
+        _ = await model.galleryFile(for: photo)
+        _ = await model.galleryFile(for: photo)
+        XCTAssertEqual(downloads.value, 1, "a second open reads the cached copy")
+        guard case let .ready(url, _) = await model.retryGalleryPage(photo) else { return XCTFail() }
+        XCTAssertEqual(downloads.value, 2, "Retry drops the copy and downloads again")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
     func testShareDownloadsThenOffersTheShareSheetEvenForAPreviewableFile() async throws {
         let cache = try cache()
         let photo = try named("Beach.jpg", id: "a")
