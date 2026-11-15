@@ -55,6 +55,71 @@ struct DriveCopy {
     var recents: String { owed("browser.recents", Self.recentsFallback) }
     var allFiles: String { owed("browser.allFiles", Self.allFilesFallback) }
 
+    // Finder arrangement (atum-desktop #43–#45). Exported words where the pin
+    // has them; desktop's own words (`DrivePendingCopy`) until then.
+    var name: String { text("name") }
+    var modified: String { text("modified") }
+    var size: String { text("size") }
+    var share: String { design.text("src.matrix.mobile-copy.mobileChatCopy.media.share") }
+    var close: String { design.text("desktop.common.close") }
+    var search: String { pending("search") }                    // PENDING-COPY:matrixDriveCopy.search
+    var searchScopeTitle: String { pending("searchScope.title") } // PENDING-COPY:matrixDriveCopy.searchScope.title
+    var searchEmpty: String { pending("searchEmpty") }          // PENDING-COPY:matrixDriveCopy.searchEmpty
+    var driveName: String { pending("browser.drive") }          // PENDING-COPY:matrixDriveCopy.browser.drive
+    var viewMode: String { pending("viewMode") }                // PENDING-COPY:matrixDriveCopy.viewMode
+    var listView: String { pending("listView") }                // PENDING-COPY:matrixDriveCopy.listView
+    var gridView: String { pending("gridView") }                // PENDING-COPY:matrixDriveCopy.gridView
+    var groupTitle: String { pending("groups.title") }          // PENDING-COPY:matrixDriveCopy.groups.title
+    var previewError: String { pending("preview.error") }       // PENDING-COPY:matrixDriveCopy.preview.error
+    var previewLoading: String { pending("preview.loading") }   // PENDING-COPY:matrixDriveCopy.preview.loading
+    var previewUnavailable: String { pending("preview.unavailable") } // PENDING-COPY:matrixDriveCopy.preview.unavailable
+    /// Phone-only: the phone searches the open folder's listing only.
+    var searchFolderOnly: String {                              // PENDING-COPY:mobilePhoneCopy.drive.searchFolderOnly
+        let key = "src.matrix.mobile-copy.mobilePhoneCopy.drive.searchFolderOnly"
+        if design.copy.contains(key) { return design.text(key) }
+        return DrivePendingCopy.searchFolderOnly[design.locale] ?? DrivePendingCopy.searchFolderOnly["en"]!
+    }
+
+    func sortLabel(_ key: DriveSortKey) -> String {
+        switch key {
+        case .name: name
+        case .modified: modified
+        case .size: size
+        }
+    }
+
+    func groupChoice(_ group: DriveGroupBy) -> String {
+        pending("groups." + group.rawValue)                     // PENDING-COPY:matrixDriveCopy.groups.*
+    }
+
+    /// A group's title (`groups.kinds|dates|sizes`, or the month or year).
+    func groupLabel(_ key: DriveGroupKey) -> String {
+        switch key {
+        case .all: ""
+        case let .kind(family): pending("groups.kinds." + family.rawValue)
+        case let .size(band): pending("groups.sizes." + band.rawValue)
+        case let .period(period): pending("groups.dates." + period.rawValue)
+        case .month, .year: key.dateLabel(locale: Locale(identifier: design.locale)) ?? ""
+        case .undated: pending("groups.kinds.other")
+        }
+    }
+
+    /// One item's kind, as desktop's gallery caption names it.
+    func itemKind(_ family: DriveKindFamily) -> String {
+        pending("itemKinds." + family.rawValue)                 // PENDING-COPY:matrixDriveCopy.itemKinds.*
+    }
+
+    /// A desktop key the pinned export does not carry yet: the export wins
+    /// once it does.
+    private func pending(_ suffix: String) -> String {
+        let key = Self.root + suffix
+        if design.copy.contains(key) { return design.text(key) }
+        guard let values = DrivePendingCopy.desktop[suffix] else {
+            preconditionFailure("Missing pending Drive copy: \(suffix)")
+        }
+        return values[design.locale] ?? values["en"]!
+    }
+
     /// "Up to date · 14:32", as the desktop's Drive status line.
     func upToDate(at: Date, now: Date = Date()) -> String {
         upToDate + " · " + DriveTimeFormat.syncTime(at, now: now, locale: Locale(identifier: design.locale))

@@ -249,6 +249,208 @@ final class DriveFeatureModelTests: XCTestCase {
         XCTAssertEqual(model.notice, .changed)
     }
 
+    private func named(_ name: String, id: String) throws -> DriveItem {
+        try DriveItem(
+            id: "storage-fixture$space-fixture!" + id, name: name, kind: .file,
+            etag: "etag-" + id, size: 5,
+            webDavURL: URL(string: "https://drive.atum.test/dav/spaces/storage-fixture$space-fixture/\(id)")!,
+            parentDriveID: "storage-fixture$space-fixture",
+            parentID: DrivePage.rootParentID
+        )
+    }
+
+    func testGalleryOpensOnPicturesAndPDFsAndLoadsEachPageWithoutTheAlert() async throws {
+        let cache = try cache()
+        let photo = try named("Beach.jpg", id: "a")
+        let notes = try named("Notes.txt", id: "b")
+        let scan = try named("Scan.pdf", id: "c")
+        let broken = try named("Broken.png", id: "d")
+        let reader = FakeDriveReader(rootResults: [.success(try page(items: [photo, notes, scan, broken]))])
+        reader.download = { item, url, progress in
+            if item.id == broken.id { throw DriveFailure.serviceUnavailable(retryAfter: nil) }
+            progress(item.size, item.size)
+            try Data(repeating: 2, count: Int(item.size)).write(to: url)
+        }
+        let model = DriveFeatureModel()
+        model.configure(accountID: "owner", resume: {
+            LiveDriveAccess(cache: cache, state: .active(reader))
+        }, connect: { LiveDriveAccess(cache: cache, state: .active(reader)) })
+        await model.start()
+
+        model.openGallery([photo, notes, scan, broken], startingAt: notes)
+        XCTAssertNil(model.gallery, "a text file is not a gallery page")
+        model.openGallery([photo, notes, scan, broken], startingAt: scan)
+        XCTAssertEqual(model.gallery?.items.map(\.name), ["Beach.jpg", "Scan.pdf", "Broken.png"])
+        XCTAssertEqual(model.gallery?.startID, scan.id)
+
+        guard case let .ready(url, isStale) = await model.galleryFile(for: scan) else {
+            return XCTFail("the PDF page did not load")
+        }
+        XCTAssertFalse(isStale)
+        XCTAssertEqual(try Data(contentsOf: url), Data(repeating: 2, count: 5))
+        XCTAssertTrue(model.busyItemIDs.isEmpty)
+
+        let failed = await model.galleryFile(for: broken)
+        XCTAssertEqual(failed, .failed(.downloadFailed))
+        XCTAssertNil(model.notice, "the page says it; no alert behind the sheet")
+        XCTAssertNil(model.preview)
+
+        model.dismissGallery()
+        XCTAssertNil(model.gallery)
+    }
+
+    /// A cache that holds one 5-byte file within its budget: the next commit
+    /// evicts the oldest unheld one.
+    private func tinyCache() throws -> DriveCache {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("atum-drive-model-" + UUID().uuidString, isDirectory: true)
+        roots.append(root)
+        return try DriveCache(
+            root: root.appendingPathComponent("v1/scope", isDirectory: true),
+            configuration: .init(evictableBudgetBytes: 8, minimumFreeBytes: 0),
+            availableCapacity: { 1_000_000 }
+        )
+    }
+
+    private func galleryModel(cache: DriveCache, items: [DriveItem],
+                              downloads: MainActorCounter) throws -> DriveFeatureModel {
+        let reader = FakeDriveReader(rootResults: [.success(try page(items: items))])
+        reader.download = { item, url, progress in
+            downloads.value += 1
+            progress(item.size, item.size)
+            try Data(repeating: 3, count: Int(item.size)).write(to: url)
+        }
+        let model = DriveFeatureModel()
+        model.configure(accountID: "owner", resume: {
+            LiveDriveAccess(cache: cache, state: .active(reader))
+        }, connect: { LiveDriveAccess(cache: cache, state: .active(reader)) })
+        return model
+    }
+
+    func testTheShownPageSurvivesThePrefetchOfTheNext() async throws {
+        let cache = try tinyCache()
+        let big = try named("Scan.pdf", id: "a"), next = try named("Next.pdf", id: "b")
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [big, next], downloads: downloads)
+        await model.start()
+
+        await model.holdGalleryPage(big)
+        guard case let .ready(shown, _) = await model.galleryFile(for: big) else { return XCTFail() }
+        _ = await model.galleryFile(for: next)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: shown.path),
+                      "the page on screen was evicted by the prefetch")
+        XCTAssertEqual(downloads.value, 2)
+    }
+
+    func testAnEvictedPageIsDownloadedAgainWhenShown() async throws {
+        let cache = try tinyCache()
+        let first = try named("One.pdf", id: "a"), second = try named("Two.pdf", id: "b")
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [first, second], downloads: downloads)
+        await model.start()
+
+        guard case let .ready(old, _) = await model.galleryFile(for: first) else { return XCTFail() }
+        await model.holdGalleryPage(second)
+        _ = await model.galleryFile(for: second)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path), "budget evicts the unheld page")
+
+        // Back on the first page: the gallery re-resolves it before drawing.
+        await model.holdGalleryPage(first)
+        guard case let .ready(again, _) = await model.galleryFile(for: first) else { return XCTFail() }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: again.path))
+        XCTAssertEqual(downloads.value, 3)
+    }
+
+    func testRetryForAnUnreadablePageDownloadsItAgain() async throws {
+        let cache = try cache()
+        let photo = try named("Broken.jpg", id: "a")
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [photo], downloads: downloads)
+        await model.start()
+        _ = await model.galleryFile(for: photo)
+        _ = await model.galleryFile(for: photo)
+        XCTAssertEqual(downloads.value, 1, "a second open reads the cached copy")
+        guard case let .ready(url, _) = await model.retryGalleryPage(photo) else { return XCTFail() }
+        XCTAssertEqual(downloads.value, 2, "Retry drops the copy and downloads again")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testRetryReplacesAKeptCopyThatWillNotRenderAndKeepsItOffline() async throws {
+        let cache = try cache()
+        let photo = try named("Kept.jpg", id: "a")
+        // A kept copy of the right size whose bytes don't decode.
+        _ = try await cache.commit(stage(Data("XXXXX".utf8), cache: cache), item: photo, keepOffline: true)
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [photo], downloads: downloads)
+        await model.start()
+        guard case let .ready(first, _) = await model.galleryFile(for: photo) else { return XCTFail() }
+        XCTAssertEqual(try Data(contentsOf: first), Data("XXXXX".utf8))
+        XCTAssertEqual(downloads.value, 0, "an open reads the kept copy")
+
+        guard case let .ready(url, _) = await model.retryGalleryPage(photo) else { return XCTFail() }
+        XCTAssertEqual(downloads.value, 1, "Try again downloads even though a kept copy exists")
+        XCTAssertEqual(try Data(contentsOf: url), Data(repeating: 3, count: 5), "the copy was replaced")
+        let stillKept = try await cache.isKept(photo)
+        XCTAssertTrue(stillKept, "the file stays kept offline")
+        XCTAssertTrue(model.keptItemIDs.contains(photo.id))
+    }
+
+    func testTheHeldPageSurvivesTheEntryCountLimit() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("atum-drive-model-" + UUID().uuidString, isDirectory: true)
+        roots.append(root)
+        let cache = try DriveCache(
+            root: root.appendingPathComponent("v1/scope", isDirectory: true),
+            configuration: .init(evictableBudgetBytes: 1_000_000, minimumFreeBytes: 0, maxEntryCount: 2),
+            availableCapacity: { 1_000_000 }
+        )
+        let held = try named("Shown.pdf", id: "a")
+        let other = try named("Other.pdf", id: "b")
+        let newest = try named("Next.pdf", id: "c")
+        let heldURL = try await cache.commit(stage(Data("aaaaa".utf8), cache: cache), item: held,
+                                             keepOffline: false, now: Date(timeIntervalSince1970: 1))
+        try await cache.holdPreview(held)
+        let otherURL = try await cache.commit(stage(Data("bbbbb".utf8), cache: cache), item: other,
+                                              keepOffline: false, now: Date(timeIntervalSince1970: 2))
+        _ = try await cache.commit(stage(Data("ccccc".utf8), cache: cache), item: newest,
+                                   keepOffline: false, now: Date(timeIntervalSince1970: 3))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: heldURL.path),
+                      "the entry limit evicted the held page, the oldest entry")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: otherURL.path), "the next oldest goes instead")
+    }
+
+    func testShareDownloadsThenOffersTheShareSheetEvenForAPreviewableFile() async throws {
+        let cache = try cache()
+        let photo = try named("Beach.jpg", id: "a")
+        let reader = FakeDriveReader(rootResults: [.success(try page(items: [photo]))])
+        let model = DriveFeatureModel()
+        model.configure(accountID: "owner", resume: {
+            LiveDriveAccess(cache: cache, state: .active(reader))
+        }, connect: { LiveDriveAccess(cache: cache, state: .active(reader)) })
+        await model.start()
+        await model.share(photo)
+        XCTAssertEqual(model.preview?.presentation, .export)
+        XCTAssertEqual(model.preview?.name, "Beach.jpg")
+        model.dismissPreview()
+        await model.open(photo)
+        XCTAssertEqual(model.preview?.presentation, .quickLook)
+    }
+
+    func testAccountChangeClosesTheGallery() async throws {
+        let cache = try cache()
+        let photo = try named("Beach.jpg", id: "a")
+        let reader = FakeDriveReader(rootResults: [.success(try page(items: [photo]))])
+        let model = DriveFeatureModel()
+        model.configure(accountID: "owner", resume: {
+            LiveDriveAccess(cache: cache, state: .active(reader))
+        }, connect: { LiveDriveAccess(cache: cache, state: .active(reader)) })
+        await model.start()
+        model.openGallery([photo], startingAt: photo)
+        XCTAssertNotNil(model.gallery)
+        await model.withdraw()
+        XCTAssertNil(model.gallery)
+    }
+
     func testFailedCacheStoreDoesNotHideFreshServerListing() async throws {
         let cache = try cache()
         let root = try XCTUnwrap(roots.last).appendingPathComponent("v1/scope")

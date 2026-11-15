@@ -46,29 +46,6 @@ public enum DriveDestination: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
 }
 
-/// Desktop `recentDriveRows`: there is no activity feed yet, so recency is the
-/// item's modified time, newest first, then the name. An item without a time
-/// goes last.
-public enum DriveRecents {
-    /// Desktop draws the four newest as large tiles above the list.
-    public static let tileCount = 4
-
-    public static func order(_ items: [DriveItem]) -> [DriveItem] {
-        items.sorted { left, right in
-            switch (left.modifiedAt, right.modifiedAt) {
-            case let (l?, r?) where l != r: return l > r
-            case (.some, nil): return true
-            case (nil, .some): return false
-            default: return left.name.localizedStandardCompare(right.name) == .orderedAscending
-            }
-        }
-    }
-
-    public static func tiles(_ items: [DriveItem]) -> [DriveItem] {
-        Array(order(items).prefix(tileCount))
-    }
-}
-
 /// Desktop's Drive times (`formatDriveSyncTime`, `formatModified`): the time
 /// today, the date (and for a sync, the time) before today.
 public enum DriveTimeFormat {
