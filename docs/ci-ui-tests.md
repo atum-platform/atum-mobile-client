@@ -121,6 +121,10 @@ per run on 2026-11-11 with six lanes active).
   `chat.bubbles-live` now grows every 8 s (Debug-only), and the hittable check waits up to
   5 s for the settled layout instead of a fixed pause. The waits that follow the stream
   scale with it: growth to long 20 s (lands at 9.5 s), typing's end 30 s (at 25.5 s).
+- 2026-11-15: `ChatInfoUITests/testGroupInfoShowsMembersRowAndOptimisticSwitches` failed on
+  PR #60 (report menu change, no Chat Info code) on hosted shard 2: "pin is Optional(1)", so the
+  switch had flipped by the time the failure message was built, just after the 5 s wait expired
+  (the test took 86 s on that runner). The pin and mute switch waits are now 15 s.
 
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
