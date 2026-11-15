@@ -18,8 +18,8 @@ public enum MessageMenuItem: Equatable, Hashable, Sendable {
     case selectText
     /// "Sửa": my text messages in people chats only.
     case edit
-    /// "Báo cáo": a person's message, never mine, an assistant's or an app
-    /// bot's (`ReportPolicy.mayReportMessage`; desktop `message-actions.tsx`).
+    /// "Báo cáo": another sender's message, including assistants and app
+    /// bots, never mine (`ReportPolicy.mayReportMessage`).
     case report
     /// "Xóa": my own messages (destructive, last).
     case delete
@@ -49,16 +49,13 @@ public enum MessageMenuRules {
     /// room state, virtual and synthetic rows.
     ///
     /// §2.7 per room kind:
-    /// - my assistant: copy, select (answers), reply, react, delete own;
-    /// - Moon or Andy: copy, select (answers) only;
+    /// - my assistant: copy, select (answers), reply, react, report answers, delete own;
+    /// - Moon or Andy: copy, select (answers), report their messages;
     /// - a person or a group: copy, reply, react, edit and delete own, and
     ///   report on someone else's.
     ///
-    /// Report needs `nonPersonSenders` (every assistant and app bot the
-    /// phone knows): without it the menu cannot tell a person from an
-    /// assistant in a group, so it offers no Report.
+    /// Report eligibility is independent of room and sender kind.
     public static func items(for item: ChatItem, in kind: RoomKind,
-                             nonPersonSenders: Set<String>? = nil,
                              threads: Bool = false) -> [MessageMenuItem] {
         switch item.kind {
         case .message, .image, .file: break
@@ -74,7 +71,7 @@ public enum MessageMenuRules {
         if hasText { items.append(.copy) }
         if hasText, isAnswer(item, in: kind) { items.append(.selectText) }
         if ChatItemRules.canEdit(item, in: kind) { items.append(.edit) }
-        if let nonPersonSenders, ReportPolicy.mayReportMessage(item, in: kind, nonPersonSenders: nonPersonSenders) {
+        if ReportPolicy.mayReportMessage(item) {
             items.append(.report)
         }
         if !isBotRoom, ChatItemRules.canDelete(item) || isHeldSend(item) { items.append(.delete) }

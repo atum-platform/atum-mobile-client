@@ -473,19 +473,18 @@ final class LiveConversationStore: ConversationStore {
     // MARK: Report (HC-2)
 
     /// Every assistant and app bot this chat knows: the room's agent or bot,
-    /// the account's agents and the catalog apps' bots (by user ID). Their
-    /// messages and they themselves get no Report (`ReportPolicy`).
+    /// the account's agents and the catalog apps' bots (by user ID). These
+    /// identities get no Report person; their messages can still be reported.
     var nonPersonSenders: Set<String> {
         agentUserIDs.union(info.knownNames.keys).union(info.catalogBotUserIDs)
     }
 
     /// "Báo cáo" on someone else's message: `Room.reportContent` with the
     /// event's ID and the person's reason, never its text. The row is checked
-    /// again here, so a stale menu never reports my own message or a bot's.
+    /// again here, so a stale menu never reports my own or an unavailable message.
     func report(_ itemID: String, reason: String?) async -> Bool {
         guard let item = core.row(itemID)?.item,
-              let request = ReportPolicy.messageRequest(roomID: roomID, item: item, kind: kind,
-                                                        nonPersonSenders: nonPersonSenders, reason: reason) else {
+              let request = ReportPolicy.messageRequest(roomID: roomID, item: item, reason: reason) else {
             return false
         }
         return await send(request)

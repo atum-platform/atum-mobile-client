@@ -1,5 +1,9 @@
 # Report and Block (wave 1 · HC-2)
 
+Message-report eligibility below describes the original HC-2 slice. It is
+superseded by [Report assistant and app-bot messages](report-bot-messages.md):
+assistant/app content can now be reported; person-report and Block rules stay the same.
+
 App Review guideline 1.2 asks for a way to report people and their content, beside Block. The phone had Block (the person panel and a group's Members page) but no Report. This slice adds Report person and Report message with the desktop's rules, words and flow. Evidence: parity audit lane 1, slice S2 (`docs/research/2026-11-10-parity-audit/lane1-home-chats.md`, rows "Report person", "Report message", "Block / Unblock", "Members page").
 
 ## What the phone does now
