@@ -37,6 +37,7 @@ struct ChatRowView: View, Equatable {
                              isGrowing: isGrowing)
         case .notice:
             NoticeRow(row: row, kind: kind, parsedBody: parsedBody)
+                .chatRowMenu(row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody)
         case let .dayDivider(day):
             DayDividerRow(day: day)
         case .readMarker:
@@ -80,7 +81,7 @@ extension View {
     /// content, from what the chat screen put in the environment: the copy,
     /// the row actions (with the reaction tick and the link gate), my user ID
     /// for the palette's marks and the presenter for its sheets. Rows with
-    /// nothing to act on (notices, placeholders, virtual rows) get no menu.
+    /// nothing to act on (non-actionable notices, placeholders, virtual rows) get no menu.
     func chatRowMenu(_ row: ChatRow, kind: RoomKind, roomTitle: String,
                      parsedBody: AttributedString?) -> some View {
         modifier(ChatRowMenu(row: row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody))

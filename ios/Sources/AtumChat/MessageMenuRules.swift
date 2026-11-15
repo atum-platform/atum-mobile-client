@@ -45,7 +45,7 @@ public enum MessageMenuRules {
 
     /// The menu for `item` in a room of `kind`, in display order: the
     /// palette first, then reply, copy, select text, edit, report, delete. Empty
-    /// means the row has no menu: notices (B17: no action), placeholders,
+    /// means the row has no menu: notices outside app-bot rooms (B17), placeholders,
     /// room state, virtual and synthetic rows.
     ///
     /// §2.7 per room kind:
@@ -54,14 +54,16 @@ public enum MessageMenuRules {
     /// - a person or a group: copy, reply, react, edit and delete own, and
     ///   report on someone else's.
     ///
-    /// Report eligibility is independent of room and sender kind.
+    /// Text/media report eligibility is independent of room and sender kind;
+    /// app-bot room notices also qualify.
     public static func items(for item: ChatItem, in kind: RoomKind,
                              threads: Bool = false) -> [MessageMenuItem] {
         switch item.kind {
         case .message, .image, .file: break
+        case .notice where kind == .appBot && ReportPolicy.mayReportMessage(item, in: kind): break
         default: return []
         }
-        let isText = item.kind == .message
+        let isText = item.kind == .message || item.kind == .notice
         let hasText = isText && !item.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let isBotRoom = kind == .appBot
         var items: [MessageMenuItem] = []
@@ -71,7 +73,7 @@ public enum MessageMenuRules {
         if hasText { items.append(.copy) }
         if hasText, isAnswer(item, in: kind) { items.append(.selectText) }
         if ChatItemRules.canEdit(item, in: kind) { items.append(.edit) }
-        if ReportPolicy.mayReportMessage(item) {
+        if ReportPolicy.mayReportMessage(item, in: kind) {
             items.append(.report)
         }
         if !isBotRoom, ChatItemRules.canDelete(item) || isHeldSend(item) { items.append(.delete) }
@@ -99,9 +101,10 @@ public enum MessageMenuRules {
     }
 
     /// B20: "on answers also Chọn văn bản": a message from the room's agent or
-    /// bot, never my own and never a person's.
+    /// bot (including app-bot notices), never my own and never a person's.
     public static func isAnswer(_ item: ChatItem, in kind: RoomKind) -> Bool {
-        guard item.kind == .message, !item.isOwn else { return false }
+        guard !item.isOwn else { return false }
+        guard item.kind == .message || (item.kind == .notice && kind == .appBot) else { return false }
         switch kind {
         case .assistant, .appBot: return true
         case .person, .group: return false

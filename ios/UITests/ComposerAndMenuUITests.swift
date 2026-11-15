@@ -811,6 +811,49 @@ final class MessageMenuUITests: WS3UITestCase {
         assertMessageReportSheet(app)
     }
 
+    @MainActor
+    func testAppBotNoticeMenuSubmitsReportWithReason() throws {
+        let probe = TranscriptUITestCase.liveEvidence.appendingPathComponent("probe/\(UUID().uuidString)")
+        let app = launchChat(.botMoonNotice, extra: ["-AtumUITestProbeDir", probe.path])
+        let notice = element(app, "row.bot.moon-notice.0003")
+        XCTAssertTrue(notice.waitForExistence(timeout: Self.waitSeconds))
+        notice.press(forDuration: 1.2)
+        XCTAssertTrue(menuButton(app, "Báo cáo").waitForExistence(timeout: Self.waitSeconds))
+        XCTAssertEqual(shownItems(app), ["Sao chép", "Chọn văn bản", "Báo cáo"])
+        XCTAssertFalse(menuButton(app, "Chặn").exists)
+        menuButton(app, "Báo cáo").tap()
+        let reason = app.textFields["report.reason"]
+        XCTAssertTrue(reason.waitForExistence(timeout: Self.waitSeconds))
+        reason.tap()
+        reason.typeText("  unsafe content  ")
+        element(app, "report.send").tap()
+        try assertReportProbe(probe, roomID: "bot.moon-notice", eventID: "$bot.moon-notice.0003", reason: "unsafe content")
+        XCTAssertTrue(eventually(5) { !self.element(app, "report.sheet").exists })
+    }
+
+    @MainActor
+    func testAssistantReportSubmissionUsesDefaultReason() throws {
+        let probe = TranscriptUITestCase.liveEvidence.appendingPathComponent("probe/\(UUID().uuidString)")
+        let app = launchChat(.chatActions, extra: ["-AtumUITestProbeDir", probe.path])
+        openMenu(app, row: answer, text: "Dự án Góc Phố")
+        menuButton(app, "Báo cáo").tap()
+        XCTAssertTrue(element(app, "report.send").waitForExistence(timeout: Self.waitSeconds))
+        element(app, "report.send").tap()
+        try assertReportProbe(probe, roomID: "chat.actions", eventID: "$chat.actions.0002", reason: "abuse")
+        XCTAssertTrue(eventually(5) { !self.element(app, "report.sheet").exists })
+    }
+
+    @MainActor
+    private func assertReportProbe(_ folder: URL, roomID: String, eventID: String, reason: String) throws {
+        let file = folder.appendingPathComponent("reports.txt")
+        XCTAssertTrue(eventually(5) { FileManager.default.fileExists(atPath: file.path) })
+        let lines = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.count, 1, "one routed report per submission")
+        let json = try XCTUnwrap(lines.first?.split(separator: " ", maxSplits: 1).last)
+        let request = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: String]
+        XCTAssertEqual(request, ["roomID": roomID, "eventID": eventID, "reason": reason])
+    }
+
     /// These fixtures have no homeserver: verify the shared sheet and its
     /// exported message wording, then cancel without claiming a server report.
     @MainActor

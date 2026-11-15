@@ -6,11 +6,14 @@ the menu also required a known non-person sender set before offering Report.
 
 ## Behavior and server path
 
-- Long-press a server-backed text, image, or file from another sender: **Report**
+- Long-press a server-backed text, image, or file from another sender (also a
+  notice in an app-bot chat): **Report**
   appears in person, group, assistant, and app-bot chats, including Moon/Andy.
   Reporting no longer needs the sender catalog or member classification.
 - Own messages, pending/failed sends, transaction IDs, missing/invalid event IDs,
-  notices, redacted/unreadable placeholders, and room-state rows remain ineligible.
+  notices outside app-bot chats, redacted/unreadable placeholders, and room-state
+  rows remain ineligible. Incoming server notices in app-bot chats offer Copy,
+  Select text, and Report, as their text messages do.
 - The existing `ReportSheet(subject: .message)` and `ChatActions.report` are reused.
   The live store rechecks eligibility, builds an event-only request, and calls
   `Room.reportContent(eventId:reason:)` through the existing SDK path:
@@ -44,7 +47,7 @@ shared message-report wording in en, vi, ja, zh, and zh-Hant:
 
 No new copy keys or PENDING-COPY entries are needed.
 
-## Verification
+## Original PR verification
 
 - Static checks: `git diff --check` passed; all five exported report keys
   resolve in all five locales (25 key/locale pairs).
@@ -64,7 +67,7 @@ No new copy keys or PENDING-COPY entries are needed.
 
 No simulator was started for this task. Future Swift builds/tests must use the
 shared heavy build lock, two jobs, and existing build/cache directories, stopping
-below 1.5 GiB free. No push, PR, CI, or Apple account action is part of this
+below 2 GiB free. No push, PR, CI, or Apple account action is part of this
 implementation checkpoint.
 
 ## Owner device check
@@ -77,6 +80,93 @@ implementation checkpoint.
 4. Confirm assistants/apps gained no Block action, person Block still works,
    and VoiceOver and large text can reach the report controls in en/vi.
 
-Scripted UI fixtures have no homeserver; the new tests target menu-to-sheet
-presentation, not server acceptance. Running the unit/UI checks, live server
-receipt, and physical-device checks remain with the owner.
+Scripted UI fixtures have no homeserver. The original tests target menu-to-sheet
+presentation. The follow-up below adds submission and routed-request assertions;
+live server receipt and physical-device checks remain with the owner.
+
+## Review follow-ups
+
+The `bot.moon-notice` name covered two different event types: `.0001` is a
+regular text greeting, while `.0003` is an actual `.notice` setup message with
+`io.atum.app_bot` metadata. The earlier menu/sheet UI checks pressed the greeting.
+`bot.moon-notices` and its edited/spoofed variants also publish actual notices,
+including the shared Andy notice codes. `ItemMapper` preserves the SDK's notice
+kind and captures catalog-bot notice metadata; `Projection` keeps non-transient
+notices as notice rows. The catalog-bot path is shared by Moon and Andy; this is
+fixture/mapping evidence, not a live homeserver observation.
+
+B17's blanket no-action notice rule stranded that app content. `MessageMenuRules`
+and `ReportPolicy` now accept incoming, settled server notices in `.appBot` rooms,
+and `ChatRowView` installs the existing menu on `NoticeRow`. The menu matches app
+text messages: Copy, Select text, Report, without reactions or Block. Notice text,
+setup/terms buttons, and app metadata authentication are unchanged. No sender
+catalog or metadata requirement is added to content reporting. Notice menus in
+other room kinds retain B17's behavior; assistant transient-line projection and
+person/member reporting are unchanged. Own, local-echo, pending/failed,
+transaction-only, missing/invalid event, redacted, unreadable, and state rows
+cannot be reported. This uses the documented desktop app-content report path;
+it does not add a new endpoint or person-report rule.
+
+The Debug scripted host now replaces only the final report transport on its
+room-less `LiveConversationStore`. Report sheet submission still calls
+`ChatActions.report`, resolves the selected row again, constructs the real
+`ReportPolicy.Request`, and reaches the store's send path. The host records only
+room ID, event ID, and cleaned reason in the existing timestamped UI probe;
+no SDK/network report is attempted. Two UI tests assert exactly one routed call:
+Moon's actual notice with a supplied reason, and an assistant answer with the
+default `abuse`. They also check successful sheet dismissal. Unit tests check
+notice eligibility/exclusions and fixture projection. The thread test asserts
+that another person's, assistant's, or app bot's reply is reportable and targets
+its own event ID, rather than the thread root or quoted event; an own reply is
+excluded.
+
+### Follow-up verification
+
+- Focused Swift package tests: **83 passed, 0 failed** (80 chat-core tests plus 3 copy-contract tests). Suites:
+  `ReportPolicyTests`, `MessageMenuRulesTests`, `ThreadMenuTests`, `ScriptedTests`,
+  `ChatMemberModerationTests`, `ChatCopyContractTests`, `ChatExitPolicyTests`,
+  `WorkingLineParityTests`.
+- Simulator app/test build: passed. Focused UI tests on `Atum iPhone 16e`:
+  **5 passed, 0 failed**: `testAppBotNoticeMenuSubmitsReportWithReason`,
+  `testAssistantReportSubmissionUsesDefaultReason`,
+  `testAssistantAnswerOpensMessageReportSheet`,
+  `testAppBotMessageOpensMessageReportSheet`,
+  `testBotRoomMenuOffersCopySelectAndReport`.
+- Xcode returned exit 0 (`TEST SUCCEEDED`). Its automatic post-test
+  `simctl diagnose` child was stopped after the five tests passed; the test/build
+  process itself completed normally. The locked runner then shut down simulators.
+  Final build-volume free space: 7.1 GiB. The result bundle reports five
+  `Invalid frame dimension (negative or non-finite)` runtime warnings across
+  the five menu tests; no test failed. Their layout source remains uninvestigated.
+- `git diff --check`: passed.
+- `python3 scripts/public_guard.py --base origin/main --head HEAD`: passed,
+  exit 0, including the implementation commit.
+
+All Swift/Xcode verification uses the shared heavy-build lock, two build jobs,
+and the prescribed temporary/cache directories. The Xcode run uses dedicated
+`dd-report-followups` derived data and the shared `spm` cache. A monitor stops
+verification below 2 GiB free, and the same locked command shuts down all
+simulators before releasing the lock. This checkpoint is local-only; the
+coordinator owns integration, review, pushing, PRs, and CI.
+
+The verification batch held `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`
+with `TMPDIR=/Volumes/AtumTestFlight/tmp` throughout both commands below (working
+directory `ios`). Its disk monitor enforced the 2 GiB floor, and its finalizer
+ran `xcrun simctl shutdown all` before releasing the lock.
+
+```sh
+swift test --scratch-path /Volumes/AtumTestFlight/swiftbuild-fold-reader -j 2 --filter 'ReportPolicyTests|MessageMenuRulesTests|ThreadMenuTests|ScriptedTests|ChatMemberModerationTests|ChatCopyContractTests|ChatExitPolicyTests|WorkingLineParityTests'
+
+xcodebuild -project AtumMobile.xcodeproj -scheme AtumMobile -configuration Debug \
+  -destination 'platform=iOS Simulator,id=CB24FAE2-75F9-4E19-A856-0F5A9F036C0B' \
+  -derivedDataPath /Volumes/AtumTestFlight/dd-report-followups \
+  -clonedSourcePackagesDirPath /Volumes/AtumTestFlight/spm -jobs 2 \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+  -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
+  -resultBundlePath /Volumes/AtumTestFlight/report-followups-verify/ui.xcresult test \
+  -only-testing:AtumMobileUITests/MessageMenuUITests/testAppBotNoticeMenuSubmitsReportWithReason \
+  -only-testing:AtumMobileUITests/MessageMenuUITests/testAssistantReportSubmissionUsesDefaultReason \
+  -only-testing:AtumMobileUITests/MessageMenuUITests/testAssistantAnswerOpensMessageReportSheet \
+  -only-testing:AtumMobileUITests/MessageMenuUITests/testAppBotMessageOpensMessageReportSheet \
+  -only-testing:AtumMobileUITests/MessageMenuUITests/testBotRoomMenuOffersCopySelectAndReport
+```

@@ -260,6 +260,12 @@ final class LiveConversationStore: ConversationStore {
     /// One accepted send, for the app's first-message product event.
     @ObservationIgnored var onMessageSent: (@MainActor () -> Void)?
 
+    #if DEBUG
+    /// Scripted hosts replace only the final report transport, after the real
+    /// store has resolved and rechecked the row. Never used with a live room.
+    @ObservationIgnored var scriptedReport: (@MainActor (ReportPolicy.Request) -> Bool)?
+    #endif
+
     // MARK: Private
 
     @ObservationIgnored private var core: ConversationCore
@@ -487,7 +493,7 @@ final class LiveConversationStore: ConversationStore {
     /// again here, so a stale menu never reports my own or an unavailable message.
     func report(_ itemID: String, reason: String?) async -> Bool {
         guard let item = core.row(itemID)?.item,
-              let request = ReportPolicy.messageRequest(roomID: roomID, item: item, reason: reason) else {
+              let request = ReportPolicy.messageRequest(roomID: roomID, item: item, reason: reason, in: kind) else {
             return false
         }
         return await send(request)
@@ -507,7 +513,11 @@ final class LiveConversationStore: ConversationStore {
     }
 
     private func send(_ request: ReportPolicy.Request) async -> Bool {
-        guard !isClosed, let room, request.roomID == roomID else { return false }
+        guard !isClosed, request.roomID == roomID else { return false }
+        #if DEBUG
+        if room == nil, let scriptedReport { return scriptedReport(request) }
+        #endif
+        guard let room else { return false }
         do {
             switch request.target {
             case let .event(eventID): try await room.reportContent(eventId: eventID, reason: request.reason)

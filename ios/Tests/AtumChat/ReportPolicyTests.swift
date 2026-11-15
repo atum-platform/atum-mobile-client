@@ -102,7 +102,6 @@ final class ReportPolicyTests: XCTestCase {
     func testNonContentRowsNeverOfferReport() {
         for sender in [F.friend, F.agent, F.bot] {
             let rows: [ChatItem] = [
-                F.notice("n", from: sender),
                 ChatItem(id: "x", kind: .placeholder(.redacted), sender: sender, eventOrTransactionId: .event("$x")),
                 ChatItem(id: "u", kind: .placeholder(.undecryptable), sender: sender, eventOrTransactionId: .event("$u")),
                 ChatItem(id: "s", kind: .roomState, sender: sender, eventOrTransactionId: .event("$s"))
@@ -111,10 +110,45 @@ final class ReportPolicyTests: XCTestCase {
         }
     }
 
+    func testAppBotNoticesNeedAnIncomingServerEvent() {
+        var notice = F.notice("n", from: F.bot)
+        XCTAssertTrue(ReportPolicy.mayReportMessage(notice, in: .appBot))
+        XCTAssertEqual(ReportPolicy.messageRequest(roomID: room, item: notice, reason: nil, in: .appBot),
+                       ReportPolicy.Request(roomID: room, target: .event("$n"), reason: "abuse"))
+        for kind in [RoomKind.assistant, .person, .group] {
+            XCTAssertFalse(ReportPolicy.mayReportMessage(notice, in: kind))
+        }
+        var excluded = [ChatItem]()
+        notice.isOwn = true
+        excluded.append(notice)
+        notice.isOwn = false
+        notice.isLocalEcho = true
+        excluded.append(notice)
+        notice.isLocalEcho = false
+        for delivery in [ChatDelivery.sending(), .failed(isRecoverable: true)] {
+            notice.delivery = delivery
+            excluded.append(notice)
+        }
+        notice.delivery = .remote
+        for ref in [ChatEventRef.transaction("local"), .event("invalid")] {
+            notice.eventOrTransactionId = ref
+            excluded.append(notice)
+        }
+        notice.eventOrTransactionId = nil
+        excluded.append(notice)
+        for item in excluded {
+            XCTAssertFalse(ReportPolicy.mayReportMessage(item, in: .appBot))
+            XCTAssertNil(ReportPolicy.messageRequest(roomID: room, item: item, reason: nil, in: .appBot))
+            XCTAssertEqual(MessageMenuRules.items(for: item, in: .appBot), [])
+        }
+    }
+
     private func assertUnreportable(_ item: ChatItem, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertFalse(ReportPolicy.mayReportMessage(item), item.id, file: file, line: line)
         XCTAssertNil(ReportPolicy.messageRequest(roomID: room, item: item, reason: nil), file: file, line: line)
         for kind in RoomKind.allCases {
+            XCTAssertFalse(ReportPolicy.mayReportMessage(item, in: kind), file: file, line: line)
+            XCTAssertNil(ReportPolicy.messageRequest(roomID: room, item: item, reason: nil, in: kind), file: file, line: line)
             XCTAssertFalse(MessageMenuRules.items(for: item, in: kind).contains(.report),
                            "\(item.id) in \(kind)", file: file, line: line)
         }

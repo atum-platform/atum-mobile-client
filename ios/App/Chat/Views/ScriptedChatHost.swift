@@ -50,6 +50,15 @@ struct ScriptedChatHost: View {
                                         languageCode: design.locale,
                                         roomIsEncrypted: false)
         let store = LiveConversationStore(info: info, history: .onScroll)
+        store.scriptedReport = { request in
+            guard case let .event(eventID) = request.target,
+                  let data = try? JSONSerialization.data(withJSONObject: [
+                    "roomID": request.roomID, "eventID": eventID, "reason": request.reason
+                  ], options: [.sortedKeys]),
+                  let line = String(data: data, encoding: .utf8) else { return false }
+            UITestProbe.append(line, to: "reports.txt")
+            return true
+        }
         // The scripted cast stands in for the room's joined members, so the
         // composer's `@` picker has people to offer.
         if ComposerRules.offersMentions(kind: script.context.kind) {
