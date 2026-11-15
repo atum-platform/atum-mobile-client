@@ -536,3 +536,25 @@ became unavailable and the queued processes disappeared. State/controller
 regressions and the three UI repetitions remain unverified. Only iOS 27.0 was
 installed; the intended fallback was iPhone 16e on iOS 27.0. Do not lift quarantine
 on this evidence.
+
+The coordinator subsequently verified the prior head on iPhone 17e / iOS 27:
+399 app tests ran with one failure, the preserved joined-search regression;
+two complete HomeChatsWave3 UI runs passed, and the third failed query-entry
+checks (`qqz` / `da at` instead of `qqzzxx` / `da lat`). The shared-page bug
+is confirmed: the original caller cleared the handle after awaiting it, allowing
+a joined walk to resume first and consume its 40-page budget on the same
+completed task. Cleanup now runs inside the shared task before any waiter
+receives its result. The regression assertions are unchanged. Query entry now
+uses character-by-character typing with three bounded, logged attempts and
+requires the field value to match before testing search behavior. Follow-up verification used iPhone 17e / iOS 27.0, the shared lock,
+two build jobs, and the existing derived data. Build passed; all 399 app tests
+passed, including the unchanged joined-page regression and published-idle
+regression. All three search tests passed in UI runs 1 and 2 (6 executions,
+0 search failures; no query retries were logged). The full classes had 1 and
+2 non-search failures respectively: a stalled panel launch recovered by
+terminating the app in run 1, and missing Home long-press targets in run 2.
+Run 3 had the same two Home failures and stalled during panel launch. After
+runner recovery, it stalled again before query entry in the accessibility search
+launch; that run was stopped. Thus a clean third search repetition remains
+unverified. Logs and process samples were retained in the external verification
+directory. Quarantine remains unchanged pending reliable hosted verification.

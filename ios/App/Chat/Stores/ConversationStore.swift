@@ -528,12 +528,15 @@ final class LiveConversationStore: ConversationStore {
         guard !Task.isCancelled, !isClosed else { return .failed }
         let generation = generation
         let page = Task { [weak self] in
-            await self?.performSearchPage(generation: generation) ?? .failed
+            guard let self else { return ChatHistorySearch.Page.failed }
+            let result = await self.performSearchPage(generation: generation)
+            // Clear before releasing any waiter. A joined walk can resume before
+            // the original caller and immediately request its next page.
+            if generation == self.generation { self.searchPage = nil }
+            return result
         }
         searchPage = page
-        let result = await page.value
-        if generation == self.generation { searchPage = nil }
-        return result
+        return await page.value
     }
 
     private func performSearchPage(generation: UInt64) async -> ChatHistorySearch.Page {

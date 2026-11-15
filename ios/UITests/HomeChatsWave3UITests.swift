@@ -35,12 +35,20 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
 
     /// Verify the input before interpreting any result counter. On PR #56's
     /// iOS 26.2 AX-XXXL failure, bulk typing "da lat" delivered "da at".
-    /// Do not retry or repair it: that would hide a separate input failure.
+    /// Retry transport failures before interpreting the paging result.
     @MainActor
     private func enterSearchQuery(_ query: String, in field: XCUIElement,
                                   file: StaticString = #filePath, line: UInt = #line) {
         intendedSearchQuery = query
-        field.typeText(query)
+        for attempt in 0..<3 {
+            field.tap()
+            if attempt > 0, let current = field.value as? String, !current.isEmpty {
+                print("Search input retry \(attempt): received \(current), requested \(query)")
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+            }
+            for character in query { field.typeText(String(character)) }
+            if field.value as? String == query { return }
+        }
         XCTAssertEqual(field.value as? String, query,
                        "Search input differs from the requested query; this is not evidence of a paging stall.",
                        file: file, line: line)
