@@ -97,27 +97,31 @@ per run on 2026-11-11 with six lanes active).
   `HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` at line 124:
   the failure message already read "Result 1 of 1. Searched 89 of 2200", so the match
   was found just after the 15 s wait ran out (PR #49 failed the same way at 70 of 2200).
-  That was initially attributed to runner speed, and the wait became 30 s.
-  The 2026-11-14 investigation below reproduces a real app paging race; the
-  existing 30 s wait remains unchanged.
-- 2026-11-14: the test was **quarantined** (atum-mobile#50) by PR #54 after `285c443`
-  shard 3 failed with "No results. Searched 70 of 2200" even with the 30 s wait (the walk
-  stopped, not slowed). `fix/chat-search-walk-stall` fixes the paging race (see below) and
-  removes it from `QUARANTINE` again.
-- 2026-11-14: on PR #56 (`2e3d39f`) shard 0 failed
-  `StoreCommerceUITests/testSettlingCheckoutWaitsNeutrallyThenOffersGet` at line 281 ("a neutral
-  wait while checkout settles"). The test started 14:41:24 and failed 36 s in: launching and
-  opening the item took ~31 s on the hosted runner, longer than the scripted 20 s settle
-  (counted from launch), so the loading phase had already ended. The Debug-only
-  `ScriptedApplePurchasesAPI.slowCheckoutDelay` is now 45 s; the wait for Get and
-  `testSettlingCheckoutKeepsHeaderEntryHiddenUntilOpen`'s wait for the header entry are 70 s.
-- 2026-11-14: PR #56's paging fix let `testSearchFindsAWordThreePagesBackAndCloses` pass on
-  both hosted runs, and the AX-XXXL audit passed on run 1 (`2e3d39f`), but run 2 (`bac7589`,
-  shard 3) failed it with "No results. Searched 128 of 2200" at line 129. This was
-  initially interpreted as another incomplete walk. The artifact investigation below
-  shows that the field received `da at` and the walk completed before the deadline.
-  `testSearchBarAtAccessibilitySizePassesTheAudit` is **quarantined again**
-  (atum-mobile#50) while the remaining slowness or stall is diagnosed from that run's result bundle.
+  The app is correct and the hosted runner is slow at AX-XXXL; #52 doesn't touch chat
+  search. That wait is now 30 s.
+- 2026-11-14: `HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` is
+  **quarantined** (atum-mobile#50). With the 30 s wait, PR #54 (`285c443`, shard 3) still
+  failed at line 126 with "No results. Searched 70 of 2200": the in-chat search walk
+  stopped, not slowed (PR #49: 70 of 2200; PR #52 run 1: 89 of 2200). None of those PRs
+  touch chat search. This reads as an intermittent stall in the search walk on the hosted
+  runner, so it is under diagnosis as an app bug. Remove the line when the stall is fixed.
+- 2026-11-14: `HomeChatsWave3UITests/testSearchFindsAWordThreePagesBackAndCloses` and
+  `testSearchWithNoMatchSaysNoResultsInVietnamese` are **quarantined** (atum-mobile#50) with
+  the AX-XXXL audit. All three walk the 2200-row scripted transcript, and on the hosted
+  iPhone 16e / iOS 26.2 simulator the walk runs short on and off across unrelated PRs:
+  #55 run 1 on main ("No results. Searched 70 of 2200", complete); PR #56's paging fix runs
+  ("Searching 70 / 108 of 2200…", still in progress). The build Mac (iOS 27) passes them.
+  Under diagnosis on `fix/chat-search-walk-stall` (PR #56). Remove these lines when the
+  walk is fixed on iOS 26.
+- 2026-11-14: `TranscriptKeyboardAndFoldUITests/testALiveLongAnswerFoldsOnceFinalAndOpensInPlace`
+  failed twice on PR #55 (header-only change) at two different steps: run 1 "Show more is out
+  of view" (checked 0.6 s after the fold, before layout settled) and run 2 "the answer finished
+  before it was seen growing" (the scripted answer's last growth at 9.5 s and typing's end at
+  13.5 s left a 4 s window the hosted runner missed). The scripted stream in
+  `chat.bubbles-live` now grows every 8 s (Debug-only), and the hittable check waits up to
+  5 s for the settled layout instead of a fixed pause. The waits that follow the stream
+  scale with it: growth to long 20 s (lands at 9.5 s), typing's end 30 s (at 25.5 s).
+
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned

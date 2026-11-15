@@ -714,9 +714,9 @@ struct HomeScreen: View {
     }
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
     /// the top centre): the account face (44 circle) leading, the Kit search
-    /// field in the middle, the glass note-pencil (44) trailing. While
-    /// searching, Cancel replaces the face and the pencil. At accessibility
-    /// sizes the face and pencil sit on their own row above the field.
+    /// field in the middle, the glass plus (44) trailing. While searching,
+    /// Cancel replaces the face and the plus. At accessibility sizes the face
+    /// and plus sit on their own row above the field.
     ///
     /// The field is one stable child of its row in every state: only the
     /// controls around it come and go. Rebuilding it on focus (an `if` that
@@ -757,7 +757,14 @@ struct HomeScreen: View {
     private var searching: Bool { searchFocused || !query.isEmpty }
 
     private var searchField: some View {
-        HomeSearchField(query: $query, prompt: copy(.search), focused: $searchFocused)
+        HomeSearchField(query: $query, prompt: searchPrompt, label: copy(.search), focused: $searchFocused)
+    }
+
+    /// Desktop #48: the field shows just "Search"; VoiceOver keeps "Search everything".
+    private var searchPrompt: String {
+        let key = HomeSearchPromptCopy.placeholderKey
+        return HomeSearchPromptCopy.placeholder(locale: design.locale,
+                                                exported: design.copy.contains(key) ? design.text(key) : nil)
     }
 
     private func endSearch() {
@@ -783,10 +790,13 @@ struct HomeScreen: View {
         .accessibilityIdentifier("home.account")
     }
 
+    /// Desktop #48: New chat is the Kit's plus icon button to the right of
+    /// the roster search (`MatrixStartChatButton`, Phosphor `plus`), same
+    /// action and spoken name as before.
     @ViewBuilder private var createButton: some View {
         if canStartChat {
             Button { startChatPresented = true } label: {
-                Image(atum.symbol(.composePencil))
+                Image(atum.symbol(.plus))
                     .font(.system(size: 19, weight: .light))
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())
@@ -1321,10 +1331,12 @@ private struct HomeBadgeUpdate: Equatable {
 /// The Kit search field (`.ak-field--search`): a full-radius capsule on
 /// `fill-quiet` with no ring, the magnifier (16, light) and placeholder in
 /// ink-3, the query in `.body` ink; 44 pt tall on the phone (Kit regular
-/// control height).
+/// control height). `prompt` is the placeholder drawn in the field, `label`
+/// its spoken name (desktop's `placeholder` and `aria-label`).
 private struct HomeSearchField: View {
     @Binding var query: String
     let prompt: String
+    let label: String
     var focused: FocusState<Bool>.Binding
     @Environment(\.atum) private var atum
     @Environment(\.colorScheme) private var scheme
@@ -1353,7 +1365,7 @@ private struct HomeSearchField: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
-                .accessibilityLabel(prompt)
+                .accessibilityLabel(label)
                 .accessibilityIdentifier("home.search")
                 if !query.isEmpty {
                     Button { query = "" } label: {
@@ -1361,7 +1373,7 @@ private struct HomeSearchField: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .accessibilityLabel(Text(verbatim: prompt))
+                    .accessibilityLabel(Text(verbatim: label))
                     .accessibilityIdentifier("home.search.clear")
                 }
             }
