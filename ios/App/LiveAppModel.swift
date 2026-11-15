@@ -6659,9 +6659,19 @@ final class LiveAppModel {
                       !MobileAppBotRoomAccountData.isHidden(hiddenAt: row.appBotHiddenAt, lastMessageAt: row.latestTimestamp ?? 0),
                       !row.memberUserIDs.isEmpty else { return nil }
                 let name = companyWorkspace.teamSpaceRoomLabel(roomID: row.roomID)?.name ?? product.title
+                // The picker draws the face Home draws: the same kind and assistant mark.
+                let home = HomeRow(product: product, locale: .current)
+                let face: ShareChat.Face = switch home.kind {
+                case .atum: .atum
+                case .assistant: .assistant
+                case .app: .app
+                case .group: .group
+                case .person, .invitation: .person
+                }
                 return ShareChat(id: row.roomID, name: name, isGroup: !row.isDirect,
                                  recipients: Array(row.memberUserIDs.prefix(32)),
-                                 avatarURI: product.matrixAvatarURL ?? row.heroAvatarURL)
+                                 avatarURI: product.matrixAvatarURL ?? row.heroAvatarURL,
+                                 face: face, mark: home.mark)
             }
         return ShareDirectory(account: ShareAccount(userID: context.runtime.ticket.session.userID,
                                                      generation: context.runtime.ticket.generation), chats: Array(chats.prefix(512)))

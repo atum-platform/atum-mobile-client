@@ -47,9 +47,16 @@ final class ShareItemLoader {
         let name = provider.suggestedName
         if kind == .url || kind == .text || type == UTType.fileURL.identifier {
             return try await withCheckedThrowingContinuation { continuation in
-                provider.loadItem(forTypeIdentifier: type, options: nil) { value, error in
+                provider.loadItem(forTypeIdentifier: type, options: nil) { loaded, error in
                     do {
                         if let error { throw error }
+                        // Object-registered URLs (NSItemProvider(object:)) and some file
+                        // providers answer a URL load with the URL's provider data, not a URL.
+                        var value = loaded
+                        if let data = loaded as? Data, kind == .url || type == UTType.fileURL.identifier,
+                           let url = try? NSURL.object(withItemProviderData: data, typeIdentifier: type) as URL {
+                            value = url as NSURL
+                        }
                         if let url = value as? URL, url.isFileURL {
                             let scoped = url.startAccessingSecurityScopedResource()
                             defer { if scoped { url.stopAccessingSecurityScopedResource() } }

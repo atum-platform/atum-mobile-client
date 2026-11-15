@@ -115,7 +115,7 @@ final class AvatarArtTests: XCTestCase {
         XCTAssertNotNil(art.backplate)
         func render(_ art: AtumAvatarArt) throws -> CGImage {
             let renderer = ImageRenderer(content: AtumAvatar(kind: .app, name: "Andy", art: art, size: 52)
-                .environment(\.atum, AtumVisualSystem(design: design)))
+                .atumDesign(design))
             renderer.scale = 3
             return try XCTUnwrap(renderer.cgImage)
         }

@@ -69,6 +69,17 @@ targets:
       - path: Notifications/ScriptedNotificationFixtures.swift
       - path: Shared/ShareSuggestions.swift
       - path: Share/SharePendingCopy.swift
+      # The share extension's picker, for the Debug-only scripted host
+      # (App/Debug/ScriptedShareHost.swift); Release excludes them below.
+      - path: Share/ShareComposerModel.swift
+      - path: Share/ShareItemLoader.swift
+      - path: Share/SharePickerCopy.swift
+      - path: Share/SharePickerDesign.swift
+      - path: Share/SharePickerPreview.swift
+      - path: Share/SharePickerRow.swift
+      - path: Share/SharePickerSections.swift
+      - path: Share/SharePickerView.swift
+      - path: Share/ShareLocalizable.xcstrings
       - path: ../LICENSE
         buildPhase: resources
       - path: ../LICENSES/Hermes-Agent-MIT.txt
@@ -121,6 +132,10 @@ targets:
             - S6ScriptedHost.swift
             - Scripted*.swift
             - StoreScriptedCommerce.swift
+            - ShareComposerModel.swift
+            - ShareItemLoader.swift
+            - SharePicker*.swift
+            - ShareLocalizable.xcstrings
   AtumNotifications:
     type: app-extension
     platform: iOS
@@ -188,9 +203,17 @@ targets:
       - path: Share
         excludes: [Info.plist, AtumShare.entitlements]
       - path: Shared/ShareSuggestions.swift
+      # The app's Kit token reader and avatar renderer, compiled in; the token
+      # file alone (not the app's design bundle) is the extension's resource.
+      - path: App/DesignSystem/AtumKit.swift
+      - path: App/DesignSystem/AtumAvatar.swift
+      - path: Vendor/AtumDesign/atum-kit-tokens.json
+        buildPhase: resources
     dependencies:
       - package: AtumDesign
         product: AtumNativeAPI
+      - package: AtumDesign
+        product: AtumChat
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.share
@@ -211,9 +234,15 @@ targets:
       - path: Shared/ShareSuggestions.swift
       - path: ShareTests
       - path: App/OutgoingShareSuggestions.swift
+      - path: App/DesignSystem/AtumKit.swift
+      - path: App/DesignSystem/AtumAvatar.swift
+      - path: Vendor/AtumDesign/atum-kit-tokens.json
+        buildPhase: resources
     dependencies:
       - package: AtumDesign
         product: AtumNativeAPI
+      - package: AtumDesign
+        product: AtumChat
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.share.tests

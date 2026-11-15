@@ -59,6 +59,9 @@ struct AtumMobileApp: App {
             ScriptedChatHost(script: script)
         } else if let roster = AtumScriptedLaunch.selection?.roster {
             ScriptedHomeHost(roster: roster)
+        } else if let share = ScriptedShareScenario.parse(ProcessInfo.processInfo.arguments) {
+            // `-AtumScriptedShare <scenario>`: the share extension's picker on synthetic data.
+            ScriptedShareHost(scenario: share)
         } else {
             AppRoot()
         }

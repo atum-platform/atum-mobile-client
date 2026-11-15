@@ -6,7 +6,11 @@ import Observation
 @MainActor @Observable
 final class ShareComposerModel {
     enum Phase: Equatable { case loading, ready, queuing, queued, failed }
+    /// The queue's per-share recipient bound (ShareQueue validates the same twenty).
+    static let maximumSelection = 20
     private(set) var recentChats = [ShareChat]()
+    /// The eligible Share Suggestion room the intent named, if any (preselected at load).
+    private(set) var suggestedChatID: String?
     var search = ""
     var selection = Set<String>()
     var caption = ""
@@ -18,7 +22,7 @@ final class ShareComposerModel {
         search.isEmpty ? recentChats : recentChats.filter { $0.name.localizedCaseInsensitiveContains(search) }
     }
     var canSend: Bool {
-        !cancelled && phase == .ready && !selection.isEmpty && selection.count <= 20 && !items.isEmpty
+        !cancelled && phase == .ready && !selection.isEmpty && selection.count <= Self.maximumSelection && !items.isEmpty
             && selection.isSubset(of: Set(recentChats.map(\.id))) && caption.utf8.count <= ShareQueue.maximumTextBytes
     }
     @ObservationIgnored private let queue: ShareQueue
@@ -37,6 +41,7 @@ final class ShareComposerModel {
             guard let directory = try queue.readDirectory(), directory.account == current else { throw ShareQueueFailure.accountChanged }
             identity = current; recentChats = directory.chats
             selection = ShareSuggestions.preselection(intent: intent, chats: recentChats)
+            suggestedChatID = selection.first
             let id = try queue.begin(); jobID = id
             items = try await ShareItemLoader(queue: queue).load(providers, jobID: id) { progress = $0 }
             guard !cancelled else { try? queue.remove(id); return }
@@ -46,10 +51,19 @@ final class ShareComposerModel {
             self.error = SharePendingCopy.text(.failed); phase = .failed
         }
     }
+    var isAtSelectionLimit: Bool { selection.count >= Self.maximumSelection }
+    /// Choosing chats may overlap a slow file copy; sending still waits for ready.
+    /// Only chats in the current account's eligible snapshot can be chosen.
     func toggle(_ chat: ShareChat) {
-        guard phase == .ready else { return }
+        guard phase == .ready || phase == .loading, !cancelled,
+              recentChats.contains(where: { $0.id == chat.id }) else { return }
         if selection.contains(chat.id) { selection.remove(chat.id) }
-        else if selection.count < 20 { selection.insert(chat.id) }
+        else if selection.count < Self.maximumSelection { selection.insert(chat.id) }
+    }
+    /// The staged copy of a loaded attachment, for the preview strip's thumbnail only.
+    func stagedFile(for item: ShareItem) -> URL? {
+        guard let jobID, phase != .queued, !cancelled else { return nil }
+        return try? queue.fileURL(item, jobID: jobID)
     }
     /// Success means durable intake, never network delivery. The owner controls dismissal.
     func send() {

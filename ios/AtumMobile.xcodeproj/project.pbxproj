@@ -11,10 +11,12 @@
 		018C2AB6FE456B5406B8819E /* ConnectionGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8892D5382728FCA1137C973 /* ConnectionGlyph.swift */; };
 		02927E05A7B82D005884500F /* ChatMenuModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4B8E8C5CC0221C7DA59E66 /* ChatMenuModel.swift */; };
 		03511538884AC9E9CE9DCED0 /* CompanyChannelChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */; };
+		0362F46B91D3319DD58577F7 /* SharePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59222F64B0F0D53153E2B98B /* SharePickerView.swift */; };
 		039FE585E321A87ABA34B56E /* ChatEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F63C1B58186F8A073F792B /* ChatEnvironment.swift */; };
 		043A5D1FA5DE2ED7198CF18D /* HomeChatsWave3StateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF51E1B392E629BDDEE3B807 /* HomeChatsWave3StateTests.swift */; };
 		04AED8B26FF5878412870333 /* AtumSharedControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B11924707D6B263D7C558F9 /* AtumSharedControls.swift */; };
 		0747FA732704B2B3911E1664 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = FE09EC837F5D02840D34BB11 /* Localizable.xcstrings */; };
+		08A92692A80DB331F4F05F10 /* SharePickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C592C961120AF443ED6C7DF /* SharePickerRow.swift */; };
 		0C03ED6A288C93514F0A8AE3 /* S6PresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97350188135A9E0758288628 /* S6PresentationTests.swift */; };
 		0CF1BDAB420FC6F623516F21 /* MathFonts-LPPL-1.3c.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4C83FBB5F314CFF28A1C2482 /* MathFonts-LPPL-1.3c.txt */; };
 		0DB02DBDBB94CA899ED4006F /* AttachmentPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C880F0C004C94EFEC6EBA2 /* AttachmentPreparer.swift */; };
@@ -22,11 +24,12 @@
 		1033EE57CCEC6D33975BE267 /* LoadingEarlierRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BDC5DD56B44C08D958FD9C /* LoadingEarlierRow.swift */; };
 		10744397176B22AA4D83BA28 /* ScriptedHomeHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878AB17BC9B607538F2836E1 /* ScriptedHomeHost.swift */; };
 		11B70B0B1D9D1EEA82825373 /* TeamSpaceCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A22E078427C31742F08C637 /* TeamSpaceCopy.swift */; };
-		11F5006BF84A6A916C54E50A /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 380F01E7C7E23F0F4C9B01C4 /* LICENSE */; };
 		123F029FB5A2A3093112CBDB /* ProtonAmountFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445FBDF559131D1A2D1175FB /* ProtonAmountFormatTests.swift */; };
 		129103B104A95793D09EC8E0 /* AppBotPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 047AEB418B8DD1F993C3DDD7 /* AppBotPresentation.swift */; };
 		137C15AD08FA23477BBA6043 /* AssistantHomeDestinationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50F3D24A1C179DC7FCFA694 /* AssistantHomeDestinationTests.swift */; };
 		143D8797AE3A325FA510285B /* HomeChatsWave2StateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D80973BC1E388C5AD6B8F7FB /* HomeChatsWave2StateTests.swift */; };
+		149C148E0B4B9EB16EA56D00 /* SharePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59222F64B0F0D53153E2B98B /* SharePickerView.swift */; };
+		191B714F98297E6357EA4F79 /* SharePickerDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E093EB2FDD0ACF4F0BAC8AF /* SharePickerDesign.swift */; };
 		1988E81DE02D363BA0449EE9 /* Textual-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 17126229509607B4CFA25A4C /* Textual-LICENSE.txt */; };
 		19B9AC4ED1423C55C21839EB /* ConversationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD7F230B5EC24982633DC95 /* ConversationViews.swift */; };
 		1AA6D05769CB4EED3259B8A2 /* ChatMediaPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3000FBC7D5C7CC34FF0DD758 /* ChatMediaPresentation.swift */; };
@@ -34,6 +37,7 @@
 		1B3104F5617164EB587BA38A /* FirstRunGreetingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE6265E160DBC6C35D2C445F /* FirstRunGreetingTests.swift */; };
 		1B8C44A1E4EB4BBF19C1ABAC /* AtumTelemetry in Frameworks */ = {isa = PBXBuildFile; productRef = 7E13F0469082FE7028306F2C /* AtumTelemetry */; };
 		1BD6F0BE167F8CDABEEB238D /* SpeechDictationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5B880A8993F917C69ACC3FE /* SpeechDictationEngine.swift */; };
+		1EF8853C847016826BCED758 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 62020021FB030D6A03C2CFBA /* Assets.xcassets */; };
 		1FE1ED15632DFF480B9E4E80 /* MathFonts-MIT-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 000C5802F5DA2B1CD68F6163 /* MathFonts-MIT-LICENSE.txt */; };
 		1FED11C16F6AAF0A823FA3D5 /* GScrollDynamicTypeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E14C8E07A5220CD1744589 /* GScrollDynamicTypeUITests.swift */; };
 		209F6023083F9EF7BCC9BB9A /* S6SystemGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C05250266D07008E89E4A6B /* S6SystemGallery.swift */; };
@@ -43,6 +47,7 @@
 		224E1DC96D4601A58CC8F617 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30635388E4F462B12710F72B /* ShareViewController.swift */; };
 		22B6D11E40D6CC1F3CE999E0 /* ProtonTopUp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17CA4634D4BB32072A0A9001 /* ProtonTopUp.swift */; };
 		25E48EEEFA8F85D1D89E44DA /* AtumMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C847BF5BA076FDE92399ED /* AtumMobileApp.swift */; };
+		26C0538CBC45248DE9E5C421 /* AtumAvatarLoading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16691149EE9255E615151C21 /* AtumAvatarLoading.swift */; };
 		281E7098764877EE3887C071 /* AtumKitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 217E49CD3A5C5BA3920263DF /* AtumKitTests.swift */; };
 		282F9A8E0CF933BF588450C2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 6E89864C3077D2CDA9F91E56 /* PrivacyInfo.xcprivacy */; };
 		2837B9046111BCBA4647D3A4 /* PhoneApprovalsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04A3E81E69317DCCE090B4A4 /* PhoneApprovalsUITests.swift */; };
@@ -50,7 +55,9 @@
 		289D64EBC63A86A62671DB68 /* MathFonts-GUST-FONT-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F21F9F26B7AE3ADF4F7C1F85 /* MathFonts-GUST-FONT-LICENSE.txt */; };
 		29D9C27DEBE4A536434E8019 /* CommunicationNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1504C847B81B3648FFAF80 /* CommunicationNotification.swift */; };
 		29DA3E212073130210A58D9D /* AppOnboardingCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5773C98F5EB80B08BB493152 /* AppOnboardingCopyTests.swift */; };
+		2AA6AF6FD5C1CE38AE429639 /* SharePickerCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6959BE6D34E5C76E9FCBAB89 /* SharePickerCopy.swift */; };
 		2B892CD831237CDD5BEE7ED6 /* AtomMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F90A897EA9F722D94BEB953 /* AtomMark.swift */; };
+		2C296F58D4E4516E4E94A213 /* SharePickerPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE90D647B332A55D8DE5EDA /* SharePickerPreview.swift */; };
 		2D557A723E6DCEBA197D5944 /* AccountDevicesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E9729D8BA12C9642980EDCB /* AccountDevicesTests.swift */; };
 		2EA8CF5CF7C6C781F05BFD33 /* Hermes-Agent-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6118FC17F0E26712603AC6DF /* Hermes-Agent-MIT.txt */; };
 		2F08C2E9AB8ED449C146B953 /* AtumVisualSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E574CAA6873D7ED17908C6A /* AtumVisualSystem.swift */; };
@@ -71,6 +78,8 @@
 		3CF3F1745E408086C8828604 /* AtumSettingsRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F7F7D5D559C9A6AFE29481 /* AtumSettingsRow.swift */; };
 		3DEEAF9931270A36FEC490EC /* AnswerActionsRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF3F6825E15A2AA3D445E08 /* AnswerActionsRow.swift */; };
 		3E61CE0DF718650931A7CB11 /* AttachmentTray.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4744C01F6EFBF653B13ABC5 /* AttachmentTray.swift */; };
+		3ED94370C92C6837D2460530 /* ShareItemLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC648513E88CA8908DA83BC /* ShareItemLoader.swift */; };
+		40769B9DB548DF479E5793E1 /* SharePickerPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE90D647B332A55D8DE5EDA /* SharePickerPreview.swift */; };
 		44481AEC4531066DDD184142 /* PhosphorSymbols.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDF280A03FF5F979336BAACB /* PhosphorSymbols.swift */; };
 		445A157653B8FF38DFAE3CC6 /* S6ScriptedHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAB2C7BB62CE7DE3694EE525 /* S6ScriptedHost.swift */; };
 		45363A9BCC29388660F4BFB6 /* ScriptedNotificationPoster.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E7E6E272EA7EE4D9D5477AF /* ScriptedNotificationPoster.swift */; };
@@ -78,11 +87,15 @@
 		45E78DFFE89ED387187AF82D /* AppStartRosterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A0C0F10D4B0C71919E63FF /* AppStartRosterTests.swift */; };
 		46468A3A8DF1B9AC8B73A7F4 /* AtumNativeAPI in Frameworks */ = {isa = PBXBuildFile; productRef = EAF7FCEC0F3F0E116753C594 /* AtumNativeAPI */; };
 		4685BEF460CD3FFD4F54DD49 /* LiveDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10AAA4D763F43361B56ED7E /* LiveDesign.swift */; };
+		46C0D360431B07EEEF026710 /* ShareLocalizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 108E857B109FEA6E85A65B41 /* ShareLocalizable.xcstrings */; };
 		47722B0DEC69D7BC9E36A537 /* DriveCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95162DC94949B7CE696D6BBD /* DriveCopy.swift */; };
 		47966C2F3D83D69A453B9ADC /* SharePendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3991E5EF26E1BB94453D58A /* SharePendingCopy.swift */; };
 		483C0D2C519E3B85BC4822B8 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = D090067E84799FF9F2C948D3 /* Sentry */; };
+		495097F2C56830374FC604BE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 62020021FB030D6A03C2CFBA /* Assets.xcassets */; };
 		49C270917055CE30ADAA5D89 /* StoreCommercePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21E48DC827F8DCEA162870C8 /* StoreCommercePresentation.swift */; };
+		4A224AE3646676278191A11F /* atum-kit-tokens.json in Resources */ = {isa = PBXBuildFile; fileRef = 8F31FAF4E8281E3D2D44DA6C /* atum-kit-tokens.json */; };
 		4E3E15D349E4549E03B547FD /* JumpPillButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A5F646A651995AC791525E8 /* JumpPillButton.swift */; };
+		4EDA72C8B51C3CB095F36863 /* ShareLocalizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 108E857B109FEA6E85A65B41 /* ShareLocalizable.xcstrings */; };
 		4F0650C22B3EB6B449AA7B6B /* Sentry-THIRD_PARTY_NOTICES.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5DD77D2B748B43AEA0A1F88A /* Sentry-THIRD_PARTY_NOTICES.txt */; };
 		4F385FA0F8581DE13F80535A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 6B3AC8DEB4164959EC4915FB /* PrivacyInfo.xcprivacy */; };
 		4F99382842B9FF2A813080B4 /* TranscriptUITestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9CF44135356E3483D961CF /* TranscriptUITestSupport.swift */; };
@@ -97,11 +110,14 @@
 		55A67B44C8E489B24519126F /* CommunicationNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1EF632578E3BD9B4C50D8C1 /* CommunicationNotificationTests.swift */; };
 		5652640CB42EC304DBA47862 /* MediaViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15A2BAFBA55DB05022FA6CE0 /* MediaViewer.swift */; };
 		5668844A25E271C81675DC61 /* ChatPanelHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B4C7D2DA2643ECCCF9E9C69 /* ChatPanelHost.swift */; };
+		571EE41054100EDC8E2BF252 /* ShareLocalizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 108E857B109FEA6E85A65B41 /* ShareLocalizable.xcstrings */; };
 		57EF65DE7209FEE23132C311 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DCFA888CDA1AFED5BE2A5687 /* PrivacyInfo.xcprivacy */; };
 		58C98CA66B20F6364D693193 /* rich-text-notices.json in Resources */ = {isa = PBXBuildFile; fileRef = 16E80A4F8381968AECF596C5 /* rich-text-notices.json */; };
+		58EEBACE89EFAE7EEA6AA30E /* SharePickerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F88E0109774E653A50842A /* SharePickerUITests.swift */; };
 		58FFF98F5431C75863E264C5 /* CompanySpaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A978118D2881F551EC2169DA /* CompanySpaceViews.swift */; };
 		59400CBE8F4092249C6E9821 /* DeleteAccountRequestSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92B60C848C7F0C423EF13E7 /* DeleteAccountRequestSheet.swift */; };
 		5C54C20454E66949DBD509DD /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 63A1D47507770A58E34BEA28 /* AtumChat */; };
+		5EB0F556B51A8F82AC14BC7B /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 3EE1FA575D53F4B0866032B1 /* AtumChat */; };
 		5EB134D76B899F90E0D467B5 /* MessageMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F21F01CD5A7DE4E8C71BFFC /* MessageMenu.swift */; };
 		5EC06AAEDB20A87EC841716D /* ComposerDictationCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3553821F25D476C4DB869723 /* ComposerDictationCopy.swift */; };
 		5F2D717476AF370EB7152EC3 /* CompanyThreadsMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09831FA267F224243C9A5062 /* CompanyThreadsMatrix.swift */; };
@@ -110,6 +126,7 @@
 		62BDCB93BDA9CB60F59B0E88 /* ScriptedNotificationFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3846104472BF6A4D6F6CA55C /* ScriptedNotificationFixtures.swift */; };
 		631F909CD568BED2EABE1B4D /* AccountProfileHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500A588601B2984113B22779 /* AccountProfileHeader.swift */; };
 		63FDC6CECE17538013F3C315 /* CompanyThreadsCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A180816CF606537CB7F4DF50 /* CompanyThreadsCopy.swift */; };
+		64A0BE1323F2EDFCC79A1B4D /* SharePickerSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAA4314062C5ACD99D9642A /* SharePickerSections.swift */; };
 		64D080E030F35F0DBFAED30B /* AccountSettingsStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE9832C39E8B526348BAD2F0 /* AccountSettingsStateTests.swift */; };
 		64D6DE9BC3FA1B4C2D081B8C /* LaunchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C7861959DAC2456AC4C87C6 /* LaunchUITests.swift */; };
 		65A715CD0B9DDC7F9585B768 /* WorkingLineRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC53C31588CE85624FA04E61 /* WorkingLineRow.swift */; };
@@ -123,6 +140,7 @@
 		6AA652DAC496E2D2E8C7895F /* StoreScriptedCommerce.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4415778D09370120022A7AEE /* StoreScriptedCommerce.swift */; };
 		6AF26F5F5091AEFB49B45C79 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEABB2BCEC7C76F61859D8CD /* NotificationService.swift */; };
 		6DDC7222D59F800598DBBB8D /* AppRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F22D7ED106BEA5B648BDE0 /* AppRoot.swift */; };
+		6E4DAADCB781483A8018925E /* SharePickerDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E093EB2FDD0ACF4F0BAC8AF /* SharePickerDesign.swift */; };
 		6E7034629AFB5559B393A813 /* CommunicationNotificationCaptureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 692B59F67CCF3B66F380BDD2 /* CommunicationNotificationCaptureUITests.swift */; };
 		6EC5157A6E8EDA029E3B8674 /* MathFonts-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = C849D6466FA13E610FFFFE1B /* MathFonts-OFL.txt */; };
 		6FC05DB4029D594BE8B4035E /* ScriptedAppPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D84C18CD819B265BC8315B4 /* ScriptedAppPanel.swift */; };
@@ -136,9 +154,12 @@
 		7772C4CB8C6E889A8F7AD67D /* ChatRenameAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 958923E3C0AB588D8CEAB79C /* ChatRenameAlert.swift */; };
 		77A38601B8BB10220634ECF8 /* ShareItemLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC648513E88CA8908DA83BC /* ShareItemLoader.swift */; };
 		78072CE47923637FE07FDA08 /* PhoneModelPickerList.swift in Sources */ = {isa = PBXBuildFile; fileRef = F16F582A48A3807F93330D3D /* PhoneModelPickerList.swift */; };
+		7895CE4C4302556B12E2CF75 /* SharePickerCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6959BE6D34E5C76E9FCBAB89 /* SharePickerCopy.swift */; };
 		78D0988E3A22774D7D2A2C23 /* ShareSuggestionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADCF06A517A153D733A6EB7 /* ShareSuggestionsTests.swift */; };
 		7A17F7346DD7ED2F39E9E96B /* SharePendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3991E5EF26E1BB94453D58A /* SharePendingCopy.swift */; };
+		7AFA38231B7B370EE762663A /* atum-kit-tokens.json in Resources */ = {isa = PBXBuildFile; fileRef = 8F31FAF4E8281E3D2D44DA6C /* atum-kit-tokens.json */; };
 		7CD8B3941C5C9F8C07A58968 /* PhoneModelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4791811ED8DA6CB94C011D8A /* PhoneModelPicker.swift */; };
+		7EB6F9E14D98DE7F97F10069 /* AtumAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CDA670495E738C2EA73023F /* AtumAvatar.swift */; };
 		7FB69CB646AC9CCCCF7C92B1 /* MatrixNotificationFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABFEA9787AB744B84CE1D1D /* MatrixNotificationFetcher.swift */; };
 		8006AEFC9D98E24089291A9D /* RoomListController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8031B605D7ED80E40783E0CD /* RoomListController.swift */; };
 		80757EDBE8C74C0DFD3A8A6C /* NotificationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AF5EC3A12DD1B80A5106D7 /* NotificationServiceTests.swift */; };
@@ -161,6 +182,7 @@
 		918F401EF6F1B5F1A836B61D /* TeamSpaceStructureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D0DE1D0D4132D5A5E9B10D /* TeamSpaceStructureTests.swift */; };
 		91A65384B3D9089D63D913F7 /* SharedCollectionsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BCC89E163B580641A28AFD /* SharedCollectionsUITests.swift */; };
 		921B6069E1C8EB254F1FEBF0 /* ConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0FC555340582E84414D171 /* ConversationTests.swift */; };
+		92C4A6D671D53D51CDF3CA1D /* SharePickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C592C961120AF443ED6C7DF /* SharePickerRow.swift */; };
 		92D259BD43DA5D40B4A730AA /* PhoneApprovalLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457053C999D102B9988AEE06 /* PhoneApprovalLive.swift */; };
 		932350441E74DCDDEF01498B /* TeamSpaceDailyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E12532A687A3AD0B73DE494 /* TeamSpaceDailyTests.swift */; };
 		93832330B2B256E36B524D10 /* AppBotNoticeProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AB21F5CFF8004E21E6065F /* AppBotNoticeProjection.swift */; };
@@ -175,6 +197,7 @@
 		9942CF559209F592799C015F /* AtumNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 29A6A06AD372CFD9D38AFCFF /* AtumNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		998A24EB5365252948BF3964 /* CommunicationNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1504C847B81B3648FFAF80 /* CommunicationNotification.swift */; };
 		9AF8541BEE524090FA6B3D2A /* FirstRunIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 524664E04DF6C4EF53AD1313 /* FirstRunIntegrationTests.swift */; };
+		9B9493EA4CDF6658D8F704FA /* AtumKitComposites.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EBD95ABA9B8BC18C4E9F2B0 /* AtumKitComposites.swift */; };
 		9BB8975177918BCEB7B11F10 /* ScriptedMediaAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8E7DACC4BF2657FB3370B7 /* ScriptedMediaAccess.swift */; };
 		9BCB093524687915C6D18414 /* CompanyConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C6AEE72C05F3CC887DECDA5 /* CompanyConversationStore.swift */; };
 		9C54F3237322F2F565F97A42 /* AppCardSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBDDABD1E87CBD4A35035D6F /* AppCardSheet.swift */; };
@@ -183,7 +206,9 @@
 		9CE5EC213498C0B2ED79040F /* AttachSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF24603753D3B4F72078B922 /* AttachSheet.swift */; };
 		9D4767EA28C5D6CDA2F9C93E /* FounderRavenAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7FCADCE926153AF3B880A20 /* FounderRavenAvatar.swift */; };
 		9EA230C66C1BD342D2207D2C /* MathFonts-EmbeddedNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 3CD6FBB9D92465A29802E123 /* MathFonts-EmbeddedNotices.txt */; };
+		9F3B882933657CE566D737F4 /* SharePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59222F64B0F0D53153E2B98B /* SharePickerView.swift */; };
 		9F4F0EDD2EECA86D8BFC3F6F /* TeamSpaceInviteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA8B5B5F532E8B9D5145432 /* TeamSpaceInviteTests.swift */; };
+		9F736F011CD7AF9939E4663C /* SharePickerDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E093EB2FDD0ACF4F0BAC8AF /* SharePickerDesign.swift */; };
 		A095090987C8312438A578DF /* ScriptedNotificationFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3846104472BF6A4D6F6CA55C /* ScriptedNotificationFixtures.swift */; };
 		A0EC8BD92076BE153023533B /* S6SystemUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AA1C01CBCBF54986F755DA /* S6SystemUITests.swift */; };
 		A2117D0A1EFE433E001525D0 /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 6B7B8ADB36AC492CA81EFEBD /* AtumChat */; };
@@ -193,6 +218,7 @@
 		A3DF398F7FFDBDF7FD846FAC /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = FE09EC837F5D02840D34BB11 /* Localizable.xcstrings */; };
 		A4D363820259C15FD5D9D830 /* ChatFaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75D6ED1A84266C6C7E977FF1 /* ChatFaces.swift */; };
 		A547B8B15406A1AB6CCFF69B /* TeamSpaceThreadsPendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AB8F1B9D3B46026D160C26 /* TeamSpaceThreadsPendingCopy.swift */; };
+		A638930BC643F0108D11234D /* SharePickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CC2A08F838014C4E0E84F20 /* SharePickerTests.swift */; };
 		A68E46DA94BF1D1A6084E556 /* KitBoardCaptureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC4718E463BCD1234DA42AD /* KitBoardCaptureUITests.swift */; };
 		A6D822BAAB4A9636C7B763E5 /* SessionLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFAAC357B5A8394814F318E4 /* SessionLifecycle.swift */; };
 		A789CE19B3A7734ECDEED18A /* NoticeRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 928D052ADCCB2BF76FA35EE6 /* NoticeRow.swift */; };
@@ -206,6 +232,8 @@
 		ADF34293A83318C9BF03CDC8 /* CompanyThreadsReads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F8AF8D7379192A2617818F6 /* CompanyThreadsReads.swift */; };
 		AE028CEF1A81BB5097707111 /* AssistantHandleEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81EE1ADB09752658386AF07F /* AssistantHandleEditor.swift */; };
 		AE7D9EF90761D538DE094614 /* MatrixAvatarThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41709887A661B2844962F90D /* MatrixAvatarThumbnailCache.swift */; };
+		AF0B25C86845DEE963A70BB5 /* SharePickerSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAA4314062C5ACD99D9642A /* SharePickerSections.swift */; };
+		B0AC137F37352B500273333C /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 25B5E43BBF0DD1AE26604746 /* AtumChat */; };
 		B15C2E7D990B421063B3B19F /* LiveRosterRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */; };
 		B4FBA601A2C1C139359B2F53 /* Sentry-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 2AD275C49D2EBAA73DE4EFFA /* Sentry-LICENSE.txt */; };
 		B511169B2E7A874AD5DEB0D3 /* ScriptedSharedCollectionsScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063B1C239670DA214B9AFBFF /* ScriptedSharedCollectionsScope.swift */; };
@@ -217,6 +245,7 @@
 		BA297795BF470ED6FFE5C09B /* MatrixRustSDK-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = DBBC58A9DE9B4D88CEA7004C /* MatrixRustSDK-LICENSE.txt */; };
 		BB450685019512DE26577341 /* QuoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E304229026117B7D508A16 /* QuoteView.swift */; };
 		BBD97711EE060C816B4C2718 /* ThirdPartyLicences.json in Resources */ = {isa = PBXBuildFile; fileRef = CC46B135FE2676C3AA48CB9F /* ThirdPartyLicences.json */; };
+		BC32EAB7ADA5981C0E9A1D62 /* AtumKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB56378C2BC54E677F08543 /* AtumKit.swift */; };
 		BC3FBDD9FC8FE1B11464825E /* S4S5StateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71BF6AB8AD0A61DED5920F20 /* S4S5StateTests.swift */; };
 		BCE33E58B6EBDD9D073E3D4B /* ScriptedChatHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE20BDFE3B419CA064C3D4A8 /* ScriptedChatHost.swift */; };
 		BE4A159B917C899C1A0D3478 /* AccountModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C7ACCD9351E458DD81DBA2 /* AccountModels.swift */; };
@@ -250,6 +279,7 @@
 		D3D4F996335F5324643CEC0A /* LegalScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22FACE799EB35A301605EFC /* LegalScreens.swift */; };
 		D42307709D5555ED5CE37FE4 /* NOTICE in Resources */ = {isa = PBXBuildFile; fileRef = E1DFC5829F618FE0152B0E77 /* NOTICE */; };
 		D499393DEB46DFC63FB94868 /* AppSidePanelStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA5BC1C8441EE89D085C73D /* AppSidePanelStateTests.swift */; };
+		D49C0CB9DEDA0249C7E9B4FC /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 89B37FC527379655642671B3 /* LICENSE */; };
 		D4C6FB9AAE5BD43D4F83C577 /* ProtonAmountFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD76CF392ED3276C83E51583 /* ProtonAmountFormat.swift */; };
 		D650300A0A80303DB9C83017 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = B7B58211C40B6CDB4787E1BC /* Textual */; };
 		D6786F83C8212754F06652B5 /* MessageFoldViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1C774E1A415CF65143E3A3 /* MessageFoldViews.swift */; };
@@ -257,18 +287,23 @@
 		D77E1B7E55CF64BA4094944F /* CommunicationNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1504C847B81B3648FFAF80 /* CommunicationNotification.swift */; };
 		D7A099FA07EA579B7C7117AE /* OutgoingShareSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BAF969F9D680A1D3226DEA9 /* OutgoingShareSuggestions.swift */; };
 		D7ED3A9145D9477C78EDB8E5 /* NotificationRoomPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57B55D535EC0C089F54430B3 /* NotificationRoomPublisher.swift */; };
+		D80F998B73D6C6326EAD7DB5 /* ScriptedShareHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC9CA93AEDDDFFFE886C3B4 /* ScriptedShareHost.swift */; };
 		D8BC0A0DC4441377C5271160 /* DebugLaunch.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF92A07EEB47B84CC201299A /* DebugLaunch.swift */; };
 		D93763C7460FBB31966798C8 /* ChatInfoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D90FAB83643A6D6FE0FB40C /* ChatInfoSheet.swift */; };
 		D945F41002F020C8DD7F1D54 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 23A2083BB4DA250A5DC8B663 /* Assets.xcassets */; };
 		D9A873088CF660338B74C349 /* AssistantCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD5AAA5DB301D749DE40E08 /* AssistantCard.swift */; };
+		DA345611D7B7B6AF42822CFB /* AtumKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB56378C2BC54E677F08543 /* AtumKit.swift */; };
 		DACA1E46B5BF39C40EC46B12 /* ShareSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB821F4EFDE27F918F36BAD3 /* ShareSuggestions.swift */; };
 		DC16172A5CF2A96B274C7064 /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A959224C834A607E693ECD47 /* TranscriptView.swift */; };
 		DC2A1406B5512A2805608224 /* NativeRichText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55FD517430985EDE52675D60 /* NativeRichText.swift */; };
 		DD072BF4D46A295A0DF7590B /* AssistantsWave3UITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6028943595228B4448671AF /* AssistantsWave3UITests.swift */; };
 		DE4586D8A4A1098F3187CD00 /* CompanySwitcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B34D10943B247E13747AAF8 /* CompanySwitcherTests.swift */; };
+		DEBBA87C7327A5C8C79B2CD9 /* ShareComposerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 634B1A21F342946105A99E10 /* ShareComposerModel.swift */; };
 		DEDFB925322967CD01590E5C /* KitGlyphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 921B6D886A7C47341BA06EA0 /* KitGlyphTests.swift */; };
 		DF761982CECDF074268BF5A7 /* AccountAssistantRosterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960C012E279790C8657A67FD /* AccountAssistantRosterTests.swift */; };
+		E04E8563C1A7396C59693B6C /* SharePickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C592C961120AF443ED6C7DF /* SharePickerRow.swift */; };
 		E07B18193463CEE2C2500B58 /* ChatPanelUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC664004AF714C51541782F /* ChatPanelUITests.swift */; };
+		E0B3A42F40AE84929BA11D88 /* SharePickerPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE90D647B332A55D8DE5EDA /* SharePickerPreview.swift */; };
 		E27319D8D48889689C291439 /* TeamSpacePendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F6614A6EB16B2D06489CDC /* TeamSpacePendingCopy.swift */; };
 		E2E61E7B15C5AC83C5F26157 /* HomeGlobalSearchPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50633980D576EF3C5A119C2 /* HomeGlobalSearchPolicyTests.swift */; };
 		E3665AB49BD1951028D9DF2B /* ProbeLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE2D07D34EDD53B2BC9B079 /* ProbeLog.swift */; };
@@ -278,6 +313,7 @@
 		E7999E30F4D60C7DF47C9ECE /* S1MatrixUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93E1EECC6509DF3CD28B9F13 /* S1MatrixUITests.swift */; };
 		E875903DB92DAE3524043FF0 /* ElementX-NSE.md in Resources */ = {isa = PBXBuildFile; fileRef = AE23F200921E3C4EB9F38A89 /* ElementX-NSE.md */; };
 		E8768073B70AADA21D4543F7 /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 0CFF1FDDA5302B1B9089C38D /* AtumChat */; };
+		E8C4342C7EBA6AC87DE549B5 /* SharePickerSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAA4314062C5ACD99D9642A /* SharePickerSections.swift */; };
 		E8E371345509159DECD4C0A1 /* ProtonMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D15DA73393A7BB3E51841B5 /* ProtonMark.swift */; };
 		EA09A0B0A55C11DD1CAF9AD0 /* MatrixRustSDK-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = DBBC58A9DE9B4D88CEA7004C /* MatrixRustSDK-LICENSE.txt */; };
 		EB925D4B5D2C88977BCFA56A /* AccountProfileEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50C197752B5EB15B984BC58 /* AccountProfileEditorTests.swift */; };
@@ -289,6 +325,7 @@
 		ECCCB25B52E7DFD913BDB762 /* FirstRunRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 982200125D77989D55CF5ADD /* FirstRunRuntime.swift */; };
 		EE9114EB2D2EBE467D32A245 /* RootTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9029419E7D96871E7953588E /* RootTabs.swift */; };
 		EEB7C9632C3F68FFAC743371 /* CompanySpaceMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48ABD9DB2357AD77F3A873B7 /* CompanySpaceMatrix.swift */; };
+		EEF36BC77663A8CD5E541D9B /* SharePickerCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6959BE6D34E5C76E9FCBAB89 /* SharePickerCopy.swift */; };
 		EF66348FE4783EE2716C498C /* TeamSpaceInviteUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07144AC2790D4E9D81AC6041 /* TeamSpaceInviteUITests.swift */; };
 		EFC69E79BE67062220B8627A /* ChatCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 497568A9F56073BDA95243DD /* ChatCopy.swift */; };
 		F0A0C3B6AFD5AB5C803C8D97 /* AccountProfileEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896B46FF8920F34300401246 /* AccountProfileEditor.swift */; };
@@ -303,6 +340,7 @@
 		FCC8614A904DC8C7921C6904 /* LiveAuthDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C69833D4D9C74C9BBCA32C /* LiveAuthDiagnostics.swift */; };
 		FCF23DA1D2EE410C74C12005 /* SDKAttachmentSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8448B0D798E6A2F4BE3DE96 /* SDKAttachmentSender.swift */; };
 		FDF1C5ADB4D91BFBC6612F31 /* SafariView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EA192043DCF2945396A080F /* SafariView.swift */; };
+		FE25425EE7F27A6F904153A5 /* AtumAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CDA670495E738C2EA73023F /* AtumAvatar.swift */; };
 		FEA457A450ECE11AA66217E2 /* ChatSearchBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F46965F05ED5B72EA7CF36 /* ChatSearchBar.swift */; };
 		FF01DEF113A4327D55782296 /* CompanyLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F802940C864EB823935C92C5 /* CompanyLogo.swift */; };
 		FF4A7FB1D7B91C6B385B3586 /* StoreCommerceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CFFC0417081A9085D996D97 /* StoreCommerceUITests.swift */; };
@@ -380,10 +418,13 @@
 		09831FA267F224243C9A5062 /* CompanyThreadsMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyThreadsMatrix.swift; sourceTree = "<group>"; };
 		09F5B420669B97B6AEBF12B3 /* LiveSharedCollections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSharedCollections.swift; sourceTree = "<group>"; };
 		0B34D10943B247E13747AAF8 /* CompanySwitcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySwitcherTests.swift; sourceTree = "<group>"; };
+		0CC2A08F838014C4E0E84F20 /* SharePickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerTests.swift; sourceTree = "<group>"; };
 		0CEDFF380E705A45A33EF920 /* AtumMobile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AtumMobile.entitlements; sourceTree = "<group>"; };
+		108E857B109FEA6E85A65B41 /* ShareLocalizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = ShareLocalizable.xcstrings; sourceTree = "<group>"; };
 		10F74306DAF0BF9208C8BB82 /* AccountScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountScreen.swift; sourceTree = "<group>"; };
 		11B08434CB5411234C8A9C99 /* DayDividerRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayDividerRow.swift; sourceTree = "<group>"; };
 		11F7F7D5D559C9A6AFE29481 /* AtumSettingsRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumSettingsRow.swift; sourceTree = "<group>"; };
+		11F88E0109774E653A50842A /* SharePickerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerUITests.swift; sourceTree = "<group>"; };
 		12D964ECFA8E0F284D646944 /* GScrollUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GScrollUITests.swift; sourceTree = "<group>"; };
 		1338EAD8D1FBCD6E90999790 /* ItemMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemMapper.swift; sourceTree = "<group>"; };
 		137B4475C399684FFE43891C /* ConversationCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationCopy.swift; sourceTree = "<group>"; };
@@ -391,9 +432,11 @@
 		15A2BAFBA55DB05022FA6CE0 /* MediaViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaViewer.swift; sourceTree = "<group>"; };
 		15C880F0C004C94EFEC6EBA2 /* AttachmentPreparer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPreparer.swift; sourceTree = "<group>"; };
 		15F6614A6EB16B2D06489CDC /* TeamSpacePendingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpacePendingCopy.swift; sourceTree = "<group>"; };
+		16691149EE9255E615151C21 /* AtumAvatarLoading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumAvatarLoading.swift; sourceTree = "<group>"; };
 		16E80A4F8381968AECF596C5 /* rich-text-notices.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rich-text-notices.json"; sourceTree = "<group>"; };
 		17126229509607B4CFA25A4C /* Textual-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Textual-LICENSE.txt"; sourceTree = "<group>"; };
 		17CA4634D4BB32072A0A9001 /* ProtonTopUp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtonTopUp.swift; sourceTree = "<group>"; };
+		1AC9CA93AEDDDFFFE886C3B4 /* ScriptedShareHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptedShareHost.swift; sourceTree = "<group>"; };
 		1AD5F14D26848D4847216983 /* ShareQueueDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareQueueDelivery.swift; sourceTree = "<group>"; };
 		1B4F3F5FA585308EAA73A120 /* AppLinkWebAuthPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLinkWebAuthPresenter.swift; sourceTree = "<group>"; };
 		1C6E94B50888B8A7A9DB23EB /* FirstRunCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRunCards.swift; sourceTree = "<group>"; };
@@ -426,7 +469,6 @@
 		335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRosterRows.swift; sourceTree = "<group>"; };
 		3553821F25D476C4DB869723 /* ComposerDictationCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerDictationCopy.swift; sourceTree = "<group>"; };
 		3680C4853A6454B341ABC067 /* TranscriptUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUITests.swift; sourceTree = "<group>"; };
-		380F01E7C7E23F0F4C9B01C4 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
 		3846104472BF6A4D6F6CA55C /* ScriptedNotificationFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptedNotificationFixtures.swift; sourceTree = "<group>"; };
 		3CD6FBB9D92465A29802E123 /* MathFonts-EmbeddedNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "MathFonts-EmbeddedNotices.txt"; sourceTree = "<group>"; };
 		3CDA670495E738C2EA73023F /* AtumAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumAvatar.swift; sourceTree = "<group>"; };
@@ -453,6 +495,7 @@
 		4D90FAB83643A6D6FE0FB40C /* ChatInfoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInfoSheet.swift; sourceTree = "<group>"; };
 		4DA8B5B5F532E8B9D5145432 /* TeamSpaceInviteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceInviteTests.swift; sourceTree = "<group>"; };
 		4EA192043DCF2945396A080F /* SafariView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariView.swift; sourceTree = "<group>"; };
+		4EBD95ABA9B8BC18C4E9F2B0 /* AtumKitComposites.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumKitComposites.swift; sourceTree = "<group>"; };
 		4FA7D84EF28A8812D98C3FF2 /* Router.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Router.swift; sourceTree = "<group>"; };
 		4FF3F6825E15A2AA3D445E08 /* AnswerActionsRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerActionsRow.swift; sourceTree = "<group>"; };
 		500A588601B2984113B22779 /* AccountProfileHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountProfileHeader.swift; sourceTree = "<group>"; };
@@ -461,6 +504,7 @@
 		56C69833D4D9C74C9BBCA32C /* LiveAuthDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAuthDiagnostics.swift; sourceTree = "<group>"; };
 		5773C98F5EB80B08BB493152 /* AppOnboardingCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOnboardingCopyTests.swift; sourceTree = "<group>"; };
 		57B55D535EC0C089F54430B3 /* NotificationRoomPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRoomPublisher.swift; sourceTree = "<group>"; };
+		59222F64B0F0D53153E2B98B /* SharePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerView.swift; sourceTree = "<group>"; };
 		5A72440409A3D796EF7342BB /* AttachmentPreparerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPreparerTests.swift; sourceTree = "<group>"; };
 		5ADCF06A517A153D733A6EB7 /* ShareSuggestionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSuggestionsTests.swift; sourceTree = "<group>"; };
 		5B11924707D6B263D7C558F9 /* AtumSharedControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumSharedControls.swift; sourceTree = "<group>"; };
@@ -472,7 +516,9 @@
 		5E9729D8BA12C9642980EDCB /* AccountDevicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDevicesTests.swift; sourceTree = "<group>"; };
 		5EB56378C2BC54E677F08543 /* AtumKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumKit.swift; sourceTree = "<group>"; };
 		5EDEE7E5C75ED5F661437470 /* AppOnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOnboardingViews.swift; sourceTree = "<group>"; };
+		5EE90D647B332A55D8DE5EDA /* SharePickerPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerPreview.swift; sourceTree = "<group>"; };
 		6118FC17F0E26712603AC6DF /* Hermes-Agent-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Hermes-Agent-MIT.txt"; sourceTree = "<group>"; };
+		62020021FB030D6A03C2CFBA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		634B1A21F342946105A99E10 /* ShareComposerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareComposerModel.swift; sourceTree = "<group>"; };
 		635EDAC779946482EC51EB28 /* TimelineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineController.swift; sourceTree = "<group>"; };
 		6475C3D3539F83EFF25CFA1C /* AtumNotificationsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AtumNotificationsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -480,6 +526,7 @@
 		65E57A0A4A6E16379B0A7464 /* AccountSettingsState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsState.swift; sourceTree = "<group>"; };
 		67AF5EC3A12DD1B80A5106D7 /* NotificationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationServiceTests.swift; sourceTree = "<group>"; };
 		692B59F67CCF3B66F380BDD2 /* CommunicationNotificationCaptureUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunicationNotificationCaptureUITests.swift; sourceTree = "<group>"; };
+		6959BE6D34E5C76E9FCBAB89 /* SharePickerCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerCopy.swift; sourceTree = "<group>"; };
 		6A9759FFBC6760628756EECA /* IgnoredPeopleList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IgnoredPeopleList.swift; sourceTree = "<group>"; };
 		6B3AC8DEB4164959EC4915FB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		6CD3B5C0364CFA8466F00FDC /* Wave2MediaBotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wave2MediaBotUITests.swift; sourceTree = "<group>"; };
@@ -499,6 +546,7 @@
 		7A824CB1272A87D1DCE75F35 /* ShareItemLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareItemLoaderTests.swift; sourceTree = "<group>"; };
 		7B6B1F163B1FF44576CFFB31 /* HomeShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeShellUITests.swift; sourceTree = "<group>"; };
 		7BA26BBC62B824A20B3BFF8B /* RosterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosterStore.swift; sourceTree = "<group>"; };
+		7C592C961120AF443ED6C7DF /* SharePickerRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerRow.swift; sourceTree = "<group>"; };
 		7C6AEE72C05F3CC887DECDA5 /* CompanyConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyConversationStore.swift; sourceTree = "<group>"; };
 		7F21F01CD5A7DE4E8C71BFFC /* MessageMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageMenu.swift; sourceTree = "<group>"; };
 		7FDEBBF9F3B6168F6E70FBC5 /* Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Composer.swift; sourceTree = "<group>"; };
@@ -514,9 +562,11 @@
 		878AB17BC9B607538F2836E1 /* ScriptedHomeHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptedHomeHost.swift; sourceTree = "<group>"; };
 		88B5F131AA25CF571308984F /* AccountDevices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDevices.swift; sourceTree = "<group>"; };
 		896B46FF8920F34300401246 /* AccountProfileEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountProfileEditor.swift; sourceTree = "<group>"; };
+		89B37FC527379655642671B3 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
 		8AC86D770CEC88C3D071341B /* ChatScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatScreen.swift; sourceTree = "<group>"; };
 		8C05250266D07008E89E4A6B /* S6SystemGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S6SystemGallery.swift; sourceTree = "<group>"; };
 		8C7861959DAC2456AC4C87C6 /* LaunchUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchUITests.swift; sourceTree = "<group>"; };
+		8F31FAF4E8281E3D2D44DA6C /* atum-kit-tokens.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "atum-kit-tokens.json"; sourceTree = "<group>"; };
 		8F8AF8D7379192A2617818F6 /* CompanyThreadsReads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyThreadsReads.swift; sourceTree = "<group>"; };
 		9029419E7D96871E7953588E /* RootTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabs.swift; sourceTree = "<group>"; };
 		921B6D886A7C47341BA06EA0 /* KitGlyphTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KitGlyphTests.swift; sourceTree = "<group>"; };
@@ -531,6 +581,7 @@
 		99F22D7ED106BEA5B648BDE0 /* AppRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRoot.swift; sourceTree = "<group>"; };
 		9C2D9DF99EFDD46B2622E0F9 /* AvatarArtTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarArtTests.swift; sourceTree = "<group>"; };
 		9DC123C9D63D6519BFCDED46 /* CompanySpaceReads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySpaceReads.swift; sourceTree = "<group>"; };
+		9E093EB2FDD0ACF4F0BAC8AF /* SharePickerDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerDesign.swift; sourceTree = "<group>"; };
 		9E12532A687A3AD0B73DE494 /* TeamSpaceDailyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceDailyTests.swift; sourceTree = "<group>"; };
 		9E7E6E272EA7EE4D9D5477AF /* ScriptedNotificationPoster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptedNotificationPoster.swift; sourceTree = "<group>"; };
 		9E8BC84840B65719FFE7829C /* CompanyChannelChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyChannelChrome.swift; sourceTree = "<group>"; };
@@ -615,6 +666,7 @@
 		E8AB3B2BCE27108D814492B7 /* PushNotificationRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationRouting.swift; sourceTree = "<group>"; };
 		EA8E271898B10FFC40A26887 /* TranscriptKeyboardAndFoldUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptKeyboardAndFoldUITests.swift; sourceTree = "<group>"; };
 		EB9AE3A7A1F74B1E712C872E /* CompanyInviteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyInviteViews.swift; sourceTree = "<group>"; };
+		EBAA4314062C5ACD99D9642A /* SharePickerSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePickerSections.swift; sourceTree = "<group>"; };
 		EBDDABD1E87CBD4A35035D6F /* AppCardSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCardSheet.swift; sourceTree = "<group>"; };
 		ECE7745AE55313511629B0DB /* AtumMobileUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AtumMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EEABB2BCEC7C76F61859D8CD /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
@@ -684,6 +736,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				910DB36DC94EE2AAD85F5D4C /* AtumNativeAPI in Frameworks */,
+				B0AC137F37352B500273333C /* AtumChat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -707,6 +760,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				46468A3A8DF1B9AC8B73A7F4 /* AtumNativeAPI in Frameworks */,
+				5EB0F556B51A8F82AC14BC7B /* AtumChat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -754,6 +808,15 @@
 			path = Media;
 			sourceTree = "<group>";
 		};
+		093BA29232F4A722AE32A85C /* AtumDesign */ = {
+			isa = PBXGroup;
+			children = (
+				8F31FAF4E8281E3D2D44DA6C /* atum-kit-tokens.json */,
+			);
+			name = AtumDesign;
+			path = Vendor/AtumDesign;
+			sourceTree = "<group>";
+		};
 		19552651D437B7286219AD52 /* Notifications */ = {
 			isa = PBXGroup;
 			children = (
@@ -771,7 +834,9 @@
 			children = (
 				A79DAA0826AD59000F42AC06 /* AtumAppearance.swift */,
 				3CDA670495E738C2EA73023F /* AtumAvatar.swift */,
+				16691149EE9255E615151C21 /* AtumAvatarLoading.swift */,
 				5EB56378C2BC54E677F08543 /* AtumKit.swift */,
+				4EBD95ABA9B8BC18C4E9F2B0 /* AtumKitComposites.swift */,
 				11F7F7D5D559C9A6AFE29481 /* AtumSettingsRow.swift */,
 				5B11924707D6B263D7C558F9 /* AtumSharedControls.swift */,
 				3E574CAA6873D7ED17908C6A /* AtumVisualSystem.swift */,
@@ -822,15 +887,6 @@
 			path = Product;
 			sourceTree = "<group>";
 		};
-		301FE22DB000443981B8978B /* t3-15cc27bb-a57768b310e6b486 */ = {
-			isa = PBXGroup;
-			children = (
-				380F01E7C7E23F0F4C9B01C4 /* LICENSE */,
-			);
-			name = "t3-15cc27bb-a57768b310e6b486";
-			path = ..;
-			sourceTree = "<group>";
-		};
 		3061AF562EA2274289D8306E /* Packages */ = {
 			isa = PBXGroup;
 			children = (
@@ -849,6 +905,15 @@
 				C480F6BF5F3FD3F7C99CABC4 /* RoomMutationQueue.swift */,
 			);
 			path = Home;
+			sourceTree = "<group>";
+		};
+		31A0ADAFF7AB4227D43D4378 /* t3-80b4fcee-69056df82c344760 */ = {
+			isa = PBXGroup;
+			children = (
+				89B37FC527379655642671B3 /* LICENSE */,
+			);
+			name = "t3-80b4fcee-69056df82c344760";
+			path = ..;
 			sourceTree = "<group>";
 		};
 		3790A2024D758CE3F1732883 /* SDK */ = {
@@ -1067,6 +1132,7 @@
 				00AA1C01CBCBF54986F755DA /* S6SystemUITests.swift */,
 				D26C608FD170FBBE592D8437 /* SettingsUITestSupport.swift */,
 				B9BCC89E163B580641A28AFD /* SharedCollectionsUITests.swift */,
+				11F88E0109774E653A50842A /* SharePickerUITests.swift */,
 				5CFFC0417081A9085D996D97 /* StoreCommerceUITests.swift */,
 				27BE008882050F4882F2CB36 /* TeamSpaceDailyUITests.swift */,
 				07144AC2790D4E9D81AC6041 /* TeamSpaceInviteUITests.swift */,
@@ -1102,6 +1168,7 @@
 				9E7E6E272EA7EE4D9D5477AF /* ScriptedNotificationPoster.swift */,
 				847C4F7BB66649153653A9E5 /* ScriptedPhoneApprovals.swift */,
 				063B1C239670DA214B9AFBFF /* ScriptedSharedCollectionsScope.swift */,
+				1AC9CA93AEDDDFFFE886C3B4 /* ScriptedShareHost.swift */,
 				4415778D09370120022A7AEE /* StoreScriptedCommerce.swift */,
 			);
 			path = Debug;
@@ -1118,10 +1185,18 @@
 		AB6764883C400AE766D51D79 /* Share */ = {
 			isa = PBXGroup;
 			children = (
+				62020021FB030D6A03C2CFBA /* Assets.xcassets */,
 				DCFA888CDA1AFED5BE2A5687 /* PrivacyInfo.xcprivacy */,
 				634B1A21F342946105A99E10 /* ShareComposerModel.swift */,
 				CAC648513E88CA8908DA83BC /* ShareItemLoader.swift */,
+				108E857B109FEA6E85A65B41 /* ShareLocalizable.xcstrings */,
 				F3991E5EF26E1BB94453D58A /* SharePendingCopy.swift */,
+				6959BE6D34E5C76E9FCBAB89 /* SharePickerCopy.swift */,
+				9E093EB2FDD0ACF4F0BAC8AF /* SharePickerDesign.swift */,
+				5EE90D647B332A55D8DE5EDA /* SharePickerPreview.swift */,
+				7C592C961120AF443ED6C7DF /* SharePickerRow.swift */,
+				EBAA4314062C5ACD99D9642A /* SharePickerSections.swift */,
+				59222F64B0F0D53153E2B98B /* SharePickerView.swift */,
 				30635388E4F462B12710F72B /* ShareViewController.swift */,
 			);
 			path = Share;
@@ -1131,6 +1206,7 @@
 			isa = PBXGroup;
 			children = (
 				7A824CB1272A87D1DCE75F35 /* ShareItemLoaderTests.swift */,
+				0CC2A08F838014C4E0E84F20 /* SharePickerTests.swift */,
 				2E17CB28B4746CC748665891 /* ShareQueueTests.swift */,
 				5ADCF06A517A153D733A6EB7 /* ShareSuggestionsTests.swift */,
 			);
@@ -1215,6 +1291,7 @@
 			children = (
 				6D0280FC692E355766730F66 /* App */,
 				6D4B6DCF77FFBDC9F748D8BC /* AppTests */,
+				093BA29232F4A722AE32A85C /* AtumDesign */,
 				5069E0F3EB1EF83BB047EE73 /* LICENSES */,
 				2529AEA006C5786CD6059D72 /* Notices */,
 				19552651D437B7286219AD52 /* Notifications */,
@@ -1223,7 +1300,7 @@
 				AB6764883C400AE766D51D79 /* Share */,
 				41CFC5DAAF4C41FB1C627D9B /* Shared */,
 				B308E2C1F556343DA5C10EC5 /* ShareTests */,
-				301FE22DB000443981B8978B /* t3-15cc27bb-a57768b310e6b486 */,
+				31A0ADAFF7AB4227D43D4378 /* t3-80b4fcee-69056df82c344760 */,
 				8769BCB0AEFA500E96D8E549 /* UITests */,
 				024A806B413742CED1546150 /* Products */,
 			);
@@ -1329,6 +1406,7 @@
 			buildConfigurationList = 8B1CBCACCB0B28D15A9909A5 /* Build configuration list for PBXNativeTarget "AtumShareTests" */;
 			buildPhases = (
 				9D4272C4168C2983E5D16082 /* Sources */,
+				EFA3194325A83851C52CC5E6 /* Resources */,
 				AE52AFF063742D40A8229B02 /* Frameworks */,
 			);
 			buildRules = (
@@ -1338,6 +1416,7 @@
 			name = AtumShareTests;
 			packageProductDependencies = (
 				159CC59E32ABF2D178ACB317 /* AtumNativeAPI */,
+				25B5E43BBF0DD1AE26604746 /* AtumChat */,
 			);
 			productName = AtumShareTests;
 			productReference = BE819985B47DAAA1BD112438 /* AtumShareTests.xctest */;
@@ -1398,6 +1477,7 @@
 			name = AtumShare;
 			packageProductDependencies = (
 				EAF7FCEC0F3F0E116753C594 /* AtumNativeAPI */,
+				3EE1FA575D53F4B0866032B1 /* AtumChat */,
 			);
 			productName = AtumShare;
 			productReference = FBAD718C3EFE96CCF863BF82 /* AtumShare.appex */;
@@ -1539,7 +1619,7 @@
 				AB04F912D2B46AC1968F4354 /* ConcurrencyExtras-LICENSE.txt in Resources */,
 				2EA8CF5CF7C6C781F05BFD33 /* Hermes-Agent-MIT.txt in Resources */,
 				F3554B20CE1845FDB358EA2A /* InfoPlist.xcstrings in Resources */,
-				11F5006BF84A6A916C54E50A /* LICENSE in Resources */,
+				D49C0CB9DEDA0249C7E9B4FC /* LICENSE in Resources */,
 				0747FA732704B2B3911E1664 /* Localizable.xcstrings in Resources */,
 				9EA230C66C1BD342D2207D2C /* MathFonts-EmbeddedNotices.txt in Resources */,
 				289D64EBC63A86A62671DB68 /* MathFonts-GUST-FONT-LICENSE.txt in Resources */,
@@ -1552,6 +1632,7 @@
 				4F385FA0F8581DE13F80535A /* PrivacyInfo.xcprivacy in Resources */,
 				B4FBA601A2C1C139359B2F53 /* Sentry-LICENSE.txt in Resources */,
 				4F0650C22B3EB6B449AA7B6B /* Sentry-THIRD_PARTY_NOTICES.txt in Resources */,
+				4EDA72C8B51C3CB095F36863 /* ShareLocalizable.xcstrings in Resources */,
 				E407B377E96207C435E818DB /* SwiftUIMath-LICENSE.txt in Resources */,
 				1988E81DE02D363BA0449EE9 /* Textual-LICENSE.txt in Resources */,
 				BBD97711EE060C816B4C2718 /* ThirdPartyLicences.json in Resources */,
@@ -1572,7 +1653,10 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1EF8853C847016826BCED758 /* Assets.xcassets in Resources */,
 				57EF65DE7209FEE23132C311 /* PrivacyInfo.xcprivacy in Resources */,
+				571EE41054100EDC8E2BF252 /* ShareLocalizable.xcstrings in Resources */,
+				4A224AE3646676278191A11F /* atum-kit-tokens.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1584,6 +1668,16 @@
 				A3DF398F7FFDBDF7FD846FAC /* Localizable.xcstrings in Resources */,
 				EA09A0B0A55C11DD1CAF9AD0 /* MatrixRustSDK-LICENSE.txt in Resources */,
 				282F9A8E0CF933BF588450C2 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EFA3194325A83851C52CC5E6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				495097F2C56830374FC604BE /* Assets.xcassets in Resources */,
+				46C0D360431B07EEEF026710 /* ShareLocalizable.xcstrings in Resources */,
+				7AFA38231B7B370EE762663A /* atum-kit-tokens.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1644,11 +1738,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FE25425EE7F27A6F904153A5 /* AtumAvatar.swift in Sources */,
+				DA345611D7B7B6AF42822CFB /* AtumKit.swift in Sources */,
 				D7A099FA07EA579B7C7117AE /* OutgoingShareSuggestions.swift in Sources */,
 				C9B745DFCF01B1A5ED1416BF /* ShareComposerModel.swift in Sources */,
 				77A38601B8BB10220634ECF8 /* ShareItemLoader.swift in Sources */,
 				ADCB41A5DCA83B0DCB1829E4 /* ShareItemLoaderTests.swift in Sources */,
 				7A17F7346DD7ED2F39E9E96B /* SharePendingCopy.swift in Sources */,
+				7895CE4C4302556B12E2CF75 /* SharePickerCopy.swift in Sources */,
+				191B714F98297E6357EA4F79 /* SharePickerDesign.swift in Sources */,
+				E0B3A42F40AE84929BA11D88 /* SharePickerPreview.swift in Sources */,
+				92C4A6D671D53D51CDF3CA1D /* SharePickerRow.swift in Sources */,
+				AF0B25C86845DEE963A70BB5 /* SharePickerSections.swift in Sources */,
+				A638930BC643F0108D11234D /* SharePickerTests.swift in Sources */,
+				0362F46B91D3319DD58577F7 /* SharePickerView.swift in Sources */,
 				91670FF75399C25541E3DF36 /* ShareQueueTests.swift in Sources */,
 				D349EEA4E1124E111857982F /* ShareSuggestions.swift in Sources */,
 				78D0988E3A22774D7D2A2C23 /* ShareSuggestionsTests.swift in Sources */,
@@ -1659,9 +1762,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7EB6F9E14D98DE7F97F10069 /* AtumAvatar.swift in Sources */,
+				BC32EAB7ADA5981C0E9A1D62 /* AtumKit.swift in Sources */,
 				831358EA53B4524A8E47C07A /* ShareComposerModel.swift in Sources */,
 				C49DDFABCDDEAEB776334969 /* ShareItemLoader.swift in Sources */,
 				47966C2F3D83D69A453B9ADC /* SharePendingCopy.swift in Sources */,
+				2AA6AF6FD5C1CE38AE429639 /* SharePickerCopy.swift in Sources */,
+				6E4DAADCB781483A8018925E /* SharePickerDesign.swift in Sources */,
+				2C296F58D4E4516E4E94A213 /* SharePickerPreview.swift in Sources */,
+				E04E8563C1A7396C59693B6C /* SharePickerRow.swift in Sources */,
+				E8C4342C7EBA6AC87DE549B5 /* SharePickerSections.swift in Sources */,
+				149C148E0B4B9EB16EA56D00 /* SharePickerView.swift in Sources */,
 				FF65D2708406471350AB9981 /* ShareSuggestions.swift in Sources */,
 				224E1DC96D4601A58CC8F617 /* ShareViewController.swift in Sources */,
 			);
@@ -1689,6 +1800,7 @@
 				E7999E30F4D60C7DF47C9ECE /* S1MatrixUITests.swift in Sources */,
 				A0EC8BD92076BE153023533B /* S6SystemUITests.swift in Sources */,
 				697CD2D4DF9FDFDA78F15B96 /* SettingsUITestSupport.swift in Sources */,
+				58EEBACE89EFAE7EEA6AA30E /* SharePickerUITests.swift in Sources */,
 				91A65384B3D9089D63D913F7 /* SharedCollectionsUITests.swift in Sources */,
 				FF4A7FB1D7B91C6B385B3586 /* StoreCommerceUITests.swift in Sources */,
 				F4E87FE2DDB5853BE9A5B8AD /* TeamSpaceDailyUITests.swift in Sources */,
@@ -1744,7 +1856,9 @@
 				3E61CE0DF718650931A7CB11 /* AttachmentTray.swift in Sources */,
 				B522BB699B2DA98CCDC88396 /* AtumAppearance.swift in Sources */,
 				B9295376C15D2060AD472299 /* AtumAvatar.swift in Sources */,
+				26C0538CBC45248DE9E5C421 /* AtumAvatarLoading.swift in Sources */,
 				751C1D9424BBC65042A66641 /* AtumKit.swift in Sources */,
+				9B9493EA4CDF6658D8F704FA /* AtumKitComposites.swift in Sources */,
 				25E48EEEFA8F85D1D89E44DA /* AtumMobileApp.swift in Sources */,
 				3CF3F1745E408086C8828604 /* AtumSettingsRow.swift in Sources */,
 				04AED8B26FF5878412870333 /* AtumSharedControls.swift in Sources */,
@@ -1862,10 +1976,19 @@
 				A8BFD23AFD2DF4D8262FB281 /* ScriptedNotificationFixtures.swift in Sources */,
 				45363A9BCC29388660F4BFB6 /* ScriptedNotificationPoster.swift in Sources */,
 				286CD90AD64D26C91DB234EF /* ScriptedPhoneApprovals.swift in Sources */,
+				D80F998B73D6C6326EAD7DB5 /* ScriptedShareHost.swift in Sources */,
 				B511169B2E7A874AD5DEB0D3 /* ScriptedSharedCollectionsScope.swift in Sources */,
 				CF1EB716D0227567BE6337A9 /* SelectTextSheet.swift in Sources */,
 				A6D822BAAB4A9636C7B763E5 /* SessionLifecycle.swift in Sources */,
+				DEBBA87C7327A5C8C79B2CD9 /* ShareComposerModel.swift in Sources */,
+				3ED94370C92C6837D2460530 /* ShareItemLoader.swift in Sources */,
 				A8C4EC4CAC7C5368AE6CE3D5 /* SharePendingCopy.swift in Sources */,
+				EEF36BC77663A8CD5E541D9B /* SharePickerCopy.swift in Sources */,
+				9F736F011CD7AF9939E4663C /* SharePickerDesign.swift in Sources */,
+				40769B9DB548DF479E5793E1 /* SharePickerPreview.swift in Sources */,
+				08A92692A80DB331F4F05F10 /* SharePickerRow.swift in Sources */,
+				64A0BE1323F2EDFCC79A1B4D /* SharePickerSections.swift in Sources */,
+				9F3B882933657CE566D737F4 /* SharePickerView.swift in Sources */,
 				F56BB86C7F12EE9799ED617B /* ShareQueueDelivery.swift in Sources */,
 				DACA1E46B5BF39C40EC46B12 /* ShareSuggestions.swift in Sources */,
 				3698EACB27814D565EBAA24C /* SharedCollectionsCopy.swift in Sources */,
@@ -1932,6 +2055,10 @@
 					S6ScriptedHost.swift,
 					"Scripted*.swift",
 					StoreScriptedCommerce.swift,
+					ShareComposerModel.swift,
+					ShareItemLoader.swift,
+					"SharePicker*.swift",
+					ShareLocalizable.xcstrings,
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
@@ -2429,10 +2556,18 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = AtumNativeAPI;
 		};
+		25B5E43BBF0DD1AE26604746 /* AtumChat */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AtumChat;
+		};
 		2B3F6FA27D944DF0213C44E5 /* MatrixRustSDK */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 97704AB3428F663611A759AD /* XCRemoteSwiftPackageReference "atum-matrix-rust-components-swift" */;
 			productName = MatrixRustSDK;
+		};
+		3EE1FA575D53F4B0866032B1 /* AtumChat */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AtumChat;
 		};
 		63A1D47507770A58E34BEA28 /* AtumChat */ = {
 			isa = XCSwiftPackageProductDependency;

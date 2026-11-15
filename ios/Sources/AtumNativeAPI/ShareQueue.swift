@@ -13,14 +13,23 @@ public struct ShareAccount: Codable, Equatable, Sendable {
 }
 
 public struct ShareChat: Codable, Equatable, Identifiable, Sendable {
+    /// How the picker draws the face, mirroring the Home roster row's kind (apps are
+    /// squircles, Atum is the crescent, everyone else a circle). Presentation only.
+    public enum Face: String, Codable, Sendable { case atum, assistant, app, person, group }
     public let id: String
     public let name: String
     public let isGroup: Bool
     public let recipients: [String]
     public let avatarURI: String?
-    public init(id: String, name: String, isGroup: Bool, recipients: [String], avatarURI: String? = nil) {
+    /// Optional so a snapshot written before these fields still decodes.
+    public let face: Face?
+    /// A named assistant's coloured shape, drawn while it has no photo.
+    public let mark: AgentMark?
+    public init(id: String, name: String, isGroup: Bool, recipients: [String], avatarURI: String? = nil,
+                face: Face? = nil, mark: AgentMark? = nil) {
         self.id = id; self.name = name; self.isGroup = isGroup
         self.recipients = recipients; self.avatarURI = avatarURI
+        self.face = face; self.mark = mark
     }
 }
 

@@ -14,6 +14,10 @@ phone maps in `ios/Vendor/AtumKitIcons/phosphor-map.json`.
   generate-phosphor-symbols.py --check
       fail if the assets differ from what the vendored subset would generate
 
+The share extension carries its own small catalog (`ios/Share/Assets.xcassets`)
+with only the `SHARE_ALIASES` symbols, generated from the same subset, so it
+does not embed the app's whole catalog.
+
 Each symbol is a Regular-M-only custom symbol template (v3.0). One em (the
 template's 100 pt) is one Phosphor box (256 units), so `.font(.system(size: 20))`
 draws the Kit's 20 pt icon, centred on the cap height like an SF Symbol.
@@ -32,6 +36,11 @@ MAP = VENDOR / "phosphor-map.json"
 SUBSET = VENDOR / "phosphor-icons.json"
 ASSETS = ROOT / "ios/App/Assets.xcassets/Phosphor"
 SWIFT = ROOT / "ios/App/DesignSystem/PhosphorSymbols.swift"
+SHARE_CATALOG = ROOT / "ios/Share/Assets.xcassets"
+SHARE_ASSETS = SHARE_CATALOG / "Phosphor"
+# The share picker's icons (ios/Share/SharePickerDesign.swift names the same assets).
+SHARE_ALIASES = ["AlertCircle", "Check", "CheckCircle2", "File", "FileImage", "FileText", "Link", "Movie"]
+CATALOG_CONTENTS = json.dumps({"info": {"author": "xcode", "version": 1}}, indent=2) + "\n"
 
 BOX = 256.0
 EM = 100.0
@@ -169,10 +178,16 @@ def contents(filename):
                        "symbols": [{"filename": filename, "idiom": "universal"}]}, indent=2) + "\n"
 
 
-def expected_files(subset):
+def expected_files(subset, aliases=None):
     files = {"Contents.json": json.dumps({"info": {"author": "xcode", "version": 1},
                                           "properties": {"provides-namespace": False}}, indent=2) + "\n"}
-    for alias, (name, weight) in sorted(load_map().items()):
+    mapping = load_map()
+    if aliases is not None:
+        missing = sorted(set(aliases) - set(mapping))
+        if missing:
+            raise SystemExit(f"share aliases not in the phone map: {missing}")
+        mapping = {alias: mapping[alias] for alias in aliases}
+    for alias, (name, weight) in sorted(mapping.items()):
         paths = subset[weight].get(name)
         if not paths:
             raise SystemExit(f"{alias}: Phosphor {weight} '{name}' is not in the vendored subset")
@@ -222,7 +237,14 @@ def main():
     if subset["viewBox"] != [0, 0, 256, 256]:
         raise SystemExit("unexpected Phosphor viewBox")
     files = expected_files(subset)
+    share_files = expected_files(subset, SHARE_ALIASES)
     if args.check:
+        share_actual = ({str(p.relative_to(SHARE_ASSETS)): p.read_text() for p in SHARE_ASSETS.rglob("*") if p.is_file()}
+                        if SHARE_ASSETS.exists() else {})
+        catalog = SHARE_CATALOG / "Contents.json"
+        if share_actual != share_files or not catalog.is_file() or catalog.read_text() != CATALOG_CONTENTS:
+            print("Share extension Phosphor symbols are stale", file=sys.stderr)
+            return 1
         actual = {str(p.relative_to(ASSETS)): p.read_text() for p in ASSETS.rglob("*") if p.is_file()} if ASSETS.exists() else {}
         if SWIFT.read_text() != swift_map():
             print("PhosphorSymbols.swift is stale", file=sys.stderr)
@@ -240,7 +262,15 @@ def main():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     SWIFT.write_text(swift_map())
-    print(f"Wrote {len(files) // 2} Phosphor symbols to {ASSETS.relative_to(ROOT)}")
+    if SHARE_ASSETS.exists():
+        shutil.rmtree(SHARE_ASSETS)
+    for relative, text in share_files.items():
+        path = SHARE_ASSETS / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    (SHARE_CATALOG / "Contents.json").write_text(CATALOG_CONTENTS)
+    print(f"Wrote {len(files) // 2} Phosphor symbols to {ASSETS.relative_to(ROOT)}"
+          f" and {len(share_files) // 2} to {SHARE_ASSETS.relative_to(ROOT)}")
     return 0
 
 
