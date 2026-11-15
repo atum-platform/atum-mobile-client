@@ -75,7 +75,7 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
     /// long the launch takes.
     @MainActor
     func testALiveLongAnswerFoldsOnceFinalAndOpensInPlace() {
-        let app = launchChat(.chatBubblesLive)
+        let app = launchChat(.chatBubblesLive, extra: ["-AtumUITestSlowBubbleStream"])
         let live = "chat.bubbles-live.answer-1" // ScriptedChats.bubblesLiveID
         let toggle = element(app, "message.fold." + live)
         let body = element(app, "message.body." + live)
@@ -93,25 +93,42 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
             .withOffset(CGVector(dx: window.frame.midX, dy: frame.minY + frame.height * 0.35)).tap()
         XCTAssertTrue(eventually { !app.keyboards.firstMatch.exists }, "the keyboard did not hide")
 
-        // Growing: long (two of its three growths in) while Atum still types.
-        XCTAssertTrue(body.waitForExistence(timeout: 15), "the live answer never arrived")
-        // The second growth lands 9.5 s after the send.
-        XCTAssertTrue(eventually(20) { body.frame.height > 800 }, "the live answer did not grow long")
-        let toggleWhileGrowing = toggle.exists
-        let stillTyping = typing.exists
-        XCTAssertTrue(stillTyping, "the answer finished before it was seen growing")
-        XCTAssertFalse(toggleWhileGrowing, "a growing answer shows a toggle")
+        // Observe any partial body, rather than racing the second growth's
+        // height. One snapshot keeps the body, typing and toggle at the same
+        // instant even when separate accessibility queries are slow.
+        XCTAssertTrue(body.waitForExistence(timeout: 30), "the live answer never arrived")
+        var growingBody = ""
+        XCTAssertTrue(eventually(30) {
+            guard let root = try? app.snapshot() else { return false }
+            var pending = [root]
+            var nodes: [String: XCUIElementSnapshot] = [:]
+            while let node = pending.popLast() {
+                if !node.identifier.isEmpty { nodes[node.identifier] = node }
+                pending.append(contentsOf: node.children)
+            }
+            guard let partial = nodes["message.body." + live], !partial.label.isEmpty,
+                  nodes[AccessibilityID.rowTyping] != nil else { return false }
+            XCTAssertNil(nodes["message.fold." + live], "a growing answer shows a toggle")
+            growingBody = partial.label
+            return true
+        }, "the answer finished before it was seen growing")
         keepScreenshot("fold-live-growing", of: app)
 
         // Final: folded at the bottom, still following.
-        // Typing stops 8 s after the last growth (25.5 s after the send).
-        XCTAssertTrue(eventually(30) { !typing.exists }, "Atum never stopped typing")
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "the final answer shows no toggle")
-        XCTAssertTrue(eventually(5) { toggle.label == "Xem thêm" }, "the final answer did not fold")
+        // The UI-only stream grows every 20 s and ends at 61.5 s.
+        XCTAssertTrue(eventually(75) { !typing.exists }, "Atum never stopped typing")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 15), "the final answer shows no toggle")
+        XCTAssertTrue(eventually(15) { toggle.label == "Xem thêm" }, "the final answer did not fold")
+        XCTAssertGreaterThan(body.label.count, growingBody.count, "the observed partial answer never grew")
         XCTAssertTrue(eventually { transcript.value as? String == "following" }, "the chat left its bottom")
-        // Wait for the fold's layout to settle rather than a fixed pause: on the
-        // hosted runner it can take longer than 0.6 s (PR #55 run 1).
-        XCTAssertTrue(eventually(5) { toggle.isHittable }, "Show more is out of view")
+        // Accessibility elements may report isHittable=false even
+        // when already inside the window. Wait for the actual window/composer geometry.
+        XCTAssertTrue(eventually(20) {
+            let target = toggle.frame
+            let composerTop = self.element(app, "composer.pill").frame.minY
+            return !target.isEmpty && window.frame.contains(target)
+                && target.maxY <= composerTop + 1 && target.maxY > composerTop - 160
+        }, "Show more is out of view or not at the bottom")
         let composer = element(app, "composer.pill").frame.minY
         XCTAssertLessThanOrEqual(toggle.frame.maxY, composer + 1, "Show more is under the composer")
         XCTAssertGreaterThan(toggle.frame.maxY, composer - 160, "the folded answer is not at the bottom")

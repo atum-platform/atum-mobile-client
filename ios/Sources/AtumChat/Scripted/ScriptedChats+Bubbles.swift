@@ -70,8 +70,12 @@ extension ScriptedChats {
         let full = twoScreenAnswer(seed: 52)
         let paragraphs = full.components(separatedBy: "\n\n")
         func part(_ count: Int) -> String { paragraphs.prefix(count).joined(separator: "\n\n") }
+        // UI automation can take longer than the normal stream to dismiss
+        // the keyboard and take its first snapshot on a hosted simulator.
+        // Keep the ordinary fixture clock (and player tests) unchanged.
+        let interval: TimeInterval = ProcessInfo.processInfo.arguments.contains("-AtumUITestSlowBubbleStream") ? 20 : 8
         let replies = ScriptedReplies(sender: Cast.atum, seenAfter: 0.5, typingAfter: 0.8, answerAfter: 1.5,
-                                      bodies: [full], stream: ScriptedStream(bodies: [part(3), part(7), full], every: 8))
+                                      bodies: [full], stream: ScriptedStream(bodies: [part(3), part(7), full], every: interval))
         return ScriptedScript(name: name, title: "Atum", context: assistant, initial: initial, replies: replies,
                               names: Cast.names)
     }

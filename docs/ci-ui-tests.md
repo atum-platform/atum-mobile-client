@@ -126,6 +126,37 @@ per run on 2026-11-11 with six lanes active).
   switch had flipped by the time the failure message was built, just after the 5 s wait expired
   (the test took 86 s on that runner). The pin and mute switch waits are now 15 s.
 
+- 2026-11-15: `TranscriptKeyboardAndFoldUITests/testALiveLongAnswerFoldsOnceFinalAndOpensInPlace`
+  missed the streaming phase on hosted `4982102` and reported Show more out of view on
+  `ea03554`. The UI test opts into a Debug-only 20 s growth interval (the ordinary
+  fixture remains 8 s), observes any partial body together with typing and no toggle
+  in one accessibility snapshot, then requires a longer final body and a fold.
+  Show more gets a 20 s window/composer-containment wait instead of `isHittable`;
+  the bottom-placement, in-place expansion and detached-chat assertions stay.
+- 2026-11-15: `StoreCommerceUITests/testSettlingCheckoutWaitsNeutrallyThenOffersGet`
+  missed the launch-relative 20 s settling window on hosted `2e3d39f`. A test-only
+  release file now gates the Debug scripted Apple reply until the neutral wait,
+  absent Get/closed line, price and absent top-up have all been checked. The test
+  then releases checkout, polls for Get while checking for a closed line, and
+  checks again that the closed line is absent after opening. Other slow-checkout
+  scenarios keep their existing clock; Release is unaffected.
+- 2026-11-15: `HomeShellUITests/testSearchFiltersNamesAndCancelRestoresRows` failed
+  on hosted `9d63d30` (run 43180498415), line 183: the 2 s no-results assertion
+  expected the old conversation-only empty text. Baseline `61612ed` already uses
+  the current global-search text. Keep that text and all filter/clear/cancel
+  assertions, give the transitions 15 s and add messages identifying the failed
+  state. No product copy changes.
+- 2026-11-15: `AssistantsWave3UITests/testRoutineRowsSayTheScheduleAndPauseFromASwipe`
+  failed on hosted `67ca0cc` (run 43052459166), “no swipe Pause”: the 2 s wait
+  after the swipe expired before the hosted simulator exposed the action.
+  Wait up to 15 s for Pause; the schedule, tap and paused-state checks stay.
+- 2026-11-15: `TranscriptUITestSupport.launchTimedChat` now waits 30 s instead of
+  8 s for the initial latest row to paint after the source starts. The reported
+  hosted failure was at line 40; its run SHA was not supplied and could not be
+  recovered from the available failed hosted logs (baseline `61612ed`). The
+  source-start probe and all timed-scenario assertions remain unchanged. Verify
+  this shared boundary through `TranscriptUITests`, including the timed U2 test.
+
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
@@ -597,3 +628,65 @@ retry branch was not exercised by these runs. The AtumChat package suite passed
 and test commands used the shared lock, two jobs, and existing derived data;
 the verification script shut down simulators afterward. These local iOS 27
 results do not lift the iOS 26 hosted quarantine.
+
+## Hosted flake hardening verification (2026-11-15)
+
+Local-only from `61612ed`, on `test/hosted-flake-hardening`. One locked
+verification batch used `TMPDIR=/Volumes/AtumTestFlight/tmp`, the shared
+`.heavy-build.lock`, `-j 2`, derived data at
+`/Volumes/AtumTestFlight/dd-flake-hardening`, package clones at
+`/Volumes/AtumTestFlight/spm`, and one iPhone 17 / iOS 27 simulator.
+`build-for-testing` passed. No Swift or xcodebuild command ran outside the lock.
+All four directly changed tests passed three focused repetitions. The live
+fold also passed in its complete class, with body top unchanged at 364 pt on
+all four openings. The shared initial-paint assertion passed in all three
+focused timed-U2 runs; U2 subsequently failed twice at its unchanged
+short-lived typing-footer assertion (line 30), then passed once.
+
+| Target test | Pass | Fail | Evidence |
+| --- | ---: | ---: | --- |
+| `TranscriptKeyboardAndFoldUITests/testALiveLongAnswerFoldsOnceFinalAndOpensInPlace` | 4 | 0 | Three focused runs plus the complete fold class. |
+| `StoreCommerceUITests/testSettlingCheckoutWaitsNeutrallyThenOffersGet` | 3 | 0 | Three focused runs, including neutral wait, absent closed line and Get. |
+| `HomeShellUITests/testSearchFiltersNamesAndCancelRestoresRows` | 3 | 0 | Three focused runs. |
+| `AssistantsWave3UITests/testRoutineRowsSayTheScheduleAndPauseFromASwipe` | 3 | 0 | Three focused runs. |
+| `TranscriptUITests/testU2DotsThenAnswerStayInView` | 1 | 2 | Initial paint passed 3/3; two later snapshots found no typing footer. |
+
+Retained result bundles and their companion logs are under
+`/Volumes/AtumTestFlight/dd-flake-hardening/results`:
+
+| Bundle | Result |
+| --- | --- |
+| `focused-1.xcresult` | 4 passed, 1 failed (U2 footer), 0 skipped. |
+| `focused-2.xcresult` | 4 passed, 1 failed (U2 footer), 0 skipped. |
+| `focused-3.xcresult` | 5 passed, 0 failed, 0 skipped. |
+| `class-TranscriptKeyboardAndFoldUITests.xcresult` | 3 passed, 0 failed, 0 skipped; complete class. |
+| `class-StoreCommerceUITests.xcresult` | Incomplete, without final `Info.plist`; retain the raw directory and log, not a readable completed result. |
+
+The Store class log records three passes, then
+`testDetailReviewConfirmSucceedsOnce` hung after tapping
+`store.purchased.entry`: app-idle wait at 147.75 s, no idle notification at
+209.39 s, and no recovery before the app was terminated at about 508 s.
+XCTest still did not recover; cancellation was requested and the batch was
+then interrupted before it could advance. Its seven later tests and the full
+HomeShell, AssistantsWave3 and Transcript classes did not run. These are
+verification gaps, not passing classes. The purchase-history root cause and
+the timed-U2 footer race remain unresolved; neither path was changed here.
+The app thread-sample attempt did not complete. The log and
+`store-purchase-history-intervention.log` retain the observed boundary.
+
+During repetition three the internal disk rejected temporary-file creation.
+The SwiftPM artifact cache was copied to the external volume, hash-verified
+and temporarily linked at its original path so verification could continue.
+After interruption, locked cleanup shut down all simulators, restored and
+hash-verified the original cache location, removed the temporary external
+cache copy and deleted only this lane's `Build/Intermediates.noindex`.
+Result bundles remain. `cleanup.log` records completion.
+
+The outbound guard ran independently with exit 0 before the fix checkpoint
+was attached to the branch (`public-guard-1.log`). The final documentation
+candidate is checked the same way; `public-guard-final.log` retains its
+result. `xcresulttool` independently confirms the four completed bundles'
+counts above; the partial Store bundle fails its reader with a missing
+`Info.plist`. ChatInfo, workflow quarantine/local-only lists, product copy
+and Release behavior are unchanged. No push, PR, hosted CI, deployment,
+paid API or other agent was started.
