@@ -627,13 +627,62 @@ results do not lift the iOS 26 hosted quarantine.
 
 ## Hosted flake hardening verification (2026-11-15)
 
-Local-only checkpoint from `61612ed`, on `test/hosted-flake-hardening`.
-The single locked batch builds and tests with scratch, derived data and package
-cache on the assigned external volume, two jobs and one iPhone 17 / iOS 27
-simulator. `build-for-testing` passed. The first focused repetition passed the
-live fold, settling checkout, Home search and routine swipe tests. The shared
-30 s initial-paint wait also passed; the unchanged timed U2 test subsequently
-missed its short typing-footer window during a slow accessibility snapshot.
-The remaining repetitions and five full classes are still running. Results
-and logs are retained under `dd-flake-hardening/results` on that volume.
-Final outcomes and outbound-guard evidence will replace this checkpoint note.
+Local-only from `61612ed`, on `test/hosted-flake-hardening`. One locked
+verification batch used `TMPDIR=/Volumes/AtumTestFlight/tmp`, the shared
+`.heavy-build.lock`, `-j 2`, derived data at
+`/Volumes/AtumTestFlight/dd-flake-hardening`, package clones at
+`/Volumes/AtumTestFlight/spm`, and one iPhone 17 / iOS 27 simulator.
+`build-for-testing` passed. No Swift or xcodebuild command ran outside the lock.
+All four directly changed tests passed three focused repetitions. The live
+fold also passed in its complete class, with body top unchanged at 364 pt on
+all four openings. The shared initial-paint assertion passed in all three
+focused timed-U2 runs; U2 subsequently failed twice at its unchanged
+short-lived typing-footer assertion (line 30), then passed once.
+
+| Target test | Pass | Fail | Evidence |
+| --- | ---: | ---: | --- |
+| `TranscriptKeyboardAndFoldUITests/testALiveLongAnswerFoldsOnceFinalAndOpensInPlace` | 4 | 0 | Three focused runs plus the complete fold class. |
+| `StoreCommerceUITests/testSettlingCheckoutWaitsNeutrallyThenOffersGet` | 3 | 0 | Three focused runs, including neutral wait, absent closed line and Get. |
+| `HomeShellUITests/testSearchFiltersNamesAndCancelRestoresRows` | 3 | 0 | Three focused runs. |
+| `AssistantsWave3UITests/testRoutineRowsSayTheScheduleAndPauseFromASwipe` | 3 | 0 | Three focused runs. |
+| `TranscriptUITests/testU2DotsThenAnswerStayInView` | 1 | 2 | Initial paint passed 3/3; two later snapshots found no typing footer. |
+
+Retained result bundles and their companion logs are under
+`/Volumes/AtumTestFlight/dd-flake-hardening/results`:
+
+| Bundle | Result |
+| --- | --- |
+| `focused-1.xcresult` | 4 passed, 1 failed (U2 footer), 0 skipped. |
+| `focused-2.xcresult` | 4 passed, 1 failed (U2 footer), 0 skipped. |
+| `focused-3.xcresult` | 5 passed, 0 failed, 0 skipped. |
+| `class-TranscriptKeyboardAndFoldUITests.xcresult` | 3 passed, 0 failed, 0 skipped; complete class. |
+| `class-StoreCommerceUITests.xcresult` | Incomplete, without final `Info.plist`; retain the raw directory and log, not a readable completed result. |
+
+The Store class log records three passes, then
+`testDetailReviewConfirmSucceedsOnce` hung after tapping
+`store.purchased.entry`: app-idle wait at 147.75 s, no idle notification at
+209.39 s, and no recovery before the app was terminated at about 508 s.
+XCTest still did not recover; cancellation was requested and the batch was
+then interrupted before it could advance. Its seven later tests and the full
+HomeShell, AssistantsWave3 and Transcript classes did not run. These are
+verification gaps, not passing classes. The purchase-history root cause and
+the timed-U2 footer race remain unresolved; neither path was changed here.
+The app thread-sample attempt did not complete. The log and
+`store-purchase-history-intervention.log` retain the observed boundary.
+
+During repetition three the internal disk rejected temporary-file creation.
+The SwiftPM artifact cache was copied to the external volume, hash-verified
+and temporarily linked at its original path so verification could continue.
+After interruption, locked cleanup shut down all simulators, restored and
+hash-verified the original cache location, removed the temporary external
+cache copy and deleted only this lane's `Build/Intermediates.noindex`.
+Result bundles remain. `cleanup.log` records completion.
+
+The outbound guard ran independently with exit 0 before the fix checkpoint
+was attached to the branch (`public-guard-1.log`). The final documentation
+candidate is checked the same way; `public-guard-final.log` retains its
+result. `xcresulttool` independently confirms the four completed bundles'
+counts above; the partial Store bundle fails its reader with a missing
+`Info.plist`. ChatInfo, workflow quarantine/local-only lists, product copy
+and Release behavior are unchanged. No push, PR, hosted CI, deployment,
+paid API or other agent was started.
