@@ -93,11 +93,9 @@ extension View {
     /// store's parse of an answer (`ConversationStore.parsedBody(for:)`), so
     /// the preview and the select-text sheet never parse again.
     func messageMenu(row: ChatRow, kind: RoomKind, roomTitle: String, ownUserID: String?,
-                     nonPersonSenders: Set<String>?,
                      parsedBody: AttributedString?, design: LiveDesign, actions: ChatActions,
                      presenter: MessageActionsPresenter) -> some View {
         modifier(MessageMenuModifier(row: row, kind: kind, roomTitle: roomTitle, ownUserID: ownUserID,
-                                     nonPersonSenders: nonPersonSenders,
                                      parsedBody: parsedBody, design: design, actions: actions, presenter: presenter))
     }
 
@@ -128,8 +126,6 @@ private struct MessageMenuModifier: ViewModifier {
     let kind: RoomKind
     let roomTitle: String
     let ownUserID: String?
-    /// Every assistant and app bot the chat knows; nil offers no Report.
-    let nonPersonSenders: Set<String>?
     let parsedBody: AttributedString?
     let design: LiveDesign
     let actions: ChatActions
@@ -138,8 +134,7 @@ private struct MessageMenuModifier: ViewModifier {
     @State private var frame: CGRect = .zero
 
     func body(content: Content) -> some View {
-        let items = MessageMenuRules.items(for: row.item, in: kind, nonPersonSenders: nonPersonSenders,
-                                           threads: presenter.openThread != nil)
+        let items = MessageMenuRules.items(for: row.item, in: kind, threads: presenter.openThread != nil)
         if items.isEmpty {
             content
         } else {
