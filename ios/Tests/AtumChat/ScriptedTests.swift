@@ -79,6 +79,45 @@ final class ScriptedTests: XCTestCase {
         XCTAssertEqual(ScriptedScenarios.name(in: frozen), "chat.long")
     }
 
+    /// PR #56's hosted AX-XXXL failure received "da at", although XCTest
+    /// requested "da lat". 128 searched means all five fixture pages were
+    /// consumed for that typo; a longer wait cannot find the intended word.
+    @MainActor
+    func testSearchFixtureCompletesForDeliveredTypoAndFindsIntendedQuery() async throws {
+        let fixture = try script(ScriptedScenario.chatSearch.rawValue)
+        func walk(_ query: String) async throws -> (ChatHistorySearch.Progress, [Int]) {
+            var player = player(fixture)
+            var projector = TimelineProjector(generation: 1, context: fixture.context,
+                                               options: .s1, calendar: env.calendar)
+            var rows = [ChatRow]()
+            var counts = [Int]()
+            func apply(_ outputs: [Output]) throws {
+                for case let .diffs(diffs) in outputs {
+                    rows = try projector.apply(diffs, now: env.reference).snapshot.rows
+                }
+            }
+            try apply(player.open())
+            let result = await ChatHistorySearch.run(query: query, rows: { rows }, loadPage: {
+                _ = player.beginPagination()
+                let page = player.servePage()
+                do { try apply(page.outputs) }
+                catch { XCTFail("page projection failed: \(error)"); return .failed }
+                return .loaded(hasMore: !page.hitTimelineStart)
+            }, progress: { counts.append($0.searched) })
+            return (result, counts)
+        }
+        let (typo, counts) = try await walk("da at")
+        XCTAssertEqual(typo.phase, .complete)
+        XCTAssertEqual(typo.pages, 5)
+        XCTAssertEqual(typo.searched, 128)
+        XCTAssertEqual(counts, [35, 52, 70, 89, 108, 128])
+        let (intended, intendedCounts) = try await walk("da lat")
+        XCTAssertEqual(intended.phase, .found)
+        XCTAssertEqual(intended.pages, 3)
+        XCTAssertEqual(intended.searched, 89)
+        XCTAssertEqual(intendedCounts, [35, 52, 70, 89])
+    }
+
     // MARK: Every scenario plays cleanly
 
     func testEveryChatScenarioPlaysThroughWithBatchesThatFitAndUniqueIDs() throws {

@@ -19,13 +19,42 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         return app
     }
 
+    private var intendedSearchQuery: String?
+
+    override func tearDown() {
+        if let query = intendedSearchQuery {
+            let url = probeFolder.appendingPathComponent("search-placement.txt")
+            let trace = (try? String(contentsOf: url, encoding: .utf8)) ?? "No search probe file was written."
+            let attachment = XCTAttachment(string: "Intended scripted query: \(query)\n" + trace)
+            attachment.name = "search-placement.txt"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        super.tearDown()
+    }
+
+    /// Verify the input before interpreting any result counter. On PR #56's
+    /// iOS 26.2 AX-XXXL failure, bulk typing "da lat" delivered "da at".
+    /// Do not retry or repair it: that would hide a separate input failure.
+    @MainActor
+    private func enterSearchQuery(_ query: String, in field: XCUIElement,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        intendedSearchQuery = query
+        field.typeText(query)
+        XCTAssertEqual(field.value as? String, query,
+                       "Search input differs from the requested query; this is not evidence of a paging stall.",
+                       file: file, line: line)
+    }
+
     @MainActor private var appearanceTag: String { XCUIDevice.shared.appearance == .dark ? "dark" : "light" }
 
-    /// The field takes focus by itself; on a loaded simulator the keyboard
-    /// can be slow, and then a tap saves the test from timing out.
+    /// A visible keyboard does not prove this field owns focus. Establish
+    /// the typing target explicitly, without retrying or repairing input.
     @MainActor
     private func focusSearch(_ app: XCUIApplication, _ field: XCUIElement) {
-        if !app.keyboards.firstMatch.waitForExistence(timeout: 5) { field.tap() }
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
+                      "the search field did not bring up the keyboard")
     }
 
     // MARK: HC-6
@@ -43,7 +72,7 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 3), boundedHierarchy(app))
         XCTAssertFalse(element(app, AccessibilityID.composerField).exists, "the bar takes the composer's place")
         focusSearch(app, field)
-        field.typeText("da lat")
+        enterSearchQuery("da lat", in: field)
         let count = element(app, "chat.search.count")
         XCTAssertTrue(waitFor(15) { (count.label).hasPrefix("Result 1 of 1") }, "count: \(count.label)")
         let matches = app.descendants(matching: .any)
@@ -89,7 +118,7 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let field = element(app, "chat.search.field")
         XCTAssertTrue(field.waitForExistence(timeout: 3))
         focusSearch(app, field)
-        field.typeText("qqzzxx")
+        enterSearchQuery("qqzzxx", in: field)
         let count = element(app, "chat.search.count")
         XCTAssertTrue(waitFor(20) { count.label.hasPrefix("Không có kết quả") && count.label.contains("Đã tìm") },
                       "count: \(count.label)")
@@ -122,10 +151,10 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let field = element(app, "chat.search.field")
         XCTAssertTrue(field.waitForExistence(timeout: 3))
         focusSearch(app, field)
-        field.typeText("da lat")
+        enterSearchQuery("da lat", in: field)
         let count = element(app, "chat.search.count")
-        // 30 s: at AX-XXXL the hosted runner walks the 2200-row transcript slowly
-        // (PR #49, PR #52: the label read "Result 1 of 1" just after 15 s ran out).
+        // Keep the existing 30 s search budget. This fixture has 128 projected
+        // event-content rows; 2200 is the product bound, not its row count.
         XCTAssertTrue(waitFor(30) { count.label.hasPrefix("Result 1 of 1") }, "count: \(count.label)")
         keepScreenshot("hc6-search-ax5-\(appearanceTag)-en", of: app)
         // Only the bar is this slice's; transcript rows have their own audits.

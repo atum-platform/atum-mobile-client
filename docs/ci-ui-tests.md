@@ -113,9 +113,10 @@ per run on 2026-11-11 with six lanes active).
   `testSettlingCheckoutKeepsHeaderEntryHiddenUntilOpen`'s wait for the header entry are 70 s.
 - 2026-11-14: PR #56's paging fix let `testSearchFindsAWordThreePagesBackAndCloses` pass on
   both hosted runs, and the AX-XXXL audit passed on run 1 (`2e3d39f`), but run 2 (`bac7589`,
-  shard 3) failed it with "No results. Searched 128 of 2200" at line 129. The walk gets
-  further than before (70 → 128) but still doesn't finish within the wait at AX-XXXL on the
-  hosted runner. `testSearchBarAtAccessibilitySizePassesTheAudit` is **quarantined again**
+  shard 3) failed it with "No results. Searched 128 of 2200" at line 129. This was
+  initially interpreted as another incomplete walk. The artifact investigation below
+  shows that the field received `da at` and the walk completed before the deadline.
+  `testSearchBarAtAccessibilitySizePassesTheAudit` is **quarantined again**
   (atum-mobile#50) while the remaining slowness or stall is diagnosed from that run's result bundle.
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
@@ -366,12 +367,10 @@ Debug probe delays older batches while retaining output order, exercising the
 slow-runner interleaving at AX-XXXL. Walk phase, page count and searched count
 join placement events in `search-placement.txt`, without logging query text.
 
-The audit test is absent from `QUARANTINE` on the requested main baseline
-(`ba594e1`). Its quarantine line exists on PR #54 (`feat/handles-ui`). After
-the coordinator merges #54, remove
-`HomeChatsWave3UITests/testSearchBarAtAccessibilitySizePassesTheAudit` from
-`.github/workflows/ui-tests.yml` before shipping this fix. This local worker
-has not merged that branch or changed its workflow.
+The audit test was absent from `QUARANTINE` on the original main baseline
+(`ba594e1`). PR #54 (`feat/handles-ui`) introduced its quarantine line; it is
+present again on PR #56's `b6ac948` baseline. The new iOS 26.2 input-delivery
+investigation below retains that line pending verification on that runtime.
 
 Verification on iPhone 17 / iOS 27, one simulator under the heavy-build
 lock, with two build jobs and a shared derived-data directory:
@@ -439,3 +438,75 @@ one iPhone 17 / iOS 27 simulator):
   fallbacks. Existing waits and assertions remain unchanged.
 - The simulator was shut down inside the locked script before it exited.
   The follow-up is committed locally only; no push, PR, hosted CI or deploy.
+
+
+## PR #56 run 2: completed walk for a malformed query (2026-11-14)
+
+The supplied `pr56-run2-shard3.xcresult` identifies iPhone 16e, iOS 26.2,
+OS build `23C54`. Its failed AX-XXXL audit does **not** show a walk stopping
+short. `xcresulttool get test-results activities`, exported attachments and
+exported diagnostics establish the following:
+
+- XCTest requested `da lat` at 15:11:35.801 UTC. The synthesized-event binary
+  plist also contains `string = da lat` and `typingSpeed = 60`.
+- The screen recording shows `d` while typing, then `da at`; the missing `l`
+  stays missing. The failed app's AX snapshots report `chat.search.field`
+  value `da at` from 15:11:37.666 through the end of the test. There is no
+  captured field value `da lat` for that app process.
+- The AX count changes to Searching 35 at 15:11:39.198, 52 at 15:11:41.525,
+  70 at 15:11:45.157, 89 at 15:11:49.788, and 108 at 15:11:54.962. At
+  15:12:01.740 it says **No results. Searched 128 of 2200**. The assertion
+  fails at 15:12:08.930, over seven seconds after that terminal result.
+- 128 is the full projected event-content count of this five-page fixture;
+  2200 is the search bound. The deterministic scripted fixture test confirms
+  that `da at` completes at 128 with no match, whereas `da lat` finds one
+  match on page 3 at 89. More waiting cannot make the wrong query match.
+- The subsequent three-pages-back test on the same hosted device actually
+  receives `da lat` and reports Result 1 of 1 / Searched 89 at 15:12:40.555,
+  about 13 seconds after its typing activity started.
+
+The bundle has the recording and synthesized-event attachments, plus AX
+stdout in exported diagnostics. It has **no** `search-placement.txt` probe
+attachment/file or `search.walk` / `search.page.timeout` lines in those logs.
+Therefore this artifact cannot establish whether any individual page hit
+its five-second fallback. Some progress intervals are several seconds long,
+but the completed full-fixture walk and malformed field value explain this
+failure independently. It is not evidence for increasing the search wait.
+
+No production app change is justified by this artifact. The binding forwards
+received text to `ChatSearchSession.setQuery`, which stores it unchanged;
+only Return handling strips newlines. The missing character could originate
+in event synthesis or the UIKit/SwiftUI text-input/update interleaving. The
+available traces do not distinguish those causes, and this investigation
+does not claim that fast real-user typing is unaffected.
+
+A local baseline run on iPhone 16e / iOS 27 reproduced a separate input
+setup failure: iteration 2 could not synthesize typing because neither the
+field nor a descendant had keyboard focus. The helper had accepted any
+visible keyboard as proof of field focus. Setup now taps the search field
+explicitly, then asserts keyboard presence within the existing five-second
+window. This is a test action, not a product focus or layout change; it does
+not establish why the hosted run lost only `l`.
+
+Test changes preserve bulk `typeText`, the page delay, all existing wait
+budgets, result assertions, and the quarantine. Each search test now asserts
+the field's exact value immediately after typing. An input failure fails there,
+with its actual value, rather than being mislabeled as pagination 30 seconds
+later. Teardown attaches `search-placement.txt` with keep-always lifetime,
+including the intended synthetic query (or an explicit missing-file note).
+The new deterministic package test compares both delivered strings through
+the real scripted player, projector, index and bounded history search.
+
+The honest next step on iOS 26.2 is to compare bulk injection with paced
+single-character typing and exact prefix readback, with the probe attached.
+For the bar's accessibility audit, confirmed input can be a setup
+precondition; retain a separate bulk-typing check to keep character loss
+visible. Do not silently retry/repair the string, accept `da at`, extend the
+search wait, or restore the quarantined test based only on iOS 27 results.
+
+Local runtime inventory contains **only iOS 27.0 (24A434)**. No iOS 26 runtime
+was downloaded or installed. The local batch uses the installed iPhone 16e
+device type (390 × 844 points) with iOS 27, so it matches device size but
+cannot reproduce or clear the iOS 26.2 input-delivery issue.
+
+Verification: pending the locked local batch in `dd-search-stall`.
