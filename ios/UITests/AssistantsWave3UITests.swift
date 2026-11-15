@@ -274,7 +274,7 @@ final class AssistantsWave3UITests: TranscriptUITestCase {
         keepScreenshot("as6-routine-rows", of: app)
         app.staticTexts["Morning brief"].swipeLeft()
         let pause = app.buttons["Tạm dừng"]
-        XCTAssertTrue(pause.waitForExistence(timeout: 2), "no swipe Pause")
+        XCTAssertTrue(pause.waitForExistence(timeout: 15), "no swipe Pause")
         pause.tap()
         XCTAssertTrue(app.staticTexts["Đã tạm dừng"].waitForExistence(timeout: 3)
                       || app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'dừng'")).count > 0)

@@ -122,6 +122,37 @@ per run on 2026-11-11 with six lanes active).
   5 s for the settled layout instead of a fixed pause. The waits that follow the stream
   scale with it: growth to long 20 s (lands at 9.5 s), typing's end 30 s (at 25.5 s).
 
+- 2026-11-15: `TranscriptKeyboardAndFoldUITests/testALiveLongAnswerFoldsOnceFinalAndOpensInPlace`
+  missed the streaming phase on hosted `4982102` and reported Show more out of view on
+  `ea03554`. The UI test opts into a Debug-only 20 s growth interval (the ordinary
+  fixture remains 8 s), observes any partial body together with typing and no toggle
+  in one accessibility snapshot, then requires a longer final body and a fold.
+  Show more gets a 20 s window/composer-containment wait instead of `isHittable`;
+  the bottom-placement, in-place expansion and detached-chat assertions stay.
+- 2026-11-15: `StoreCommerceUITests/testSettlingCheckoutWaitsNeutrallyThenOffersGet`
+  missed the launch-relative 20 s settling window on hosted `2e3d39f`. A test-only
+  release file now gates the Debug scripted Apple reply until the neutral wait,
+  absent Get/closed line, price and absent top-up have all been checked. The test
+  then releases checkout, polls for Get while checking for a closed line, and
+  checks again that the closed line is absent after opening. Other slow-checkout
+  scenarios keep their existing clock; Release is unaffected.
+- 2026-11-15: `HomeShellUITests/testSearchFiltersNamesAndCancelRestoresRows` failed
+  on hosted `9d63d30` (run 43180498415), line 183: the 2 s no-results assertion
+  expected the old conversation-only empty text. Baseline `61612ed` already uses
+  the current global-search text. Keep that text and all filter/clear/cancel
+  assertions, give the transitions 15 s and add messages identifying the failed
+  state. No product copy changes.
+- 2026-11-15: `AssistantsWave3UITests/testRoutineRowsSayTheScheduleAndPauseFromASwipe`
+  failed on hosted `67ca0cc` (run 43052459166), “no swipe Pause”: the 2 s wait
+  after the swipe expired before the hosted simulator exposed the action.
+  Wait up to 15 s for Pause; the schedule, tap and paused-state checks stay.
+- 2026-11-15: `TranscriptUITestSupport.launchTimedChat` now waits 30 s instead of
+  8 s for the initial latest row to paint after the source starts. The reported
+  hosted failure was at line 40; its run SHA was not supplied and could not be
+  recovered from the available failed hosted logs (baseline `61612ed`). The
+  source-start probe and all timed-scenario assertions remain unchanged. Verify
+  this shared boundary through `TranscriptUITests`, including the timed U2 test.
+
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
@@ -593,3 +624,16 @@ retry branch was not exercised by these runs. The AtumChat package suite passed
 and test commands used the shared lock, two jobs, and existing derived data;
 the verification script shut down simulators afterward. These local iOS 27
 results do not lift the iOS 26 hosted quarantine.
+
+## Hosted flake hardening verification (2026-11-15)
+
+Local-only checkpoint from `61612ed`, on `test/hosted-flake-hardening`.
+The single locked batch builds and tests with scratch, derived data and package
+cache on the assigned external volume, two jobs and one iPhone 17 / iOS 27
+simulator. `build-for-testing` passed. The first focused repetition passed the
+live fold, settling checkout, Home search and routine swipe tests. The shared
+30 s initial-paint wait also passed; the unchanged timed U2 test subsequently
+missed its short typing-footer window during a slow accessibility snapshot.
+The remaining repetitions and five full classes are still running. Results
+and logs are retained under `dd-flake-hardening/results` on that volume.
+Final outcomes and outbound-guard evidence will replace this checkpoint note.

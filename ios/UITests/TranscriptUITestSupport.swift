@@ -37,7 +37,7 @@ class TranscriptUITestCase: AtumUITestCase {
         XCTAssertTrue(waitFor(75) { !self.probeLines("clock.txt").isEmpty },
                       "the scripted source did not start")
         let sourceStart = probeLines("clock.txt").last?.time ?? requestedStart
-        XCTAssertTrue(latest(app).waitForExistence(timeout: 8), "the initial timeline did not paint")
+        XCTAssertTrue(latest(app).waitForExistence(timeout: 30), "the initial timeline did not paint")
         return (app, sourceStart.addingTimeInterval(leadIn))
     }
 

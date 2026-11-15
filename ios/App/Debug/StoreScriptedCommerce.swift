@@ -272,7 +272,19 @@ import SwiftUI
     static let slowCheckoutDelay: Duration = .seconds(20)
 
     func appleProducts() async throws -> AppleProductsResponse {
-        if store.mode == .slowCheckout { try await Task.sleep(for: Self.slowCheckoutDelay) }
+        if store.mode == .slowCheckout {
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "-AtumUITestCheckoutReleaseFile"), index + 1 < arguments.count {
+                // The UI test releases this synthetic reply only after it
+                // observes the neutral wait. Launch/query latency cannot
+                // consume the settling phase. Cancellation ends a failed run.
+                while !FileManager.default.fileExists(atPath: arguments[index + 1]) {
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            } else {
+                try await Task.sleep(for: Self.slowCheckoutDelay)
+            }
+        }
         return try decode(["catalogVersion": 1, "environment": "sandbox", "checkoutOpen": store.mode != .closed,
                     "products": Self.packs.keys.sorted().map { id in
                         ["productId": id, "packId": String(id.split(separator: ".").last!),

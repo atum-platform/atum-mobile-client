@@ -169,22 +169,25 @@ final class HomeShellUITests: TranscriptUITestCase {
         field.typeText("lan")
 
         let lan = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Lan'")).firstMatch
-        XCTAssertTrue(lan.waitForExistence(timeout: 2))
+        XCTAssertTrue(lan.waitForExistence(timeout: 15), "Search did not show Lan")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atum'")).firstMatch.exists)
 
         let clear = app.buttons.matching(identifier: "home.search.clear").firstMatch
-        XCTAssertTrue(clear.waitForExistence(timeout: 2), "Search clear did not appear")
+        XCTAssertTrue(clear.waitForExistence(timeout: 15), "Search clear did not appear")
         clear.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atum'")).firstMatch
-            .waitForExistence(timeout: 2))
+            .waitForExistence(timeout: 15), "Clear did not restore Atum")
 
         field.tap()
         field.typeText("zzz")
-        XCTAssertTrue(app.staticTexts["Không tìm thấy kết quả nào"].waitForExistence(timeout: 2))
+        // The hosted 9d63d30 failure expected the old conversation-only
+        // empty copy. Main already checks the current global-search copy.
+        XCTAssertTrue(app.staticTexts["Không tìm thấy kết quả nào"].waitForExistence(timeout: 15),
+                      "Search did not show the no-results state for zzz")
         app.buttons.matching(identifier: "home.search.clear").firstMatch.tap()
 
         app.buttons.matching(identifier: "home.search.cancel").firstMatch.tap()
-        XCTAssertTrue(app.buttons.matching(identifier: "home.create").firstMatch.waitForExistence(timeout: 2),
+        XCTAssertTrue(app.buttons.matching(identifier: "home.create").firstMatch.waitForExistence(timeout: 15),
                       "Cancel did not restore the header controls")
         XCTAssertTrue(field.exists, "the search field stays at the top")
     }

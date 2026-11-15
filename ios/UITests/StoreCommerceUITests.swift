@@ -274,16 +274,21 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     /// the sheet waits neutrally while the coordinator settles (no Get, no
     /// "not available" line, no header top-up), then offers Get.
     @MainActor
-    func testSettlingCheckoutWaitsNeutrallyThenOffersGet() {
-        let app = launchStore("store.checkout-slow")
+    func testSettlingCheckoutWaitsNeutrallyThenOffersGet() throws {
+        let folder = Self.scratch.appendingPathComponent("checkout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let release = folder.appendingPathComponent("release")
+        let app = launchStore("store.checkout-slow", extra: ["-AtumUITestCheckoutReleaseFile", release.path])
         openItem("pet/gigi", in: app)
         let loading = element(app, "store.detail.loading")
-        XCTAssertTrue(loading.waitForExistence(timeout: 5), "a neutral wait while checkout settles")
+        XCTAssertTrue(loading.waitForExistence(timeout: 20), "a neutral wait while checkout settles")
         XCTAssertFalse(element(app, "store.detail.acquire").exists, "no Get before the coordinator answers")
         XCTAssertFalse(element(app, "store.detail.closed").exists, "no closed line on a build that opens")
         XCTAssertTrue(visibleTexts(app).contains { $0.contains("90") }, "the paid price shows while settling")
         keepScreenshot("U-Store-16-sheet-checkout-settling-\(appearanceTag)-vi", of: app)
         assertNoTopUp(app)
+        try Data().write(to: release, options: .atomic)
 
         let acquire = element(app, "store.detail.acquire")
         let deadline = Date().addingTimeInterval(40)
@@ -294,6 +299,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         }
         XCTAssertFalse(sawClosed, "the closed line flashed before Get")
         XCTAssertTrue(acquire.exists, "Get once checkout opens")
+        XCTAssertFalse(element(app, "store.detail.closed").exists, "no closed line once checkout opens")
         XCTAssertEqual(acquire.label, "Nhận · 90 Proton")
         keepScreenshot("U-Store-16-sheet-checkout-open-\(appearanceTag)-vi", of: app)
         element(app, "store.sheet.close").tap()
@@ -328,11 +334,11 @@ final class StoreCommerceUITests: TranscriptUITestCase {
 
     @MainActor
     private func launchStore(_ name: String, contentSize: String = "UICTContentSizeCategoryL",
-                             language: String = "vi", locale: String = "vi_VN") -> XCUIApplication {
+                             language: String = "vi", locale: String = "vi_VN", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [AtumLaunchArguments.noAnimationsFlag, AtumLaunchArguments.scriptedFlag, name,
                                "-AppleLanguages", "(\(language))", "-AppleLocale", locale,
-                               "-UIPreferredContentSizeCategoryName", contentSize]
+                               "-UIPreferredContentSizeCategoryName", contentSize] + extra
         app.launch()
         return app
     }
