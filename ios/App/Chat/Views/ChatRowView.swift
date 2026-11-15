@@ -96,14 +96,13 @@ private struct ChatRowMenu: ViewModifier {
     @Environment(\.chatTheme) private var theme
     @Environment(\.chatActions) private var actions
     @Environment(\.chatOwnUserID) private var ownUserID
-    @Environment(\.chatNonPersonSenders) private var nonPersonSenders
     @Environment(\.messageActions) private var presenter
 
     func body(content: Content) -> some View {
         if let theme, let presenter {
             content.messageMenu(row: row, kind: kind, roomTitle: roomTitle,
                                 ownUserID: ownUserID.isEmpty ? nil : ownUserID,
-                                nonPersonSenders: nonPersonSenders, parsedBody: parsedBody,
+                                parsedBody: parsedBody,
                                 design: theme.design, actions: actions, presenter: presenter)
         } else {
             content

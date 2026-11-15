@@ -1,12 +1,10 @@
 import XCTest
 @testable import AtumChat
 
-/// HC-2: Report person and Report message beside Block (App Review 1.2),
-/// as on the desktop (`roster-model.ts` `reportablePerson`, `app.tsx`
-/// `reportMenu`, `sdk.ts` `reportEvent` / `reportUser`).
+/// HC-2 and bot content reports (App Review 1.2 and 4.7.1): person-report
+/// restrictions remain separate from message-report eligibility.
 final class ReportPolicyTests: XCTestCase {
     private let room = "!room:example.test"
-    private let bots: Set<String> = [F.agent, F.bot]
 
     private func image(_ id: String, from sender: String) -> ChatItem {
         ChatItem(id: id, kind: .image(width: 400, height: 300), sender: sender,
@@ -57,56 +55,81 @@ final class ReportPolicyTests: XCTestCase {
 
     // MARK: Report message
 
-    func testSomeoneElsesMessageInAPeopleChatMayBeReportedButNeverMine() {
-        for kind in [RoomKind.person, .group] {
-            XCTAssertTrue(ReportPolicy.mayReportMessage(F.text("t", from: F.friend), in: kind, nonPersonSenders: bots))
-            XCTAssertTrue(ReportPolicy.mayReportMessage(image("i", from: F.friend), in: kind, nonPersonSenders: bots))
-            XCTAssertFalse(ReportPolicy.mayReportMessage(F.mine("m"), in: kind, nonPersonSenders: bots), "\(kind)")
-            XCTAssertFalse(ReportPolicy.mayReportMessage(F.echo("e"), in: kind, nonPersonSenders: bots))
+    func testPersonAssistantAndAppMessagesMayBeReportedInEveryRoomKind() {
+        for sender in [F.friend, F.agent, F.bot] {
+            let items = [F.text("t", from: sender), image("i", from: sender),
+                         ChatItem(id: "f", kind: .file(name: "file.pdf"), sender: sender,
+                                  eventOrTransactionId: .event("$f"))]
+            for item in items {
+                XCTAssertTrue(ReportPolicy.mayReportMessage(item), "\(sender): \(item.id)")
+                for kind in RoomKind.allCases {
+                    XCTAssertTrue(MessageMenuRules.items(for: item, in: kind).contains(.report),
+                                  "\(sender): \(item.id) in \(kind)")
+                }
+            }
         }
     }
 
-    func testAssistantsAndAppBotsAreNeverReported() {
-        XCTAssertFalse(ReportPolicy.mayReportMessage(F.text("a", from: F.agent), in: .group, nonPersonSenders: bots),
-                       "an assistant in a group")
-        XCTAssertFalse(ReportPolicy.mayReportMessage(F.text("b", from: F.bot), in: .group, nonPersonSenders: bots),
-                       "an app bot in a group")
-        XCTAssertFalse(ReportPolicy.mayReportMessage(F.text("a", from: F.agent), in: .assistant, nonPersonSenders: []),
-                       "an assistant's chat, even unnamed")
-        XCTAssertFalse(ReportPolicy.mayReportMessage(F.text("b", from: F.bot), in: .appBot, nonPersonSenders: []))
+    func testOwnMessagesNeverOfferReportInAnyRoomKind() {
+        let sent = F.echo("s", delivery: .sent(eventID: "$sent"))
+        for item in [F.mine("m"), F.echo("e"), sent] {
+            XCTAssertFalse(ReportPolicy.mayReportMessage(item))
+            XCTAssertNil(ReportPolicy.messageRequest(roomID: room, item: item, reason: nil))
+            for kind in RoomKind.allCases {
+                XCTAssertFalse(MessageMenuRules.items(for: item, in: kind).contains(.report), "\(kind)")
+            }
+        }
     }
 
     func testOnlyAMessageTheServerHasIsReported() {
-        var pending = F.text("p", from: F.friend)
-        pending.delivery = .sending()
-        XCTAssertFalse(ReportPolicy.mayReportMessage(pending, in: .person, nonPersonSenders: []))
-        var local = F.text("l", from: F.friend)
-        local.eventOrTransactionId = .transaction("txn-l")
-        XCTAssertFalse(ReportPolicy.mayReportMessage(local, in: .person, nonPersonSenders: []))
-        let rows: [ChatItem] = [
-            F.notice("n", from: F.friend),
-            ChatItem(id: "x", kind: .placeholder(.redacted), sender: F.friend, eventOrTransactionId: .event("$x")),
-            ChatItem(id: "u", kind: .placeholder(.undecryptable), sender: F.friend, eventOrTransactionId: .event("$u")),
-            ChatItem(id: "s", kind: .roomState, sender: F.friend, eventOrTransactionId: .event("$s"))
-        ]
-        for item in rows {
-            XCTAssertFalse(ReportPolicy.mayReportMessage(item, in: .group, nonPersonSenders: []), item.id)
+        for sender in [F.friend, F.agent, F.bot] {
+            var item = F.text("t", from: sender)
+            for delivery in [ChatDelivery.sending(), .failed(isRecoverable: true)] {
+                item.delivery = delivery
+                assertUnreportable(item)
+            }
+            item.delivery = .remote
+            item.eventOrTransactionId = .transaction("txn-t")
+            assertUnreportable(item)
+            item.eventOrTransactionId = nil
+            assertUnreportable(item)
+            item.eventOrTransactionId = .event("not-a-server-event")
+            assertUnreportable(item)
+        }
+        assertUnreportable(F.text("empty", from: ""))
+    }
+
+    func testNonContentRowsNeverOfferReport() {
+        for sender in [F.friend, F.agent, F.bot] {
+            let rows: [ChatItem] = [
+                F.notice("n", from: sender),
+                ChatItem(id: "x", kind: .placeholder(.redacted), sender: sender, eventOrTransactionId: .event("$x")),
+                ChatItem(id: "u", kind: .placeholder(.undecryptable), sender: sender, eventOrTransactionId: .event("$u")),
+                ChatItem(id: "s", kind: .roomState, sender: sender, eventOrTransactionId: .event("$s"))
+            ]
+            for item in rows { assertUnreportable(item) }
         }
     }
 
-    func testTheMenuOffersReportBeforeDeleteOnlyWhenItKnowsWhoIsAPerson() {
+    private func assertUnreportable(_ item: ChatItem, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertFalse(ReportPolicy.mayReportMessage(item), item.id, file: file, line: line)
+        XCTAssertNil(ReportPolicy.messageRequest(roomID: room, item: item, reason: nil), file: file, line: line)
+        for kind in RoomKind.allCases {
+            XCTAssertFalse(MessageMenuRules.items(for: item, in: kind).contains(.report),
+                           "\(item.id) in \(kind)", file: file, line: line)
+        }
+    }
+
+    func testTheMenuOffersReportForPeopleAssistantAnswersAndAppMessages() {
         let friend = F.text("t", from: F.friend, "Chào")
-        XCTAssertEqual(MessageMenuRules.items(for: friend, in: .group, nonPersonSenders: bots),
+        XCTAssertEqual(MessageMenuRules.items(for: friend, in: .group),
                        [.react, .reply, .copy, .report])
-        XCTAssertEqual(MessageMenuRules.items(for: friend, in: .group), [.react, .reply, .copy],
-                       "a host that cannot tell an assistant from a person offers no Report")
-        XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Ok"), in: .person, nonPersonSenders: bots),
+        XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Ok"), in: .person),
                        [.react, .reply, .copy, .edit, .delete], "never on my own")
-        XCTAssertEqual(MessageMenuRules.items(for: F.text("a", from: F.agent, "Kết quả"), in: .assistant,
-                                              nonPersonSenders: bots),
-                       [.react, .reply, .copy, .selectText])
-        XCTAssertEqual(MessageMenuRules.items(for: F.text("b", from: F.bot, "Chào"), in: .appBot,
-                                              nonPersonSenders: bots), [.copy, .selectText])
+        XCTAssertEqual(MessageMenuRules.items(for: F.text("a", from: F.agent, "Kết quả"), in: .assistant),
+                       [.react, .reply, .copy, .selectText, .report])
+        XCTAssertEqual(MessageMenuRules.items(for: F.text("b", from: F.bot, "Chào"), in: .appBot),
+                       [.copy, .selectText, .report])
     }
 
     // MARK: Requests
@@ -120,16 +143,17 @@ final class ReportPolicyTests: XCTestCase {
 
     func testAMessageReportNamesTheEventAndTheReasonNeverTheText() {
         let item = F.text("t", from: F.friend, "nội dung riêng")
-        XCTAssertEqual(ReportPolicy.messageRequest(roomID: room, item: item, kind: .group, nonPersonSenders: bots,
-                                                   reason: "  spam  "),
+        XCTAssertEqual(ReportPolicy.messageRequest(roomID: room, item: item, reason: "  spam  "),
                        ReportPolicy.Request(roomID: room, target: .event("$t"), reason: "spam"))
-        XCTAssertEqual(ReportPolicy.messageRequest(roomID: room, item: item, kind: .person, nonPersonSenders: bots,
-                                                   reason: nil)?.reason, ReportPolicy.defaultReason,
+        XCTAssertEqual(ReportPolicy.messageRequest(roomID: room, item: item, reason: nil)?.reason, ReportPolicy.defaultReason,
                        "no reason: the desktop's fixed protocol value")
-        XCTAssertNil(ReportPolicy.messageRequest(roomID: room, item: F.mine("m"), kind: .person,
-                                                 nonPersonSenders: bots, reason: nil))
-        XCTAssertNil(ReportPolicy.messageRequest(roomID: room, item: F.text("a", from: F.agent), kind: .group,
-                                                 nonPersonSenders: bots, reason: nil))
+        for sender in [F.agent, F.bot] {
+            let message = F.text("bot-reply", from: sender, "private output")
+            XCTAssertEqual(ReportPolicy.messageRequest(roomID: room, item: message, reason: "  unsafe  "),
+                           ReportPolicy.Request(roomID: room, target: .event("$bot-reply"), reason: "unsafe"))
+            XCTAssertEqual(ReportPolicy.messageRequest(roomID: room, item: message, reason: nil),
+                           ReportPolicy.Request(roomID: room, target: .event("$bot-reply"), reason: ReportPolicy.defaultReason))
+        }
     }
 
     func testAPersonReportNamesTheirLatestMessageHere() {
