@@ -26,6 +26,14 @@ final class MessageMenuRulesTests: XCTestCase {
                        "a bot image can be reported even with nothing to copy")
     }
 
+    func testAppBotNoticesShareTheTextMenuAndOtherNoticesKeepNoMenu() {
+        let notice = F.notice("n", from: F.bot)
+        XCTAssertEqual(MessageMenuRules.items(for: notice, in: .appBot), [.copy, .selectText, .report])
+        for kind in [RoomKind.assistant, .person, .group] {
+            XCTAssertEqual(MessageMenuRules.items(for: notice, in: kind), [])
+        }
+    }
+
     func testPeopleAndGroupsOfferEditAndDeleteOnMineAndNoSelect() {
         for kind in [RoomKind.person, .group] {
             XCTAssertEqual(MessageMenuRules.items(for: F.text("t", from: F.friend, "Chào"), in: kind),
@@ -39,7 +47,6 @@ final class MessageMenuRulesTests: XCTestCase {
 
     func testRowsWithNothingToActOnHaveNoMenu() {
         let rows: [ChatItem] = [
-            F.notice("n", from: F.agent),
             ChatItem(id: "x", kind: .placeholder(.redacted), sender: F.friend, eventOrTransactionId: .event("$x")),
             ChatItem(id: "u", kind: .placeholder(.undecryptable), sender: F.friend, eventOrTransactionId: .event("$u")),
             ChatItem(id: "s", kind: .roomState, sender: F.friend, eventOrTransactionId: .event("$s")),

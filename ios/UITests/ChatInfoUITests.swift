@@ -281,15 +281,16 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(pin.exists)
         XCTAssertTrue(mute.exists)
         XCTAssertEqual(pin.value as? String, "0")
-        // Each switch answers at once in the app; the 5 s covers a busy shared
-        // runner (a 24 s accessibility stall was seen on 2026-11-06).
+        // Each switch answers at once in the app; the 15 s covers a busy shared
+        // runner (a 24 s accessibility stall was seen on 2026-11-06; on 2026-11-15
+        // the pin read "1" just after a 5 s wait expired on a hosted shard).
         pin.switches.firstMatch.exists ? pin.switches.firstMatch.tap() : pin.tap()
         XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "1"), object: pin)], timeout: 5) == .completed,
+            predicate: NSPredicate(format: "value == %@", "1"), object: pin)], timeout: 15) == .completed,
                       "pin is \(String(describing: pin.value)): \(app.debugDescription.prefix(12_000))")
         mute.switches.firstMatch.exists ? mute.switches.firstMatch.tap() : mute.tap()
         XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "1"), object: mute)], timeout: 5) == .completed,
+            predicate: NSPredicate(format: "value == %@", "1"), object: mute)], timeout: 15) == .completed,
                       "mute is \(String(describing: mute.value)): \(app.debugDescription.prefix(12_000))")
 
         keepScreenshot("s2-chat-info-group-light-vi", of: app)

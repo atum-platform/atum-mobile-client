@@ -4,7 +4,8 @@ import AtumNativeAPI
 import SwiftUI
 
 /// An `m.notice` (B17): one quiet, centred, muted line showing the latest
-/// edit, with no action. A catalog bot's two-line notice ("vi line, newline,
+/// edit. App-bot room notices share the message menu; other notices have
+/// no action. A catalog bot's two-line notice ("vi line, newline,
 /// en line") shows the line in the app's language (§4.2 item 3). S5 adds the
 /// bot's buttons here (WS7). Superseded working lines never reach this view:
 /// the projection hides them.

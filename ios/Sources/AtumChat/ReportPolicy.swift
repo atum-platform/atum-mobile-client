@@ -37,18 +37,22 @@ public enum ReportPolicy {
     }
 
     /// Whether the long-press menu offers Report on this row: a message,
-    /// image or file from another sender, with its server event. Room and
-    /// sender kind do not restrict content reporting; own messages never qualify.
-    public static func mayReportMessage(_ item: ChatItem) -> Bool {
+    /// image or file (also a notice in an app-bot room) from another sender,
+    /// with its server event. Text/media reports do not depend on room or
+    /// sender kind; own messages never qualify.
+    public static func mayReportMessage(_ item: ChatItem, in kind: RoomKind? = nil) -> Bool {
         guard !item.isOwn, !item.sender.isEmpty else { return false }
-        return reportableEventID(item) != nil
+        return reportableEventID(item, in: kind) != nil
     }
 
     /// The event a report of this row names: a message, image or file the
-    /// server has (an event ID, never a local echo or a failed send).
-    public static func reportableEventID(_ item: ChatItem) -> String? {
+    /// server has, including app-bot room notices (an event ID, never a
+    /// local echo or a failed send). Other notices retain B17's no-action rule.
+    public static func reportableEventID(_ item: ChatItem, in kind: RoomKind? = nil) -> String? {
+        guard !item.isLocalEcho else { return nil }
         switch item.kind {
         case .message, .image, .file: break
+        case .notice where kind == .appBot: break
         default: return nil
         }
         switch item.delivery {
@@ -93,9 +97,9 @@ public enum ReportPolicy {
     }
 
     /// Report one message, if the menu may offer it.
-    public static func messageRequest(roomID: String, item: ChatItem, reason: String?) -> Request? {
-        guard mayReportMessage(item),
-              let eventID = reportableEventID(item) else { return nil }
+    public static func messageRequest(roomID: String, item: ChatItem, reason: String?, in kind: RoomKind? = nil) -> Request? {
+        guard mayReportMessage(item, in: kind),
+              let eventID = reportableEventID(item, in: kind) else { return nil }
         return Request(roomID: roomID, target: .event(eventID), reason: Self.reason(reason ?? "") ?? defaultReason)
     }
 
