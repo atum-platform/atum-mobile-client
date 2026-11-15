@@ -51,6 +51,9 @@ public protocol ChatTimelineSource: AnyObject, Sendable {
     /// `Timeline.paginateBackwards(numEvents:)`: true at the start of the
     /// room (B5).
     func paginateBackwards(numEvents: UInt16) async throws -> Bool
+    /// Enqueue a marker after outputs already queued by the source. False
+    /// means the stream is closed or the source has no publication pipeline.
+    func markOutputBoundary(_ id: UUID) async -> Bool
     /// B13 and B15.
     func sendReceipt(_ receipt: ChatReceipt) async throws
     /// `Timeline.fetchDetailsForEvent(eventId:)` for a reply whose original
@@ -63,6 +66,9 @@ public enum ChatTimelineMediaError: Error, Equatable, Sendable {
 }
 
 public extension ChatTimelineSource {
+    /// Inert command-only test sources have no publications to flush.
+    func markOutputBoundary(_ id: UUID) async -> Bool { false }
+
     func send(text: String, replyTo eventID: String?, mentions _: OutgoingMentions) async throws {
         try await send(text: text, replyTo: eventID)
     }
@@ -84,6 +90,8 @@ public enum ChatTimelineOutput: Equatable, Sendable {
     case typing(userIDs: [String])
     /// SDK `PaginationStatus` (B5).
     case pagination(PaginationState)
+    /// A source-ordered publication boundary, acknowledged by the consumer.
+    case outputBoundary(UUID)
 }
 
 /// One SDK `[TimelineDiff]` batch, mapped.

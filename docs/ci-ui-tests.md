@@ -121,6 +121,7 @@ per run on 2026-11-11 with six lanes active).
   `chat.bubbles-live` now grows every 8 s (Debug-only), and the hittable check waits up to
   5 s for the settled layout instead of a fixed pause. The waits that follow the stream
   scale with it: growth to long 20 s (lands at 9.5 s), typing's end 30 s (at 25.5 s).
+
 - **Not a required check** yet. Make it required once it has been green on
   `main` for a few runs.
 - No secrets, signing or uploads beyond failure result bundles. Actions are pinned
@@ -325,3 +326,260 @@ The final public-boundary check is
 `python3 scripts/public_guard.py --base 161ada7 --head HEAD`; its output is
 retained as `quarantine/public-guard.log` alongside the result bundles. Work is
 committed locally only; no push, pull request, hosted CI or deployment was run.
+
+
+## In-chat search page-publication race (2026-11-14)
+
+The terminal “No results. Searched 70 of 2200” label is not a walk waiting
+for row layout. `2200` is the product search bound; `chat.search` contains
+140 messages, configured for 40 cached events and older pages of 20.
+Projection hides transient events, so the observed searched counts are
+35 → 52 → 70 → 89 when the match is found on page 3.
+The Debug gated-source regression reproduces exactly `complete`, one page,
+70 searched, bound 2200 against the unchanged app while the matching page is
+still withheld. Publishing it later cannot restart that completed walk. `rowsChanged` can
+still update the match count, but does not update terminal walk progress or
+request focus, explaining late “Result 1 of 1. Searched …” labels too.
+
+`paginateBackwards` returns independently of the ordered source-output →
+mapper → projector → main-actor publication pipeline. The old search loader
+released the core's page claim at the call's return, then waited at most one
+second for **any row-count change**. Adding/removing the loading row could
+satisfy that condition, and a slow publication could outlast it. Search could
+consume its page budget or see timeline-start before searching the page's
+rows. Cancelling a query also cancelled those sleeps; after four seconds
+waiting for a claimed slot, the loader could issue a page without owning it.
+
+`TimelineController` normally keeps page completion behind the ordered
+pagination idle publication, after the preceding batch and loading-row
+removal reach the store. This applies to scroll/background pages too. The
+review follow-up below adds an explicit queued-output flush and a five-second
+fallback for absent/deduplicated status callbacks. Closing the controller, a
+broken projection, or source-stream termination also releases the wait.
+`LiveConversationStore` owns and shares each search-page task through that
+barrier; a new query joins the existing page, and detach/close cancels its
+owner. Slot acquisition no longer falls through after a timed polling limit.
+No transcript view structure, layout, search bound, wait, or assertion changes.
+
+Regression coverage lives in `HomeChatsWave3StateTests`: a controllable source
+returns before publishing an older match, holds the output beyond the former
+one-second fallback, and releases it explicitly. The unchanged app fails by
+completing at 70; the fixed app must remain pending and then find row 71.
+Additional tests cover query replacement during an unpublished page and
+teardown. Search UI tests now pass `-AtumScriptedSearchPageDelay 1.2`; the
+Debug probe delays older batches while retaining output order, exercising the
+slow-runner interleaving at AX-XXXL. Walk phase, page count and searched count
+join placement events in `search-placement.txt`, without logging query text.
+
+The audit test was absent from `QUARANTINE` on the original main baseline
+(`ba594e1`). PR #54 (`feat/handles-ui`) introduced its quarantine line; it is
+present again on PR #56's `b6ac948` baseline. The new iOS 26.2 input-delivery
+investigation below retains that line pending verification on that runtime.
+
+Verification on iPhone 17 / iOS 27, one simulator under the heavy-build
+lock, with two build jobs and a shared derived-data directory:
+
+- Before the fix: the gated publication test failed at `complete`, 70 searched
+  (three assertions); the query-replacement coverage passed.
+- After the fix: all 1,631 Swift package tests and 12 focused app state tests
+  (`HomeChatsWave3StateTests` and `HomeChatsWave2StateTests`) passed.
+- `testSearchBarAtAccessibilitySizePassesTheAudit`: 5 consecutive delayed-page
+  runs passed, zero skips. All five probes recorded 35 → 52 → 70 → 89, found
+  on page 3.
+- The complete `HomeChatsWave3UITests` class: 7/7 passed, zero skips, including
+  another AX-XXXL audit run. The delayed no-match walk completed all five
+  older pages at 128 projected event-content rows.
+- Existing search waits and assertions are unchanged. The simulator was shut
+  down before the locked batch released. No hosted CI, push or deployment.
+
+
+### Review follow-up: missing pagination statuses
+
+Review of `d6edefb` identified that SDK status notifications can be absent or
+deduplicated, so idle cannot be an unconditional completion requirement.
+Tracking is installed on the controller's main actor before the SDK call;
+the consumer cannot process a status from that call before tracking exists.
+After the call returns, an output-boundary marker drains already-queued
+publications. The SDK source inserts this marker into its **input** stream,
+behind callbacks still awaiting mapping; the scripted source and delayed
+probe preserve the same ordering. This avoids using `Task.yield`, a loading
+row, or a guessed delay as proof that queued work was published.
+
+After that flush, a call with no observed `.paginating` returns its SDK
+result immediately. A call which observed `.paginating` waits for published
+idle, with a five-second bound covering both the flush and idle wait. Timeout
+returns the SDK result and writes `search.page.timeout` to the Debug
+`search-placement.txt` probe. It also clears a remaining loading status and
+row: otherwise the core's next page could remain blocked even after the
+controller returned. Ended output streams release the wait too.
+
+Both controller callers were checked: the search loader and the common
+scroll/background effect runner. The core already claims one page at a
+time; scrolling is held while search owns that claim, and search waits while
+scrolling/background work owns it. Core tests cover both directions. An
+unexpected concurrent controller call now joins the current request and
+receives its result, rather than throwing a cancellation error for a scroll
+load. Shared-collection paging calls the SDK directly and is unchanged.
+
+`TimelinePaginationPublicationTests` uses controllable sources for no status
+(with queued rows), immediate timeline start, a status consumed before SDK
+return, statuses queued after return, missing idle, ended outputs, and
+concurrent search/scroll callers. The missing-idle test injects a 100 ms
+bound, checks completion at that bound and a cleared loading status, and
+successfully requests a second page. Production defaults to five seconds.
+The original 70-row gated regression remains unchanged.
+
+Follow-up verification (same heavy-build lock, two jobs, `dd-search-stall`,
+one iPhone 17 / iOS 27 simulator):
+
+- All 1,632 package tests passed, including both core page-ownership directions.
+- All 19 focused app tests passed, including the original stall regression and
+  seven controller cases. No-status and timeline-start cases returned in
+  1 ms; the two 100 ms missing-idle requests completed in 206 ms together.
+- The AX-XXXL audit passed 5 consecutive delayed-page runs, zero skips.
+- The full `HomeChatsWave3UITests` class passed 7/7, zero skips. All eight
+  search probes in this rerun used normal completion, with zero timeout
+  fallbacks. Existing waits and assertions remain unchanged.
+- The simulator was shut down inside the locked script before it exited.
+  The follow-up is committed locally only; no push, PR, hosted CI or deploy.
+
+
+## PR #56 run 2: completed walk for a malformed query (2026-11-14)
+
+The supplied `pr56-run2-shard3.xcresult` identifies iPhone 16e, iOS 26.2,
+OS build `23C54`. Its failed AX-XXXL audit does **not** show a walk stopping
+short. `xcresulttool get test-results activities`, exported attachments and
+exported diagnostics establish the following:
+
+- XCTest requested `da lat` at 15:11:35.801 UTC. The synthesized-event binary
+  plist also contains `string = da lat` and `typingSpeed = 60`.
+- The screen recording shows `d` while typing, then `da at`; the missing `l`
+  stays missing. The failed app's AX snapshots report `chat.search.field`
+  value `da at` from 15:11:37.666 through the end of the test. There is no
+  captured field value `da lat` for that app process.
+- The AX count changes to Searching 35 at 15:11:39.198, 52 at 15:11:41.525,
+  70 at 15:11:45.157, 89 at 15:11:49.788, and 108 at 15:11:54.962. At
+  15:12:01.740 it says **No results. Searched 128 of 2200**. The assertion
+  fails at 15:12:08.930, over seven seconds after that terminal result.
+- 128 is the full projected event-content count of this five-page fixture;
+  2200 is the search bound. The deterministic scripted fixture test confirms
+  that `da at` completes at 128 with no match, whereas `da lat` finds one
+  match on page 3 at 89. More waiting cannot make the wrong query match.
+- The subsequent three-pages-back test on the same hosted device actually
+  receives `da lat` and reports Result 1 of 1 / Searched 89 at 15:12:40.555,
+  about 13 seconds after its typing activity started.
+
+The bundle has the recording and synthesized-event attachments, plus AX
+stdout in exported diagnostics. It has **no** `search-placement.txt` probe
+attachment/file or `search.walk` / `search.page.timeout` lines in those logs.
+Therefore this artifact cannot establish whether any individual page hit
+its five-second fallback. Some progress intervals are several seconds long,
+but the completed full-fixture walk and malformed field value explain this
+failure independently. It is not evidence for increasing the search wait.
+
+No production app change is justified by this artifact. The binding forwards
+received text to `ChatSearchSession.setQuery`, which stores it unchanged;
+only Return handling strips newlines. The missing character could originate
+in event synthesis or the UIKit/SwiftUI text-input/update interleaving. The
+available traces do not distinguish those causes, and this investigation
+does not claim that fast real-user typing is unaffected.
+
+A local baseline run on iPhone 16e / iOS 27 reproduced a separate input
+setup failure: iteration 2 could not synthesize typing because neither the
+field nor a descendant had keyboard focus. The helper had accepted any
+visible keyboard as proof of field focus. Setup now taps the search field
+explicitly, then asserts keyboard presence within the existing five-second
+window. This is a test action, not a product focus or layout change; it does
+not establish why the hosted run lost only `l`.
+
+Test changes preserve bulk `typeText`, the page delay, all existing wait
+budgets, result assertions, and the quarantine. Each search test now asserts
+the field's exact value immediately after typing. An input failure fails there,
+with its actual value, rather than being mislabeled as pagination 30 seconds
+later. Teardown attaches `search-placement.txt` with keep-always lifetime,
+including the intended synthetic query (or an explicit missing-file note).
+The new deterministic package test compares both delivered strings through
+the real scripted player, projector, index and bounded history search.
+
+The honest next step on iOS 26.2 is to compare bulk injection with paced
+single-character typing and exact prefix readback, with the probe attached.
+For the bar's accessibility audit, confirmed input can be a setup
+precondition; retain a separate bulk-typing check to keep character loss
+visible. Do not silently retry/repair the string, accept `da at`, extend the
+search wait, or restore the quarantined test based only on iOS 27 results.
+
+Local runtime inventory contains **only iOS 27.0 (24A434)**. No iOS 26 runtime
+was downloaded or installed. The local batch uses the installed iPhone 16e
+device type (390 × 844 points) with iOS 27, so it matches device size but
+cannot reproduce or clear the iOS 26.2 input-delivery issue.
+
+Verification: pending the locked local batch in `dd-search-stall`.
+
+### Search walk follow-up (2026-11-15)
+
+The controller unnecessarily required an output boundary after a published
+loading-to-idle transition. The ordered consumer has already published the page
+rows at that point; the boundary is needed only when pagination emits no status.
+The preserved `testPublishedIdleCompletesWithoutAnOutputBoundary` regression
+checks this path. The candidate fix accepts that transition independently.
+
+Hosted run 43610604978, shard 3, was downloaded and inspected with xcresulttool.
+The three-pages-back test failed after 46.8 s, still searching 70 of 2200 rows;
+its count reads were several seconds apart. This confirms incomplete progress,
+but does not establish that the redundant boundary wait caused that run.
+All three chat search walk tests remain quarantined under atum-mobile#50.
+Local AtumChat verification passed all 730 tests under the shared lock. The
+state/UI verification initially failed before building because device lookup
+required the exact name `iPhone 16e` (the device is `Atum iPhone 16e`). The
+corrected run queued behind other tasks, but the build volume subsequently
+became unavailable and the queued processes disappeared. State/controller
+regressions and the three UI repetitions remain unverified. Only iOS 27.0 was
+installed; the intended fallback was iPhone 16e on iOS 27.0. Do not lift quarantine
+on this evidence.
+
+The coordinator subsequently verified the prior head on iPhone 17e / iOS 27:
+399 app tests ran with one failure, the preserved joined-search regression;
+two complete HomeChatsWave3 UI runs passed, and the third failed query-entry
+checks (`qqz` / `da at` instead of `qqzzxx` / `da lat`). The shared-page bug
+is confirmed: the original caller cleared the handle after awaiting it, allowing
+a joined walk to resume first and consume its 40-page budget on the same
+completed task. Cleanup now runs inside the shared task before any waiter
+receives its result. The regression assertions are unchanged. Query entry now
+uses character-by-character typing with three bounded, logged attempts and
+requires the field value to match before testing search behavior. Follow-up verification used iPhone 17e / iOS 27.0, the shared lock,
+two build jobs, and the existing derived data. Build passed; all 399 app tests
+passed, including the unchanged joined-page regression and published-idle
+regression. All three search tests passed in UI runs 1 and 2 (6 executions,
+0 search failures; no query retries were logged). The full classes had 1 and
+2 non-search failures respectively: a stalled panel launch recovered by
+terminating the app in run 1, and missing Home long-press targets in run 2.
+Run 3 had the same two Home failures and stalled during panel launch. After
+runner recovery, it stalled again before query entry in the accessibility search
+launch; that run was stopped. Thus a clean third search repetition remains
+unverified. Logs and process samples were retained in the external verification
+directory. Quarantine remains unchanged pending reliable hosted verification.
+
+### Review follow-up
+
+Search slot acquisition now has a monotonic four-second deadline and fails when
+attachment or paging never makes the slot available; later queries receive a
+new bounded attempt. The controller also clears its coalesced request inside
+the shared task before releasing waiters. The joined-walk regression documents
+its most-recent-waiter scheduling assumption. At the start of history, search
+waits 300 ms and rechecks matches because SDK status and diffs have independent
+listeners; this bounds the grace period rather than guaranteeing arbitrarily
+late diffs. A regression delivers the final match after idle. UI query retries
+select all before clearing, independent of cursor position. Scripted probe stop
+now cancels its relay and finishes its stream, including cancellation exits.
+The unrelated checkout delay and corresponding test waits are restored to main;
+no chat search test needs the store change. Quarantine remains unchanged.
+
+Review follow-up verification passed on iPhone 17e / iOS 27.0: build succeeded,
+400 AtumMobileTests passed (including the unreleased-slot deadline regression),
+and HomeChatsWave3UITests passed 7/7 in each of three runs (21/21 overall,
+9/9 search walk executions). No query retries were logged, so the select-all
+retry branch was not exercised by these runs. The AtumChat package suite passed
+731/731, including the new idle-before-diffs final-page regression. All build
+and test commands used the shared lock, two jobs, and existing derived data;
+the verification script shut down simulators afterward. These local iOS 27
+results do not lift the iOS 26 hosted quarantine.

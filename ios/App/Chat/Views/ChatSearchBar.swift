@@ -76,6 +76,10 @@ final class ChatSearchSession {
                 progress: { [weak self] value in
                     guard !Task.isCancelled else { return }
                     self?.progress = value
+                    #if DEBUG
+                    UITestProbe.append("search.walk phase=\(value.phase) pages=\(value.pages) searched=\(value.searched)",
+                                       to: "search-placement.txt")
+                    #endif
                 })
             guard !Task.isCancelled, let self, self.query == value else { return }
             self.progress = result

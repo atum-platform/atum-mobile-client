@@ -1,6 +1,7 @@
 @testable import AtumMobile
 import XCTest
 import AtumNativeAPI
+import AtumChat
 
 /// HC-6: the chat header's line under the name (desktop
 /// `data-matrix-agent-title` and the group header topic).
@@ -36,6 +37,113 @@ final class HomeChatsWave3StateTests: XCTestCase {
         XCTAssertEqual(session.query, "")
         XCTAssertTrue(session.highlights.isEmpty)
     }
+
+    /// The page call returns before its ordered diff/status stream is consumed.
+    /// A loading row changes snapshot.rows.count, but is not the older page.
+    func testSearchWaitsForThePagePublicationBeforeDeclaringNoResults() async throws {
+        let source = GatedSearchSource()
+        let store = searchStore()
+        defer { store.close() }
+        await store.attach(source: source)
+        for _ in 0..<200 where store.snapshot.rows.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(ChatHistorySearch.searched(store.snapshot.rows), 70)
+        var result: ChatHistorySearch.Progress?
+        let walk = Task {
+            result = await ChatHistorySearch.run(query: "da lat", rows: { store.snapshot.rows },
+                                                loadPage: { await store.loadOlderPageForSearch() })
+        }
+        await source.waitForRequest()
+        // Exceeds the old 1 s row-count fallback. Release is explicitly gated,
+        // so runner speed cannot make the real page win this race.
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertNil(result, "must not finish at 70 while the page's rows are still withheld")
+        await source.releasePage()
+        await walk.value
+        XCTAssertEqual(result?.phase, .found)
+        XCTAssertEqual(result?.searched, 71)
+    }
+
+    func testReplacingAQueryDoesNotCancelOrOverlapItsUnpublishedPage() async throws {
+        let source = GatedSearchSource()
+        let store = searchStore()
+        let session = ChatSearchSession()
+        defer { session.close(); store.close() }
+        await store.attach(source: source)
+        for _ in 0..<200 where store.snapshot.rows.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        session.open()
+        session.setQuery("missing", store: store)
+        await source.waitForRequest()
+        session.setQuery("da lat", store: store)
+        try await Task.sleep(for: .milliseconds(1200))
+        let calls = await source.calls
+        XCTAssertEqual(calls, 1, "the new query must join the page, not issue another request")
+        await source.releasePage()
+        for _ in 0..<200 where session.progress?.phase != .found { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(session.progress?.phase, .found)
+        XCTAssertEqual(session.matches.first?.rowID, "older-match")
+        XCTAssertEqual(session.focus?.rowID, "older-match")
+    }
+
+    func testDetachingReleasesAnUnpublishedSearchPage() async throws {
+        let source = GatedSearchSource()
+        let store = searchStore()
+        defer { store.close() }
+        await store.attach(source: source)
+        for _ in 0..<200 where store.snapshot.rows.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        let page = Task { await store.loadOlderPageForSearch() }
+        await source.waitForRequest()
+        store.detach()
+        let result = await page.value
+        XCTAssertEqual(result, .failed)
+    }
+
+    func testUnreleasedSearchSlotFailsWithinTheDeadline() async {
+        let store = searchStore() // Detached: the page slot can never be claimed.
+        defer { store.close() }
+        let started = ContinuousClock.now
+        let result = await store.loadOlderPageForSearch()
+        XCTAssertEqual(result, .failed)
+        XCTAssertLessThan(started.duration(to: .now), .seconds(6))
+        // A later query must get its own bounded attempt, not a stuck handle.
+        let retry = await store.loadOlderPageForSearch()
+        XCTAssertEqual(retry, .failed)
+    }
+
+    func testAJoinedSearchWalkAdvancesBeyondTheSharedPage() async throws {
+        let source = GatedSearchSource(needsTwoPages: true)
+        let store = searchStore()
+        defer { store.close() }
+        await store.attach(source: source)
+        for _ in 0..<200 where store.snapshot.rows.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        // Keep the original caller behind a newer interactive search. The
+        // shared operation must release its handle before either resumes.
+        // This reproducer relies on the runtime resuming the most recent
+        // waiter first; the priorities encourage that ordering.
+        let original = Task(priority: .background) { await store.loadOlderPageForSearch() }
+        await source.waitForRequest()
+        let (entered, signal) = AsyncStream.makeStream(of: Void.self)
+        let joined = Task(priority: .userInitiated) {
+            signal.yield(()); signal.finish()
+            return await ChatHistorySearch.run(query: "da lat", rows: { store.snapshot.rows },
+                                                loadPage: { await store.loadOlderPageForSearch() })
+        }
+        for await _ in entered { break }
+        await source.releasePage()
+        let result = await joined.value
+        _ = await original.value
+        let calls = await source.calls
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2)
+        XCTAssertEqual(calls, 2, "a completed shared page must not consume the remaining search budget")
+    }
+
+    private func searchStore() -> LiveConversationStore {
+        LiveConversationStore(info: ConversationRoomInfo(
+            roomID: "!search:example.test", title: "Search",
+            context: RoomContext(kind: .person, ownUserID: "@me:example.test"),
+            knownNames: [:], catalogBotUserIDs: [], languageCode: "en"))
+    }
+
 }
 
 @MainActor
@@ -112,4 +220,269 @@ final class PeopleHandleSearchTests: XCTestCase {
             directory: { _ in XCTFail("short query"); return [] })
         XCTAssertEqual(result, [])
     }
+}
+
+
+/// Delivers SDK outputs in order, but only publishes the older page when the
+/// test releases it. The call's Bool is deliberately ahead of the stream.
+private actor GatedSearchSource: ChatTimelineSource {
+    nonisolated let outputs: AsyncStream<ChatTimelineOutput>
+    private let continuation: AsyncStream<ChatTimelineOutput>.Continuation
+    private var requested: CheckedContinuation<Void, Never>?
+    private(set) var calls = 0
+    private let needsTwoPages: Bool
+
+    init(needsTwoPages: Bool = false) {
+        self.needsTwoPages = needsTwoPages
+        (outputs, continuation) = AsyncStream.makeStream(of: ChatTimelineOutput.self)
+    }
+    func start() {
+        let items = (0..<70).map { ChatItem(id: "cached-\($0)", kind: .message,
+                                          sender: "@me:example.test", isOwn: true, body: "cached words") }
+        continuation.yield(.batch(ChatTimelineBatch(diffs: [.reset(items)])))
+    }
+    func stop() { continuation.finish() }
+    func markOutputBoundary(_ id: UUID) -> Bool {
+        continuation.yield(.outputBoundary(id))
+        return true
+    }
+    func paginateBackwards(numEvents: UInt16) -> Bool {
+        calls += 1
+        continuation.yield(.pagination(.paginating))
+        if needsTwoPages, calls == 2 {
+            emitPage(id: "older-match", body: "Đi Đà Lạt", hitStart: true)
+            return true
+        }
+        requested?.resume(); requested = nil
+        return !needsTwoPages
+    }
+    func waitForRequest() async {
+        if calls > 0 { return }
+        await withCheckedContinuation { requested = $0 }
+    }
+    func releasePage() {
+        emitPage(id: needsTwoPages ? "first-page" : "older-match",
+                 body: needsTwoPages ? "still no match" : "Đi Đà Lạt", hitStart: !needsTwoPages)
+    }
+    private func emitPage(id: String, body: String, hitStart: Bool) {
+        let item = ChatItem(id: id, kind: .message, sender: "@me:example.test", isOwn: true, body: body)
+        continuation.yield(.batch(ChatTimelineBatch(diffs: [.pushFront(item)])))
+        continuation.yield(.pagination(.idle(hitTimelineStart: hitStart)))
+    }
+    func send(text: String, replyTo eventID: String?) {}
+    func edit(_ item: ChatEventRef, text: String) {}
+    func redact(_ item: ChatEventRef) {}
+    func toggleReaction(_ item: ChatEventRef, key: String) {}
+    func isSendQueueEnabled() -> Bool { true }
+    func enableSendQueue() {}
+    func retrySend(_ item: ChatEventRef) {}
+    func abortSend(_ item: ChatEventRef) {}
+    func sendReceipt(_ receipt: ChatReceipt) {}
+    func fetchReplyDetails(eventID: String) {}
+}
+
+
+@MainActor
+final class TimelinePaginationPublicationTests: XCTestCase {
+    private func controller(_ source: PaginationStatusSource, timeout: Duration = .seconds(5)) -> TimelineController {
+        TimelineController(source: source, roomID: "!pages:example.test",
+                           context: RoomContext(kind: .person, ownUserID: "@me:example.test"),
+                           generation: 1, clock: { Date() }, pagePublicationTimeout: timeout)
+    }
+
+    func testNoStatusReturnsPromptlyAndFlushesQueuedRows() async throws {
+        let source = PaginationStatusSource(.noStatus)
+        let controller = controller(source)
+        defer { controller.close() }
+        var ids = [String]()
+        controller.onPublication = { ids = $0.projected.snapshot.rows.map(\.id) }
+        await controller.start()
+        let started = ContinuousClock.now
+        let hitStart = try await controller.paginateBackwards(events: 50)
+        XCTAssertFalse(hitStart)
+        XCTAssertEqual(ids, ["page-match"], "the output marker must flush the queued batch without status events")
+        XCTAssertLessThan(started.duration(to: .now), .seconds(2))
+    }
+
+    func testPublishedIdleCompletesWithoutAnOutputBoundary() async throws {
+        let source = PaginationStatusSource(.idleWithoutBoundary)
+        let controller = controller(source, timeout: .seconds(2))
+        defer { controller.close() }
+        var ids = [String]()
+        controller.onPublication = { ids = $0.projected.snapshot.rows.map(\.id) }
+        await controller.start()
+        let started = ContinuousClock.now
+        let hitStart = try await controller.paginateBackwards(events: 50)
+        XCTAssertFalse(hitStart)
+        XCTAssertEqual(ids, ["page-match"])
+        XCTAssertLessThan(started.duration(to: .now), .seconds(1),
+                          "published loading-to-idle already proves the page arrived; do not spend the timeout on a redundant marker")
+    }
+
+    func testAlreadyAtStartWithoutAStatusReturnsPromptly() async throws {
+        let source = PaginationStatusSource(.atStart)
+        let controller = controller(source)
+        defer { controller.close() }
+        await controller.start()
+        let started = ContinuousClock.now
+        let hitStart = try await controller.paginateBackwards(events: 50)
+        XCTAssertTrue(hitStart)
+        XCTAssertLessThan(started.duration(to: .now), .seconds(2))
+    }
+
+    func testStatusConsumedBeforeSDKReturnIsNotLost() async throws {
+        let source = PaginationStatusSource(.beforeReturn)
+        let controller = controller(source)
+        defer { controller.close() }
+        var states = [PaginationState]()
+        var ids = [String]()
+        controller.onPaginationStatus = { state in
+            states.append(state)
+            if state == .paginating { Task { await source.allowReturn() } }
+        }
+        controller.onPublication = { ids = $0.projected.snapshot.rows.map(\.id) }
+        await controller.start()
+        let hitStart = try await controller.paginateBackwards(events: 50)
+        XCTAssertFalse(hitStart)
+        XCTAssertEqual(states, [.paginating, .idle(hitTimelineStart: false)])
+        XCTAssertEqual(ids, ["page-match"])
+    }
+
+    func testStatusQueuedAfterSDKReturnIsFlushedBeforeDecidingToWait() async throws {
+        let source = PaginationStatusSource(.afterReturn)
+        let controller = controller(source)
+        defer { controller.close() }
+        var states = [PaginationState]()
+        var ids = [String]()
+        controller.onPaginationStatus = { states.append($0) }
+        controller.onPublication = { ids = $0.projected.snapshot.rows.map(\.id) }
+        await controller.start()
+        let hitStart = try await controller.paginateBackwards(events: 50)
+        XCTAssertFalse(hitStart)
+        XCTAssertEqual(states, [.paginating, .idle(hitTimelineStart: false)])
+        XCTAssertEqual(ids, ["page-match"])
+    }
+
+    func testPaginatingWithoutIdleReturnsAtTheBoundAndAllowsAnotherPage() async throws {
+        let source = PaginationStatusSource(.missingIdle)
+        let controller = controller(source, timeout: .milliseconds(100))
+        defer { controller.close() }
+        var states = [PaginationState]()
+        controller.onPaginationStatus = { states.append($0) }
+        await controller.start()
+        let started = ContinuousClock.now
+        let first = try await controller.paginateBackwards(events: 50)
+        XCTAssertFalse(first)
+        XCTAssertGreaterThanOrEqual(started.duration(to: .now), .milliseconds(100))
+        XCTAssertLessThan(started.duration(to: .now), .seconds(2))
+        XCTAssertEqual(states.last, .idle(hitTimelineStart: false), "timeout must also release the core's loading status")
+        let second = try await controller.paginateBackwards(events: 20)
+        XCTAssertFalse(second)
+        let calls = await source.calls
+        XCTAssertEqual(calls, 2, "the shared request must be cleared after a timeout")
+    }
+
+    func testEndedSubscriptionDoesNotKeepThePagePending() async throws {
+        let source = PaginationStatusSource(.ended)
+        let controller = controller(source)
+        defer { controller.close() }
+        await controller.start()
+        let started = ContinuousClock.now
+        let hitStart = try await controller.paginateBackwards(events: 20)
+        XCTAssertFalse(hitStart)
+        XCTAssertLessThan(started.duration(to: .now), .seconds(2))
+    }
+
+    func testConcurrentScrollAndSearchCallersJoinOneRequest() async throws {
+        let source = PaginationStatusSource(.heldIdle)
+        let controller = controller(source)
+        defer { controller.close() }
+        await controller.start()
+        let search = Task { try await controller.paginateBackwards(events: 50) }
+        await source.waitForBoundary()
+        let (started, signal) = AsyncStream.makeStream(of: Void.self)
+        let scroll = Task {
+            signal.yield(()); signal.finish()
+            return try await controller.paginateBackwards(events: 20)
+        }
+        for await _ in started { break }
+        await source.releasePage()
+        let searchResult = try await search.value
+        let scrollResult = try await scroll.value
+        XCTAssertFalse(searchResult)
+        XCTAssertEqual(scrollResult, searchResult)
+        let calls = await source.calls
+        XCTAssertEqual(calls, 1, "a concurrent scroll load must join rather than silently fail")
+    }
+}
+
+private actor PaginationStatusSource: ChatTimelineSource {
+    enum Mode { case noStatus, atStart, beforeReturn, afterReturn, missingIdle, ended, heldIdle, idleWithoutBoundary }
+    nonisolated let outputs: AsyncStream<ChatTimelineOutput>
+    private let continuation: AsyncStream<ChatTimelineOutput>.Continuation
+    private let mode: Mode
+    private var returnGate: CheckedContinuation<Void, Never>?
+    private var boundaryGate: CheckedContinuation<Void, Never>?
+    private var boundarySent = false
+    private(set) var calls = 0
+
+    init(_ mode: Mode) {
+        self.mode = mode
+        (outputs, continuation) = AsyncStream.makeStream(of: ChatTimelineOutput.self)
+    }
+    func start() { continuation.yield(.batch(ChatTimelineBatch(diffs: [.reset([])]))) }
+    func stop() { continuation.finish() }
+    func paginateBackwards(numEvents: UInt16) async -> Bool {
+        calls += 1
+        switch mode {
+        case .noStatus: emitMatch()
+        case .atStart, .afterReturn: break
+        case .beforeReturn:
+            continuation.yield(.pagination(.paginating))
+            await withCheckedContinuation { returnGate = $0 }
+            releasePage()
+        case .idleWithoutBoundary:
+            continuation.yield(.pagination(.paginating))
+            releasePage()
+        case .missingIdle, .heldIdle: continuation.yield(.pagination(.paginating))
+        case .ended:
+            continuation.yield(.pagination(.paginating))
+            continuation.finish()
+        }
+        return mode == .atStart
+    }
+    func allowReturn() { returnGate?.resume(); returnGate = nil }
+    func markOutputBoundary(_ id: UUID) -> Bool {
+        if mode == .idleWithoutBoundary { return false }
+        if mode == .afterReturn {
+            continuation.yield(.pagination(.paginating))
+            releasePage()
+        }
+        if case .terminated = continuation.yield(.outputBoundary(id)) { return false }
+        boundarySent = true
+        boundaryGate?.resume(); boundaryGate = nil
+        return true
+    }
+    func waitForBoundary() async {
+        if boundarySent { return }
+        await withCheckedContinuation { boundaryGate = $0 }
+    }
+    func releasePage() {
+        emitMatch()
+        continuation.yield(.pagination(.idle(hitTimelineStart: false)))
+    }
+    private func emitMatch() {
+        continuation.yield(.batch(ChatTimelineBatch(diffs: [.pushFront(ChatItem(
+            id: "page-match", kind: .message, sender: "@me:example.test", isOwn: true, body: "Đà Lạt"))])))
+    }
+    func send(text: String, replyTo eventID: String?) {}
+    func edit(_ item: ChatEventRef, text: String) {}
+    func redact(_ item: ChatEventRef) {}
+    func toggleReaction(_ item: ChatEventRef, key: String) {}
+    func isSendQueueEnabled() -> Bool { true }
+    func enableSendQueue() {}
+    func retrySend(_ item: ChatEventRef) {}
+    func abortSend(_ item: ChatEventRef) {}
+    func sendReceipt(_ receipt: ChatReceipt) {}
+    func fetchReplyDetails(eventID: String) {}
 }

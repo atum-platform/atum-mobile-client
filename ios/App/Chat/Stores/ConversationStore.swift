@@ -279,6 +279,9 @@ final class LiveConversationStore: ConversationStore {
     @ObservationIgnored private var lastDraftEditAt: TimeInterval?
     @ObservationIgnored private let clock: @Sendable () -> Date
     @ObservationIgnored private var controller: TimelineController?
+    /// The store owns a requested page through publication. Replacing a
+    /// query cancels its walk, not the shared page or its projection barrier.
+    @ObservationIgnored private var searchPage: Task<ChatHistorySearch.Page, Never>?
     /// The timeline of a closed chat, kept until the sends tapped before
     /// Back reach the SDK.
     @ObservationIgnored private var closingController: TimelineController?
@@ -516,33 +519,44 @@ final class LiveConversationStore: ConversationStore {
         }
     }
 
-    /// HC-6: one older page for the chat's search (desktop
-    /// `loadTimelineHistoryPage` + `waitForTimelineProjection`). Waits, a
-    /// little, for a page scrolling already has in flight; then loads
-    /// `ChatHistorySearch.pageEvents` events and waits until they are rows.
+    /// HC-6: join an existing search page, or claim one after the current
+    /// scroll/background page finishes. Query cancellation never opens a
+    /// second page slot while the first page is still reaching the rows.
     func loadOlderPageForSearch() async -> ChatHistorySearch.Page {
-        for _ in 0..<40 {
-            if isClosed || Task.isCancelled { return .failed }
+        if let searchPage { return await searchPage.value }
+        guard !Task.isCancelled, !isClosed else { return .failed }
+        let generation = generation
+        let page = Task { [weak self] in
+            guard let self else { return ChatHistorySearch.Page.failed }
+            let result = await self.performSearchPage(generation: generation)
+            // Clear before releasing any waiter. A joined walk can resume before
+            // the original caller and immediately request its next page.
+            if generation == self.generation { self.searchPage = nil }
+            return result
+        }
+        searchPage = page
+        return await page.value
+    }
+
+    private func performSearchPage(generation: UInt64) async -> ChatHistorySearch.Page {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(4))
+        while true {
+            guard generation == self.generation, !isClosed, !Task.isCancelled,
+                  ContinuousClock.now < deadline else { return .failed }
             if core.reachedTimelineStart { return .loaded(hasMore: false) }
             if core.startSearchPage(now: clock()) { break }
             try? await Task.sleep(for: .milliseconds(100))
         }
-        guard let controller, !core.reachedTimelineStart else {
-            return core.reachedTimelineStart ? .loaded(hasMore: false) : .failed
+        let hitStart: Bool?
+        if let controller {
+            hitStart = try? await controller.paginateBackwards(events: ChatHistorySearch.pageEvents)
+        } else {
+            hitStart = nil
         }
-        let generation = generation
-        let before = snapshot.rows.count
-        let hitStart = try? await controller.paginateBackwards(events: ChatHistorySearch.pageEvents)
         guard generation == self.generation, !isClosed else { return .failed }
         run(core.paginationFinished(hitTimelineStart: hitStart, now: clock()))
         sync()
         guard let hitStart else { return .failed }
-        // The page's events reach the rows through the projector: wait for
-        // them (bounded), so the next match check reads them.
-        for _ in 0..<20 where snapshot.rows.count == before {
-            if Task.isCancelled { break }
-            try? await Task.sleep(for: .milliseconds(50))
-        }
         return .loaded(hasMore: !hitStart)
     }
 
@@ -670,6 +684,8 @@ final class LiveConversationStore: ConversationStore {
         guard !isClosed else { return }
         let leaving = core.leaving()
         isClosed = true
+        searchPage?.cancel()
+        searchPage = nil
         sync()
         stopTyping()
         readWake?.cancel()
@@ -1008,6 +1024,8 @@ final class LiveConversationStore: ConversationStore {
     }
 
     private func closeTimeline() {
+        searchPage?.cancel()
+        searchPage = nil
         controller?.close()
         controller = nil
         readWake?.cancel()

@@ -300,7 +300,13 @@ public enum ChatHistorySearch {
             if !index.matches(in: rows(), query: query).isEmpty { return report(.found, pages) }
             switch page {
             case .failed: return report(.failed, pages)
-            case .loaded(hasMore: false): return report(.complete, pages)
+            case .loaded(hasMore: false):
+                // SDK status and diffs have separate listeners. Give the final
+                // projection a short grace period before declaring no results.
+                do { try await Task.sleep(for: .milliseconds(300)) }
+                catch { return report(.cancelled, pages) }
+                if !index.matches(in: rows(), query: query).isEmpty { return report(.found, pages) }
+                return report(.complete, pages)
             case .loaded(hasMore: true): continue
             }
         }

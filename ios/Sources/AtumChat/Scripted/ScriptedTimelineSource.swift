@@ -116,6 +116,11 @@ public actor ScriptedTimelineSource: ChatTimelineSource {
         return result.hitTimelineStart
     }
 
+    public func markOutputBoundary(_ id: UUID) -> Bool {
+        if case .terminated = continuation.yield(.outputBoundary(id)) { return false }
+        return true
+    }
+
     // MARK: ChatTimelineSource
 
     public func send(text: String, replyTo eventID: String?) {
