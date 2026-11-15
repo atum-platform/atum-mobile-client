@@ -1,6 +1,7 @@
 #if DEBUG
 import AtumChat
 import AtumDesign
+import AtumDrive
 import AtumNativeAPI
 import Foundation
 import SwiftUI
@@ -58,7 +59,7 @@ struct ScriptedHomeHost: View {
         ZStack {
             design.color("ground", scheme: scheme).ignoresSafeArea()
             RootTabs(router: router, design: design,
-                     availability: PhoneTabAvailability(teamSpace: true),
+                     availability: PhoneTabAvailability(drive: ScriptedDrive.enabled, teamSpace: true),
                      badges: PhoneTabBadges(teamSpace: scriptedTabBadge)) {
                 HomeScreen(
                     design: design,
@@ -166,7 +167,12 @@ struct ScriptedHomeHost: View {
                     .toolbar(.hidden, for: .tabBar)
                 }
             } drive: {
-                PhoneComingSoonView(design: design, tab: .drive)
+                if ScriptedDrive.enabled {
+                    // D12: the real Drive screen over a scripted reader.
+                    DriveScreen(design: design, router: router, model: ScriptedDrive.model)
+                } else {
+                    PhoneComingSoonView(design: design, tab: .drive)
+                }
             } store: {
                 StoreScreen(design: design, store: scriptedStore,
                             onRefresh: {}, onOpenRoom: { router.open(roomId: $0) })

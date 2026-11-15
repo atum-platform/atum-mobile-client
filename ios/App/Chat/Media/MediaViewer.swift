@@ -280,7 +280,8 @@ struct MediaViewer: View {
     }
 }
 
-private struct ZoomableMediaImage: UIViewRepresentable {
+/// Shared with Drive's gallery (`DriveGalleryView`).
+struct ZoomableMediaImage: UIViewRepresentable {
     let image: UIImage
     @Binding var zoomScale: Double
     @Binding var controlsVisible: Bool

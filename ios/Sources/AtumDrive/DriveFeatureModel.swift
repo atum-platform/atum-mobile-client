@@ -105,6 +105,25 @@ public struct DrivePreview: Identifiable {
     }
 }
 
+/// The swipeable preview over a folder's pictures and PDFs, opened at one of them.
+public struct DriveGallery: Identifiable, Equatable {
+    public let id = UUID()
+    public let items: [DriveItem]
+    public let startID: String
+
+    public init(items: [DriveItem], startID: String) {
+        self.items = items
+        self.startID = startID
+    }
+}
+
+/// One gallery page's file: on this iPhone (possibly an older kept copy while
+/// offline), or not, with what to say about it.
+public enum DriveGalleryFile: Equatable {
+    case ready(URL, isStale: Bool)
+    case failed(DriveNotice?)
+}
+
 @MainActor
 @Observable
 @available(macOS 14.0, *)
@@ -119,6 +138,7 @@ public final class DriveFeatureModel {
     public private(set) var transferProgress = [String: Double]()
     public private(set) var lastExitReason: DriveExitReason?
     public var preview: DrivePreview?
+    public var gallery: DriveGallery?
     public var notice: DriveNotice?
     /// The clock a fresh listing is stamped with (tests pin it).
     @ObservationIgnored public var now: () -> Date = Date.init
@@ -171,6 +191,7 @@ public final class DriveFeatureModel {
         busyItemIDs = []
         transferProgress = [:]
         preview = nil
+        gallery = nil
         notice = nil
     }
 
@@ -264,17 +285,66 @@ public final class DriveFeatureModel {
     }
 
     public func open(_ item: DriveItem) async {
+        await transfer(item, sharing: false)
+    }
+
+    /// Downloads the file if it is not on this iPhone yet, then offers the
+    /// share sheet for it.
+    public func share(_ item: DriveItem) async {
+        await transfer(item, sharing: true)
+    }
+
+    private func transfer(_ item: DriveItem, sharing: Bool) async {
         guard item.kind == .file, transferTasks[item.id] == nil else { return }
         let task = Task<Void, Never> { @MainActor [weak self] in
             guard let self else { return }
-            await self.performOpen(item)
+            await self.performOpen(item, sharing: sharing)
         }
         transferTasks[item.id] = task
         await task.value
         transferTasks[item.id] = nil
     }
 
-    private func performOpen(_ item: DriveItem) async {
+    /// Opens the swipeable preview at `item`, over `items` (the folder's
+    /// pictures and PDFs in the order it shows them).
+    public func openGallery(_ items: [DriveItem], startingAt item: DriveItem) {
+        let pages = DriveGalleryPolicy.items(items)
+        guard pages.contains(where: { $0.id == item.id }) else { return }
+        gallery = DriveGallery(items: pages, startID: item.id)
+    }
+
+    /// One gallery page's file, downloaded if needed. A failure is said on the
+    /// page itself, so it never raises the screen's alert behind the sheet.
+    public func galleryFile(for item: DriveItem) async -> DriveGalleryFile {
+        guard item.kind == .file else { return .failed(nil) }
+        let token = generation
+        busyItemIDs.insert(item.id)
+        defer {
+            if token == generation {
+                busyItemIDs.remove(item.id)
+                transferProgress[item.id] = nil
+            }
+        }
+        do {
+            let local = try await localFile(for: item, keepOffline: false, token: token)
+            try requireCurrent(token)
+            return .ready(local.url, isStale: local.isStale || connection != .ready)
+        } catch {
+            if error is CancellationError || error as? DriveFailure == .cancelled {
+                return .failed(nil)
+            }
+            guard token == generation else { return .failed(nil) }
+            return .failed(transferNotice(for: error))
+        }
+    }
+
+    public func dismissGallery() {
+        gallery = nil
+        guard let cache else { return }
+        Task { try? await cache.releasePreview() }
+    }
+
+    private func performOpen(_ item: DriveItem, sharing: Bool) async {
         let token = generation
         busyItemIDs.insert(item.id)
         defer {
@@ -288,7 +358,8 @@ public final class DriveFeatureModel {
                 url: local.url,
                 name: item.name,
                 isStale: local.isStale || connection != .ready,
-                presentation: DrivePreviewPolicy.allowsQuickLook(item) ? .quickLook : .export
+                presentation: !sharing && DrivePreviewPolicy.allowsQuickLook(item)
+                    ? .quickLook : .export
             )
         } catch {
             if error is CancellationError || error as? DriveFailure == .cancelled { return }
@@ -371,6 +442,7 @@ public final class DriveFeatureModel {
         busyItemIDs = []
         transferProgress = [:]
         preview = nil
+        gallery = nil
         notice = nil
         lastExitReason = reason
         try? await outgoing?.withdraw()
@@ -615,29 +687,35 @@ public final class DriveFeatureModel {
     }
 
     private func publishTransferFailure(_ error: any Error) {
+        if error as? DriveFailure == .cancelled { return }
+        notice = transferNotice(for: error)
+    }
+
+    /// What a failed download says, and the connection it reveals.
+    private func transferNotice(for error: any Error) -> DriveNotice? {
         switch error as? DriveFailure {
-        case .lowDisk: notice = .lowDisk
-        case .serverQuota: notice = .serverQuota
-        case .denied: notice = .denied
-        case .changed, .notFound: notice = .changed
+        case .lowDisk: return .lowDisk
+        case .serverQuota: return .serverQuota
+        case .denied: return .denied
+        case .changed, .notFound: return .changed
         case .reauthenticationRequired:
             connection = .reauthenticationRequired
-            notice = nil
+            return nil
         case .offline:
             connection = .offline
-            notice = .needsConnection
+            return .needsConnection
         case .timedOut:
             connection = .timedOut
-            notice = .downloadFailed
+            return .downloadFailed
         case .secureConnectionFailed:
             connection = .secureConnectionFailed
-            notice = .downloadFailed
+            return .downloadFailed
         case .serviceUnavailable, .rateLimited, .providerUnavailable:
             connection = .serviceUnavailable
-            notice = .downloadFailed
-        case .storageUnavailable: notice = .storageUnavailable
-        case .cancelled: break
-        default: notice = .downloadFailed
+            return .downloadFailed
+        case .storageUnavailable: return .storageUnavailable
+        case .cancelled: return nil
+        default: return .downloadFailed
         }
     }
 
