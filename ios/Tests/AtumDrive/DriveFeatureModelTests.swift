@@ -375,6 +375,50 @@ final class DriveFeatureModelTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
     }
 
+    func testRetryReplacesAKeptCopyThatWillNotRenderAndKeepsItOffline() async throws {
+        let cache = try cache()
+        let photo = try named("Kept.jpg", id: "a")
+        // A kept copy of the right size whose bytes don't decode.
+        _ = try await cache.commit(stage(Data("XXXXX".utf8), cache: cache), item: photo, keepOffline: true)
+        let downloads = MainActorCounter()
+        let model = try galleryModel(cache: cache, items: [photo], downloads: downloads)
+        await model.start()
+        guard case let .ready(first, _) = await model.galleryFile(for: photo) else { return XCTFail() }
+        XCTAssertEqual(try Data(contentsOf: first), Data("XXXXX".utf8))
+        XCTAssertEqual(downloads.value, 0, "an open reads the kept copy")
+
+        guard case let .ready(url, _) = await model.retryGalleryPage(photo) else { return XCTFail() }
+        XCTAssertEqual(downloads.value, 1, "Try again downloads even though a kept copy exists")
+        XCTAssertEqual(try Data(contentsOf: url), Data(repeating: 3, count: 5), "the copy was replaced")
+        let stillKept = try await cache.isKept(photo)
+        XCTAssertTrue(stillKept, "the file stays kept offline")
+        XCTAssertTrue(model.keptItemIDs.contains(photo.id))
+    }
+
+    func testTheHeldPageSurvivesTheEntryCountLimit() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("atum-drive-model-" + UUID().uuidString, isDirectory: true)
+        roots.append(root)
+        let cache = try DriveCache(
+            root: root.appendingPathComponent("v1/scope", isDirectory: true),
+            configuration: .init(evictableBudgetBytes: 1_000_000, minimumFreeBytes: 0, maxEntryCount: 2),
+            availableCapacity: { 1_000_000 }
+        )
+        let held = try named("Shown.pdf", id: "a")
+        let other = try named("Other.pdf", id: "b")
+        let newest = try named("Next.pdf", id: "c")
+        let heldURL = try await cache.commit(stage(Data("aaaaa".utf8), cache: cache), item: held,
+                                             keepOffline: false, now: Date(timeIntervalSince1970: 1))
+        try await cache.holdPreview(held)
+        let otherURL = try await cache.commit(stage(Data("bbbbb".utf8), cache: cache), item: other,
+                                              keepOffline: false, now: Date(timeIntervalSince1970: 2))
+        _ = try await cache.commit(stage(Data("ccccc".utf8), cache: cache), item: newest,
+                                   keepOffline: false, now: Date(timeIntervalSince1970: 3))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: heldURL.path),
+                      "the entry limit evicted the held page, the oldest entry")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: otherURL.path), "the next oldest goes instead")
+    }
+
     func testShareDownloadsThenOffersTheShareSheetEvenForAPreviewableFile() async throws {
         let cache = try cache()
         let photo = try named("Beach.jpg", id: "a")

@@ -137,17 +137,29 @@ Desktop's scope bar reads "Search: [This Drive] [<folder>]". The phone shows "Se
 ## Review fixes (PR #57, cross-family review)
 
 1. **A gallery page could point at an evicted file (P1).** The Drive cache's 250 MiB budget could evict a page's file while another page downloaded. For example, open a 200 MB PDF, then prefetch a 100 MB one: the first is removed, and going back would hand PDFKit a missing URL.
-   - `DriveCache.holdPreview(_:)` keeps the shown page's file out of budget eviction. The gallery holds the shown page before it prefetches the next; `releasePreview()` lets it go.
+   - `DriveCache.holdPreview(_:)` keeps the shown page's file out of eviction: the byte budget, and also the entry-count and manifest-size limits (re-check item 3). The gallery holds the shown page before it prefetches the next; `releasePreview()` lets it go.
    - Each time a page is shown, the gallery re-checks its file. If the file is gone, it resolves it again through the cache, downloading it if needed. A page whose file has vanished waits rather than failing.
    - Tests: `testTheShownPageSurvivesThePrefetchOfTheNext` and `testAnEvictedPageIsDownloadedAgainWhenShown`.
 2. **PDFs opened on the main thread (P2).** A page now opens its `PDFDocument` on a detached task and attaches it on the main actor. `DrivePDFView` only displays a document it is given.
 3. **Silent render failures (P2).** A page draws a failure state instead of spinning forever or going blank. `DriveGalleryRenderFailure` is pure and tested:
-   - `unreadable`: a picture that doesn't decode, a PDF that doesn't open, or one with no pages. It says "Couldn't open this preview." with Try again. Try again drops this iPhone's copy (`DriveCache.discard`) and downloads it again.
+   - `unreadable`: a picture that doesn't decode, a PDF that doesn't open, or one with no pages. It says "Couldn't open this preview." with Try again. Try again forces a replacement download even when a copy of the right size exists, including a kept-offline copy, which stays kept (re-check item 1).
    - `unsupported`: a password-protected PDF. It says "A preview isn't available for this file." with no retry; Share still works.
-   - Tests: `testRenderFailuresSayWhatWentWrongAndWhetherRetryHelps` and `testRetryForAnUnreadablePageDownloadsItAgain`.
+   - Tests: `testRenderFailuresSayWhatWentWrongAndWhetherRetryHelps`, `testRetryForAnUnreadablePageDownloadsItAgain` and `testRetryReplacesAKeptCopyThatWillNotRenderAndKeepsItOffline`.
 4. **Share copies piled up (P2).** The named share file is staged only when Share is tapped, in the gallery and in file menus. It is removed when the sheet closes, so there is one at a time. A pass on gallery close clears anything left over. Test: `DriveShareFileTests` (app unit tests).
 5. **Gallery order ignored grouping.** The gallery now takes its pages from the screen's grouped, flattened order (`DriveGalleryPolicy.items(in:)`). Test: `testTheGalleryFollowsTheGroupedOrderOnScreen`.
 6. **Device calendar.** Date groups and their month and year names now always use the Gregorian calendar in the local time zone (`DriveArrangement.gregorian`), as desktop's JavaScript dates do. A Japanese-calendar iPhone groups by 2025, not by an era year. Test: `testDatesAreGregorianWhateverTheDeviceCalendar`.
+
+### Targeted re-check
+
+1. **Try again on a kept file (blocking).** The cache's copy-dropping step left kept-offline files alone, so Try again on a kept file that wouldn't render read the same bytes back and failed again.
+   - Try again now skips the cached copy and downloads. The commit replaces the file in place and carries the kept setting over. A failed download leaves the old copy untouched.
+   - `DriveCache.discard` is gone, since nothing uses it.
+   - Test: `testRetryReplacesAKeptCopyThatWillNotRenderAndKeepsItOffline`.
+2. **Staged share files outlived their sheet (blocking).** SwiftUI clears a sheet's item binding before `onDismiss` runs, so the gallery couldn't find the file to remove.
+   - The gallery keeps the staged file's URL in its own state and removes it on dismiss. It also removes it before staging another.
+   - The file-menu share sheet (`DriveActivityView`) removes its staged copy when UIKit tears the controller down (`dismantleUIViewController`). The preview sheet's `clear()` still runs as a backstop.
+3. **The pin and the entry limits.** Entry-count and manifest-size eviction (`enforceLimits`) now skip the held page, like budget eviction does. Test: `testTheHeldPageSurvivesTheEntryCountLimit`.
+4. **PDF open and cancellation.** The PDF opens in a structured `@concurrent` task, so leaving the page cancels it. The task checks for cancellation before and after the open and reads `isLocked` and `pageCount` itself, so the main actor only attaches the document.
 
 ## Known risks and follow-ups
 
@@ -181,6 +193,13 @@ Every heavy step ran under the shared lock (`lockf -k /Volumes/AtumTestFlight/.h
 - **`AtumMobileTests`**: 391 tests, 0 failures. This includes the 4 new `DriveShareFileTests`.
 - **`DriveRevampUITests`**: 5 of 5 passed, with no `DRIVE-SWIPE-MISS`.
 - Run 9 changed only `DriveGroupKey.dateLabel`'s locale handling inside AtumDrive, so the app and UI runs were not repeated for it.
+
+**After the targeted re-check** (run 10, one locked run):
+
+- **AtumDriveTests:** 47 tests, 0 failures. These include the 2 new re-check tests.
+- **`build-for-testing`:** succeeded.
+- **`AtumMobileTests`:** 391 tests, 0 failures.
+- **`DriveRevampUITests`:** 5 of 5 passed, with no `DRIVE-SWIPE-MISS`.
 
 Earlier runs found and fixed these:
 

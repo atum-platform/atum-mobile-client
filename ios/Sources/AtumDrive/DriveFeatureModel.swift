@@ -316,6 +316,10 @@ public final class DriveFeatureModel {
     /// One gallery page's file, downloaded if needed. A failure is said on the
     /// page itself, so it never raises the screen's alert behind the sheet.
     public func galleryFile(for item: DriveItem) async -> DriveGalleryFile {
+        await galleryFile(for: item, forceDownload: false)
+    }
+
+    private func galleryFile(for item: DriveItem, forceDownload: Bool) async -> DriveGalleryFile {
         guard item.kind == .file else { return .failed(nil) }
         let token = generation
         busyItemIDs.insert(item.id)
@@ -326,7 +330,8 @@ public final class DriveFeatureModel {
             }
         }
         do {
-            let local = try await localFile(for: item, keepOffline: false, token: token)
+            let local = try await localFile(for: item, keepOffline: false, token: token,
+                                            forceDownload: forceDownload)
             try requireCurrent(token)
             return .ready(local.url, isStale: local.isStale || connection != .ready)
         } catch {
@@ -344,11 +349,12 @@ public final class DriveFeatureModel {
         try? await cache?.holdPreview(item)
     }
 
-    /// Retry for a page whose file would not render: drop this iPhone's copy
-    /// and download it again.
+    /// Retry for a page whose file would not render: download it again even
+    /// though this iPhone has a copy of the right size, replacing that copy.
+    /// A file kept offline stays kept (the cache carries the setting over on
+    /// commit), and if the download fails the old copy is left as it was.
     public func retryGalleryPage(_ item: DriveItem) async -> DriveGalleryFile {
-        try? await cache?.discard(item)
-        return await galleryFile(for: item)
+        await galleryFile(for: item, forceDownload: true)
     }
 
     public func dismissGallery() {
@@ -567,10 +573,11 @@ public final class DriveFeatureModel {
         keptItemIDs = ids
     }
 
-    private func localFile(for item: DriveItem, keepOffline: Bool, token: UInt64) async throws
+    private func localFile(for item: DriveItem, keepOffline: Bool, token: UInt64,
+                           forceDownload: Bool = false) async throws
         -> (url: URL, isStale: Bool) {
         guard let cache else { throw DriveFailure.storageUnavailable }
-        if let url = try await cache.cachedURL(for: item) {
+        if !forceDownload, let url = try await cache.cachedURL(for: item) {
             try requireCurrent(token)
             if keepOffline {
                 try await cache.setKept(true, for: item)

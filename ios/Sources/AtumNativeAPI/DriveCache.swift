@@ -149,7 +149,8 @@ public actor DriveCache {
             manifest: &manifest,
             configuration: configuration,
             protectingPage: nil,
-            protectingEntry: nil
+            protectingEntry: nil,
+            heldEntry: nil
         )
         if !startupRemoved.isEmpty { needsPersist = true }
         if needsPersist {
@@ -350,25 +351,13 @@ public actor DriveCache {
         try trim()
     }
 
-    /// Keeps `item`'s current version out of budget eviction while a preview
-    /// shows it; the next hold, or `releasePreview`, lets it go. It may be
-    /// held before its download lands.
+    /// Keeps `item`'s current version out of eviction (the byte budget, and
+    /// the entry-count and manifest-size limits) while a preview shows it;
+    /// the next hold, or `releasePreview`, lets it go. It may be held before
+    /// its download lands.
     public func holdPreview(_ item: DriveItem) throws {
         try requireActive()
         heldPreviewKey = Self.entryKey(itemID: item.id, etag: item.etag)
-    }
-
-    /// Drops this iPhone's non-kept copies of `item`, so the next open
-    /// downloads it again (a file that would not render). Kept copies stay.
-    public func discard(_ item: DriveItem) throws {
-        try requireActive()
-        let matches = manifest.entries.filter { $0.value.itemID == item.id && !$0.value.kept }
-        guard !matches.isEmpty else { return }
-        let previous = manifest
-        for key in matches.keys { manifest.entries[key] = nil }
-        do { try persist() }
-        catch { manifest = previous; throw error }
-        for entry in matches.values { try? FileManager.default.removeItem(at: fileURL(entry)) }
     }
 
     public func trim() throws {
@@ -438,7 +427,8 @@ public actor DriveCache {
                 manifest: &manifest,
                 configuration: configuration,
                 protectingPage: protectingPage,
-                protectingEntry: protectingEntry
+                protectingEntry: protectingEntry,
+                heldEntry: heldPreviewKey
             )
             try Self.write(manifest, to: manifestURL,
                            maximumBytes: configuration.maxManifestBytes)
@@ -496,7 +486,8 @@ public actor DriveCache {
     private static func enforceLimits(manifest: inout Manifest,
                                       configuration: Configuration,
                                       protectingPage: String?,
-                                      protectingEntry: String?) throws -> [Entry] {
+                                      protectingEntry: String?,
+                                      heldEntry: String?) throws -> [Entry] {
         while manifest.pages.count > configuration.maxPageCount
                 || manifest.pages.values.reduce(0, { $0 + $1.page.items.count })
                     > configuration.maxCachedItems {
@@ -511,7 +502,7 @@ public actor DriveCache {
         var removed = [Entry]()
         func removeOldestEvictable() -> Bool {
             guard let victim = manifest.entries
-                .filter({ !$0.value.kept && $0.key != protectingEntry })
+                .filter({ !$0.value.kept && $0.key != protectingEntry && $0.key != heldEntry })
                 .min(by: { $0.value.lastAccessedAt < $1.value.lastAccessedAt }) else {
                 return false
             }

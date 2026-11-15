@@ -747,10 +747,23 @@ private struct DriveActivityView: UIViewControllerRepresentable {
     let url: URL
     let name: String
 
-    /// Shares the file under its own name, not the cache's key.
+    final class Coordinator {
+        var staged: URL?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// Shares the file under its own name, not the cache's key. The staged
+    /// copy is removed when the sheet goes away, whatever its binding says.
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [DriveShareFile.make(from: url, name: name) ?? url],
-                                 applicationActivities: nil)
+        let staged = DriveShareFile.make(from: url, name: name)
+        context.coordinator.staged = staged
+        return UIActivityViewController(activityItems: [staged ?? url], applicationActivities: nil)
+    }
+
+    static func dismantleUIViewController(_ controller: UIActivityViewController,
+                                          coordinator: Coordinator) {
+        if let staged = coordinator.staged { DriveShareFile.discard(staged) }
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}

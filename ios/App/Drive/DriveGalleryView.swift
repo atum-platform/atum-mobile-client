@@ -19,8 +19,11 @@ struct DriveGalleryView: View {
 
     @State private var selection: String
     @State private var files = [String: DriveGalleryFile]()
-    /// The one file staged under its own name while the share sheet is open.
+    /// Presents the share sheet; SwiftUI clears it on dismiss.
     @State private var sharing: DriveStagedShare?
+    /// The staged file to remove when the sheet closes. Kept apart from
+    /// `sharing`, which is already nil by the time `onDismiss` runs.
+    @State private var stagedShareURL: URL?
     @Environment(\.atum) private var atum
     @Environment(\.colorScheme) private var scheme
 
@@ -71,10 +74,7 @@ struct DriveGalleryView: View {
             }
         }
         .accessibilityIdentifier("drive.gallery")
-        .sheet(item: $sharing, onDismiss: {
-            if let sharing { DriveShareFile.discard(sharing.url) }
-            sharing = nil
-        }) { staged in
+        .sheet(item: $sharing, onDismiss: discardStagedShare) { staged in
             DriveShareSheet(url: staged.url)
                 .ignoresSafeArea(edges: .bottom)
         }
@@ -112,8 +112,15 @@ struct DriveGalleryView: View {
             guard let staged = await Task.detached(operation: {
                 DriveShareFile.make(from: url, name: item.name)
             }).value else { return }
+            discardStagedShare()
+            stagedShareURL = staged
             sharing = DriveStagedShare(url: staged)
         }
+    }
+
+    private func discardStagedShare() {
+        if let stagedShareURL { DriveShareFile.discard(stagedShareURL) }
+        stagedShareURL = nil
     }
 
     @ViewBuilder private var shareButton: some View {
@@ -279,16 +286,14 @@ private struct DriveGalleryPage: View {
             if let image { value = .image(image) }
             else { value = .failed(DriveGalleryRenderFailure.image(decoded: false)!) }
         case .pdf:
-            let opened = await Task.detached(priority: .userInitiated) {
-                DriveOpenedPDF(document: PDFDocument(url: url))
-            }.value
-            let document = opened.document
-            if let failure = DriveGalleryRenderFailure.pdf(opened: document != nil,
-                                                           locked: document?.isLocked ?? false,
-                                                           pageCount: document?.pageCount ?? 0) {
+            // Structured, so leaving the page cancels it.
+            guard let opened = await Self.openPDF(url) else { return }
+            if let failure = DriveGalleryRenderFailure.pdf(opened: opened.document != nil,
+                                                           locked: opened.locked,
+                                                           pageCount: opened.pageCount) {
                 value = .failed(failure)
             } else {
-                value = .pdf(document!)
+                value = .pdf(opened.document!)
             }
         }
         guard !Task.isCancelled, url == readyURL else { return }
@@ -328,6 +333,16 @@ private struct DriveGalleryPage: View {
         return UIImage(cgImage: image)
     }
 
+    /// Opens the PDF and reads what the page needs to judge it, all off the
+    /// main actor. Nil when the page was left before or during the open.
+    @concurrent nonisolated private static func openPDF(_ url: URL) async -> DriveOpenedPDF? {
+        guard !Task.isCancelled else { return nil }
+        let document = PDFDocument(url: url)
+        guard !Task.isCancelled else { return nil }
+        return DriveOpenedPDF(document: document, locked: document?.isLocked ?? false,
+                              pageCount: document?.pageCount ?? 0)
+    }
+
     private var readyURL: URL? {
         if case let .ready(url, _) = file { return url }
         return nil
@@ -350,11 +365,14 @@ private struct DriveGalleryPage: View {
     }
 }
 
-/// A PDF opened off the main actor, handed back to it to attach. PDFKit's
-/// document is not `Sendable`; it is created on one task and only used on
-/// the main actor afterwards.
+/// A PDF opened off the main actor, with its lock state and page count read
+/// there too, handed back to it to attach. PDFKit's document is not
+/// `Sendable`; it is created on one task and only displayed on the main
+/// actor afterwards.
 private struct DriveOpenedPDF: @unchecked Sendable {
     let document: PDFDocument?
+    let locked: Bool
+    let pageCount: Int
 }
 
 /// A Drive PDF, paged vertically and zoomable (PDFKit). The document is
