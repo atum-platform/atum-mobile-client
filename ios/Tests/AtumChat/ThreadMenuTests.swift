@@ -20,6 +20,21 @@ final class ThreadMenuTests: XCTestCase {
             .contains(.replyInThread))
     }
 
+    func testReportOfAThreadReplyTargetsTheReplyEvent() {
+        for sender in [F.friend, F.agent, F.bot] {
+            let reply = F.text("reply", from: sender, "Trong chuỗi", replyTo: "$quoted", threadRoot: "$root")
+            XCTAssertTrue(ReportPolicy.mayReportMessage(reply))
+            XCTAssertTrue(MessageMenuRules.items(for: reply, in: .group, threads: true).contains(.report))
+            XCTAssertEqual(ReportPolicy.messageRequest(roomID: "!thread:example.test", item: reply, reason: "spam"),
+                           ReportPolicy.Request(roomID: "!thread:example.test", target: .event("$reply"), reason: "spam"),
+                           "report the reply, not its thread root or quoted event")
+        }
+        var own = F.mine("own", "Trong chuỗi")
+        own.threadRoot = "$root"
+        XCTAssertFalse(ReportPolicy.mayReportMessage(own))
+        XCTAssertNil(ReportPolicy.messageRequest(roomID: "!thread:example.test", item: own, reason: nil))
+    }
+
     func testNoNestedThreadsAndNoLocalEchoRoots() {
         let reply = F.text("r", from: F.friend, "Trong chuỗi", threadRoot: "$root")
         XCTAssertNil(MessageMenuRules.threadRootID(for: reply))

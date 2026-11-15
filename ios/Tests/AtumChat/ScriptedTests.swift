@@ -574,6 +574,13 @@ final class ScriptedTests: XCTestCase {
         XCTAssertEqual(botNotice.sender, Cast.moon)
         XCTAssertEqual(botNotice.body.split(separator: "\n", omittingEmptySubsequences: false).count, 2)
         XCTAssertNotNil(botNotice.appBotMeta)
+        var projector = TimelineProjector(generation: 1, context: notice.context, options: .s1, calendar: env.calendar)
+        let rows = try projector.apply([.reset(notice.initial)], now: env.reference).snapshot.rows
+        let row = try XCTUnwrap(rows.first { $0.id == botNotice.id })
+        XCTAssertEqual(row.item.kind, .notice, "the real notice, not the fixture's text greeting")
+        XCTAssertEqual(MessageMenuRules.items(for: row.item, in: notice.context.kind), [.copy, .selectText, .report])
+        XCTAssertEqual(ReportPolicy.messageRequest(roomID: notice.name, item: row.item, reason: nil, in: notice.context.kind),
+                       ReportPolicy.Request(roomID: notice.name, target: .event("$bot.moon-notice.0003"), reason: "abuse"))
         XCTAssertTrue(notice.initial.contains { $0.body.contains("https://pay.payos.vn/") }, "the purchase hold case")
 
         let noRoom = try XCTUnwrap(ScriptedScenarios.selection(named: ScriptedScenario.botMoonNoRoom.rawValue,

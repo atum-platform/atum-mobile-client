@@ -88,7 +88,7 @@ extension EnvironmentValues {
 
 extension View {
     /// B20: the long-press menu for one row. Rows with nothing to act on
-    /// (notices, placeholders, virtual rows) get no menu. `ownUserID` marks
+    /// (non-actionable notices, placeholders, virtual rows) get no menu. `ownUserID` marks
     /// the reactions I already gave (nil: none marked); `parsedBody` is the
     /// store's parse of an answer (`ConversationStore.parsedBody(for:)`), so
     /// the preview and the select-text sheet never parse again.
