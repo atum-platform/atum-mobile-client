@@ -126,6 +126,16 @@ struct AppRoot: View {
         .tint(design.color("ink", scheme: scheme))
         .atumDesign(design)
         .focusEffectDisabled()
+        .alert(SharePendingCopy.text(.reviewTitle), isPresented: $model.shareQueueNeedsReview) {
+            Button(SharePendingCopy.text(.retry)) { Task { await model.retrySharedItems() } }
+            Button(SharePendingCopy.text(.discard), role: .destructive) { model.discardSharedItems() }
+            Button(SharePendingCopy.text(.later), role: .cancel) {}
+        } message: { Text(SharePendingCopy.text(.reviewBody)) }
+        .alert(SharePendingCopy.text(.waitingTitle), isPresented: $model.shareQueueRetryLater) {
+            Button(SharePendingCopy.text(.retry)) { Task { await model.retrySharedItems() } }
+            Button(SharePendingCopy.text(.discard), role: .destructive) { model.discardSharedItems() }
+            Button(SharePendingCopy.text(.later), role: .cancel) {}
+        } message: { Text(SharePendingCopy.text(.waitingBody)) }
         .task {
             configureRouter()
             LiveRemoteNotificationRelay.shared.attach(
@@ -525,6 +535,7 @@ struct AppRoot: View {
             rosterStore.apply(rosterSnapshot)
             validatePendingPush()
         }
+        .task(id: model.shareDirectory) { await model.refreshShareIntake() }
         // Communication notifications: what only the app knows about a room
         // (assistant/app faces, Team Space names and logos) for the extension.
         .task(id: NotificationRoomPublisher.input(ownUserID: model.notificationOwnUserID,

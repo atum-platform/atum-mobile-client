@@ -129,7 +129,8 @@ actor AttachmentPreparer {
         )
     }
 
-    func prepareFile(url: URL, uploadLimit: UInt64) throws -> OutgoingChatAttachment {
+    func prepareFile(url: URL, uploadLimit: UInt64, suggestedFilename: String? = nil,
+                     type: UTType? = nil) throws -> OutgoingChatAttachment {
         let secured = url.startAccessingSecurityScopedResource()
         defer { if secured { url.stopAccessingSecurityScopedResource() } }
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .nameKey])
@@ -140,8 +141,8 @@ actor AttachmentPreparer {
         try ensureFolder()
 
         let id = UUID().uuidString.lowercased()
-        let name = Self.safeFilename(values.name ?? url.lastPathComponent,
-                                     fallback: id, extension: url.pathExtension)
+        let name = Self.safeFilename(suggestedFilename ?? values.name ?? url.lastPathComponent,
+                                     fallback: id, extension: (suggestedFilename as NSString?)?.pathExtension ?? url.pathExtension)
         let destination = folder.appendingPathComponent(id + "-" + name)
         do {
             try fileManager.copyItem(at: url, to: destination)
@@ -157,7 +158,7 @@ actor AttachmentPreparer {
             try? fileManager.removeItem(at: destination)
             throw AttachmentPreparationFailure.tooLargeFile
         }
-        let contentType = UTType(filenameExtension: destination.pathExtension)
+        let contentType = type ?? UTType(filenameExtension: destination.pathExtension)
         let mimetype = contentType?.preferredMIMEType ?? "application/octet-stream"
         return OutgoingChatAttachment(id: id, kind: .file, filePath: destination.path,
                                       filename: name, mimetype: mimetype,

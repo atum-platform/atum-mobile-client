@@ -129,6 +129,10 @@ final class LiveAppModel {
     @ObservationIgnored private var firstRunMarkerCoordinator: FirstRunMarkerCoordinator?
     private(set) var holdsRecoveryKey = false
     private(set) var recoveryKeySavedOnThisPhone = false
+    var shareQueueNeedsReview = false
+    var shareQueueRetryLater = false
+    @ObservationIgnored private let shareDrainer = ShareQueueDrainer()
+    @ObservationIgnored private var shareDrainRunning = false
     private(set) var signOutInProgress = false
     private(set) var signOutFailureToken: UInt64 = 0
     /// The owner's activity switch (`io.atum.desktop.share_activity`): public
@@ -3918,6 +3922,7 @@ final class LiveAppModel {
         await refreshAppShortcuts()
         await refreshFirstRunMarker()
         startPendingAssistantLifecycleResume()
+        await refreshShareIntake()
     }
 
     func configureCompanyWorkspace(copy: CompanyCopy) {
@@ -4293,6 +4298,10 @@ final class LiveAppModel {
     }
 
     private func observeInvites(on matrix: LiveMatrixSession) {
+        OutgoingShareSuggestions.shared.resolve = { [weak self] roomID in
+            guard let self, !self.signOutInProgress else { return nil }
+            return self.shareDirectory?.chats.first { $0.id == roomID }
+        }
         matrix.onInvitesChanged = { [weak self, weak matrix] invites in
             guard let self, let matrix else { return }
             let published = Set(invites.map(\.roomID))
@@ -4323,6 +4332,7 @@ final class LiveAppModel {
             guard let self, let matrix, self.liveMatrix === matrix else { return }
             self.attachConversation()
             Task { @MainActor [weak self] in
+                await self?.refreshShareIntake()
                 await self?.refreshShareActivity()
                 await self?.refreshAppBotPointers()
                 await self?.refreshAppShortcuts()
@@ -6627,6 +6637,76 @@ final class LiveAppModel {
         await MatrixAvatarThumbnailCache.shared.removeAll()
         await AvatarDiskCache().removeAll()
         NotificationRoomPublisher.removeAll()
+        OutgoingShareSuggestions.shared.resolve = nil
+        await OutgoingShareSuggestions.shared.removeAll()
+        try? ShareQueue().clear()
+    }
+
+    /// Shared picker snapshot; hidden, archived, invited, quarantined and synthetic rows are excluded.
+    var shareDirectory: ShareDirectory? {
+        guard let context, let session = liveMatrix, !signOutInProgress else { return nil }
+        let archived = Set(companyWorkspace.channelsByCompany.values.flatMap(\.channels)
+            .filter { $0.channel.state == .archived }.compactMap { $0.room.roomId })
+        let hidden = Set(companyWorkspace.conversations.directories.values.flatMap(\.conversations)
+            .filter { $0.hidden || $0.state != .active }.compactMap { $0.room.roomId })
+        let rows = Dictionary(uniqueKeysWithValues: session.rooms.map { ($0.roomID, $0) })
+        let chats = productRooms().sorted { ($0.latestEventAt ?? .distantPast) > ($1.latestEventAt ?? .distantPast) }
+            .compactMap { product -> ShareChat? in
+                guard product.canOpen, !product.isInvitation, product.id.hasPrefix("!"),
+                      let row = rows[product.id], !row.isLowPriority,
+                      !archived.contains(product.id), !hidden.contains(product.id),
+                      !hiddenRooms.isHidden(roomID: row.roomID, latestTimestamp: row.latestTimestamp),
+                      !MobileAppBotRoomAccountData.isHidden(hiddenAt: row.appBotHiddenAt, lastMessageAt: row.latestTimestamp ?? 0),
+                      !row.memberUserIDs.isEmpty else { return nil }
+                let name = companyWorkspace.teamSpaceRoomLabel(roomID: row.roomID)?.name ?? product.title
+                return ShareChat(id: row.roomID, name: name, isGroup: !row.isDirect,
+                                 recipients: Array(row.memberUserIDs.prefix(32)),
+                                 avatarURI: product.matrixAvatarURL ?? row.heroAvatarURL)
+            }
+        return ShareDirectory(account: ShareAccount(userID: context.runtime.ticket.session.userID,
+                                                     generation: context.runtime.ticket.generation), chats: Array(chats.prefix(512)))
+    }
+
+    func refreshShareIntake() async {
+        guard let directory = shareDirectory, let queue = try? ShareQueue() else { return }
+        do { try queue.publish(directory) } catch { shareQueueRetryLater = true; return }
+        await OutgoingShareSuggestions.shared.reconcile(eligible: Set(directory.chats.map(\.id)))
+        await drainSharedItems()
+    }
+
+    private func drainSharedItems() async {
+        guard !shareDrainRunning, let directory = shareDirectory, let session = liveMatrix, session.isReady,
+              let queue = try? ShareQueue() else { return }
+        shareDrainRunning = true
+        defer { shareDrainRunning = false }
+        let delivery = ShareQueueDelivery(jobID: UUID())
+        do {
+            let result = try await shareDrainer.drain(queue: queue, account: directory.account,
+                prepare: { [weak self] job, target in
+                    try await delivery.prepare(job: job, delivery: target, queue: queue, session: session,
+                        eligible: self?.shareDirectory?.chats.contains { $0.id == target.roomID } == true)
+                }, send: { [weak self] job, target in
+                    try await delivery.send(job: job, delivery: target, session: session,
+                        eligible: self?.shareDirectory?.chats.contains { $0.id == target.roomID } == true)
+                })
+            guard liveMatrix === session, !signOutInProgress else { return }
+            shareQueueNeedsReview = result == .needsReview
+            shareQueueRetryLater = result == .retryLater
+        } catch { if liveMatrix === session { shareQueueRetryLater = true } }
+        await delivery.clean()
+    }
+
+    func retrySharedItems() async {
+        guard !shareDrainRunning, let account = shareDirectory?.account, let queue = try? ShareQueue() else { return }
+        do { try shareDrainer.retryUncertain(queue: queue, account: account) }
+        catch { shareQueueRetryLater = true; return }
+        await drainSharedItems()
+    }
+
+    func discardSharedItems() {
+        guard !shareDrainRunning, let account = shareDirectory?.account, let queue = try? ShareQueue() else { return }
+        do { try shareDrainer.discard(queue: queue, account: account) }
+        catch { shareQueueRetryLater = true }
     }
 
     /// The signed-in Matrix account the notification room directory belongs to.

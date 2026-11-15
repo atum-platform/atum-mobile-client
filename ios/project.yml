@@ -67,12 +67,16 @@ targets:
       # (App/Debug/ScriptedNotificationPoster.swift).
       - path: Notifications/CommunicationNotification.swift
       - path: Notifications/ScriptedNotificationFixtures.swift
+      - path: Shared/ShareSuggestions.swift
+      - path: Share/SharePendingCopy.swift
       - path: ../LICENSE
         buildPhase: resources
       - path: ../LICENSES/Hermes-Agent-MIT.txt
         buildPhase: resources
     dependencies:
       - target: AtumNotifications
+        embed: true
+      - target: AtumShare
         embed: true
       - package: AtumDesign
       - package: AtumDesign
@@ -160,6 +164,61 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
         TARGETED_DEVICE_FAMILY: '1'
+  AtumShare:
+    type: app-extension
+    platform: iOS
+    info:
+      path: Share/Info.plist
+      properties:
+        CFBundleDisplayName: Atum
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            IntentsSupported: [INSendMessageIntent]
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsImageWithMaxCount: 10
+              NSExtensionActivationSupportsMovieWithMaxCount: 10
+              NSExtensionActivationSupportsFileWithMaxCount: 10
+              NSExtensionActivationSupportsWebURLWithMaxCount: 10
+    sources:
+      - path: Share
+        excludes: [Info.plist, AtumShare.entitlements]
+      - path: Shared/ShareSuggestions.swift
+    dependencies:
+      - package: AtumDesign
+        product: AtumNativeAPI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.share
+        LD_RUNPATH_SEARCH_PATHS: '$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks'
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Development
+        CODE_SIGN_ENTITLEMENTS: Share/AtumShare.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: Atum Mobile Share Development
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: '1'
+  AtumShareTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Share
+        excludes: [Info.plist, AtumShare.entitlements, ShareViewController.swift, PrivacyInfo.xcprivacy]
+      - path: Shared/ShareSuggestions.swift
+      - path: ShareTests
+      - path: App/OutgoingShareSuggestions.swift
+    dependencies:
+      - package: AtumDesign
+        product: AtumNativeAPI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.share.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: '1'
   AtumNotificationsTests:
     type: bundle.unit-test
     platform: iOS
@@ -217,6 +276,15 @@ targets:
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: '1'
 schemes:
+  AtumShare:
+    build:
+      targets:
+        AtumShare: all
+        AtumShareTests: [test]
+    test:
+      config: Debug
+      targets:
+        - AtumShareTests
   AtumNotifications:
     build:
       targets:

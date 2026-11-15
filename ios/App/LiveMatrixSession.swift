@@ -370,6 +370,7 @@ final class LiveMatrixSession {
                 throw LiveMatrixAdapterFailure.unavailable
             }
             try await room.leave()
+            await OutgoingShareSuggestions.shared.remove(roomID: roomID)
             try runtime.requireCurrent()
             return true
         } catch {
@@ -386,6 +387,7 @@ final class LiveMatrixSession {
                 throw LiveMatrixAdapterFailure.unavailable
             }
             try await room.leave()
+            await OutgoingShareSuggestions.shared.remove(roomID: roomID)
             try runtime.requireCurrent()
             if forget {
                 try await room.forget()
@@ -443,6 +445,7 @@ final class LiveMatrixSession {
                 throw LiveMatrixAdapterFailure.unavailable
             }
             try await room.leave()
+            await OutgoingShareSuggestions.shared.remove(roomID: roomID)
             try runtime.requireCurrent()
             try await room.forget()
             try runtime.requireCurrent()
@@ -636,6 +639,7 @@ final class LiveMatrixSession {
             guard info.membership == .invited else { return false }
             try runtime.requireCurrent()
             try await room.leave()
+            await OutgoingShareSuggestions.shared.remove(roomID: roomID)
             try runtime.requireCurrent()
             return true
         } catch {

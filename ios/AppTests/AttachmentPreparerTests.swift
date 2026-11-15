@@ -5,6 +5,20 @@ import UniformTypeIdentifiers
 import XCTest
 
 final class AttachmentPreparerTests: XCTestCase {
+    func testSharedVideoRetainsOriginalNameAndMIMEThroughUUIDStaging() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = root.appendingPathComponent(UUID().uuidString)
+        try Data("video bytes".utf8).write(to: input)
+        let preparer = AttachmentPreparer(folder: root.appendingPathComponent("out"))
+        let attachment = try await preparer.prepareFile(url: input, uploadLimit: 1024,
+                                                       suggestedFilename: "clip.mp4", type: .mpeg4Movie)
+        XCTAssertEqual(attachment.filename, "clip.mp4")
+        XCTAssertEqual(attachment.mimetype, "video/mp4")
+        XCTAssertEqual(attachment.kind, .file)
+    }
+
     func testPreparePhotoBakesEXIFOrientationIntoJPEGPixels() async throws {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("attachment-preparer-tests-\(UUID().uuidString)", isDirectory: true)

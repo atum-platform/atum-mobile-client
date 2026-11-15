@@ -31,6 +31,13 @@ public struct MatrixSessionReader: Sendable {
             throw MatrixCustodyFailure.recoveryRequired
         }
     }
+    /// Share intake needs identity only, even when the access token has expired.
+    /// This neither refreshes credentials nor grants permission to open an SDK client.
+    public func shareAccount() throws -> ShareAccount {
+        let ticket = try loadForRefresh()
+        return ShareAccount(userID: ticket.session.userID, generation: ticket.generation)
+    }
+
     public func loadCurrent(now: Date = Date()) throws -> MatrixCustodyTicket {
         let ticket: MatrixCustodyTicket
         do { ticket = try loadForRefresh() }

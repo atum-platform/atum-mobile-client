@@ -261,44 +261,18 @@ actor SDKTimelineSource: ChatTimelineSource {
         } else {
             _ = try await timeline.send(msg: content)
         }
+        await OutgoingShareSuggestions.shared.sent(roomID: roomID)
     }
 
     func send(attachment: OutgoingChatAttachment, caption: String?,
               replyTo eventID: String?) async throws {
-        let source = UploadSource.file(filename: attachment.filePath)
-        let parameters = UploadParameters(source: source,
-                                          caption: caption,
-                                          formattedCaption: nil,
-                                          mentions: nil,
-                                          inReplyTo: eventID)
-        let kind: AttachmentKind
-        switch attachment.kind {
-        case let .image(width, height, isAnimated):
-            let thumbnailSource = attachment.thumbnailPath.map { UploadSource.file(filename: $0) }
-            let thumbnailInfo = attachment.thumbnailPath.flatMap { path -> ThumbnailInfo? in
-                guard let size = try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber
-                else { return nil }
-                return ThumbnailInfo(height: nil, width: nil, mimetype: "image/jpeg",
-                                     size: size.uint64Value)
-            }
-            kind = .image(
-                imageInfo: ImageInfo(height: height, width: width,
-                                     mimetype: attachment.mimetype, size: attachment.byteSize,
-                                     thumbnailInfo: thumbnailInfo, thumbnailSource: nil,
-                                     blurhash: nil, isAnimated: isAnimated),
-                thumbnailSource: thumbnailSource
-            )
-        case .file:
-            kind = .file(fileInfo: FileInfo(mimetype: attachment.mimetype,
-                                            size: attachment.byteSize,
-                                            thumbnailInfo: nil,
-                                            thumbnailSource: nil))
-        }
-        let handle = try timeline.sendAttachment(params: parameters, attachment: kind)
+        let handle = try SDKAttachmentSender.enqueue(attachment, caption: caption, replyTo: eventID, timeline: timeline)
         let paths = [attachment.filePath, attachment.thumbnailPath].compactMap { $0 }
+        let roomID = roomID
         Task.detached {
             do {
                 try await handle.join()
+                await OutgoingShareSuggestions.shared.sent(roomID: roomID)
                 for path in paths { try? FileManager.default.removeItem(atPath: path) }
             } catch {
                 // The failed local echo still owns these staging files for
@@ -368,7 +342,7 @@ actor SDKTimelineSource: ChatTimelineSource {
         try? await timeline.fetchDetailsForEvent(eventId: eventID)
     }
 
-    private static func plainText(_ text: String) throws -> RoomMessageEventContentWithoutRelation {
+    static func plainText(_ text: String) throws -> RoomMessageEventContentWithoutRelation {
         try messageEventContentNew(msgtype: .text(content: TextMessageContent(body: text, formatted: nil)))
     }
 

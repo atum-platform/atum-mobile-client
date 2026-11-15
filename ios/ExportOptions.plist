@@ -18,6 +18,8 @@
 		<string>Atum Mobile App Store</string>
 		<key>com.atum.mobile.notifications</key>
 		<string>Atum Mobile Notifications App Store</string>
+		<key>com.atum.mobile.share</key>
+		<string>Atum Mobile Share App Store</string>
 	</dict>
 	<key>manageAppVersionAndBuildNumber</key>
 	<false/>
