@@ -47,11 +47,8 @@ final class DriveBrowsingTests: XCTestCase {
             try file("a.txt", modified: day),
             try folder("Newest", modified: day.addingTimeInterval(60)),
         ]
-        XCTAssertEqual(DriveRecents.order(items).map(\.name),
+        XCTAssertEqual(DriveArrangement.sort(items, by: .recent, locale: Locale(identifier: "en")).map(\.name),
                        ["Newest", "a.txt", "b.txt", "old.txt", "undated.txt"])
-        XCTAssertEqual(DriveRecents.tiles(items).map(\.name),
-                       ["Newest", "a.txt", "b.txt", "old.txt"])
-        XCTAssertEqual(DriveRecents.tiles(Array(items.prefix(2))).count, 2)
     }
 
     func testTimesReadTheClockTodayAndTheDateBefore() {

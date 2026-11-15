@@ -7,7 +7,7 @@ final class ThreadMenuTests: XCTestCase {
     func testTeamSpaceRoomsOfferReplyInThreadAfterReply() {
         let message = F.text("t", from: F.friend, "Chào")
         XCTAssertEqual(MessageMenuRules.items(for: message, in: .group, threads: true),
-                       [.react, .reply, .replyInThread, .copy])
+                       [.react, .reply, .replyInThread, .copy, .report])
         XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Ok"), in: .group, threads: true),
                        [.react, .reply, .replyInThread, .copy, .edit, .delete])
         XCTAssertEqual(MessageMenuRules.threadRootID(for: message), "$t")
@@ -15,7 +15,7 @@ final class ThreadMenuTests: XCTestCase {
 
     func testOtherRoomsNeverOfferIt() {
         let message = F.text("t", from: F.friend, "Chào")
-        XCTAssertEqual(MessageMenuRules.items(for: message, in: .group), [.react, .reply, .copy])
+        XCTAssertEqual(MessageMenuRules.items(for: message, in: .group), [.react, .reply, .copy, .report])
         XCTAssertFalse(MessageMenuRules.items(for: F.text("a", from: F.bot, "Hi"), in: .appBot, threads: true)
             .contains(.replyInThread))
     }

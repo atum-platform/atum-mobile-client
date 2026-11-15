@@ -59,6 +59,8 @@ An adapter that turns a capability on is no longer shown as "Not available".
 ## AC-4: Drive looks like the desktop's
 
 - **Type glyphs (`DriveFileFamily`):** this ports desktop `file-glyph.tsx`. Families are chosen by extension only: document (including PDF), spreadsheet, presentation, image, audio, video, archive and other. `glyphAlias` maps each family to the Phosphor assets that are already bundled.
+> Superseded in part by [drive-revamp.md](drive-revamp.md) (desktop #43–#45): the four Recents tiles are gone, All files mixes folders in by name, and search, the list/grid switch, sort, Group By, the preview gallery, Share and a scripted Drive host (D12) now exist.
+
 - **Recents and All files:** a segmented control at the root offers the desktop's two places. Recents is the default.
   - Recents shows the four newest items as large tiles, then the whole listing newest first (`DriveRecents`, desktop `recentDriveRows`: modified time, then name, undated items last).
   - All files keeps folders first, by name.

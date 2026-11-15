@@ -280,10 +280,14 @@ struct MediaViewer: View {
     }
 }
 
-private struct ZoomableMediaImage: UIViewRepresentable {
+/// Shared with Drive's gallery (`DriveGalleryView`).
+struct ZoomableMediaImage: UIViewRepresentable {
     let image: UIImage
     @Binding var zoomScale: Double
     @Binding var controlsVisible: Bool
+    /// In a pager (Drive's gallery) the picture pans only while zoomed, so a
+    /// swipe at 1× turns the page.
+    var pansOnlyWhenZoomed = false
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -296,6 +300,7 @@ private struct ZoomableMediaImage: UIViewRepresentable {
         scroll.backgroundColor = .clear
         scroll.showsHorizontalScrollIndicator = false
         scroll.showsVerticalScrollIndicator = false
+        scroll.panGestureRecognizer.isEnabled = !pansOnlyWhenZoomed
 
         let view = UIImageView(image: image)
         view.contentMode = .scaleAspectFit
@@ -340,6 +345,9 @@ private struct ZoomableMediaImage: UIViewRepresentable {
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             parent.zoomScale = scrollView.zoomScale
+            if parent.pansOnlyWhenZoomed {
+                scrollView.panGestureRecognizer.isEnabled = scrollView.zoomScale > 1.01
+            }
         }
 
         @objc func singleTap() { parent.controlsVisible.toggle() }

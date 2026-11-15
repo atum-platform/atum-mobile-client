@@ -13,23 +13,23 @@ final class MessageMenuRulesTests: XCTestCase {
 
     func testMyAssistantOffersSelectOnAnswersAndDeleteOnMineButNeverEdit() {
         let answer = F.text("a", from: F.agent, "**Kết quả**")
-        XCTAssertEqual(MessageMenuRules.items(for: answer, in: .assistant), [.react, .reply, .copy, .selectText])
+        XCTAssertEqual(MessageMenuRules.items(for: answer, in: .assistant), [.react, .reply, .copy, .selectText, .report])
         XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Câu hỏi"), in: .assistant),
                        [.react, .reply, .copy, .delete], "editing a prompt does not re-run an agent")
     }
 
-    func testABotRoomOffersOnlyCopyAndSelect() {
+    func testABotRoomOffersCopySelectAndReport() {
         XCTAssertEqual(MessageMenuRules.items(for: F.text("a", from: F.bot, "Chào bạn"), in: .appBot),
-                       [.copy, .selectText])
+                       [.copy, .selectText, .report])
         XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Hỏi Moon"), in: .appBot), [.copy])
-        XCTAssertEqual(MessageMenuRules.items(for: image("i", from: F.bot), in: .appBot), [],
-                       "nothing to copy, no reply or react in bot rooms: no menu")
+        XCTAssertEqual(MessageMenuRules.items(for: image("i", from: F.bot), in: .appBot), [.report],
+                       "a bot image can be reported even with nothing to copy")
     }
 
     func testPeopleAndGroupsOfferEditAndDeleteOnMineAndNoSelect() {
         for kind in [RoomKind.person, .group] {
             XCTAssertEqual(MessageMenuRules.items(for: F.text("t", from: F.friend, "Chào"), in: kind),
-                           [.react, .reply, .copy], "\(kind)")
+                           [.react, .reply, .copy, .report], "\(kind)")
             XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Ok"), in: kind),
                            [.react, .reply, .copy, .edit, .delete], "\(kind)")
         }
@@ -55,7 +55,7 @@ final class MessageMenuRulesTests: XCTestCase {
     }
 
     func testImagesAndFilesHaveNoCopyButCanBeAnsweredReactedAndDeleted() {
-        XCTAssertEqual(MessageMenuRules.items(for: image("i", from: F.friend), in: .group), [.react, .reply])
+        XCTAssertEqual(MessageMenuRules.items(for: image("i", from: F.friend), in: .group), [.react, .reply, .report])
         XCTAssertEqual(MessageMenuRules.items(for: image("i", from: F.me, isOwn: true), in: .person),
                        [.react, .reply, .delete], "edit is for text only")
     }
@@ -78,7 +78,7 @@ final class MessageMenuRulesTests: XCTestCase {
 
     func testAWhitespaceBodyOffersNoCopy() {
         XCTAssertEqual(MessageMenuRules.items(for: F.text("w", from: F.agent, "  \n "), in: .assistant),
-                       [.react, .reply])
+                       [.react, .reply, .report])
     }
 
     // MARK: Palette (B22)

@@ -126,7 +126,7 @@ class WS3UITestCase: AtumUITestCase {
     /// The menu items shown now, among the ones a test cares about.
     @MainActor
     func shownItems(_ app: XCUIApplication) -> [String] {
-        ["Trả lời", "Sao chép", "Chọn văn bản", "Sửa", "Xóa"].filter { menuButton(app, $0).exists }
+        ["Trả lời", "Sao chép", "Chọn văn bản", "Sửa", "Báo cáo", "Xóa"].filter { menuButton(app, $0).exists }
     }
 
     /// The glass pill (`composer.pill`): U7 and U8 measure it, not the
@@ -560,13 +560,13 @@ final class MessageMenuUITests: WS3UITestCase {
     private let laterAnswer = "row.chat.actions.0005"
 
     /// My assistant, an answer: the palette, "Trả lời", "Sao chép" and
-    /// "Chọn văn bản"; never "Sửa" or "Xóa". "Chọn văn bản" opens the sheet.
+    /// "Chọn văn bản" and Report; never "Sửa" or "Xóa". "Chọn văn bản" opens the sheet.
     @MainActor
     func testAnswerMenuInMyAssistantChatAndSelectText() {
         let app = launchChat(.chatActions)
         openMenu(app, row: answer, text: "Dự án Góc Phố")
         XCTAssertTrue(menuButton(app, "Trả lời").waitForExistence(timeout: Self.waitSeconds))
-        XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép", "Chọn văn bản"])
+        XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép", "Chọn văn bản", "Báo cáo"])
         XCTAssertTrue(paletteButton(app, "😂").exists, "the reaction palette")
         keepScreenshot("actions-1-assistant-answer-menu", of: app)
         menuButton(app, "Chọn văn bản").tap()
@@ -681,7 +681,7 @@ final class MessageMenuUITests: WS3UITestCase {
         dismissKeyboard(app)
         openMenu(app, text: "Tuyệt!")
         XCTAssertTrue(menuButton(app, "Trả lời").waitForExistence(timeout: Self.waitSeconds))
-        XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép"])
+        XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép", "Báo cáo"])
         keepScreenshot("kinds-3-person-theirs-menu", of: app)
     }
 
@@ -691,7 +691,7 @@ final class MessageMenuUITests: WS3UITestCase {
         let app = launchChat(.chatKinds)
         openMenu(app, row: "row.chat.kinds.0017", text: "Thứ Sáu đi ăn trưa")
         XCTAssertTrue(menuButton(app, "Trả lời").waitForExistence(timeout: Self.waitSeconds))
-        XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép"])
+        XCTAssertEqual(shownItems(app), ["Trả lời", "Sao chép", "Báo cáo"])
         keepScreenshot("kinds-4-group-theirs-menu", of: app)
         closeMenu(app)
         openMenu(app, row: "row.chat.kinds.0019", text: "hẹn 12 giờ")
@@ -786,15 +786,46 @@ final class MessageMenuUITests: WS3UITestCase {
             .flatMap(walk).joined(separator: " | ")
     }
 
-    /// Moon: only "Sao chép" and "Chọn văn bản" on its answers; no palette.
+    /// Moon: copy, select text and Report on its answers; no palette.
     @MainActor
-    func testBotRoomMenuIsCopyAndSelectOnly() {
+    func testBotRoomMenuOffersCopySelectAndReport() {
         let app = launchChat(.botMoonNotice)
         openMenu(app, row: "row.bot.moon-notice.0001", text: "mình là Moon")
         XCTAssertTrue(menuButton(app, "Sao chép").waitForExistence(timeout: Self.waitSeconds))
-        XCTAssertEqual(shownItems(app), ["Sao chép", "Chọn văn bản"])
+        XCTAssertEqual(shownItems(app), ["Sao chép", "Chọn văn bản", "Báo cáo"])
         XCTAssertFalse(paletteButton(app, "😂").exists, "no reactions in bot rooms")
         keepScreenshot("kinds-6-bot-answer-menu", of: app)
+    }
+
+    @MainActor
+    func testAssistantAnswerOpensMessageReportSheet() {
+        let app = launchChat(.chatActions)
+        openMenu(app, row: answer, text: "Dự án Góc Phố")
+        assertMessageReportSheet(app)
+    }
+
+    @MainActor
+    func testAppBotMessageOpensMessageReportSheet() {
+        let app = launchChat(.botMoonNotice)
+        openMenu(app, row: "row.bot.moon-notice.0001", text: "mình là Moon")
+        assertMessageReportSheet(app)
+    }
+
+    /// These fixtures have no homeserver: verify the shared sheet and its
+    /// exported message wording, then cancel without claiming a server report.
+    @MainActor
+    private func assertMessageReportSheet(_ app: XCUIApplication) {
+        let report = menuButton(app, "Báo cáo")
+        XCTAssertTrue(report.waitForExistence(timeout: Self.waitSeconds))
+        XCTAssertFalse(menuButton(app, "Chặn").exists, "reporting content must not add Block")
+        report.tap()
+        let sheet = element(app, "report.sheet")
+        XCTAssertTrue(sheet.waitForExistence(timeout: Self.waitSeconds))
+        XCTAssertTrue(labeled(app, "Báo cáo tin nhắn này?").exists)
+        XCTAssertTrue(element(app, "report.reason").exists)
+        XCTAssertTrue(element(app, "report.send").isEnabled)
+        element(app, "report.cancel").tap()
+        waitForAbsence(sheet)
     }
 
     /// Review A1: while the menu is open the pressed message shows once (its

@@ -1,14 +1,14 @@
 import Foundation
 
-/// Report a person or a message (App Review guideline 1.2: report beside
-/// block for user content), as on the desktop:
+/// Report a person or a message (App Review guidelines 1.2 and 4.7.1).
 ///
 /// - Report person (`roster-model.ts` `reportablePerson`): offered where Block
 ///   is, in a personal chat or group you can delete or leave, never for
 ///   yourself, an assistant or an app's bot, a Team Space room, or the Founder
 ///   chat while you are the Founder.
-/// - Report message (`app.tsx` `reportMenu`): a person's message the server
-///   has, never your own, an assistant's or an app bot's.
+/// - Report message: someone else's message the server has, including an
+///   assistant's output or an app bot's message. Desktop's `reportMenu`
+///   already includes app bots; assistant answers are an iPhone extension.
 ///
 /// The report carries only identifiers and the person's own optional reason,
 /// never message text (desktop `reportMatrixEvent`).
@@ -36,17 +36,11 @@ public enum ReportPolicy {
         return ChatExitPolicy.action(for: room, viewerIsFounder: viewerIsFounder) != nil
     }
 
-    /// Whether the long-press menu offers Report on this row: a person's
-    /// message, image or file in a person chat or group, with its server
-    /// event. `nonPersonSenders` holds every assistant and app bot the phone
-    /// knows (the room's agent, the account's agents and the catalog bots).
-    public static func mayReportMessage(_ item: ChatItem, in kind: RoomKind,
-                                        nonPersonSenders: Set<String>) -> Bool {
-        switch kind {
-        case .person, .group: break
-        case .assistant, .appBot: return false
-        }
-        guard !item.isOwn, !item.sender.isEmpty, !nonPersonSenders.contains(item.sender) else { return false }
+    /// Whether the long-press menu offers Report on this row: a message,
+    /// image or file from another sender, with its server event. Room and
+    /// sender kind do not restrict content reporting; own messages never qualify.
+    public static func mayReportMessage(_ item: ChatItem) -> Bool {
+        guard !item.isOwn, !item.sender.isEmpty else { return false }
         return reportableEventID(item) != nil
     }
 
@@ -99,9 +93,8 @@ public enum ReportPolicy {
     }
 
     /// Report one message, if the menu may offer it.
-    public static func messageRequest(roomID: String, item: ChatItem, kind: RoomKind,
-                                      nonPersonSenders: Set<String>, reason: String?) -> Request? {
-        guard mayReportMessage(item, in: kind, nonPersonSenders: nonPersonSenders),
+    public static func messageRequest(roomID: String, item: ChatItem, reason: String?) -> Request? {
+        guard mayReportMessage(item),
               let eventID = reportableEventID(item) else { return nil }
         return Request(roomID: roomID, target: .event(eventID), reason: Self.reason(reason ?? "") ?? defaultReason)
     }
