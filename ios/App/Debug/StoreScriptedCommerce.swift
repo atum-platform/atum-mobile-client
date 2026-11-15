@@ -269,9 +269,7 @@ import SwiftUI
     let store: ScriptedStoreAPI
     init(store: ScriptedStoreAPI) { self.store = store }
 
-    /// Counted from launch. The hosted runner can take ~30 s to launch and open
-    /// an item (PR #56), so the settling window must outlast that.
-    static let slowCheckoutDelay: Duration = .seconds(45)
+    static let slowCheckoutDelay: Duration = .seconds(20)
 
     func appleProducts() async throws -> AppleProductsResponse {
         if store.mode == .slowCheckout { try await Task.sleep(for: Self.slowCheckoutDelay) }

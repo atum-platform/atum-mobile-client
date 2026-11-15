@@ -856,6 +856,7 @@ actor ScriptedSourceProbe: ChatTimelineSource {
     func start() async {
         if relay == nil {
             relay = Task {
+                defer { continuation.finish() }
                 for await output in inner.outputs {
                     // Reproduce a slow mapper/projector independently of the
                     // page call's return. Preserve output order, including idle.
@@ -866,13 +867,14 @@ actor ScriptedSourceProbe: ChatTimelineSource {
                     guard !Task.isCancelled else { return }
                     forward(output)
                 }
-                continuation.finish()
             }
         }
         await inner.start()
     }
 
     func stop() async {
+        relay?.cancel()
+        continuation.finish()
         await inner.stop()
     }
 

@@ -540,8 +540,10 @@ final class LiveConversationStore: ConversationStore {
     }
 
     private func performSearchPage(generation: UInt64) async -> ChatHistorySearch.Page {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(4))
         while true {
-            guard generation == self.generation, !isClosed, !Task.isCancelled else { return .failed }
+            guard generation == self.generation, !isClosed, !Task.isCancelled,
+                  ContinuousClock.now < deadline else { return .failed }
             if core.reachedTimelineStart { return .loaded(hasMore: false) }
             if core.startSearchPage(now: clock()) { break }
             try? await Task.sleep(for: .milliseconds(100))

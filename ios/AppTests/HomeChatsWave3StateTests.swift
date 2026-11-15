@@ -97,6 +97,18 @@ final class HomeChatsWave3StateTests: XCTestCase {
         XCTAssertEqual(result, .failed)
     }
 
+    func testUnreleasedSearchSlotFailsWithinTheDeadline() async {
+        let store = searchStore() // Detached: the page slot can never be claimed.
+        defer { store.close() }
+        let started = ContinuousClock.now
+        let result = await store.loadOlderPageForSearch()
+        XCTAssertEqual(result, .failed)
+        XCTAssertLessThan(started.duration(to: .now), .seconds(6))
+        // A later query must get its own bounded attempt, not a stuck handle.
+        let retry = await store.loadOlderPageForSearch()
+        XCTAssertEqual(retry, .failed)
+    }
+
     func testAJoinedSearchWalkAdvancesBeyondTheSharedPage() async throws {
         let source = GatedSearchSource(needsTwoPages: true)
         let store = searchStore()
@@ -105,6 +117,8 @@ final class HomeChatsWave3StateTests: XCTestCase {
         for _ in 0..<200 where store.snapshot.rows.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         // Keep the original caller behind a newer interactive search. The
         // shared operation must release its handle before either resumes.
+        // This reproducer relies on the runtime resuming the most recent
+        // waiter first; the priorities encourage that ordering.
         let original = Task(priority: .background) { await store.loadOlderPageForSearch() }
         await source.waitForRequest()
         let (entered, signal) = AsyncStream.makeStream(of: Void.self)

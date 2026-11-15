@@ -286,8 +286,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         assertNoTopUp(app)
 
         let acquire = element(app, "store.detail.acquire")
-        // The scripted settle is 45 s from launch (`slowCheckoutDelay`).
-        let deadline = Date().addingTimeInterval(70)
+        let deadline = Date().addingTimeInterval(40)
         var sawClosed = false
         while !acquire.exists, Date() < deadline {
             if element(app, "store.detail.closed").exists { sawClosed = true }
@@ -312,8 +311,7 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         XCTAssertFalse(app.buttons.matching(identifier: "store.balance").firstMatch.exists,
                        "no Proton-pack entry while checkout settles")
         keepScreenshot("U-Store-16-header-checkout-settling-\(appearanceTag)-vi", of: app)
-        // The scripted settle is 45 s from launch (`slowCheckoutDelay`).
-        XCTAssertTrue(app.buttons.matching(identifier: "store.balance").firstMatch.waitForExistence(timeout: 70),
+        XCTAssertTrue(app.buttons.matching(identifier: "store.balance").firstMatch.waitForExistence(timeout: 40),
                       "the entry once checkout opens")
     }
 

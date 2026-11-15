@@ -116,6 +116,24 @@ final class ChatSearchTests: XCTestCase {
     }
 
     @MainActor
+    func testFinalPageIdleBeforeDiffsStillFindsOldestMatch() async {
+        var loaded = [F.text("new", from: F.agent, "nothing")]
+        var publication: Task<Void, Never>?
+        let result = await ChatHistorySearch.run(query: "da lat", rows: { self.rows(loaded) }, loadPage: {
+            // The idle/start status arrives before the independent diff listener.
+            publication = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                loaded.insert(F.text("oldest", from: F.agent, "Đi Đà Lạt"), at: 0)
+            }
+            return .loaded(hasMore: false)
+        })
+        await publication?.value
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 1)
+        XCTAssertEqual(result.searched, 2)
+    }
+
+    @MainActor
     func testHistoryStopsAtTheStartTheCapOrAFailure() async {
         let start = await ChatHistorySearch.run(query: "x", rows: { [] }, loadPage: { .loaded(hasMore: false) })
         XCTAssertEqual(start.phase, .complete)

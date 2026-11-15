@@ -327,9 +327,11 @@ final class TimelineController {
     func paginateBackwards(events: UInt16) async throws -> Bool {
         guard !isClosed else { throw CancellationError() }
         if let pageRequest { return try await pageRequest.value }
-        let request = Task { try await self.performPage(events: events) }
+        let request = Task {
+            defer { self.pageRequest = nil }
+            return try await self.performPage(events: events)
+        }
         pageRequest = request
-        defer { pageRequest = nil }
         return try await request.value
     }
 

@@ -44,7 +44,18 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
             field.tap()
             if attempt > 0, let current = field.value as? String, !current.isEmpty {
                 print("Search input retry \(attempt): received \(current), requested \(query)")
-                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+                field.press(forDuration: 1.2)
+                let app = XCUIApplication()
+                let predicate = NSPredicate(format: "label IN %@", ["Select All", "Chọn tất cả"])
+                let menu = app.menuItems.matching(predicate).firstMatch
+                let button = app.buttons.matching(predicate).firstMatch
+                if menu.waitForExistence(timeout: 2) { menu.tap() }
+                else if button.waitForExistence(timeout: 2) { button.tap() }
+                else {
+                    XCTFail("Could not select all search text for retry", file: file, line: line)
+                    return
+                }
+                field.typeText(XCUIKeyboardKey.delete.rawValue)
             }
             for character in query { field.typeText(String(character)) }
             if field.value as? String == query { return }

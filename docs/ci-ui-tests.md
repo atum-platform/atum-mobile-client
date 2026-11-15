@@ -558,3 +558,28 @@ runner recovery, it stalled again before query entry in the accessibility search
 launch; that run was stopped. Thus a clean third search repetition remains
 unverified. Logs and process samples were retained in the external verification
 directory. Quarantine remains unchanged pending reliable hosted verification.
+
+### Review follow-up
+
+Search slot acquisition now has a monotonic four-second deadline and fails when
+attachment or paging never makes the slot available; later queries receive a
+new bounded attempt. The controller also clears its coalesced request inside
+the shared task before releasing waiters. The joined-walk regression documents
+its most-recent-waiter scheduling assumption. At the start of history, search
+waits 300 ms and rechecks matches because SDK status and diffs have independent
+listeners; this bounds the grace period rather than guaranteeing arbitrarily
+late diffs. A regression delivers the final match after idle. UI query retries
+select all before clearing, independent of cursor position. Scripted probe stop
+now cancels its relay and finishes its stream, including cancellation exits.
+The unrelated checkout delay and corresponding test waits are restored to main;
+no chat search test needs the store change. Quarantine remains unchanged.
+
+Review follow-up verification passed on iPhone 17e / iOS 27.0: build succeeded,
+400 AtumMobileTests passed (including the unreleased-slot deadline regression),
+and HomeChatsWave3UITests passed 7/7 in each of three runs (21/21 overall,
+9/9 search walk executions). No query retries were logged, so the select-all
+retry branch was not exercised by these runs. The AtumChat package suite passed
+731/731, including the new idle-before-diffs final-page regression. All build
+and test commands used the shared lock, two jobs, and existing derived data;
+the verification script shut down simulators afterward. These local iOS 27
+results do not lift the iOS 26 hosted quarantine.
