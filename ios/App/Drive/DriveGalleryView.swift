@@ -218,7 +218,8 @@ private struct DriveGalleryPage: View {
                     default:
                         if let image {
                             ZoomableMediaImage(image: image, zoomScale: $zoomScale,
-                                               controlsVisible: $controlsVisible)
+                                               controlsVisible: $controlsVisible,
+                                               pansOnlyWhenZoomed: true)
                                 .accessibilityElement()
                                 .accessibilityLabel(Text(verbatim: item.name))
                                 .accessibilityAddTraits(.isImage)
@@ -231,7 +232,6 @@ private struct DriveGalleryPage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .accessibilityIdentifier("drive.gallery.page." + item.id)
         .task(id: readyURL) {
             guard let readyURL, DriveGalleryPolicy.kind(item) == .image else { return }
             image = await Task.detached(priority: .userInitiated) {

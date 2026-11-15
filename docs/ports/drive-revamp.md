@@ -127,7 +127,7 @@ Desktop's scope bar reads "Search: [This Drive] [<folder>]". The phone shows "Se
 - `ios/App/Drive/DriveScreen.swift`: the list and icon bodies, the "…" menu, search and the scope line, groups, and Share in file menus.
 - `ios/App/Drive/DriveGalleryView.swift`: the gallery sheet, the PDF view and `DriveShareFile`.
 - `ios/App/Drive/DriveCopy.swift` and `DrivePendingCopy.swift`: the copy.
-- `ZoomableMediaImage` in the chat `MediaViewer.swift` is now internal, so the gallery can reuse it.
+- `ZoomableMediaImage` in the chat `MediaViewer.swift` is now internal, with a `pansOnlyWhenZoomed` option, so the gallery can reuse it and still page. The chat viewer's behaviour is unchanged.
 - **Scripted Drive host (closes D12).** `ios/App/Debug/ScriptedDriveHost.swift` is Debug-only and excluded from Release by `Scripted*.swift`.
   - Launch with `-AtumScripted home.roster -AtumDebugDrive -AtumScriptedDrive`. That puts the real `DriveScreen` and `DriveFeatureModel` on Home's Drive tab over a scripted `DriveReading`.
   - The pictures and PDFs in it are drawn at launch, so their bytes are real.
@@ -139,8 +139,44 @@ Desktop's scope bar reads "Search: [This Drive] [<folder>]". The phone shows "Se
 - **Folders mixed in by name.** All files now mixes folders in by name, as desktop's Finder sort does. AC-4's folders-first order is retired.
 - **HEIF.** `.heif` groups as Other, because desktop's kind table lacks it. The phone glyph still draws it as an image. Raise it with desktop if it matters.
 - **Swipe preview limits.** A picture larger than 4096 px is shown downsampled. Animated GIFs show their first frame.
+- **Swipe on a loaded simulator.** A short synthesized swipe sometimes did not turn the page. The tests now drag past halfway. Worth a check on a device with quick flicks.
 - **Sort on Recents.** Desktop also lets Recents be re-sorted for the visit; the phone does the same, and the menu shows the current order.
 
 ## Verification
 
-See the session's report. Results are copied below after the locked run.
+Every heavy step ran under the shared lock (`lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`), with `-j 2` / `-jobs 2`. Derived data was in `/Volumes/AtumTestFlight/dd-drive-revamp`. The simulator was one iPhone 17 (iOS 26), shut down at the end of each run.
+
+- **`swift test --filter AtumDriveTests`** (run 1): 39 tests, 0 failures. These include:
+  - `DriveArrangementTests`, 14 new: sort, next sort, stored choices, Kind/Size/Date groups and their order, month and year names, ungrouped, kind table, search, middle cut, gallery items.
+  - `DriveFeatureModelTests`, 3 new: the gallery and per-page failures without the alert, Share then the share sheet, an account change closing the gallery.
+  - The updated `DriveBrowsingTests` Recents order.
+- **`xcodebuild build-for-testing`** (AtumMobile, Debug): succeeded in every run.
+- **`AtumMobileTests`**: 387 tests, 0 failures (runs 1 and 3).
+- **`DriveRevampUITests`**, on the scripted Drive host: 5 of 5 passed in run 7.
+  - `testViewSortAndGroupAreChosenAndRemembered`: Icons by default; List, Size and Kind from "…"; List and Group By survive a relaunch; the folder sort is kept for All files.
+  - `testSearchFiltersTheFolderAndShowsItsScope`: the scope line reads "Atum Drive"; the matches are filtered; no matches shows the empty line.
+  - `testGallerySwipesThroughTheFolderAndShares`: the picture opens at its caption; a drag moves to the PDF; the strip jumps back; Share shows the system sheet.
+  - `testRowMenuShares`: a long-press on a row, then Share, shows the system sheet.
+  - `testCaptureDriveSurfaces`: en/vi × light/dark, eight surfaces each.
+
+Earlier runs found and fixed these:
+
+- An outer container accessibility identifier hid `drive.grid` and the gallery's image. Those identifiers moved inward.
+- iOS 26 ends search with a close (X) button, not Cancel.
+- A picture's zoom view took the horizontal pan at 1×, so the pager could not turn. `ZoomableMediaImage` now has a `pansOnlyWhenZoomed` option, used by the gallery only; the chat viewer is unchanged.
+- In dark mode, list rows drew on black instead of the app's ground.
+- XCUITest's short `swipeLeft` sometimes failed to page on a loaded host: 2 of about 12 swipes in runs 4 and 5. Run 6 was also degraded, with the internal disk nearly full and a launch with no process ID. The tests now drag most of the page width, as a person does. Run 7 logged no `DRIVE-SWIPE-MISS`.
+
+Screenshots are in `/Volumes/AtumTestFlight/drive-revamp-shots/`:
+
+- `drive-{en,vi}-{light,dark}-{1-icons-recents,2-view-menu,3-list-group-kind,4-icons-group-size,5-search,6-folder-icons,7-gallery-image,8-gallery-pdf}.png`
+- `drive-behaviour-{list-kind,gallery-share,row-share}.png`
+
+The share-sheet captures show the file offered under its own name ("Hội An lanterns"), not the cache key.
+
+Not checked:
+
+- A physical iPhone, or a live Drive account.
+- ja and zh on screen.
+- Dynamic Type at accessibility sizes.
+- VoiceOver beyond the labels the tests read.

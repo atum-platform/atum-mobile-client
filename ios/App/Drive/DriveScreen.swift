@@ -144,25 +144,27 @@ private struct DriveDirectoryView: View {
                                  driveID: route?.driveID ?? model.rootDriveID)
             }
         }
-        .accessibilityIdentifier("drive.directory." + parentID)
     }
 
     // MARK: List and Icons
 
     private func listBody(_ items: [DriveItem]) -> some View {
         List {
-            if searching {
-                Section { scopeLine }.listRowSeparator(.hidden)
-            } else {
-                if route == nil {
-                    Section { destinationPicker }.listRowSeparator(.hidden)
+            Group {
+                if searching {
+                    Section { scopeLine }.listRowSeparator(.hidden)
+                } else {
+                    if route == nil {
+                        Section { destinationPicker }.listRowSeparator(.hidden)
+                    }
+                    statusSection
+                    if route != nil { Section { breadcrumbs } }
                 }
-                statusSection
-                if route != nil { Section { breadcrumbs } }
+                if items.isEmpty {
+                    Section { noMatches }.listRowSeparator(.hidden)
+                }
             }
-            if items.isEmpty {
-                Section { noMatches }.listRowSeparator(.hidden)
-            }
+            .listRowBackground(Color.clear)
             ForEach(groups(items)) { group in
                 if group.label.isEmpty {
                     ForEach(group.items) { row($0) }
@@ -174,8 +176,11 @@ private struct DriveDirectoryView: View {
                     }
                 }
             }
+            // Rows sit on the app's ground, as the icons do.
+            .listRowBackground(Color.clear)
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .accessibilityIdentifier("drive.list")
     }
 
@@ -269,8 +274,12 @@ private struct DriveDirectoryView: View {
                 ForEach(DriveSortKey.allCases, id: \.self) { key in
                     Button { setSort(sort.next(key)) } label: {
                         if sort.key == key {
-                            Label(copy.sortLabel(key),
-                                  image: design.symbol(sort.ascending ? "ArrowUp" : "ArrowDown"))
+                            // A bitmap icon: a custom symbol does not draw in a system menu.
+                            Label {
+                                Text(copy.sortLabel(key))
+                            } icon: {
+                                design.barIcon(sort.ascending ? "ArrowUp" : "ArrowDown")
+                            }
                         } else {
                             Text(copy.sortLabel(key))
                         }
@@ -410,6 +419,8 @@ private struct DriveDirectoryView: View {
         .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("drive.empty")
     }
 
     @ViewBuilder private func stateMessage(_ message: String, action: String) -> some View {

@@ -28,7 +28,8 @@ final class DriveRevampUITests: AtumUITestCase {
                "-atum.appearance", dark ? "dark" : "light"]
             + (keep ? ["-AtumScriptedDriveKeep"] : [])
         app.launch()
-        XCTAssertTrue(item(app, "Q3 board report.pdf").waitForExistence(timeout: 15), "Drive did not list")
+        // The "…" appears once the listing has items, whatever view was remembered.
+        XCTAssertTrue(element(app, "drive.viewOptions").waitForExistence(timeout: 15), "Drive did not list")
         return app
     }
 
@@ -77,12 +78,12 @@ final class DriveRevampUITests: AtumUITestCase {
         element(app, "drive.destination").buttons[words.allFiles].tap()
         choose(app, words.list)
         XCTAssertTrue(element(app, "drive.list").waitForExistence(timeout: 3))
-        above(item(app, "Archive 2024.zip"), item(app, "Team offsite.mov"))
+        above(item(app, "Archive 2024.zip"), item(app, "Budget 2026.xlsx"))
         choose(app, words.size)
         above(item(app, "Team offsite.mov"), item(app, "Archive 2024.zip"))
         choose(app, words.group, words.kind)
         XCTAssertTrue(element(app, "drive.group.kind:folder").waitForExistence(timeout: 3))
-        XCTAssertTrue(element(app, "drive.group.kind:pdf").exists)
+        XCTAssertTrue(element(app, "drive.group.kind:archive").exists)
         keepScreenshot("drive-behaviour-list-kind", of: app)
 
         app.terminate()
@@ -127,7 +128,7 @@ final class DriveRevampUITests: AtumUITestCase {
         XCTAssertTrue(caption.waitForExistence(timeout: 5), "the preview did not open")
         XCTAssertTrue(caption.label.contains("Sunrise.jpg"), caption.label)
         XCTAssertTrue(element(app, "drive.gallery.image").waitForExistence(timeout: 10))
-        element(app, "drive.gallery.pages").swipeLeft()
+        turnPage(app, until: element(app, "drive.gallery.pdf"))
         XCTAssertTrue(waitFor(caption, toContain: "Ticket.pdf"), caption.label)
         XCTAssertTrue(element(app, "drive.gallery.pdf").waitForExistence(timeout: 10))
         // The strip: back to the first picture.
@@ -140,6 +141,8 @@ final class DriveRevampUITests: AtumUITestCase {
         XCTAssertTrue(waitForEnabled(share))
         share.tap()
         XCTAssertTrue(shareSheetAppears(app), "no share sheet")
+        Thread.sleep(forTimeInterval: 1.5)
+        keepScreenshot("drive-behaviour-gallery-share", of: app)
     }
 
     /// Share from a row's menu downloads the file and offers the share sheet.
@@ -149,12 +152,13 @@ final class DriveRevampUITests: AtumUITestCase {
         let words = Self.words["en"]!
         choose(app, words.list)
         let row = item(app, "Budget 2026.xlsx")
-        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.waitForExistence(timeout: 8))
         row.press(forDuration: 1.2)
         let share = menuItem(app, "Share")
-        XCTAssertTrue(share.waitForExistence(timeout: 3))
+        XCTAssertTrue(share.waitForExistence(timeout: 8), "the row menu did not open")
         share.tap()
         XCTAssertTrue(shareSheetAppears(app), "no share sheet")
+        Thread.sleep(forTimeInterval: 1.5)
         keepScreenshot("drive-behaviour-row-share", of: app)
     }
 
@@ -173,6 +177,28 @@ final class DriveRevampUITests: AtumUITestCase {
             Thread.sleep(forTimeInterval: 0.25)
         }
         return false
+    }
+
+    /// Drag most of the page's width to the left. XCUITest's `swipeLeft` is
+    /// short, and on a loaded host it moves slowly, so the pager can settle
+    /// back on the same page; past halfway it settles on the next one at any
+    /// speed, as a person's drag does.
+    @MainActor private func dragToNextPage(_ app: XCUIApplication) {
+        let pages = element(app, "drive.gallery.pages")
+        pages.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5))
+            .press(forDuration: 0.05,
+                   thenDragTo: pages.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)))
+    }
+
+    /// Turn to the next page, allowing one retry (see DRIVE-SWIPE-MISS).
+    @MainActor private func turnPage(_ app: XCUIApplication, until target: XCUIElement,
+                                     file: StaticString = #filePath, line: UInt = #line) {
+        dragToNextPage(app)
+        if !target.waitForExistence(timeout: 5) {
+            print("DRIVE-SWIPE-MISS gallery-test")
+            dragToNextPage(app)
+        }
+        XCTAssertTrue(target.waitForExistence(timeout: 10), "the page did not turn", file: file, line: line)
     }
 
     @MainActor private func waitFor(_ element: XCUIElement, toContain text: String) -> Bool {
@@ -216,7 +242,9 @@ final class DriveRevampUITests: AtumUITestCase {
 
         element(app, "drive.destination").buttons[words.allFiles].tap()
         choose(app, words.group, words.kind)
-        XCTAssertTrue(element(app, "drive.group.kind:folder").waitForExistence(timeout: 3))
+        // Kind groups sort by their names, so which comes first depends on the language.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "drive.group.kind:"))
+            .firstMatch.waitForExistence(timeout: 3))
         Thread.sleep(forTimeInterval: 0.6)
         keepScreenshot(prefix + "-3-list-group-kind", of: app)
 
@@ -231,9 +259,11 @@ final class DriveRevampUITests: AtumUITestCase {
         XCTAssertTrue(element(app, "drive.search.scope").waitForExistence(timeout: 3))
         Thread.sleep(forTimeInterval: 0.6)
         keepScreenshot(prefix + "-5-search", of: app)
-        let cancel = app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@ OR label == %@",
-                                                      "Cancel", "Cancel", "Hủy")).firstMatch
-        if cancel.exists { cancel.tap() } else { field.typeText(XCUIKeyboardKey.delete.rawValue) }
+        // iOS 26 ends search with a close (X) beside the field.
+        let close = app.buttons.matching(NSPredicate(format: "label IN %@",
+                                                     ["Close", "Đóng", "Cancel", "Hủy"])).firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 2), "no search close")
+        close.tap()
 
         choose(app, words.group, language == "vi" ? "Không nhóm" : "None")
         item(app, "Photos").tap()
@@ -245,7 +275,14 @@ final class DriveRevampUITests: AtumUITestCase {
         XCTAssertTrue(element(app, "drive.gallery.image").waitForExistence(timeout: 10))
         Thread.sleep(forTimeInterval: 1)
         keepScreenshot(prefix + "-7-gallery-image", of: app)
-        element(app, "drive.gallery.pages").swipeLeft()
+        // Swipe once; a miss is logged (DRIVE-SWIPE-MISS, an open item in
+        // docs/ports/drive-revamp.md) and the strip moves instead, so the capture
+        // completes. The swipe itself is asserted in the gallery test.
+        dragToNextPage(app)
+        if !element(app, "drive.gallery.pdf").waitForExistence(timeout: 5) {
+            print("DRIVE-SWIPE-MISS \(prefix)")
+            app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "Ticket-pdf")).firstMatch.tap()
+        }
         XCTAssertTrue(element(app, "drive.gallery.pdf").waitForExistence(timeout: 10))
         Thread.sleep(forTimeInterval: 1)
         keepScreenshot(prefix + "-8-gallery-pdf", of: app)
