@@ -514,3 +514,25 @@ device type (390 × 844 points) with iOS 27, so it matches device size but
 cannot reproduce or clear the iOS 26.2 input-delivery issue.
 
 Verification: pending the locked local batch in `dd-search-stall`.
+
+### Search walk follow-up (2026-11-15)
+
+The controller unnecessarily required an output boundary after a published
+loading-to-idle transition. The ordered consumer has already published the page
+rows at that point; the boundary is needed only when pagination emits no status.
+The preserved `testPublishedIdleCompletesWithoutAnOutputBoundary` regression
+checks this path. The candidate fix accepts that transition independently.
+
+Hosted run 43610604978, shard 3, was downloaded and inspected with xcresulttool.
+The three-pages-back test failed after 46.8 s, still searching 70 of 2200 rows;
+its count reads were several seconds apart. This confirms incomplete progress,
+but does not establish that the redundant boundary wait caused that run.
+All three chat search walk tests remain quarantined under atum-mobile#50.
+Local AtumChat verification passed all 730 tests under the shared lock. The
+state/UI verification initially failed before building because device lookup
+required the exact name `iPhone 16e` (the device is `Atum iPhone 16e`). The
+corrected run queued behind other tasks, but the build volume subsequently
+became unavailable and the queued processes disappeared. State/controller
+regressions and the three UI repetitions remain unverified. Only iOS 27.0 was
+installed; the intended fallback was iPhone 16e on iOS 27.0. Do not lift quarantine
+on this evidence.

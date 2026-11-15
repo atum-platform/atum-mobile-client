@@ -342,7 +342,8 @@ final class TimelineController {
         guard !isClosed, !Task.isCancelled else { throw CancellationError() }
         if !outputEnded {
             // Flush queued outputs before deciding whether loading was seen.
-            // The marker itself and idle are both covered by the same bound.
+            // A published loading-to-idle transition already delivers the rows.
+            // Only sources without that transition need the boundary marker.
             let marker = Task { [source] in
                 if !(await source.markOutputBoundary(id)), self.outputEnded { completion.finish() }
             }
@@ -366,7 +367,8 @@ final class TimelineController {
                     await finishPageStatusIfNeeded(hitStart: hitStart)
                     return hitStart
                 }
-                if flushed, pagePublication?.started == false || pagePublication?.idle == true { break }
+                if pagePublication?.started == true && pagePublication?.idle == true { break }
+                if flushed && pagePublication?.started == false { break }
             }
         }
         guard !isClosed, !Task.isCancelled else { throw CancellationError() }
