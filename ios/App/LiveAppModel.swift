@@ -366,6 +366,8 @@ final class LiveAppModel {
             rebindPhoneApprovals()
             applePurchases.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
             assistantTurnStopUnavailable.removeAll()
+            modelOffers.removeAll()
+            modelDestinations.removeAll()
             officialAccountsClientGeneration &+= 1
             officialAccountsCadence.activate(nil)
             if let accountID = context?.runtime.ticket.session.userID {
@@ -376,6 +378,31 @@ final class LiveAppModel {
             }
         }
     }
+    @ObservationIgnored private var modelOffers = [NativeID: ManagedModelPickerState<ManagedModelSnapshot>]()
+    @ObservationIgnored private var modelDestinations = [NativeID: ManagedModelPickerState<ManagedModelDestinationSnapshot>]()
+
+    private func modelOfferState(for principal: NativeID) -> ManagedModelPickerState<ManagedModelSnapshot> {
+        if let state = modelOffers[principal] { return state }
+        let state = ManagedModelPickerState<ManagedModelSnapshot>(revision: \.revision)
+        modelOffers[principal] = state
+        return state
+    }
+
+    private func modelDestinationState(for principal: NativeID) -> ManagedModelPickerState<ManagedModelDestinationSnapshot> {
+        if let state = modelDestinations[principal] { return state }
+        let state = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        modelDestinations[principal] = state
+        return state
+    }
+
+    private func modelPickerScope(client: NativeDomainClient, roomID: String, principal: NativeID) -> () -> Bool {
+        let generation = accountScopeGeneration
+        return { [weak self] in
+            self?.accountScopeGeneration == generation && self?.domainClient === client
+                && self?.agentForRoom(roomID)?.principal == principal
+        }
+    }
+
     /// A38: the per-account acknowledged zone for the roster read, and the
     /// one system-time-zone observer, which reuses the foreground refresh.
     @ObservationIgnored private let ownerTimeZone = OwnerTimeZoneBookkeeper()
@@ -1811,15 +1838,16 @@ final class LiveAppModel {
 
     func assistantModelActions(roomID: String) -> AssistantModelActions? {
         guard let accountID = context?.runtime.ticket.session.userID,
-              domainClient != nil, agentForRoom(roomID) != nil else { return nil }
+              let client = domainClient, let agent = agentForRoom(roomID) else { return nil }
+        let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         return AssistantModelActions(
             matrixAccountID: accountID,
             read: { [weak self] in
-                guard let self else { return .failed }
+                guard let self, current() else { return .failed }
                 return await self.readAssistantModels(roomID: roomID)
             },
             save: { [weak self] snapshot, model, effort, requestID in
-                guard let self else { return .failed }
+                guard let self, current() else { return .failed }
                 return await self.saveAssistantModel(roomID: roomID, snapshot: snapshot,
                                                      model: model, effort: effort,
                                                      requestID: requestID)
@@ -1829,15 +1857,16 @@ final class LiveAppModel {
 
     func assistantModelDestinationActions(roomID: String) -> AssistantModelDestinationActions? {
         guard let accountID = context?.runtime.ticket.session.userID,
-              domainClient != nil, agentForRoom(roomID) != nil else { return nil }
+              let client = domainClient, let agent = agentForRoom(roomID) else { return nil }
+        let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         return AssistantModelDestinationActions(
             matrixAccountID: accountID,
             read: { [weak self] in
-                guard let self else { return .failed }
+                guard let self, current() else { return .failed }
                 return await self.readAssistantModelDestinations(roomID: roomID)
             },
             save: { [weak self] snapshot, destination, model, requestID in
-                guard let self else { return .refused(nil) }
+                guard let self, current() else { return .refused(nil) }
                 return await self.saveAssistantModelDestination(
                     roomID: roomID, snapshot: snapshot, destination: destination,
                     model: model, requestID: requestID
@@ -1845,11 +1874,12 @@ final class LiveAppModel {
             },
             subscriptions: AssistantSubscriptionActions(
                 read: { [weak self] in
-                    await self?.readSubscriptionAccount()
+                    guard current() else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
+                    return await self?.readSubscriptionAccount()
                         ?? PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)
                 },
                 save: { [weak self] snapshot, source, model, effort, requestID in
-                    guard let self else { return .refused(nil) }
+                    guard let self, current() else { return .refused(nil) }
                     return await self.saveAssistantModelSubscription(
                         roomID: roomID, snapshot: snapshot, source: source,
                         model: model, effort: effort, requestID: requestID
@@ -2134,9 +2164,11 @@ final class LiveAppModel {
 
     private func readAssistantModels(roomID: String) async -> AssistantModelLoadResult {
         guard let client = domainClient, let agent = agentForRoom(roomID) else { return .failed }
+        let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         do {
-            let value = try await client.managedModels(agentPrincipal: agent.principal)
-            guard domainClient === client, agentForRoom(roomID)?.principal == agent.principal else { return .failed }
+            let value = try await modelOfferState(for: agent.principal).read(isCurrent: current) {
+                try await client.managedModels(agentPrincipal: agent.principal)
+            }
             return .value(value)
         } catch let failure as NativeDomainClientFailure {
             if case let .http(http) = failure,
@@ -2156,33 +2188,36 @@ final class LiveAppModel {
                                     requestID: NativeID) async -> AssistantModelSaveResult {
         guard let client = domainClient, let agent = agentForRoom(roomID),
               snapshot.agentPrincipal == agent.principal else { return .failed }
-        do {
-            let write = try ManagedModelWrite(requestId: requestID, snapshot: snapshot,
-                                              model: model, effort: effort)
-            let value = try await client.writeManagedModel(agentPrincipal: agent.principal,
-                                                           value: write)
-            guard domainClient === client, agentForRoom(roomID)?.principal == agent.principal else { return .failed }
-            return .saved(value)
-        } catch let failure as NativeDomainClientFailure {
-            guard case let .http(http) = failure, http.response.error == .conflict else { return .failed }
-            let latest = try? await client.managedModels(agentPrincipal: agent.principal)
-            guard domainClient === client, agentForRoom(roomID)?.principal == agent.principal else { return .failed }
-            return .conflict(latest)
-        } catch {
-            return .failed
+        let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
+        let result = await modelOfferState(for: agent.principal).save(
+            from: snapshot, requestID: requestID, refreshAfterSecondConflict: false,
+            isCurrent: current, fetch: { try await client.managedModels(agentPrincipal: agent.principal) }
+        ) { fence, id in
+            let write = try ManagedModelWrite(requestId: id, snapshot: fence, model: model, effort: effort)
+            return try await client.writeManagedModel(agentPrincipal: agent.principal, value: write)
+        }
+        switch result {
+        case let .saved(value): return .saved(value)
+        case let .refused(latest): return .conflict(latest)
+        case .failed: return .failed
         }
     }
 
     private func readAssistantModelDestinations(roomID: String) async
         -> AssistantModelDestinationLoadResult {
         guard let client = domainClient, let agent = agentForRoom(roomID) else { return .failed }
+        let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
+        let offerState = modelOfferState(for: agent.principal)
+        let destinationState = modelDestinationState(for: agent.principal)
         do {
-            async let destinationRead = client.managedModelDestinations(agentPrincipal: agent.principal)
-            async let offerRead = try? client.managedModels(agentPrincipal: agent.principal)
-            let snapshot = try await destinationRead
-            let offer = await offerRead
-            guard domainClient === client,
-                  agentForRoom(roomID)?.principal == agent.principal else { return .failed }
+            var offer: ManagedModelSnapshot?
+            let snapshot = try await destinationState.read(isCurrent: current) {
+                async let destinationRead = client.managedModelDestinations(agentPrincipal: agent.principal)
+                offer = try? await offerState.read(isCurrent: current) {
+                    try await client.managedModels(agentPrincipal: agent.principal)
+                }
+                return try await destinationRead
+            }
             let eligible: Set<String> = Set((offer?.models ?? []).compactMap { model -> String? in
                 guard model.eligibility == .ready,
                       ManagedModelLineup.servedAliases.contains(model.alias) else { return nil }
@@ -2335,28 +2370,12 @@ final class LiveAppModel {
                                                model: String,
                                                requestID: NativeID) async
         -> AssistantModelDestinationSaveResult {
-        guard let client = domainClient, let agent = agentForRoom(roomID),
-              snapshot.agentPrincipal == agent.principal else { return .refused(nil) }
-        do {
+        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot, requestID: requestID) {
+            client, principal, fence, id in
             let write = try ManagedModelDestinationWrite(
-                requestId: requestID, snapshot: snapshot,
-                destination: destination, model: model
+                requestId: id, snapshot: fence, destination: destination, model: model
             )
-            let value = try await client.writeManagedModelDestination(
-                agentPrincipal: agent.principal, value: write
-            )
-            guard domainClient === client,
-                  agentForRoom(roomID)?.principal == agent.principal else { return .refused(nil) }
-            return .saved(value)
-        } catch let failure as NativeDomainClientFailure {
-            guard case let .http(http) = failure,
-                  http.response.error == .conflict else { return .refused(nil) }
-            let latest = try? await client.managedModelDestinations(agentPrincipal: agent.principal)
-            guard domainClient === client,
-                  agentForRoom(roomID)?.principal == agent.principal else { return .refused(nil) }
-            return .refused(latest)
-        } catch {
-            return .refused(nil)
+            return try await client.writeManagedModelDestination(agentPrincipal: principal, value: write)
         }
     }
 
@@ -2381,27 +2400,33 @@ final class LiveAppModel {
                                                 effort: ManagedModelEffort,
                                                 requestID: NativeID) async
         -> AssistantModelDestinationSaveResult {
+        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot, requestID: requestID) {
+            client, principal, fence, id in
+            let write = try ManagedModelSubscriptionWrite(
+                requestId: id, snapshot: fence, source: source, model: model, effort: effort
+            )
+            return try await client.writeManagedModelSubscription(agentPrincipal: principal, value: write)
+        }
+    }
+
+    private func saveAssistantDestinationChoice(
+        roomID: String, snapshot: ManagedModelDestinationSnapshot, requestID: NativeID,
+        write: (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID) async throws
+            -> ManagedModelDestinationSnapshot
+    ) async -> AssistantModelDestinationSaveResult {
         guard let client = domainClient, let agent = agentForRoom(roomID),
               snapshot.agentPrincipal == agent.principal else { return .refused(nil) }
-        do {
-            let write = try ManagedModelSubscriptionWrite(
-                requestId: requestID, snapshot: snapshot, source: source, model: model, effort: effort
-            )
-            let value = try await client.writeManagedModelSubscription(
-                agentPrincipal: agent.principal, value: write
-            )
-            guard domainClient === client,
-                  agentForRoom(roomID)?.principal == agent.principal else { return .refused(nil) }
-            return .saved(value)
-        } catch let failure as NativeDomainClientFailure {
-            guard case let .http(http) = failure,
-                  http.response.error == .conflict else { return .refused(nil) }
-            let latest = try? await client.managedModelDestinations(agentPrincipal: agent.principal)
-            guard domainClient === client,
-                  agentForRoom(roomID)?.principal == agent.principal else { return .refused(nil) }
-            return .refused(latest)
-        } catch {
-            return .refused(nil)
+        let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
+        let result = await modelDestinationState(for: agent.principal).save(
+            from: snapshot, requestID: requestID, refreshAfterSecondConflict: true,
+            isCurrent: current, fetch: { try await client.managedModelDestinations(agentPrincipal: agent.principal) }
+        ) { fence, id in
+            try await write(client, agent.principal, fence, id)
+        }
+        switch result {
+        case let .saved(value): return .saved(value)
+        case let .refused(latest): return .refused(latest)
+        case .failed: return .refused(nil)
         }
     }
 

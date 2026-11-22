@@ -973,13 +973,8 @@ public struct AgentsRead: Sendable {
 
     public func writeManagedModel(agentPrincipal: NativeID,
                                   value: ManagedModelWrite) async throws -> ManagedModelSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(ManagedModelSnapshot.self,
-                                         url: try agentURL(agentPrincipal, suffix: "model-choice"),
-                                         method: "PUT", body: body,
-                                         acceptsAssistantNameRefusal: false)
+        let snapshot = try await putModelChoice(ManagedModelSnapshot.self,
+                                                url: agentURL(agentPrincipal, suffix: "model-choice"), value: value)
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
         }
@@ -1006,14 +1001,9 @@ public struct AgentsRead: Sendable {
     public func writeManagedModelDestination(agentPrincipal: NativeID,
                                              value: ManagedModelDestinationWrite) async throws
         -> ManagedModelDestinationSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(
+        let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
-            method: "PUT", body: body,
-            acceptsAssistantNameRefusal: false
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
@@ -1027,19 +1017,32 @@ public struct AgentsRead: Sendable {
     public func writeManagedModelSubscription(agentPrincipal: NativeID,
                                               value: ManagedModelSubscriptionWrite) async throws
         -> ManagedModelDestinationSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(
+        let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
-            method: "PUT", body: body,
-            acceptsAssistantNameRefusal: false
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
         }
         return snapshot
+    }
+
+    private func putModelChoice<Snapshot: Decodable, Write: Encodable>(
+        _ type: Snapshot.Type, url: URL, value: Write
+    ) async throws -> Snapshot {
+        let body: Data
+        do { body = try JSONEncoder().encode(value) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let result = try await response(url: url, method: "PUT", body: body,
+                                        maximumRequestBodyBytes: 262_144,
+                                        maximumResponseBodyBytes: 262_144, acceptedStatuses: [200, 409])
+        if result.status == 409 {
+            if let conflict = try? NativeAPI.decode(ManagedModelFenceConflictResponse.self, from: result.body) {
+                throw conflict.reason
+            }
+            throw NativeDomainClientFailure.http(try httpFailure(result))
+        }
+        return try decode(type, data: result.body)
     }
 
     /// `atum.chatgpt-relay/1`: whether an owner Mac relays its ChatGPT plan

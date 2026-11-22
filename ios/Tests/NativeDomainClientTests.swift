@@ -174,8 +174,8 @@ import AtumChat
     }
 
     private func managedModelBody(revision: Int = 1,
-                                  effort: String = "medium") throws -> Data {
-        let digest = String(repeating: "a", count: 64)
+                                  effort: String = "medium",
+                                  digest: String = String(repeating: "a", count: 64)) throws -> Data {
         return try JSONSerialization.data(withJSONObject: [
             "profile": "atum.model-choice/1.1",
             "agentPrincipal": agentPrincipal,
@@ -899,6 +899,80 @@ import AtumChat
         XCTAssertEqual(saved.revision, 2)
         XCTAssertEqual(saved.choice.effort, .high)
         XCTAssertEqual(step, 2)
+    }
+
+    func testManagedModelPolicyConflictRetriesTheSamePickUnderTheNewDigest() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let requestID = ModelWriteRequests<NativeID>.freshID()
+        let api = client(TestAuthorization(first: "p2-model-token"))
+        let picker = ManagedModelPickerState<ManagedModelSnapshot>(revision: \.revision)
+        let newDigest = String(repeating: "b", count: 64)
+        var calls: [String] = []
+        var firstBody: [String: Any]?
+        NativeDomainProtocol.state.handler = { request in
+            calls.append(request.httpMethod ?? "")
+            switch calls.count {
+            case 1: return .json(try! self.managedModelBody())
+            case 2:
+                firstBody = try! JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as? [String: Any]
+                return .init(status: 409, chunks: [Data(#"{"error":"matrix_409","details":{"reason":"policy_changed"},"policyDigest":"\#(newDigest)"}"#.utf8)])
+            case 3:
+                return .json(try! self.managedModelBody(digest: newDigest))
+            default:
+                let retry = try! JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as! [String: Any]
+                XCTAssertEqual(retry["expectedRevision"] as? Int, 1)
+                XCTAssertEqual(retry["policyDigest"] as? String, newDigest)
+                XCTAssertEqual(retry["choice"] as? [String: String], firstBody?["choice"] as? [String: String])
+                XCTAssertEqual(firstBody?["requestId"] as? String, requestID.rawValue)
+                XCTAssertNotEqual(firstBody?["policyDigest"] as? String, newDigest)
+                XCTAssertNotEqual(retry["requestId"] as? String, requestID.rawValue)
+                return .json(try! self.managedModelBody(revision: 2, effort: "high", digest: newDigest))
+            }
+        }
+        let fetch = { try await api.managedModels(agentPrincipal: principal) }
+        let initial = try await picker.read(isCurrent: { true }, fetch: fetch)
+        let result = await picker.save(from: initial, requestID: requestID,
+                                       refreshAfterSecondConflict: false, isCurrent: { true }, fetch: fetch) { fence, id in
+            let write = try ManagedModelWrite(requestId: id, snapshot: fence, model: "sonnet", effort: .high)
+            return try await api.writeManagedModel(agentPrincipal: principal, value: write)
+        }
+        guard case let .saved(saved) = result else { return XCTFail("The fresh policy should save the pick") }
+        XCTAssertEqual(saved.choice.effort, .high)
+        XCTAssertEqual(saved.revision, 2)
+        XCTAssertEqual(calls, ["GET", "PUT", "GET", "PUT"])
+    }
+
+    func testDestinationRevisionConflictRetriesOnceAndKeepsTheFinalReadback() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let requestID = ModelWriteRequests<NativeID>.freshID()
+        let api = client(TestAuthorization(first: "p2-destination-token"))
+        let picker = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        var calls: [String] = []
+        var revisions: [Int] = []
+        NativeDomainProtocol.state.handler = { request in
+            calls.append(request.httpMethod ?? "")
+            switch request.httpMethod {
+            case "GET": return .json(try! self.managedModelDestinationsBody(revision: 3 + revisions.count))
+            default:
+                let body = try! JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as! [String: Any]
+                revisions.append(try! XCTUnwrap(body["expectedRevision"] as? Int))
+                return .init(status: 409, chunks: [Data(#"{"error":"matrix_409","details":{"reason":"revision_conflict"},"revision":\#(3 + revisions.count)}"#.utf8)])
+            }
+        }
+        let fetch = { try await api.managedModelDestinations(agentPrincipal: principal) }
+        let initial = try await picker.read(isCurrent: { true }, fetch: fetch)
+        let model = "nhat-thuc"
+        let destination = try ManagedModelDestinationID("cloud")
+        let result = await picker.save(from: initial, requestID: requestID,
+                                       refreshAfterSecondConflict: true, isCurrent: { true }, fetch: fetch) { fence, id in
+            let write = try ManagedModelDestinationWrite(requestId: id, snapshot: fence,
+                                                         destination: destination, model: model)
+            return try await api.writeManagedModelDestination(agentPrincipal: principal, value: write)
+        }
+        guard case let .refused(latest) = result else { return XCTFail("Two conflicts must end the attempt") }
+        XCTAssertEqual(latest?.revision, 5)
+        XCTAssertEqual(revisions, [3, 4])
+        XCTAssertEqual(calls, ["GET", "PUT", "GET", "PUT", "GET"])
     }
 
     func testManagedModelDestinationReadAndWriteUseTheFrozenOwnerRoute() async throws {
