@@ -160,6 +160,7 @@ final class LiveAppModel {
     @ObservationIgnored private var mediaDrafts = [String: ChatMediaComposerState]()
     @ObservationIgnored private var localMediaDrafts = [String: ConversationLocalMediaDraft]()
     @ObservationIgnored private var conversationMembersTask: Task<Void, Never>?
+    @ObservationIgnored private var privateCosTurnProof: (PrivateCosTurnKey, CompanyTurnBinding)?
     private var conversationOpenedRoom: LiveProductRoom?
     @ObservationIgnored private var isRefreshingDomainOnForeground = false
     /// The app's copy language (`LiveDesign.locale`), set by the root view:
@@ -1940,15 +1941,17 @@ final class LiveAppModel {
     }
 
     func assistantTurnStopActions(roomID: String) -> AssistantTurnStopActions? {
-        guard let client = domainClient, let route = assistantTurnStopRoute(roomID: roomID) else { return nil }
+        guard let store = conversation, let client = domainClient,
+              let route = assistantTurnStopRoute(roomID: roomID) else { return nil }
         let generation = assistantLifecycleGeneration
-        return AssistantTurnStopActions { [weak self] intent in
-            guard let self, self.domainClient === client,
+        return AssistantTurnStopActions { [weak self, weak store] intent in
+            guard let self, let store, self.conversation === store, self.domainClient === client,
                   self.assistantLifecycleGeneration == generation,
                   self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
             var unavailable = false
             let result = await route.stop(intent, using: client, onRouteUnavailable: { unavailable = true })
-            guard self.domainClient === client, self.assistantLifecycleGeneration == generation,
+            guard self.conversation === store, self.domainClient === client,
+                  self.assistantLifecycleGeneration == generation,
                   self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
             if unavailable { self.assistantTurnStopUnavailable.insert(route.agentPrincipal) }
             return result
@@ -3491,6 +3494,7 @@ final class LiveAppModel {
         conversationMembersTask?.cancel()
         conversationMembersTask = nil
         conversationMembers = []
+        privateCosTurnProof = nil
         if let conversation {
             conversation.close()
             drafts[conversation.roomID] = conversation.draft
@@ -3664,22 +3668,26 @@ final class LiveAppModel {
             // A company DM is a conversation between people (a group DM a group), whatever the
             // room's size says; never an assistant's or a bot's, and never from `m.room.create.type`.
             context = RoomContext(kind: conversation.kind == .dm ? .person : .group, ownUserID: ownUserID)
+        } else if companyWorkspace.isCompanyChannel(roomID) {
+            context = RoomContext(kind: .group, ownUserID: ownUserID)
+            context.companyTurnScope = .channel(threadRoot: nil, binding: nil)
         } else if let agent = candidates.first(where: { agentByUser[$0] != nil }) {
             context = RoomContext(kind: .assistant, ownUserID: ownUserID, agentUserIDs: [agent])
         } else if let bot = botUserID(for: room) ?? candidates.first(where: { catalogBotUserIDs.contains($0) }) {
             context = RoomContext(kind: .appBot, ownUserID: ownUserID, agentUserIDs: [bot])
-        } else if companyWorkspace.isCompanyChannel(roomID) {
-            // A company channel is the same chat surface as a group even when
-            // the roster is small; its name and members come from the
-            // platform, never from `m.room.create.type`.
-            context = RoomContext(kind: .group, ownUserID: ownUserID)
         } else {
             context = RoomContext(kind: room.memberCount > 2 ? .group : .person, ownUserID: ownUserID)
         }
         // Desktop knows all account agents even in a shared room. Keep this
         // separate from the selected private-chat agent and catalog bots.
         context.knownAgentUserIDs = Set(agentByUser.keys)
-        if case .privateCos = companyWorkspace.roomClassification(roomID) { context.isCompanyPrivateCos = true }
+        if case .privateCos = companyWorkspace.roomClassification(roomID) {
+            context.isCompanyPrivateCos = true
+            let binding = privateCosTurnProof.flatMap { key, binding in
+                key == privateCosTurnKey(roomID: roomID) ? binding : nil
+            }
+            context.companyTurnScope = .privateCos(binding: binding)
+        }
         return ConversationRoomInfo(roomID: roomID, title: title, context: context,
                                     knownNames: knownAgentAndBotNames,
                                     catalogBotUserIDs: catalogBotUserIDs,
@@ -3687,6 +3695,66 @@ final class LiveAppModel {
                                     roomIsEncrypted: room.isEncrypted,
                                     isMarkedUnread: room.isMarkedUnread,
                                     shareActivity: shareActivity)
+    }
+
+    struct PrivateCosTurnKey: Equatable {
+        let membership: CompanyTurnMembershipKey
+        let store: ObjectIdentifier
+        let binding: CompanyPrivateCosView.Binding
+    }
+
+    func privateCosTurnKey(roomID: String) -> PrivateCosTurnKey? {
+        guard let conversation, conversation.roomID == roomID,
+              case let .privateCos(companyID) = companyWorkspace.roomClassification(roomID),
+              let state = companyWorkspace.privateCosStates[companyID],
+              state.view.state == "ready", state.availability != .unavailable,
+              let binding = state.view.binding, binding.roomId == roomID,
+              liveMatrix?.rooms.first(where: { $0.roomID == roomID })?.isEncrypted == false,
+              let membership = companyTurnMembershipKey(roomID: roomID) else { return nil }
+        return PrivateCosTurnKey(membership: membership, store: ObjectIdentifier(conversation), binding: binding)
+    }
+
+    func refreshPrivateCosTurnPresentation(roomID: String) async {
+        guard !Task.isCancelled, conversation?.roomID == roomID else { return }
+        let key = privateCosTurnKey(roomID: roomID)
+        if privateCosTurnProof?.0 != key {
+            privateCosTurnProof = nil
+            refreshConversationIdentity()
+        }
+        guard let key, let session = liveMatrix, let ownUserID = conversation?.ownUserID else { return }
+        while !Task.isCancelled {
+            let members = await session.members(roomID: roomID)
+            guard !Task.isCancelled, privateCosTurnKey(roomID: roomID) == key else { return }
+            let pair = key.binding.scope.pair
+            let joined = Set(members?.map(\.userID) ?? [])
+            if ownUserID != key.binding.agentUserId,
+               joined == [ownUserID, key.binding.agentUserId] {
+                privateCosTurnProof = (key, CompanyTurnBinding(
+                    companyID: pair.companyPrincipal.rawValue, agentPrincipal: key.binding.agentPrincipal.rawValue,
+                    agentUserID: key.binding.agentUserId, roomID: roomID,
+                    audience: .privateCos(memberPrincipal: pair.memberPrincipal.rawValue,
+                                          membershipIncarnation: pair.membershipIncarnation.rawValue)))
+            } else {
+                privateCosTurnProof = nil
+            }
+            refreshConversationIdentity()
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        }
+    }
+
+    func readCompanyChannelTurnBinding(_ claim: CompanyRoomClaim, session: LiveMatrixSession,
+                                       ownUserID: String) async -> CompanyTurnBinding? {
+        guard liveMatrix === session, let client = domainClient, let companyID = try? NativeID(claim.companyID),
+              let agent = try? await client.companyChannelAgent(companyID: companyID),
+              agent.userID != ownUserID,
+              let members = await session.members(roomID: claim.roomID),
+              members.contains(where: { $0.userID == ownUserID }),
+              members.contains(where: { $0.userID == agent.userID }),
+              !Task.isCancelled, domainClient === client, liveMatrix === session,
+              companyWorkspace.claim(roomID: claim.roomID) == claim else { return nil }
+        return CompanyTurnBinding(companyID: claim.companyID, agentPrincipal: agent.principal.rawValue,
+                                  agentUserID: agent.userID, roomID: claim.roomID,
+                                  audience: .channel(id: claim.channelID))
     }
 
     /// Leave and Delete chat on an app bot room hide it on this phone only.

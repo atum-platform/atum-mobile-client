@@ -567,6 +567,14 @@ public struct AgentsRead: Sendable {
                                   method: "GET", body: nil))
     }
 
+    /// Desktop's unversioned GET view, scoped to the requested company.
+    public func companyChannelAgent(companyID: NativeID) async throws -> CompanyChannelAgent {
+        let agent = try await read(CompanyChannelAgent.self, url: try companyURL(companyID, suffix: "ai"),
+                                  maximumResponseBodyBytes: 4_096)
+        guard agent.companyID == companyID else { throw NativeDomainClientFailure.invalidResponse }
+        return agent
+    }
+
     public func acceptCompanyInvitation(companyID: NativeID, requestID: NativeID,
                                         invitationID: NativeID) async throws -> CompanySnapshot {
         let body: Data
@@ -1631,7 +1639,7 @@ public struct AgentsRead: Sendable {
         if parts.count == 1 { return true }
         if parts.count == 2 {
             return ["accept", "leave", "channels", "conversations", "private-cos", "invite", "invitations",
-                    "invite-links"].contains(parts[1])
+                    "invite-links", "ai"].contains(parts[1])
         }
         // invite-links/{id}/revoke (wire 1.2)
         if parts[1] == "invite-links" {

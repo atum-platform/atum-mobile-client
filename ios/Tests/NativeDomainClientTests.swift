@@ -18,6 +18,32 @@ import AtumChat
         }, protocolClasses: [NativeDomainProtocol.self])
     }
 
+    func testCompanyTurnAgentReadMatchesTheRequestedCompany() async throws {
+        let company = try NativeID("11111111-1111-4111-8111-a11111111111")
+        let foreign = try NativeID("22222222-2222-4222-8222-a22222222222")
+        let agent = "@fixture-agent:example.test"
+        let answer = Data("""
+        {"schemaVersion":1,"companyId":"\(company.rawValue)",
+         "agent":{"principal":"\(agentPrincipal)","userId":"\(agent)","displayName":"Chief of Staff"},
+         "enabled":true,"revision":1,"state":"ready","canManage":false}
+        """.utf8)
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertNil(request.value(forHTTPHeaderField: CompanyWire.headerName))
+            let route = request.url?.path ?? ""
+            XCTAssertTrue([company, foreign].contains { route == "/api/matrix/v1/companies/\($0.rawValue)/ai" })
+            return .json(answer)
+        }
+        let client = client(TestAuthorization(first: "synthetic-company-view"))
+        let identity = try await client.companyChannelAgent(companyID: company)
+        XCTAssertEqual(identity.userID, agent)
+        XCTAssertEqual(identity.principal.rawValue, agentPrincipal)
+        do {
+            _ = try await client.companyChannelAgent(companyID: foreign)
+            XCTFail("A mismatched company cannot prove a channel agent")
+        } catch NativeDomainClientFailure.invalidResponse {}
+    }
+
     private func body(of request: URLRequest) -> Data? {
         if let body = request.httpBody { return body }
         guard let stream = request.httpBodyStream else { return nil }

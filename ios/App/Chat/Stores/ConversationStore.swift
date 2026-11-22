@@ -374,6 +374,13 @@ final class LiveConversationStore: ConversationStore {
         return true
     }
 
+    func updateChannelThreadBinding(_ binding: CompanyTurnBinding?) -> Bool {
+        guard let rootID = info.threadRootID, case .channel = info.context.companyTurnScope else { return false }
+        var updated = info
+        updated.context.companyTurnScope = .channel(threadRoot: rootID, binding: binding)
+        return updateRoomInfo(updated)
+    }
+
     // MARK: Protocol
 
     func handle(_ input: FollowInput) {
