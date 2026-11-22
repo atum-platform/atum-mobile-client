@@ -54,14 +54,32 @@ tool activity keys and approval wait are also available through the lookup.
 
 ## Verification
 
-The verification commands ran one at a time under the shared heavy-build lock.
+The builds and tests ran one at a time under the shared heavy-build lock.
 Swift scratch and Xcode derived data were under
 `/Volumes/AtumTestFlight/dd-w4-copy-repin`.
 
 - Importer `--verify` accepted the pin. Importer tests passed 8/8 and native
   catalog tests passed 4/4.
-- `test_copy_keys_in_pin` still reports 75 missing literal occurrences
-  across 72 keys, exactly matching the baseline by key and occurrence count.
+- `test_copy_keys_in_pin` passed 2/3 tests. The remaining test reports 75
+  missing literal occurrences across 72 keys, matching the baseline by key
+  and occurrence count.
   The misses come from Team Space (67 occurrences), App Panel (6), Drive's
   guarded folder-search scope (1), and Home's guarded main-agent label (1).
 - `swift test -j 2` passed 735/735, including all three prototype catalog tests.
+- Debug `xcodebuild build-for-testing` succeeded with one compiler job.
+  `lipo` confirmed an arm64 simulator executable.
+- The focused AppTests passed 40/40 on an iPhone 17 simulator running iOS 27.
+  The run covered `AccountSettingsStateTests`, `HomeGlobalSearchPolicyTests`,
+  and `PhoneModelPickerCopyTests`.
+- `DriveRevampUITests.testViewSortAndGroupAreChosenAndRemembered` passed.
+  `HomeShellUITests.testHeaderShortSearchAndPlusAppearances` passed in English
+  and Vietnamese, in both light and dark appearances.
+- `DriveRevampUITests.testCaptureDriveSurfaces` passed on the focused rerun
+  in English and Vietnamese, in both light and dark appearances. Its first
+  run lost search-field focus after tapping. The test now checks focus and
+  retries the tap before typing. The simulator diagnostics collection for
+  the first run was stopped after the suite finished so the retry could
+  acquire the lock. Xcode finalized the first result bundle with the one
+  capture failure and the other 42 tests passing.
+- The standalone `python3 scripts/public_guard.py --base origin/main --head HEAD`
+  exited 0.

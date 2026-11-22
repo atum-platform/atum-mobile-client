@@ -254,7 +254,15 @@ final class DriveRevampUITests: AtumUITestCase {
         keepScreenshot(prefix + "-4-icons-group-size", of: app)
 
         let field = app.searchFields.firstMatch
-        field.tap()
+        let focusPredicate = NSPredicate(format: "hasKeyboardFocus == true")
+        var focused = false
+        // A loaded simulator can drop the tap before the field takes focus.
+        for _ in 0..<3 where !focused {
+            field.tap()
+            let expectation = XCTNSPredicateExpectation(predicate: focusPredicate, object: field)
+            focused = XCTWaiter().wait(for: [expectation], timeout: 8) == .completed
+        }
+        XCTAssertTrue(focused, "Drive search did not take keyboard focus")
         field.typeText("report")
         XCTAssertTrue(element(app, "drive.search.scope").waitForExistence(timeout: 3))
         Thread.sleep(forTimeInterval: 0.6)
