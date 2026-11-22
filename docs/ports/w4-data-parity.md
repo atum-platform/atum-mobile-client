@@ -26,4 +26,13 @@ The package tests cover legacy and null fallback, a spendable zero, a reduced ba
 
 ## Verification
 
-The verification batch runs under the shared build lock with two build jobs and one iPhone 17 simulator. Logs and result bundles are kept in `/Volumes/AtumTestFlight/dd-w4-data-parity/`.
+The verification batch used the shared build lock, two build jobs, the shared package clones and one iPhone 17 simulator running iOS 27. Logs and result bundles are under `/Volumes/AtumTestFlight/dd-w4-data-parity/`.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `swift test --filter AtumDesignTests` | 897 passed, 0 failed on the corrected wallet transport | `package-final.log` |
+| App unit tests | 95 passed, including the cleared-working-line roster case | `app-tests.xcresult`, `app-tests.log` |
+| Picker UI, four selected `ChatInfoUITests` | 4 passed | `ui-tests.xcresult`, `ui-tests.log` |
+| Roster UI, `S1MatrixUITests.testRoster` | Initial setup needed an appearance helper. The helper applied light appearance on retry, then the build volume disconnected during the test. | `ui-tests.xcresult`, `ui-roster-retry.log`, `appearance-runner.log` |
+
+The first package run exposed the transport's fixed extra-header allowlist. The corrected route permits projection 1.4 only on the wallet GET. The app build used that correction. The public guard exited 0 on implementation head `a49df76`. Live Matrix sync and live platform billing remain unverified.
