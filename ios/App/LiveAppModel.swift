@@ -1886,7 +1886,13 @@ final class LiveAppModel {
                         roomID: roomID, snapshot: snapshot, source: source,
                         model: model, effort: effort, requestID: requestID
                     )
-                }
+                },
+                training: ChatGPTTrainingActions(
+                    read: { [weak self] in await self?.readChatGPTTraining() },
+                    confirm: { [weak self] connectionID in
+                        await self?.confirmChatGPTTraining(connectionID: connectionID) ?? .unavailable
+                    }
+                )
             )
         )
     }
@@ -2399,6 +2405,25 @@ final class LiveAppModel {
         let value = PhoneSubscriptionAccount(chatGPT: await relay, openCodeGo: await connections)
         guard domainClient === client else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
         return value
+    }
+
+    /// The account's ChatGPT-with-Google training-off confirmation, read from
+    /// the platform each time a ChatGPT pick asks. nil is "could not read",
+    /// which the picker never treats as confirmed.
+    private func readChatGPTTraining() async -> ChatGPTTrainingStatus? {
+        guard let client = domainClient else { return nil }
+        let status = try? await client.chatGPTTraining()
+        guard domainClient === client else { return nil }
+        return status
+    }
+
+    /// Sends the person's explicit confirmation for the connection the card
+    /// read. A sign-out or account switch mid-flight is "unavailable".
+    private func confirmChatGPTTraining(connectionID: String) async -> ChatGPTTrainingConfirmResult {
+        guard let client = domainClient else { return .unavailable }
+        let result = await client.confirmChatGPTTraining(connectionID: connectionID)
+        guard domainClient === client else { return .unavailable }
+        return result
     }
 
     /// The cloud destination switched to a subscription model (1.4 / 1.5),

@@ -1119,6 +1119,88 @@ import AtumChat
         ])
     }
 
+    /// The training-off confirmation goes to the desktop's Shell route with
+    /// the host-bridge contract header, the exact three-field body, and the
+    /// desktop's answers: 200 current is confirmed, 409 is stale, anything
+    /// else is unavailable. A 401 refreshes once and never confirms.
+    func testChatGPTTrainingUsesTheDesktopShellRouteAndExactBody() async throws {
+        let connection = "00000000-0000-4000-8000-0000000000c1"
+        let authorization = TestAuthorization(first: "p2-training-token", refreshed: "p2-training-fresh")
+        let value = client(authorization)
+        var answers: [NativeDomainProtocol.Reply] = []
+        var seen: [String] = []
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://api.atumplatform.com/api/connections/openai-codex/training-confirmation")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Atum-Host-Bridge-Contract"),
+                           "atum.s2.host-bridge/1.0.0")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            seen.append(request.httpMethod! + " " + (request.value(forHTTPHeaderField: "Authorization") ?? ""))
+            if request.httpMethod == "POST" {
+                let data = try! XCTUnwrap(self.body(of: request))
+                let body = try! XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
+                XCTAssertEqual(body, ["wordingVersion": "chatgpt-google-v1", "connectionId": connection,
+                                      "transferWordingVersion": "chatgpt-google-transfer-v1"])
+            } else {
+                XCTAssertNil(self.body(of: request))
+            }
+            return answers.removeFirst()
+        }
+        func projection(current: Bool, wording: String?) -> Data {
+            try! JSONSerialization.data(withJSONObject: [
+                "current": current, "wordingVersion": wording ?? NSNull(), "connectionId": connection,
+                "confirmedAt": current ? "2026-11-20T08:00:00.000Z" : NSNull(),
+                "revision": current ? 3 : NSNull(),
+            ])
+        }
+
+        answers = [.json(projection(current: false, wording: nil))]
+        let read = try await value.chatGPTTraining()
+        XCTAssertEqual(read, ChatGPTTrainingStatus(current: false, connectionID: connection, confirmedAt: nil))
+
+        answers = [.json(projection(current: true, wording: "chatgpt-google-v1"))]
+        guard case let .confirmed(status) = await value.confirmChatGPTTraining(connectionID: connection) else {
+            return XCTFail("a current 200 is the confirmation")
+        }
+        XCTAssertTrue(status.current)
+        XCTAssertNotNil(status.confirmedAt)
+
+        answers = [.init(status: 409, chunks: [Data(#"{"state":"refused"}"#.utf8)])]
+        let stale = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(stale, .stale)
+
+        // A 200 for another wording is not this build's confirmation.
+        answers = [.json(projection(current: true, wording: "chatgpt-google-v2"))]
+        let otherWording = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(otherWording, .unavailable)
+
+        answers = [.init(status: 503, chunks: [Data(#"{"state":"unavailable"}"#.utf8)])]
+        let down = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(down, .unavailable)
+
+        // One refresh after a 401, then the answer stands.
+        answers = [.init(status: 401, chunks: [Data(#"{"state":"refused"}"#.utf8)]),
+                   .init(status: 401, chunks: [Data(#"{"state":"refused"}"#.utf8)])]
+        let refused = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(refused, .unavailable)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+
+        // A failed read is never a confirmation: it throws.
+        answers = [.init(status: 503, chunks: [Data(#"{"state":"unavailable"}"#.utf8)])]
+        do {
+            _ = try await value.chatGPTTraining()
+            XCTFail("a 503 read must not return a status")
+        } catch {}
+
+        // A connection that is not a UUID never leaves the phone.
+        let before = seen.count
+        let malformed = await value.confirmChatGPTTraining(connectionID: "not-a-connection")
+        XCTAssertEqual(malformed, .unavailable)
+        XCTAssertEqual(seen.count, before)
+        XCTAssertEqual(seen.first, "GET Bearer p2-training-token")
+        XCTAssertEqual(seen.filter { $0 == "POST Bearer p2-training-fresh" }.count, 1)
+    }
+
     func testAgentAvatarWriteBindsCanonicalTargetAndUsesBoundedImageBody() async throws {
         let target = try NativeID(agentPrincipal)
         let image = try AgentAvatarImage(type: .jpeg, data: Data([0xff, 0xd8, 0xff, 0xd9]))

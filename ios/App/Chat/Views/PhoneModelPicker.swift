@@ -11,6 +11,9 @@ struct AssistantSubscriptionActions {
     let read: () async -> PhoneSubscriptionAccount
     let save: (ManagedModelDestinationSnapshot, ManagedModelDestinationSource, String, ManagedModelEffort,
                NativeID) async -> AssistantModelDestinationSaveResult
+    /// The one-time training-off confirmation a ChatGPT pick needs first.
+    /// Without it a ChatGPT pick is never written (`ChatGPTTrainingGate`).
+    var training: ChatGPTTrainingActions?
 }
 
 /// One subscription pick, for an idempotent retry of the same write.
@@ -58,6 +61,8 @@ struct PhoneConversationModelPicker: View {
     /// What the account's subscriptions can run in the cloud now; nil until read.
     @State private var account: PhoneSubscriptionAccount?
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
+    /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
+    @State private var confirming: PendingChatGPTTraining?
 
     private struct ConversationModelWrite: Hashable, Sendable {
         let model: String
@@ -106,7 +111,14 @@ struct PhoneConversationModelPicker: View {
 
     var body: some View {
         Group {
-            if !rows.isEmpty {
+            if let confirming, let training = destinations?.subscriptions?.training {
+                ChatGPTTrainingConfirmView(design: design, actions: training, status: confirming.status,
+                                           onConfirmed: { _ in
+                                               self.confirming = nil
+                                               writeSubscription(confirming.row)
+                                           },
+                                           onKeep: { self.confirming = nil })
+            } else if !rows.isEmpty {
                 PhoneModelPickerList(
                     design: design,
                     matrixAccountID: actions?.matrixAccountID ?? destinations?.matrixAccountID ?? "",
@@ -259,11 +271,41 @@ struct PhoneConversationModelPicker: View {
 
     /// A subscription pick writes the cloud destination (1.4 / 1.5), as the
     /// desktop's cloud picker does. Only the server's answer moves the check.
+    /// A ChatGPT pick first passes the training-off gate.
     private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
         guard savingRowID == nil, savingEffort == nil, let destination,
-              let save = destinations?.subscriptions?.save,
+              destinations?.subscriptions?.save != nil,
+              PhoneModelPickerProjection.canSelectSubscription(
+                  row, snapshot: destination, account: account) != nil else { return }
+        guard row.source == .chatGPTPlan else { return writeSubscription(row) }
+        savingRowID = row.stableID
+        saveFailed = false
+        Task { @MainActor in
+            let decision = await ChatGPTTrainingGate.decide(source: row.source,
+                                                            training: destinations?.subscriptions?.training)
+            guard !Task.isCancelled else { return }
+            switch decision {
+            case .write:
+                writeSubscription(row)
+            case let .ask(status):
+                savingRowID = nil
+                confirming = PendingChatGPTTraining(row: row, status: status)
+            case .failed:
+                savingRowID = nil
+                saveFailed = true
+            }
+        }
+    }
+
+    /// The write itself, against the snapshot the picker holds now.
+    private func writeSubscription(_ row: PhoneModelPickerProjection.Row) {
+        guard let destination, let save = destinations?.subscriptions?.save,
               let effort = PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: destination, account: account) else { return }
+                  row, snapshot: destination, account: account) else {
+            savingRowID = nil
+            saveFailed = true
+            return
+        }
         savingRowID = row.stableID
         saveFailed = false
         let operation = subscriptionWrites.begin(SubscriptionWrite(
@@ -407,6 +449,8 @@ private struct PhoneDestinationModelPicker: View {
     @State private var writes = ModelWriteRequests<DestinationModelWrite>()
     @State private var account: PhoneSubscriptionAccount?
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
+    /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
+    @State private var confirming: PendingChatGPTTraining?
 
     private struct DestinationModelWrite: Hashable, Sendable {
         let destination: String
@@ -414,16 +458,27 @@ private struct PhoneDestinationModelPicker: View {
     }
 
     var body: some View {
-        PhoneModelPickerList(
-            design: design,
-            matrixAccountID: actions.matrixAccountID,
-            destinationID: destination.rawValue,
-            rows: rows,
-            context: destination.isCloud ? .cloudAssistant : .mac,
-            savingRowID: savingRowID,
-            saveFailed: saveFailed,
-            select: choose
-        )
+        Group {
+            if let confirming, let training = actions.subscriptions?.training {
+                ChatGPTTrainingConfirmView(design: design, actions: training, status: confirming.status,
+                                           onConfirmed: { _ in
+                                               self.confirming = nil
+                                               writeSubscription(confirming.row)
+                                           },
+                                           onKeep: { self.confirming = nil })
+            } else {
+                PhoneModelPickerList(
+                    design: design,
+                    matrixAccountID: actions.matrixAccountID,
+                    destinationID: destination.rawValue,
+                    rows: rows,
+                    context: destination.isCloud ? .cloudAssistant : .mac,
+                    savingRowID: savingRowID,
+                    saveFailed: saveFailed,
+                    select: choose
+                )
+            }
+        }
         .task {
             if let read = actions.subscriptions?.read { account = await read() }
         }
@@ -476,11 +531,40 @@ private struct PhoneDestinationModelPicker: View {
         }
     }
 
-    /// The same 1.4 / 1.5 cloud write as the composer's picker.
+    /// The same 1.4 / 1.5 cloud write as the composer's picker, behind the
+    /// same training-off gate for a ChatGPT pick.
     private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
-        guard savingRowID == nil, destination.isCloud, let save = actions.subscriptions?.save,
+        guard savingRowID == nil, destination.isCloud, actions.subscriptions?.save != nil,
+              PhoneModelPickerProjection.canSelectSubscription(
+                  row, snapshot: value.snapshot, account: account) != nil else { return }
+        guard row.source == .chatGPTPlan else { return writeSubscription(row) }
+        savingRowID = row.stableID
+        saveFailed = false
+        Task { @MainActor in
+            let decision = await ChatGPTTrainingGate.decide(source: row.source,
+                                                            training: actions.subscriptions?.training)
+            guard !Task.isCancelled else { return }
+            switch decision {
+            case .write:
+                writeSubscription(row)
+            case let .ask(status):
+                savingRowID = nil
+                confirming = PendingChatGPTTraining(row: row, status: status)
+            case .failed:
+                savingRowID = nil
+                saveFailed = true
+            }
+        }
+    }
+
+    private func writeSubscription(_ row: PhoneModelPickerProjection.Row) {
+        guard destination.isCloud, let save = actions.subscriptions?.save,
               let effort = PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: value.snapshot, account: account) else { return }
+                  row, snapshot: value.snapshot, account: account) else {
+            savingRowID = nil
+            saveFailed = true
+            return
+        }
         savingRowID = row.stableID
         saveFailed = false
         let operation = subscriptionWrites.begin(SubscriptionWrite(
