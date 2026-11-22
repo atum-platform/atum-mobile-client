@@ -30,23 +30,13 @@ public enum ChatProgressPresentation: Equatable, Hashable, Sendable {
     }
 }
 
-/// Pending English values from desktop's matrix-status-line-copy.ts. The
-/// supplied lookup reads the current language from the pinned export.
+/// The supplied lookup reads the current language from the pinned export.
+/// Video consent still uses the desktop English line until the key is exported.
 public enum TurnStatusPendingCopy {
     public static func text(_ status: ChatProgressPresentation,
-                            exported: (String, Int?) -> String?) -> String {
+                            exported: (String, Int?) -> String?) -> String? {
         if let value = exported(status.exportKey, status.minutes) { return value }
-        switch status {
-        case .toolActivity(.web): return "Looking it up on the web…"
-        case .toolActivity(.read): return "Reading…"
-        case .toolActivity(.write): return "Editing files…"
-        case .toolActivity(.run): return "Running a task…"
-        case .toolActivity(.delegate): return "Getting a helper on it…"
-        case .toolActivity(.look): return "Looking at the image…"
-        case .toolActivity(.draw): return "Drawing…"
-        case let .heartbeat(minutes): return "Still working · \(minutes) min"
-        case .approvalWait: return "Waiting for your OK…"
-        case .videoConsentRequired: return "Waiting for you to allow video…"
-        }
+        guard status == .videoConsentRequired else { return nil }
+        return "Waiting for you to allow video…"
     }
 }

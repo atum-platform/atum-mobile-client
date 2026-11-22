@@ -113,8 +113,10 @@ extension AtumTurnMarkersTests {
         XCTAssertEqual(line, WorkingLineText(current: "Exported line", steps: [
             .init(text: "Finished", done: true), .init(text: "Next", done: false)
         ]))
-        XCTAssertEqual(WorkingLineText(body: "", presentation: .approvalWait) { _, _ in nil }.current,
-                       "Waiting for your OK…")
+        XCTAssertEqual(WorkingLineText(body: "", presentation: .videoConsentRequired) { _, _ in nil }.current,
+                       "Waiting for you to allow video…")
+        XCTAssertEqual(WorkingLineText(body: "Publisher line", presentation: .approvalWait) { _, _ in nil }.current,
+                       "Publisher line")
         XCTAssertEqual(WorkingLineText(body: "Old header", presentation: nil) { _, _ in nil }.current, "Old header")
     }
 

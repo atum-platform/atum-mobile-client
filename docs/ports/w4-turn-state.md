@@ -1,5 +1,7 @@
 # Wave 4 chat turn state
 
+This note records the package lane before the copy repin and app integration. See [Wave 4 iPhone chat and data wiring](w4-ab-wiring.md) for the assembled behavior and remaining work.
+
 ## Adopt before build
 
 Desktop source is atum-desktop main `eb808c46`.

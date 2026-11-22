@@ -12,8 +12,14 @@ import SwiftUI
 struct WorkingLineRow: View {
     let row: ChatRow
 
+    @Environment(\.chatTheme) private var theme
+
     var body: some View {
-        AgentWorkingLayout(text: WorkingLineText(body: row.item.body))
+        let text = WorkingLineText(body: row.item.body, presentation: row.item.progress?.presentation) { key, minutes in
+            guard let design = theme?.design, design.copy.contains(key) else { return nil }
+            return design.text(key, arguments: minutes.map { [.number(Int64($0))] } ?? [])
+        }
+        AgentWorkingLayout(text: text)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.updatesFrequently)
             .accessibilityIdentifier(row.accessibilityID)
