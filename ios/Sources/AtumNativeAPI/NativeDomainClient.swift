@@ -45,6 +45,8 @@ public struct AgentsRead: Sendable {
     private static let officialAccountsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/official-accounts")!
     private static let storeCatalogURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/store/catalog")!
     private static let walletURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet")!
+    private static let walletProjectionHeader = "X-Atum-Wallet-Projection"
+    private static let walletProjectionVersion = "1.4"
     private static let walletHistoryURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet/history")!
     private static let aliasLookupURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/lookup")!
     private static let aliasCheckURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/check")!
@@ -426,7 +428,9 @@ public struct AgentsRead: Sendable {
     }
 
     public func wallet() async throws -> WalletResponse {
-        try await read(WalletResponse.self, url: Self.walletURL)
+        try await requestWithHeaders(WalletResponse.self, url: Self.walletURL,
+                                     method: "GET", body: nil, acceptsAssistantNameRefusal: false,
+                                     extraHeaders: [Self.walletProjectionHeader: Self.walletProjectionVersion]).value
     }
 
     /// Starts or observes this signed-in account's personal Drive mapping.
@@ -983,13 +987,8 @@ public struct AgentsRead: Sendable {
 
     public func writeManagedModel(agentPrincipal: NativeID,
                                   value: ManagedModelWrite) async throws -> ManagedModelSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(ManagedModelSnapshot.self,
-                                         url: try agentURL(agentPrincipal, suffix: "model-choice"),
-                                         method: "PUT", body: body,
-                                         acceptsAssistantNameRefusal: false)
+        let snapshot = try await putModelChoice(ManagedModelSnapshot.self,
+                                                url: agentURL(agentPrincipal, suffix: "model-choice"), value: value)
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
         }
@@ -1016,14 +1015,9 @@ public struct AgentsRead: Sendable {
     public func writeManagedModelDestination(agentPrincipal: NativeID,
                                              value: ManagedModelDestinationWrite) async throws
         -> ManagedModelDestinationSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(
+        let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
-            method: "PUT", body: body,
-            acceptsAssistantNameRefusal: false
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
@@ -1037,19 +1031,32 @@ public struct AgentsRead: Sendable {
     public func writeManagedModelSubscription(agentPrincipal: NativeID,
                                               value: ManagedModelSubscriptionWrite) async throws
         -> ManagedModelDestinationSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(
+        let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
-            method: "PUT", body: body,
-            acceptsAssistantNameRefusal: false
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
         }
         return snapshot
+    }
+
+    private func putModelChoice<Snapshot: Decodable, Write: Encodable>(
+        _ type: Snapshot.Type, url: URL, value: Write
+    ) async throws -> Snapshot {
+        let body: Data
+        do { body = try JSONEncoder().encode(value) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let result = try await response(url: url, method: "PUT", body: body,
+                                        maximumRequestBodyBytes: 262_144,
+                                        maximumResponseBodyBytes: 262_144, acceptedStatuses: [200, 409])
+        if result.status == 409 {
+            if let conflict = try? NativeAPI.decode(ManagedModelFenceConflictResponse.self, from: result.body) {
+                throw conflict.reason
+            }
+            throw NativeDomainClientFailure.http(try httpFailure(result))
+        }
+        return try decode(type, data: result.body)
     }
 
     /// `atum.chatgpt-relay/1`: whether an owner Mac relays its ChatGPT plan
@@ -1429,6 +1436,9 @@ public struct AgentsRead: Sendable {
                   if url.path == CloudScheduleStop.path, method == "POST" {
                       return (name == "Origin" && value == Self.scheduleStopOrigin)
                           || (name == CloudScheduleStop.bridgeHeader && value == CloudScheduleStop.bridgeVersion)
+                  }
+                  if name == Self.walletProjectionHeader {
+                      return method == "GET" && url == Self.walletURL && value == Self.walletProjectionVersion
                   }
                   if url.path.hasPrefix(Self.baseURL.path + "/store/") {
                       if name == StoreWire.capabilitiesHeader { return value == StoreWire.capabilities }

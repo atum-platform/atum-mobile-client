@@ -1537,7 +1537,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         async let roomTypeValue = roomTypeIfChatCandidate(from: room, isChatCandidate: true)
         async let botData = appBotAccountDataIfChatCandidate(from: room, isChatCandidate: isChatCandidate)
         async let privateTitleData = try? await room.accountDataRaw(eventType: ChatPrivateTitle.eventType)
-        let preview = latestText(from: await latest)
+        let preview = await rosterPreview(from: await latest, room: room)
         // A delivery-outcome notice is not something a person said. Keep the
         // row's last real message (the snapshot merge supplies it) instead of
         // letting the warning become the chat list's second line.
@@ -1658,6 +1658,41 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         }
     }
 
+    nonisolated private static func rosterPreview(from event: LatestEventValue, room: Room) async
+        -> LiveLatestEventPreview {
+        let latest = latestText(from: event)
+        guard latest.content == .redacted else { return latest }
+
+        // LatestEventValue omits the raw redaction and the earlier messages.
+        // Read the SDK's cached live timeline only for a redacted preview.
+        let configuration = TimelineConfiguration(
+            focus: .live(hideThreadedEvents: false), filter: .all, internalIdPrefix: nil,
+            dateDividerMode: .daily, trackReadReceipts: .disabled, reportUtds: false
+        )
+        guard let timeline = try? await room.timelineWithConfiguration(configuration: configuration) else {
+            return latest
+        }
+        let (updates, continuation) = AsyncStream<[TimelineItem]>.makeStream()
+        let listener = RosterTimelineSnapshot(continuation: continuation)
+        let handle = await timeline.addListener(listener: listener)
+        // The SDK sends an initial reset during addListener. We only need that snapshot.
+        handle.cancel()
+        continuation.finish()
+        guard let items = await updates.first(where: { _ in true }) else { return latest }
+        let recent = items.suffix(60).compactMap { item -> LiveLatestEventPreview.Candidate? in
+            guard let event = item.asEvent(), event.isRemote else { return nil }
+            let content = previewContent(from: event.content)
+            guard content != .none else { return nil }
+            return .init(
+                preview: LiveLatestEventPreview(text: text(from: event.content), content: content,
+                    senderID: event.sender, senderName: senderName(from: event.senderProfile, userID: event.sender),
+                    isOwn: event.isOwn, isNotice: isNotice(event.content), timestamp: UInt64(event.timestamp)),
+                redactedJSON: content == .redacted ? event.lazyProvider.debugInfo().originalJson : nil
+            )
+        }
+        return latest.replacingClearedWorkingLine(in: recent)
+    }
+
     /// The sender's own name, or nil: never their Matrix ID or its opaque localpart.
     nonisolated private static func senderName(from profile: ProfileDetails, userID: String) -> String? {
         guard case let .ready(displayName, _, _, _, _) = profile else { return nil }
@@ -1696,7 +1731,17 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
     }
 }
 
-private struct LiveLatestEventPreview {
+struct LiveLatestEventPreview {
+    struct Candidate {
+        let preview: LiveLatestEventPreview
+        let redactedJSON: String?
+
+        var clearedWorkingLine: Bool {
+            guard preview.content == .redacted, let sender = preview.senderID else { return false }
+            return ClearedWorkingLine.matches(json: redactedJSON, originalSender: sender)
+        }
+    }
+
     var text: String?
     var content: RowPreview.Content
     var senderID: String?
@@ -1719,6 +1764,38 @@ private struct LiveLatestEventPreview {
         self.isNotice = isNotice
         self.sendState = sendState
         self.timestamp = timestamp
+    }
+
+    func replacingClearedWorkingLine(in cached: [Candidate]) -> Self {
+        guard content == .redacted, let index = cached.lastIndex(where: {
+            $0.preview.content == .redacted && $0.preview.timestamp == timestamp
+                && $0.preview.senderID == senderID
+        }), cached[index].clearedWorkingLine else { return self }
+
+        for candidate in cached[..<index].reversed() where !candidate.clearedWorkingLine {
+            let preview = candidate.preview
+            if preview.content == .none { continue }
+            if case let .text(body) = preview.content, body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || RowPreview.suppressesPreview(body: body, isOwn: preview.isOwn, isNotice: preview.isNotice) {
+                continue
+            }
+            return preview
+        }
+        return Self()
+    }
+}
+
+private final class RosterTimelineSnapshot: TimelineListener {
+    let continuation: AsyncStream<[TimelineItem]>.Continuation
+
+    init(continuation: AsyncStream<[TimelineItem]>.Continuation) {
+        self.continuation = continuation
+    }
+
+    func onUpdate(diff: [TimelineDiff]) {
+        guard case let .reset(values)? = diff.first else { return }
+        continuation.yield(values)
+        continuation.finish()
     }
 }
 

@@ -42,3 +42,86 @@ final class ModelWriteRequestsTests: XCTestCase {
         XCTAssertNoThrow(try NativeID(ModelWriteRequests<Write>.freshID().rawValue))
     }
 }
+
+@MainActor
+final class ManagedModelPickerStateTests: XCTestCase {
+    private struct Snapshot: Equatable, Sendable {
+        let revision: Int64
+        let model: String
+    }
+
+    private let before = Snapshot(revision: 7, model: "nguyet-thuc")
+    private let after = Snapshot(revision: 8, model: "nhat-thuc")
+    private let requestID = ModelWriteRequests<NativeID>.freshID()
+
+    func testReadStartedBeforeAWriteReturnsTheAdoptedSnapshot() async throws {
+        let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
+        let (started, notice) = AsyncStream<Void>.makeStream()
+        var finish: CheckedContinuation<Snapshot, Never>?
+        let pending = Task {
+            try await state.read(isCurrent: { true }) {
+                await withCheckedContinuation { completion in
+                    finish = completion
+                    notice.yield(())
+                    notice.finish()
+                }
+            }
+        }
+        _ = await started.first(where: { _ in true })
+
+        let result = await state.save(from: before, requestID: requestID,
+                                      refreshAfterSecondConflict: false, isCurrent: { true }, fetch: { before }) { _, _ in after }
+        guard case .saved = result else { return XCTFail("Expected a save") }
+        // A pre-write read can report the same revision and still hold old policy or choice.
+        finish?.resume(returning: Snapshot(revision: 8, model: before.model))
+        let late = try await pending.value
+        XCTAssertEqual(late, after)
+        let older = try await state.read(isCurrent: { true }) { before }
+        XCTAssertEqual(older, after)
+    }
+
+    func testObsoleteIntentCannotRetryAfterAnotherPickDuringItsRead() async throws {
+        let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
+        let (started, notice) = AsyncStream<Void>.makeStream()
+        var finish: CheckedContinuation<Snapshot, Never>?
+        var olderWrites = 0
+        let pending = Task {
+            await state.save(from: before, requestID: requestID,
+                             refreshAfterSecondConflict: true, isCurrent: { true }, fetch: {
+                await withCheckedContinuation { completion in
+                    finish = completion
+                    notice.yield(())
+                    notice.finish()
+                }
+            }) { _, _ in
+                olderWrites += 1
+                throw ManagedModelFenceConflict.revision
+            }
+        }
+        _ = await started.first(where: { _ in true })
+        _ = await state.save(from: before, requestID: ModelWriteRequests<NativeID>.freshID(),
+                             refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { before }) { _, _ in after }
+        finish?.resume(returning: before)
+        guard case .failed = await pending.value else { return XCTFail("The older pick was superseded") }
+        XCTAssertEqual(olderWrites, 1)
+        let held = try await state.read(isCurrent: { true }) { before }
+        XCTAssertEqual(held, after)
+    }
+
+    func testOtherConflictsDoNotReadOrRetry() async throws {
+        let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
+        let body = Data(#"{"error":"matrix_409","details":{"reason":"model_unavailable"}}"#.utf8)
+        let refusal = try NativeHTTPFailure(status: 409, headers: [:], body: body)
+        var writes = 0
+        let result = await state.save(from: before, requestID: requestID,
+                                      refreshAfterSecondConflict: true, isCurrent: { true }, fetch: {
+            XCTFail("Only a fence conflict can re-read")
+            return after
+        }) { _, _ in
+            writes += 1
+            throw NativeDomainClientFailure.http(refusal)
+        }
+        guard case .refused(nil) = result else { return XCTFail("Expected the original refusal") }
+        XCTAssertEqual(writes, 1)
+    }
+}
