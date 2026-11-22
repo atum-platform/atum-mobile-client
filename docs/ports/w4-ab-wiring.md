@@ -22,11 +22,14 @@ The integration starts from the copy repin to desktop `46f5a518` and merges the 
 
 ## Verification
 
-The integrated checks use the shared heavy-build lock and dedicated external-volume DerivedData at `/Volumes/AtumTestFlight/dd-w4-ab-wiring`.
+The integrated checks used the shared heavy-build lock, two build jobs, and an iPhone 17 simulator on iOS 27.0. Logs and result bundles are in `/Volumes/AtumTestFlight/dd-w4-ab-wiring`.
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Swift package, first run | 1,716 passed, 1 failed. The new binding-expiry test ran against a core compiled before that edit. A fresh run is queued. | `package.log` |
-| Debug simulator build, first run | The compiler rejected updating the copied thread context because its property was immutable. The fix is committed and the rebuild is queued. | `debug-build.log`, `debug-build.xcresult` |
-| Focused AppTests and UI tests | Queued after the rebuild. | |
-| Public boundary | Exit 0 on implementation commit `111e1c3` against `origin/main` after the copy repin PR merged. | `guard-code-final.log` |
+| Swift package | 1,717 passed, 0 failed. AtumChat ran 748, AtumDesign and Native API ran 905, AtumDrive ran 48, and AtumTelemetry ran 16. | `package-final.log` |
+| Debug simulator build | Passed, arm64. | `debug-build-retry.log`, `debug-build-retry.xcresult` |
+| Focused AppTests | 164 passed, 0 failed. Includes the cleared working-line roster case. | `app-tests.log`, `app-tests.xcresult` |
+| Focused UI tests | 13 passed, 1 failed. All 5 picker, 2 roster, and 3 transcript tests passed. The last of 4 Stop tests failed while XCTest attempted to focus the composer field. Its isolated rerun is queued. | `ui-tests.log`, `ui-tests.xcresult` |
+| Public boundary | Exit 0 against `origin/main` after the copy repin PR merged. | `guard-checkpoint.log` |
+
+The initial package run used a core compiled before the binding-expiry edit. The first simulator build caught the immutable thread context. The successful package rerun and simulator build include both fixes, and the initial logs and build bundle were kept.
