@@ -97,6 +97,8 @@ final class AssistantTurnStopTests: XCTestCase {
         XCTAssertTrue(stop.offersStop)
         let intent = stop.beginStop(newRequestID: "r1")
         XCTAssertEqual(intent, AssistantTurnStopIntent(eventID: "$q1", requestID: "r1"))
+        XCTAssertEqual(intent.map { String(describing: $0.eventID) }, "$q1",
+                       "legacy event-only probes keep the unwrapped ID")
         XCTAssertEqual(stop.phase, .stopping)
         XCTAssertFalse(stop.offersStop, "no second request while one is out")
         XCTAssertNil(stop.beginStop(newRequestID: "r2"))
@@ -247,5 +249,94 @@ final class MessageMenuLayoutTests: XCTestCase {
                                                        preview: preview, menu: menu, gap: gap))
             }
         }
+    }
+}
+
+extension AssistantTurnSignalTests {
+    func testDesktop75NativeThreadInterimSurvivesFinalWithoutEndingTheRoomTurn() {
+        // Desktop #75 forwards reply_to=$reply and thread_id=$thread to Matrix
+        // adapter.py, which emits this unmarked text and thread fallback.
+        let interimWire = #"""
+        {"msgtype":"m.text","body":"Checking the calendar.","m.relates_to":{
+          "rel_type":"m.thread","event_id":"$thread","is_falling_back":true,
+          "m.in_reply_to":{"event_id":"$reply"}}}
+        """#
+        var interim = F.text("native", from: F.agent, "Checking the calendar.", replyTo: "$reply", threadRoot: "$thread")
+        AtumTurnMarkers.parse(json: interimWire).apply(to: &interim)
+        XCTAssertFalse(interim.interim)
+        let question = F.mine("reply")
+        let status = working("work", replyTo: "$reply")
+        let context = F.assistantRoom()
+        let live = Projection.rows([question, status, interim], context: context)
+        XCTAssertEqual(F.ids(live), ["reply", "native", Projection.typingRowID])
+        XCTAssertEqual(AssistantTurnSignal.read(live, kind: .assistant),
+                       AssistantTurnSignal(unanswered: "$reply", working: true))
+
+        let finalWire = #"{"msgtype":"m.text","body":"Checking the calendar.","m.relates_to":{"m.in_reply_to":{"event_id":"$reply"}}}"#
+        var final = F.text("final", from: F.agent, interim.body, replyTo: "$reply")
+        AtumTurnMarkers.parse(json: finalWire).apply(to: &final)
+        let settled = Projection.rows([question, status, interim, final], context: context)
+        XCTAssertEqual(F.ids(settled), ["reply", "native", "final"])
+        XCTAssertEqual(AssistantTurnSignal.read(settled, kind: .assistant), .idle)
+    }
+
+    func testUnmarkedTopLevelTextHasTheSameShapeAsAFinalAnswer() {
+        let native = #"{"msgtype":"m.text","body":"Checking the calendar.","m.relates_to":{"m.in_reply_to":{"event_id":"$reply"}}}"#
+        let final = #"{"msgtype":"m.text","body":"Calendar checked.","m.relates_to":{"m.in_reply_to":{"event_id":"$reply"}}}"#
+        XCTAssertEqual(AtumTurnMarkers.parse(json: native), AtumTurnMarkers.parse(json: final))
+    }
+
+    func testExactScheduleFooterOutlivesAnotherExecutionsAnswer() throws {
+        var scheduled = working("cron", replyTo: "$unrelated")
+        scheduled.progress?.isScheduled = true
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run-a"))
+        scheduled.progress?.schedule = execution
+        let rows = Projection.rows([F.mine("question"), scheduled, F.text("other", from: F.agent)],
+                                   context: F.assistantRoom())
+        XCTAssertEqual(AssistantTurnSignal.read(rows, kind: .assistant).scheduled, execution)
+        XCTAssertEqual(F.ids(rows), ["question", "other", Projection.typingRowID])
+
+        scheduled.delivery = .sending()
+        let local = Projection.rows([F.mine("question"), scheduled], context: F.assistantRoom())
+        let unavailable = AssistantTurnSignal.read(local, kind: .assistant)
+        XCTAssertNil(unavailable.scheduled)
+        XCTAssertTrue(unavailable.hasScheduledWork)
+        XCTAssertNil(unavailable.unanswered)
+    }
+}
+
+extension AssistantTurnStopTests {
+    func testScheduledStopSelectsTheExactExecutionAndIgnoresLateReceipts() throws {
+        let a = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run-a"))
+        let b = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run-b"))
+        var stop = inProgress()
+        stop.observe(.init(unanswered: "$question", working: true, scheduled: a))
+        let first = try XCTUnwrap(stop.beginStop(newRequestID: "first"))
+        XCTAssertEqual(first.target, .schedule(a))
+        stop.retryPendingSchedule(for: first)
+        XCTAssertEqual(stop.phase, .stopping, "still in flight")
+        stop.resolve(.failed, for: first)
+        XCTAssertEqual(stop.phase, .failed)
+        XCTAssertEqual(stop.beginStop(newRequestID: "retry"), first)
+        stop.resolve(.stopRequested, for: first)
+        XCTAssertEqual(stop.phase, .stopping)
+        stop.retryPendingSchedule(for: first)
+        XCTAssertEqual(stop.phase, .working)
+        XCTAssertEqual(stop.beginStop(newRequestID: "after pending"), first)
+
+        stop.observe(.init(unanswered: "$question", working: true, scheduled: b))
+        stop.retryPendingSchedule(for: first)
+        stop.resolve(.stopped, for: first)
+        XCTAssertEqual(stop.phase, .working)
+        let second = try XCTUnwrap(stop.beginStop(newRequestID: "second"))
+        XCTAssertEqual(second.target, .schedule(b))
+        stop.resolve(.completed, for: second)
+        XCTAssertEqual(stop.phase, .finishing)
+
+        stop.observe(.init(unanswered: "$question", working: true, hasScheduledWork: true))
+        XCTAssertNil(stop.selection)
+        XCTAssertEqual(stop.phase, .working)
+        XCTAssertFalse(stop.offersStop)
+        XCTAssertNil(stop.beginStop(newRequestID: "unresolved"))
     }
 }

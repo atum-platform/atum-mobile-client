@@ -68,3 +68,75 @@ final class AtumTurnMarkersTests: XCTestCase {
     }
 
 }
+
+extension AtumTurnMarkersTests {
+    private func status(_ descriptor: String, kind: String, phase: String = "working") -> ChatProgressPresentation? {
+        AtumTurnMarkers.parse(json: """
+        {"msgtype":"m.notice","io.atum.progress":{"phase":"\(phase)","kind":"\(kind)","revision":2},
+         "io.atum.presentation":\(descriptor)}
+        """).progress?.presentation
+    }
+
+    func testDesktop63StatusDescriptorsUseOnlyClosedTypedArguments() {
+        for activity in ChatProgressPresentation.Activity.allCases {
+            let descriptor = """
+            {"version":1,"code":"tool_activity","args":{"activity":"\(activity.rawValue)"}}
+            """
+            XCTAssertEqual(status(descriptor, kind: "todo"), .toolActivity(activity))
+        }
+        XCTAssertEqual(status(#"{"version":1,"code":"heartbeat","args":{"elapsed_minutes":4}}"#, kind: "heartbeat"),
+                       .heartbeat(minutes: 4))
+        XCTAssertEqual(status(#"{"version":1,"code":"approval_wait","args":{}}"#, kind: "device", phase: "waiting"),
+                       .approvalWait)
+        XCTAssertEqual(status(#"{"version":1,"code":"video_consent_required","args":{}}"#,
+                              kind: "device", phase: "waiting"), .videoConsentRequired)
+        for invalid in [
+            #"{"version":true,"code":"heartbeat","args":{"elapsed_minutes":4}}"#,
+            #"{"version":1,"code":"heartbeat","args":{"elapsed_minutes":true}}"#,
+            #"{"version":1,"code":"heartbeat","args":{"elapsed_minutes":4.5}}"#,
+            #"{"version":1,"code":"heartbeat","args":{"elapsed_minutes":1441}}"#,
+            #"{"version":1,"code":"heartbeat","args":{"elapsed_minutes":4,"detail":"private"}}"#,
+            #"{"version":1,"code":"heartbeat","args":{"elapsed_minutes":4},"extra":true}"#
+        ] {
+            XCTAssertNil(status(invalid, kind: "heartbeat"))
+        }
+        XCTAssertNil(status(#"{"version":1,"code":"approval_wait","args":{}}"#, kind: "todo"))
+    }
+
+    func testStatusRenderingReadsTheExportFirstAndKeepsOnlyChecklistRows() {
+        let body = "Old header\n ✓ Finished \nInternal note\n • Next "
+        let line = WorkingLineText(body: body, presentation: .heartbeat(minutes: 5)) { key, minutes in
+            XCTAssertEqual(key, "shared.matrix-status-line-copy.matrixProgressCopy.heartbeat")
+            XCTAssertEqual(minutes, 5)
+            return "Exported line"
+        }
+        XCTAssertEqual(line, WorkingLineText(current: "Exported line", steps: [
+            .init(text: "Finished", done: true), .init(text: "Next", done: false)
+        ]))
+        XCTAssertEqual(WorkingLineText(body: "", presentation: .approvalWait) { _, _ in nil }.current,
+                       "Waiting for your OK…")
+        XCTAssertEqual(WorkingLineText(body: "Old header", presentation: nil) { _, _ in nil }.current, "Old header")
+    }
+
+    func testCronEditsKeepTheOriginalExecutionIdentity() throws {
+        let first = """
+        {"event_id":"$work","content":{"msgtype":"m.notice","io.atum.progress":{
+          "profile":"atum.agent-turns/1.3","scope":"owner_private","phase":"working","kind":"todo",
+          "revision":0,"trigger":"cron","schedule":{"job":"fixture-job","execution":"run-a"}}}}
+        """
+        func edit(_ execution: String) -> String {
+            """
+            {"event_id":"$edit","content":{"m.new_content":{"msgtype":"m.notice","io.atum.progress":{
+              "profile":"atum.agent-turns/1.3","scope":"owner_private","phase":"working","kind":"todo",
+              "revision":1,"trigger":"cron","schedule":{"job":"fixture-job","execution":"\(execution)"}}}}}
+            """
+        }
+        XCTAssertEqual(AtumTurnMarkers.parse(json: first).progress?.schedule?.execution, "run-a")
+        XCTAssertEqual(AtumTurnMarkers.parse(json: edit("run-a"), originalJSON: first).progress?.schedule?.execution,
+                       "run-a")
+        let changed = AtumTurnMarkers.parse(json: edit("run-b"), originalJSON: first).progress
+        XCTAssertEqual(changed?.isScheduled, true)
+        XCTAssertNil(changed?.schedule)
+        XCTAssertNil(AtumTurnMarkers.parse(json: edit("run-a")).progress?.schedule)
+    }
+}

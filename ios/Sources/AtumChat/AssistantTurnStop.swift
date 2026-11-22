@@ -21,10 +21,17 @@ public struct AssistantTurnSignal: Equatable, Sendable {
     /// The agent shows it is working: its typing row or a live
     /// `io.atum.progress` working line.
     public var working: Bool
+    /// Cron has no source question. An unresolved cron marker still takes
+    /// priority and must never fall back to stopping an unrelated question.
+    public var scheduled: ChatScheduleExecution?
+    public var hasScheduledWork: Bool
 
-    public init(unanswered: String?, working: Bool) {
+    public init(unanswered: String?, working: Bool, scheduled: ChatScheduleExecution? = nil,
+                hasScheduledWork: Bool = false) {
         self.unanswered = unanswered
         self.working = working
+        self.scheduled = scheduled
+        self.hasScheduledWork = hasScheduledWork || scheduled != nil
     }
 
     public static let idle = AssistantTurnSignal(unanswered: nil, working: false)
@@ -43,6 +50,11 @@ public struct AssistantTurnSignal: Equatable, Sendable {
             let item = row.item
             switch item.kind {
             case .typing:
+                if item.companyTurn != nil { return .idle }
+                if let progress = item.progress, progress.isScheduled {
+                    return AssistantTurnSignal(unanswered: nil, working: true,
+                                               scheduled: progress.schedule, hasScheduledWork: true)
+                }
                 working = true
                 continue
             case .message, .notice, .image, .file:
@@ -50,6 +62,9 @@ public struct AssistantTurnSignal: Equatable, Sendable {
             default:
                 continue
             }
+            // A native Matrix thread reply can carry a reply fallback to
+            // the room question without answering it in the room timeline.
+            guard item.threadRoot == nil else { continue }
             if item.isProgressLine {
                 if item.progress?.phase != .settled { working = true }
                 continue
@@ -60,7 +75,6 @@ public struct AssistantTurnSignal: Equatable, Sendable {
                 continue
             }
             // My message: the newest top-level one decides.
-            guard item.threadRoot == nil else { continue }
             guard let eventID = item.eventID, eventID.hasPrefix("$"),
                   !ended.contains(eventID), !agentSpokeAfter else {
                 return AssistantTurnSignal(unanswered: nil, working: working)
@@ -71,12 +85,11 @@ public struct AssistantTurnSignal: Equatable, Sendable {
     }
 }
 
-/// The platform's answer to one stop request (`cloud-execution/1` §3.5).
+/// The platform's answer to a turn Stop or an exact scheduled Stop.
 public enum AssistantTurnStopResult: Equatable, Sendable {
-    /// `stopped`: final; nothing will ever dispatch the turn.
+    /// The turn cannot dispatch, or the exact execution confirmed interruption.
     case stopped
-    /// `stop_requested`: the running holder was told; the room's answer or
-    /// notice shows the end.
+    /// Stop is pending. The running holder or the timeline may confirm it.
     case stopRequested
     /// `completed`: the turn had already finished; nothing was stopped.
     case completed
@@ -88,8 +101,29 @@ public enum AssistantTurnStopResult: Equatable, Sendable {
 /// One stop request: the turn's question and the idempotency key it is sent
 /// with. A retry of the same turn sends the same key.
 public struct AssistantTurnStopIntent: Equatable, Sendable {
-    public var eventID: String
-    public var requestID: String
+    public enum Target: Equatable, Sendable {
+        case turn(eventID: String)
+        case schedule(ChatScheduleExecution)
+    }
+
+    public let target: Target
+    public let requestID: String
+
+    public init(target: Target, requestID: String) {
+        self.target = target
+        self.requestID = requestID
+    }
+
+    public init(eventID: String, requestID: String) {
+        self.init(target: .turn(eventID: eventID), requestID: requestID)
+    }
+
+    /// Legacy event accessor for turn-only callers. Scheduled Stop dispatch
+    /// uses the typed target, which has no source event.
+    public var eventID: String {
+        if case let .turn(eventID) = target { return eventID }
+        return ""
+    }
 }
 
 /// The composer's turn state: working → stopping → stopped, or back to
@@ -114,25 +148,37 @@ public struct AssistantTurnStop: Equatable, Sendable {
     }
 
     public private(set) var phase: Phase = .idle
-    /// The question of the turn in progress.
-    public private(set) var target: String?
+    public private(set) var selection: AssistantTurnStopIntent.Target?
+    public var target: String? {
+        if case let .turn(eventID) = selection { return eventID }
+        return nil
+    }
     /// The key of this turn's stop request, kept for an idempotent retry.
     public private(set) var requestID: String?
+    private var scheduledStopPending = false
+
+    public static let scheduledRetryDelay: Duration = .seconds(15)
 
     public init() {}
 
     /// Stop is offered (and can be tapped) in these phases.
-    public var offersStop: Bool { phase == .working || phase == .failed }
+    public var offersStop: Bool { selection != nil && (phase == .working || phase == .failed) }
     /// The composer shows the turn as in progress.
     public var isWorking: Bool { phase != .idle }
 
     /// A new transcript reading.
     public mutating func observe(_ signal: AssistantTurnSignal) {
-        guard let question = signal.unanswered else {
+        let selected = signal.hasScheduledWork
+            ? signal.scheduled.map(AssistantTurnStopIntent.Target.schedule)
+            : signal.unanswered.map { AssistantTurnStopIntent.Target.turn(eventID: $0) }
+        guard let selected else {
             self = AssistantTurnStop()
+            // The composer can show an unavailable Stop while the exact
+            // cron target is missing. It stays disabled until a tuple arrives.
+            if signal.hasScheduledWork && signal.working { phase = .working }
             return
         }
-        if question == target {
+        if selected == selection {
             // The latch: the same question stays the turn until it is
             // answered, even after the typing signal lapses.
             return
@@ -142,7 +188,7 @@ public struct AssistantTurnStop: Equatable, Sendable {
             return
         }
         self = AssistantTurnStop()
-        target = question
+        selection = selected
         phase = .working
     }
 
@@ -151,22 +197,33 @@ public struct AssistantTurnStop: Equatable, Sendable {
     /// `newRequestID` is used only for this turn's first request; a retry
     /// after a failure re-sends the same key.
     public mutating func beginStop(newRequestID: String) -> AssistantTurnStopIntent? {
-        guard offersStop, let target else { return nil }
+        guard offersStop, let selection else { return nil }
         let key = requestID ?? newRequestID
         requestID = key
         phase = .stopping
-        return AssistantTurnStopIntent(eventID: target, requestID: key)
+        return AssistantTurnStopIntent(target: selection, requestID: key)
     }
 
     /// The platform answered a request. An answer for a turn that is no
     /// longer shown (the person moved on) changes nothing.
     public mutating func resolve(_ result: AssistantTurnStopResult, for intent: AssistantTurnStopIntent) {
-        guard intent.eventID == target, intent.requestID == requestID, phase == .stopping else { return }
+        guard intent.target == selection, intent.requestID == requestID, phase == .stopping else { return }
         switch result {
         case .stopped: phase = .stopped
-        case .stopRequested: phase = .stopping
+        case .stopRequested:
+            if case .schedule = intent.target { scheduledStopPending = true }
+            phase = .stopping
         case .completed: phase = .finishing
         case .failed: phase = .failed
         }
+    }
+
+    /// Desktop re-offers Stop after a pending/unknown schedule receipt. This
+    /// changes only availability. In-flight requests and other runs are untouched.
+    public mutating func retryPendingSchedule(for intent: AssistantTurnStopIntent) {
+        guard scheduledStopPending, phase == .stopping, intent.target == selection,
+              intent.requestID == requestID else { return }
+        scheduledStopPending = false
+        phase = .working
     }
 }

@@ -26,6 +26,22 @@ public struct WorkingLineText: Equatable, Sendable {
         self.steps = steps
     }
 
+    public init(body: String, presentation: ChatProgressPresentation?,
+                exported: (String, Int?) -> String?) {
+        guard let presentation else {
+            self.init(body: body)
+            return
+        }
+        let header = TurnStatusPendingCopy.text(presentation, exported: exported)
+        let steps = body.components(separatedBy: "\n").compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let marker = trimmed.unicodeScalars.first, "✓✔•◦".unicodeScalars.contains(marker)
+            else { return nil }
+            return trimmed
+        }
+        self.init(body: ([header] + steps).joined(separator: "\n"))
+    }
+
     public init(body: String) {
         let lines = body.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
