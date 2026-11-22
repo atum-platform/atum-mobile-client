@@ -22,4 +22,11 @@ The integration starts from the copy repin to desktop `46f5a518` and merges the 
 
 ## Verification
 
-The integrated checks use the shared heavy-build lock and dedicated external-volume DerivedData. Results will be recorded after the simulator and package runs.
+The integrated checks use the shared heavy-build lock and dedicated external-volume DerivedData at `/Volumes/AtumTestFlight/dd-w4-ab-wiring`.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Swift package, first run | 1,716 passed, 1 failed. The new binding-expiry test ran against a core compiled before that edit. A fresh run is queued. | `package.log` |
+| Debug simulator build, first run | The compiler rejected updating the copied thread context because its property was immutable. The fix is committed and the rebuild is queued. | `debug-build.log`, `debug-build.xcresult` |
+| Focused AppTests and UI tests | Queued after the rebuild. | |
+| Public boundary | Exit 0 on implementation commit `111e1c3` against `origin/main` after the copy repin PR merged. | `guard-code-final.log` |
