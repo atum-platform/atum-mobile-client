@@ -157,10 +157,8 @@ public struct DriveItem: Codable, Equatable, Hashable, Sendable, Identifiable {
     public let kind: DriveItemKind
     public let etag: String
     public let size: Int64
-    /// The file's WebDAV address, which is what a download reads. OpenCloud
-    /// omits it on folders in a children listing (seen on the owner's personal
-    /// root, 2026-11-04); folders are browsed by `id`, so they may lack it.
-    /// A file without one is refused.
+    /// The file's WebDAV address. The Graph client resolves it from the
+    /// space-relative path when the listing omits it. Folders use their ID.
     public let webDavURL: URL?
     public let modifiedAt: Date?
     public let mimeType: String?

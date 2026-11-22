@@ -251,8 +251,8 @@ public final class DriveFeatureModel {
             }
         }
 
+        guard token == generation else { return }
         guard let client else {
-            guard token == generation else { return }
             var value = directories[parentID] ?? .init()
             value.condition = value.items.isEmpty ? .needsConnection : .stale
             directories[parentID] = value
@@ -261,13 +261,14 @@ public final class DriveFeatureModel {
         var loading = directories[parentID] ?? .init()
         if loading.items.isEmpty { loading.condition = .loading }
         directories[parentID] = loading
+        let listingDriveID = driveID ?? rootDriveID
         do {
             let page: DrivePage
             if parentID == DrivePage.rootParentID {
                 page = try await client.rootPage()
             } else {
-                guard let driveID else { throw DriveFailure.invalidRequest }
-                page = try await client.children(driveID: driveID, parentID: parentID)
+                guard let listingDriveID else { throw DriveFailure.invalidRequest }
+                page = try await client.children(driveID: listingDriveID, parentID: parentID)
             }
             guard token == generation else { return }
             publish(page, condition: .fresh)
@@ -280,7 +281,7 @@ public final class DriveFeatureModel {
             connection = .ready
         } catch {
             guard token == generation else { return }
-            publishFailure(error, parentID: parentID, driveID: driveID)
+            publishFailure(error, parentID: parentID, driveID: listingDriveID)
         }
     }
 
@@ -385,7 +386,7 @@ public final class DriveFeatureModel {
             guard !Task.isCancelled, token == generation else { return }
             if error as? DriveFailure == .notFound {
                 await load(parentID: item.parentID ?? DrivePage.rootParentID,
-                           driveID: item.parentDriveID ?? rootDriveID)
+                           driveID: rootDriveID ?? item.parentDriveID)
                 guard !Task.isCancelled, token == generation else { return }
             }
             publishTransferFailure(error)
