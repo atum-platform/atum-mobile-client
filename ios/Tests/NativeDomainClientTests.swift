@@ -3358,3 +3358,43 @@ extension NativeDomainClientTests {
         }
     }
 }
+
+extension NativeDomainClientTests {
+    func testScheduledStopUsesAuthenticatedShellAndReplaysTheExactBodyOn401() async throws {
+        let agent = try stopAgent()
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: agent, roomID: "!fixture:example.test",
+                                                        routeAvailable: true))
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "fixture-job", execution: "run-a"))
+        let input = try CloudScheduleStop.Request(agent: agent.principal, execution: execution)
+        let expected = try input.body()
+        let pending = Data("""
+        {"ok":true,"requestId":"\(input.requestId.rawValue)","state":"pending","cancelled":false,"interrupted":false}
+        """.utf8)
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://api.atumplatform.com/api/host/stop")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Origin"), "https://api.atumplatform.com")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Atum-Host-Bridge-Contract"), "atum.s2.host-bridge/1.0.0")
+            XCTAssertFalse(request.httpShouldHandleCookies)
+            XCTAssertEqual(self.body(of: request), expected)
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer stop-old-token" {
+                return .init(status: 401)
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer stop-new-token")
+            return .json(pending)
+        }
+        let authorization = TestAuthorization(first: "stop-old-token", refreshed: "stop-new-token")
+        let intent = AssistantTurnStopIntent(target: .schedule(execution), requestID: "composer-intent")
+        let result = await route.stop(intent, using: client(authorization))
+        XCTAssertEqual(result, .stopRequested)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
+
+        NativeDomainProtocol.state.handler = { _ in .init(status: 403) }
+        var disabled = false
+        let refused = await route.stop(intent, using: client(TestAuthorization(first: "stop-new-token")),
+                                       onRouteUnavailable: { disabled = true })
+        XCTAssertEqual(refused, .failed)
+        XCTAssertFalse(disabled, "schedule refusal does not disable manual turn Stop")
+    }
+}

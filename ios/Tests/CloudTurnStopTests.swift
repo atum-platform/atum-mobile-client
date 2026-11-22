@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import AtumNativeAPI
+import AtumChat
 
 /// `atum.cloud-execution/1` §3.5 stop shapes, as the desktop sends and checks
 /// them (atum-app `apps/desktop/electron/matrix/device/cloud-stop.ts`). The
@@ -53,5 +54,45 @@ final class CloudTurnStopTests: XCTestCase {
         XCTAssertThrowsError(try CloudTurnStop.response(reply("stopped", extra: #","executorId":"x""#), for: request),
                              "names the executor")
         XCTAssertThrowsError(try CloudTurnStop.response(Data("{}".utf8), for: request))
+    }
+}
+
+extension CloudTurnStopTests {
+    func testScheduledStopFreezesOnlyTheExactExecutionAndKeepsDesktopRequestID() throws {
+        let agent = try NativeID(agent)
+        let a = try XCTUnwrap(ChatScheduleExecution(job: "fixture-job", execution: "run-a"))
+        let b = try XCTUnwrap(ChatScheduleExecution(job: "fixture-job", execution: "run-b"))
+        let input = try CloudScheduleStop.Request(agent: agent, execution: a)
+        let expected: NSDictionary = [
+            "agent": agent.rawValue,
+            "requestId": "8b26d56e-47d0-84cf-922b-c310c8ecfa30",
+            "source": ["kind": "schedule", "job": "fixture-job", "execution": "run-a"]
+        ]
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: input.body()) as? NSDictionary, expected)
+        XCTAssertEqual(try CloudScheduleStop.Request(agent: agent, execution: a).requestId, input.requestId)
+        XCTAssertNotEqual(try CloudScheduleStop.Request(agent: agent, execution: b).requestId, input.requestId)
+        XCTAssertNil(ChatScheduleExecution(job: "fixture-job", execution: "urn:other"))
+    }
+
+    func testScheduledStopRequiresCorrelatedAndConsistentFlags() throws {
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "fixture-job", execution: "run-a"))
+        let input = try CloudScheduleStop.Request(agent: NativeID(agent), execution: execution)
+        func result(_ state: String, flags: Bool = false, status: Int = 200,
+                    id: String? = nil) throws -> AssistantTurnStopResult {
+            let receipt = """
+            {"ok":true,"requestId":"\(id ?? input.requestId.rawValue)","state":"\(state)",
+             "cancelled":\(flags),"interrupted":\(flags)}
+            """
+            return try CloudScheduleStop.result(status: status, data: Data(receipt.utf8), for: input)
+        }
+        XCTAssertEqual(try result("interrupted", flags: true), .stopped)
+        XCTAssertEqual(try result("finished"), .completed)
+        XCTAssertEqual(try result("pending"), .stopRequested)
+        XCTAssertEqual(try result("unknown"), .stopRequested)
+        XCTAssertEqual(try result("refused", status: 403), .failed)
+        XCTAssertEqual(try result("unavailable", status: 503), .failed)
+        XCTAssertThrowsError(try result("interrupted"))
+        XCTAssertThrowsError(try result("pending", flags: true))
+        XCTAssertThrowsError(try result("interrupted", flags: true, id: requestID))
     }
 }

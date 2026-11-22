@@ -1,3 +1,4 @@
+import AtumChat
 import Foundation
 
 /// Failure metadata intentionally excludes request credentials and response
@@ -37,6 +38,7 @@ public struct AgentsRead: Sendable {
 /// SwiftUI receives typed domain values and safe failures only.
 @MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, CompanyInvitesAPI, ApplePurchasesAPI {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
+    private static let scheduleStopOrigin = "https://api.atumplatform.com"
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
     private static let agentLifecycleURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents/lifecycle")!
     private static let appsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/apps")!
@@ -198,6 +200,18 @@ public struct AgentsRead: Sendable {
             maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 262_144
         )
         do { return try CloudTurnStop.response(response.body, for: input) }
+        catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    public func cloudScheduleStop(_ input: CloudScheduleStop.Request) async throws -> AssistantTurnStopResult {
+        let body: Data
+        do { body = try input.body() }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let url = URL(string: Self.scheduleStopOrigin + CloudScheduleStop.path)!
+        let receipt = try await performAuthorized(url: url, body: body, extraHeaders: [
+            "Origin": Self.scheduleStopOrigin, CloudScheduleStop.bridgeHeader: CloudScheduleStop.bridgeVersion
+        ], maximumResponseBodyBytes: 4_096)
+        do { return try CloudScheduleStop.result(status: receipt.status, data: receipt.body, for: input) }
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
@@ -1308,14 +1322,14 @@ public struct AgentsRead: Sendable {
     /// `POST` with the same single-flight 401 refresh as `request`, but
     /// returning the raw response so a caller can answer a refused body
     /// itself (the assistant placement retries a 4xx with the empty body).
-    private func performAuthorized(url: URL, body: Data,
-                                   extraHeaders: [String: String] = [:]) async throws -> NativeDomainHTTPResponse {
+    private func performAuthorized(url: URL, body: Data, extraHeaders: [String: String] = [:],
+                                   maximumResponseBodyBytes: Int = 262_144) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false)
         try requireActiveTask()
         let first = try await perform(url: url, token: firstToken, method: "POST", body: body,
-                                      maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 262_144,
+                                      maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
                                       extraHeaders: extraHeaders)
         try requireActiveTask()
         guard first.status == 401 else { return first }
@@ -1325,7 +1339,7 @@ public struct AgentsRead: Sendable {
         let refreshedToken = try await authorize(forceRefresh: true)
         try requireActiveTask()
         let second = try await perform(url: url, token: refreshedToken, method: "POST", body: body,
-                                       maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 262_144,
+                                       maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
                                        extraHeaders: extraHeaders)
         try requireActiveTask()
         if second.status == 401 {
@@ -1412,6 +1426,10 @@ public struct AgentsRead: Sendable {
               (0...4_500_000).contains(maximumResponseBodyBytes),
               (method == "GET") == (body == nil),
               extraHeaders.allSatisfy({ name, value in
+                  if url.path == CloudScheduleStop.path, method == "POST" {
+                      return (name == "Origin" && value == Self.scheduleStopOrigin)
+                          || (name == CloudScheduleStop.bridgeHeader && value == CloudScheduleStop.bridgeVersion)
+                  }
                   if url.path.hasPrefix(Self.baseURL.path + "/store/") {
                       if name == StoreWire.capabilitiesHeader { return value == StoreWire.capabilities }
                       if name == "Idempotency-Key" {
@@ -1448,6 +1466,7 @@ public struct AgentsRead: Sendable {
         request.httpShouldHandleCookies = false
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         let operation = NativeDomainJSONOperation(request: request, protocolClasses: protocolClasses,
+                                                  timeout: url.path == CloudScheduleStop.path ? 40 : 15,
                                                   maximumBodyBytes: maximumResponseBodyBytes)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { operation.start($0) }
@@ -1526,6 +1545,7 @@ public struct AgentsRead: Sendable {
     private func isApprovedURL(_ url: URL) -> Bool {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
+        if url.path == CloudScheduleStop.path { return url.query == nil }
         guard url.path.hasPrefix(Self.baseURL.path + "/") else { return false }
         let phoneRoot = Self.baseURL.path + "/device-services"
         let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
@@ -1686,6 +1706,7 @@ private final class NativeDomainJSONOperation: NSObject, URLSessionDataDelegate,
     private let request: URLRequest
     private let protocolClasses: [URLProtocol.Type]?
     private let maximumBodyBytes: Int
+    private let timeout: TimeInterval
     private var session: URLSession?
     private var task: URLSessionTask?
     private var continuation: CheckedContinuation<NativeDomainHTTPResponse, any Error>?
@@ -1695,9 +1716,10 @@ private final class NativeDomainJSONOperation: NSObject, URLSessionDataDelegate,
     private var acceptedResponse = false
     private var finished = false
 
-    init(request: URLRequest, protocolClasses: [URLProtocol.Type]?, maximumBodyBytes: Int) {
+    init(request: URLRequest, protocolClasses: [URLProtocol.Type]?, timeout: TimeInterval, maximumBodyBytes: Int) {
         self.request = request
         self.protocolClasses = protocolClasses
+        self.timeout = timeout
         self.maximumBodyBytes = maximumBodyBytes
     }
 
@@ -1711,8 +1733,8 @@ private final class NativeDomainJSONOperation: NSObject, URLSessionDataDelegate,
             config.urlCredentialStorage = nil
             config.urlCache = nil
             config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-            config.timeoutIntervalForRequest = 15
-            config.timeoutIntervalForResource = 30
+            config.timeoutIntervalForRequest = timeout
+            config.timeoutIntervalForResource = max(30, timeout)
             config.waitsForConnectivity = false
             if let protocolClasses { config.protocolClasses = protocolClasses }
             let queue = OperationQueue()
