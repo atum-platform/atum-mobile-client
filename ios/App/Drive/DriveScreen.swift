@@ -365,7 +365,7 @@ private struct DriveDirectoryView: View {
     private var destinationPicker: some View {
         Picker(copy.title, selection: $destination) {
             Text(copy.recents).tag(DriveDestination.recents)
-            Text(copy.allFiles).tag(DriveDestination.all)
+            Text(copy.driveName).tag(DriveDestination.all)
         }
         .pickerStyle(.segmented)
         .labelsHidden()

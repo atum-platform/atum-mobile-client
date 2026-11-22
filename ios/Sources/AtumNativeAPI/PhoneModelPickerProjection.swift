@@ -15,7 +15,7 @@ public enum PhoneModelPickerProjection {
         /// Why a subscription's model is listed but cannot be chosen now, in
         /// the desktop's two states for a cloud assistant (`model-picker.tsx`):
         /// a ChatGPT plan no owner Mac relays to the cloud yet
-        /// (`chatgptCloudNotReady`), and an OpenCode Go connection that was
+        /// (`chatgptInWork`), and an OpenCode Go connection that was
         /// disconnected (`modelsSignedOut`).
         public enum Unavailable: Equatable, Sendable {
             case notReady

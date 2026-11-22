@@ -52,8 +52,7 @@ struct DriveCopy {
     /// the phone only reads Drive, so it says where the files will come from.
     var emptyRootBody: String { text("comingSoonHelp") }
     var upToDate: String { text("status.ready") }
-    var recents: String { owed("browser.recents", Self.recentsFallback) }
-    var allFiles: String { owed("browser.allFiles", Self.allFilesFallback) }
+    var recents: String { text("browser.recents") }
 
     // Finder arrangement (atum-desktop #43–#45). Exported words where the pin
     // has them; desktop's own words (`DrivePendingCopy`) until then.
@@ -124,20 +123,6 @@ struct DriveCopy {
     func upToDate(at: Date, now: Date = Date()) -> String {
         upToDate + " · " + DriveTimeFormat.syncTime(at, now: now, locale: Locale(identifier: design.locale))
     }
-
-    /// Desktop Drive keys the pinned export does not carry yet
-    /// (`matrixDriveCopy.browser.*`, atum-app 050ede8edf5). The export wins once
-    /// it carries them; until then, the desktop's own five-locale words.
-    private func owed(_ suffix: String, _ fallback: [String: String]) -> String {
-        let key = Self.root + suffix
-        if design.copy.contains(key) { return design.text(key) }
-        return fallback[AccountSettingsText.normalizedLocale(design.locale)] ?? fallback["en"]!
-    }
-
-    static let recentsFallback = ["en": "Recents", "vi": "Gần đây", "ja": "最近使った項目",
-                                  "zh": "最近使用", "zh-hant": "最近使用"]
-    static let allFilesFallback = ["en": "All files", "vi": "Tất cả tệp", "ja": "すべてのファイル",
-                                   "zh": "所有文件", "zh-hant": "所有檔案"]
 
     func notice(_ notice: DriveNotice) -> String {
         switch notice {
