@@ -118,9 +118,11 @@ public struct AssistantTurnStopIntent: Equatable, Sendable {
         self.init(target: .turn(eventID: eventID), requestID: requestID)
     }
 
-    public var eventID: String? {
+    /// Legacy event accessor for turn-only callers. Scheduled Stop dispatch
+    /// uses the typed target, which has no source event.
+    public var eventID: String {
         if case let .turn(eventID) = target { return eventID }
-        return nil
+        return ""
     }
 }
 

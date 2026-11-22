@@ -50,7 +50,7 @@ The current desktop pin fences the full identity on a settled marker or a seen l
 
 The selected cloud agent's live, confirmed cron progress carries the exact job and execution IDs. A live cron line missing the tuple keeps Stop visible but disabled and suppresses fallback to a room question. An edited line keeps the tuple only when it agrees with the original. Progress for one execution survives a different execution's answer.
 
-The existing Stop callback submits `{agent,requestId,source:{kind:"schedule",job,execution}}` through authenticated Shell transport. The stable UUIDv8 matches desktop and repeats across room reopening and bearer refresh. Execution identity preserves the exact identifier bytes. The server verifies the owned Hermes runtime and the exact execution. A correlated `interrupted` receipt requires both flags. `finished` finishes without a Stop claim. `pending` and `unknown` keep the pending phase. Refusal or transport failure uses the existing retryable failure phase and leaves the manual Stop route available. The phone roster DTO does not expose the desktop's runtime field, so the current entry point relies on Shell's runtime check.
+The existing Stop callback submits `{agent,requestId,source:{kind:"schedule",job,execution}}` through authenticated Shell transport. The stable UUIDv8 matches desktop and repeats across room reopening and bearer refresh. Execution identity preserves the exact identifier bytes. The server verifies the owned Hermes runtime and the exact execution. A correlated `interrupted` receipt requires both flags. `finished` finishes without a Stop claim. `pending` and `unknown` keep the pending phase. Refusal or transport failure uses the existing retryable failure phase and leaves the manual Stop route available. Turn-only readers continue to receive the original event ID as a string, including the scripted composer probe. The phone roster DTO does not expose the desktop's runtime field, so the current entry point relies on Shell's runtime check.
 
 `AtumTurnMarkersTests`, `AssistantTurnSignalTests` and `AssistantTurnStopTests` cover the selection, stale edits and receipts, retries, and pending state. `CloudTurnStopTests` and `NativeDomainClientTests` cover exact JSON, request IDs, receipt flags, the Shell route and bearer refresh using synthetic responses.
 
@@ -62,3 +62,10 @@ The existing Stop callback submits `{agent,requestId,source:{kind:"schedule",job
 - The existing composer dispatches exact schedule intents through its standard Stop callback. To re-offer Stop on desktop's pending timeout, call `turn.stop.retryPendingSchedule(for: intent)` after `AssistantTurnStop.scheduledRetryDelay` on a pending schedule result. The method checks the current selection and request before changing it.
 
 Live company binding, localized footer rendering and pending timeout are app integration points. The package tests use synthetic bindings and receipts.
+
+## Verification
+
+The batch held `/Volumes/AtumTestFlight/.heavy-build.lock`, used two jobs, and kept Swift scratch and Xcode derived data under `/Volumes/AtumTestFlight/dd-w4-turn-state`. Xcode used package clones in `/Volumes/AtumTestFlight/spm`.
+
+- Baseline `b9cab0d` reproduced the #75 regression with two assertions in one test. The footer vanished and `AssistantTurnSignal` reported idle while the room-level turn was working. See `/Volumes/AtumTestFlight/tmp/w4-turn-state/native-interim-baseline.log`.
+- The port passed 1,704 package tests. AtumChat ran 747, AtumDesign and Native API ran 894, AtumDrive ran 47, and AtumTelemetry ran 16. See `/Volumes/AtumTestFlight/tmp/w4-turn-state/swift-test.log`.

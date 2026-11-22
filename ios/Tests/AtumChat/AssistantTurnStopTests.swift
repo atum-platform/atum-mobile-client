@@ -97,6 +97,8 @@ final class AssistantTurnStopTests: XCTestCase {
         XCTAssertTrue(stop.offersStop)
         let intent = stop.beginStop(newRequestID: "r1")
         XCTAssertEqual(intent, AssistantTurnStopIntent(eventID: "$q1", requestID: "r1"))
+        XCTAssertEqual(intent.map { String(describing: $0.eventID) }, "$q1",
+                       "legacy event-only probes keep the unwrapped ID")
         XCTAssertEqual(stop.phase, .stopping)
         XCTAssertFalse(stop.offersStop, "no second request while one is out")
         XCTAssertNil(stop.beginStop(newRequestID: "r2"))
