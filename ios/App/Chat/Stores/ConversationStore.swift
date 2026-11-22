@@ -17,7 +17,7 @@ import UIKit
 struct ConversationRoomInfo: Sendable {
     let roomID: String
     let title: String
-    let context: RoomContext
+    var context: RoomContext
     /// Server-authored names for agents and catalog bots (sender labels).
     let knownNames: [String: String]
     /// Catalog bot identities remain explicit even in a group room, where
