@@ -105,6 +105,30 @@ final class DriveFeatureModelTests: XCTestCase {
         XCTAssertEqual(model.connection, .ready)
     }
 
+    func testFolderWithoutParentDriveMetadataUsesTheListedPersonalDrive() async throws {
+        let cache = try cache()
+        let space = "storage-users-1$aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        let folder = try DriveItem(
+            id: space + "!bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            name: "Folder", kind: .folder, etag: "folder", size: 0, webDavURL: nil
+        )
+        let root = try DrivePage(driveID: space, parentID: DrivePage.rootParentID, items: [folder])
+        let reader = FakeDriveReader(rootResults: [.success(root)])
+        reader.childrenResult = .success(try DrivePage(driveID: space, parentID: folder.id, items: []))
+        let model = DriveFeatureModel()
+        model.configure(accountID: "@owner:atum.test", resume: {
+            LiveDriveAccess(cache: cache, state: .active(reader))
+        }, connect: {
+            XCTFail("folder navigation must reuse the active reader")
+            return LiveDriveAccess(cache: cache, state: .offline)
+        })
+
+        await model.start()
+        await model.load(parentID: folder.id, driveID: folder.parentDriveID)
+        XCTAssertEqual(reader.lastChildDriveID, space)
+        XCTAssertEqual(model.directory(parentID: folder.id).condition, .fresh)
+    }
+
     func testAFreshListingIsStampedAndACachedRepaintKeepsTheStamp() async throws {
         let cache = try cache()
         let reader = FakeDriveReader(rootResults: [.success(try page(items: [try item()]))])
@@ -601,6 +625,7 @@ private actor AsyncGate {
     var rootResults: [Result<DrivePage, any Error>]
     var rootCalls = 0
     var childrenResult: Result<DrivePage, any Error>?
+    var lastChildDriveID: String?
     var download: (DriveItem, URL, @escaping @Sendable (Int64, Int64) -> Void) async throws -> Void = {
         item, url, progress in
         progress(item.size, item.size)
@@ -616,6 +641,7 @@ private actor AsyncGate {
     }
 
     func children(driveID: String, parentID: String) async throws -> DrivePage {
+        lastChildDriveID = driveID
         guard let childrenResult else { throw DriveFailure.invalidResponse }
         return try childrenResult.get()
     }

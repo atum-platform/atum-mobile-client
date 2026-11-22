@@ -441,6 +441,58 @@ final class DriveCacheTests: XCTestCase {
         XCTAssertNotNil(page.items.first?.modifiedAt)
     }
 
+    func testOpenCloud725FolderBrowsesAndDownloadsWithoutItemWebDavURL() async throws {
+        let space = "storage-users-1$aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        let rootID = space + "!aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        let parent = space + "!bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        let child = space + "!cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        let childRoute = "/graph/v1.0/drives/\(space)/items/\(parent)/children"
+        let davRoute = "/dav/spaces/\(space)/Project%20Notes/Report%20%231%3F%25.txt"
+        let drives = #"""
+        {"value":[{"id":"\#(space)","name":"Personal","driveType":"personal",
+                   "root":{"id":"\#(space)","webDavUrl":"https://drive.atum.test/dav/spaces/\#(space)"}}]}
+        """#
+        let root = #"""
+        {"value":[{"id":"\#(parent)","name":"Project Notes","eTag":"\"folder\"","size":5,"folder":{},
+                   "parentReference":{"driveId":"\#(space)","id":"\#(rootID)","path":"/"}}]}
+        """#
+        let items = #"""
+        {"value":[
+          {"id":"\#(child)","name":"Report #1?%.txt","eTag":"\"file\"","size":5,
+           "file":{"mimeType":"text/plain"},
+           "parentReference":{"driveId":"\#(space)","id":"\#(parent)","path":"/Project Notes"}},
+          {"id":"\#(space)!dddddddd-dddd-4ddd-8ddd-dddddddddddd","name":"Archive","eTag":"\"subfolder\"","size":0,"folder":{}}
+        ]}
+        """#
+        DriveTestProtocol.state.handler = { request in
+            switch request.url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) })?.percentEncodedPath {
+            case "/graph/v1.0/me/drives": return .json(drives)
+            case "/graph/v1.0/me/drive/root/children": return .json(root)
+            case childRoute: return .json(items)
+            case davRoute:
+                XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), #""file""#)
+                return .init(headers: ["ETag": #""file""#, "Content-Length": "5"],
+                             chunks: [Data("hello".utf8)])
+            default: return .init(status: 404)
+            }
+        }
+
+        let reader = try client()
+        let rootPage = try await reader.rootPage()
+        let folder = try XCTUnwrap(rootPage.items.first)
+        XCTAssertEqual(folder.parentDriveID, space)
+        XCTAssertEqual(rootPage.driveID, space)
+        let page = try await reader.children(driveID: rootPage.driveID, parentID: folder.id)
+        XCTAssertEqual(page.items.map(\.kind), [.file, .folder])
+        let file = try XCTUnwrap(page.items.first)
+        XCTAssertEqual(file.id, child)
+        XCTAssertEqual(file.webDavURL?.absoluteString, "https://drive.atum.test" + davRoute)
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        try await reader.download(file, to: destination)
+        XCTAssertEqual(try Data(contentsOf: destination), Data("hello".utf8))
+    }
+
     func testOversizedFolderTruncatesWithAFlagInsteadOfFailing() async throws {
         let drives = try graphFixture("me-drives.response.json")
         let values: [[String: Any]] = (0...500).map { index in
@@ -482,10 +534,7 @@ final class DriveCacheTests: XCTestCase {
         XCTAssertEqual(drive.id, "storage-fixture$space-fixture")
     }
 
-    /// The owner's personal root on production (2026-11-04): OpenCloud lists its
-    /// folders without `webDavUrl`. Folders are browsed by id, so they list; a
-    /// file still needs its WebDAV address to be downloaded.
-    func testRootListsFoldersWithoutWebDavURLButRefusesSuchAFile() async throws {
+    func testRootSkipsUnusableItemsAndListsFoldersWithoutWebDavURL() async throws {
         let drives = try graphFixture("me-drives.response.json")
         let folders = #"""
         {"value":[
@@ -493,12 +542,13 @@ final class DriveCacheTests: XCTestCase {
            "lastModifiedDateTime":"2026-11-02T08:12:13.455527853Z","name":"Folder A",
            "parentReference":{"driveId":"storage-fixture$space-fixture","id":"storage-fixture$space-fixture"},"size":1200},
           {"eTag":"\"b2\"","folder":{"childCount":0},"id":"storage-fixture$space-fixture!folder-b",
-           "name":"Folder B","size":0}
+           "name":"Folder B","size":0},
+          {"eTag":"\"c3\"","file":{"mimeType":"text/plain"},"id":"storage-fixture$space-fixture!file-c",
+           "name":"c.txt","size":5},
+          {"id":"storage-fixture$space-fixture!bad-path","name":"Other.txt","eTag":"bad","size":5,"file":{},
+           "parentReference":{"driveId":"storage-fixture$space-fixture","path":"/../another-space"}},
+          {"id":"storage-fixture$space-fixture!bad-size","name":"Bad size","eTag":"a","size":"large","folder":{}}
         ]}
-        """#
-        let fileWithoutAddress = #"""
-        {"value":[{"eTag":"\"c3\"","file":{"mimeType":"text/plain"},"id":"storage-fixture$space-fixture!file-c",
-                   "name":"c.txt","size":5}]}
         """#
         DriveTestProtocol.state.handler = { request in
             request.url?.path == "/graph/v1.0/me/drives" ? .json(drives) : .json(folders)
@@ -507,15 +557,50 @@ final class DriveCacheTests: XCTestCase {
         XCTAssertEqual(page.items.map(\.name), ["Folder A", "Folder B"])
         XCTAssertEqual(page.items.map(\.kind), [.folder, .folder])
         XCTAssertTrue(page.items.allSatisfy { $0.webDavURL == nil })
+    }
 
-        DriveTestProtocol.state.handler = { request in
-            request.url?.path == "/graph/v1.0/me/drives" ? .json(drives) : .json(fileWithoutAddress)
+    func testUndecodableItemsDoNotHideSecurityViolations() async throws {
+        let space = "storage-fixture$space-fixture"
+        let parent = space + "!folder-1"
+        let good = #"{"id":"\#(space)!good","name":"Good","eTag":"good","size":0,"folder":{}}"#
+        let malformed = #"{"id":"\#(space)!bad","name":1"#
+        let next = "https://other.atum.test/graph/v1.0/drives/\(space)/items/\(parent)/children?$top=3"
+        for response in [
+            #"{"value":[\#(good),\#(malformed),"extra":{"credential":"must-refuse"}}]}"#,
+            #"{"value":[\#(good),\#(malformed),"webDavUrl":"https://other.atum.test/dav/spaces/s/file"}]}"#,
+            #"{"value":[\#(good),\#(malformed),"webDavUrl":"https://user@drive.atum.test/dav/spaces/s/file"}]}"#,
+            #"{"value":[\#(good),{"id":"\#(space)!good","name":1}]}"#,
+            #"{"value":[\#(good),\#(malformed)}],"@odata.nextLink":"\#(next)"}"#,
+        ] {
+            DriveTestProtocol.state.reset()
+            DriveTestProtocol.state.handler = { _ in .json(response) }
+            do {
+                _ = try await client().children(driveID: space, parentID: parent)
+                XCTFail("the entire response must be refused")
+            } catch let failure as DriveFailure {
+                XCTAssertEqual(failure, .invalidResponse)
+            }
+            XCTAssertEqual(DriveTestProtocol.state.requests.count, 1)
         }
-        do {
-            _ = try await client().rootPage()
-            XCTFail("a file without a WebDAV address must be refused")
-        } catch let failure as DriveFailure {
-            XCTAssertEqual(failure, .invalidResponse)
+    }
+
+    func testIngressFolderDenialsUseHTTPStatusAndHeaderWithoutABody() async throws {
+        let cases: [(Int, String?, DriveFailure)] = [
+            (403, "not_owner", .denied(.notOwner)),
+            (403, "route_not_allowed", .denied(.routeNotAllowed)),
+            (400, "invalid_path", .denied(.invalidPath)),
+            (400, nil, .invalidResponse),
+        ]
+        for (status, denial, expected) in cases {
+            let headers = denial.map { ["X-Atum-Drive-Denial": $0] } ?? [:]
+            DriveTestProtocol.state.handler = { _ in .init(status: status, headers: headers) }
+            do {
+                _ = try await client().children(driveID: "storage-fixture$space-fixture",
+                                                parentID: "storage-fixture$space-fixture!folder-1")
+                XCTFail("a denial must never become an empty folder")
+            } catch let failure as DriveFailure {
+                XCTAssertEqual(failure, expected)
+            }
         }
     }
 
