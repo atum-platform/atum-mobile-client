@@ -117,9 +117,7 @@ public extension DriveReading {
     /// and length.
     public func download(_ item: DriveItem, to destination: URL,
                          progress: @escaping @Sendable (Int64, Int64) -> Void) async throws {
-        guard item.kind == .file, let webDavURL = item.webDavURL, sameOrigin(webDavURL),
-              webDavURL.path.hasPrefix("/dav/spaces/"),
-              webDavURL.query == nil,
+        guard item.kind == .file, let webDavURL = item.webDavURL, isDownloadURL(webDavURL),
               item.size <= Int64(Int.max) else {
             throw DriveFailure.invalidRequest
         }
@@ -143,42 +141,52 @@ public extension DriveReading {
         var pages = 0
         var truncated = false
 
-        listing: while let current = next {
+        while let current = next {
             guard pages < 100, allowedPageURL(current, matchingPath: first.path) else {
                 throw DriveFailure.invalidResponse
             }
             pages += 1
             let body = try await json(current)
-            let page: GraphCollection<GraphItem>
+            let page: GraphCollection<GraphItem.Listed>
             do {
                 page = try NativeAPI.decode(
-                    GraphCollection<GraphItem>.self,
+                    GraphCollection<GraphItem.Listed>.self,
                     from: body,
                     forbidden: DriveContract.forbiddenRawGraphFields
                 )
             } catch {
                 throw DriveFailure.invalidResponse
             }
-            for wire in page.value {
-                guard seen.insert(wire.id).inserted else {
+            for entry in page.value {
+                if let id = entry.id, !seen.insert(id).inserted {
                     throw DriveFailure.invalidResponse
                 }
+                let suppliedURL: URL?
+                if let rawURL = entry.rawWebDavURL {
+                    guard let url = URL(string: rawURL), isDownloadURL(url) else {
+                        throw DriveFailure.invalidResponse
+                    }
+                    suppliedURL = url
+                } else {
+                    suppliedURL = nil
+                }
+                guard let wire = entry.item else { continue }
                 guard items.count < Self.listingLimit else {
                     truncated = true
-                    break listing
+                    continue
                 }
-                let item = try wire.item()
-                if let url = item.webDavURL, !sameOrigin(url) { throw DriveFailure.invalidResponse }
+                let url = try suppliedURL ?? fileURL(for: wire, in: driveID)
+                guard let item = try? wire.item(webDavURL: url) else { continue }
                 items.append(item)
             }
             if let value = page.nextLink {
-                if items.count >= Self.listingLimit {
-                    truncated = true
-                    break
-                }
                 guard value.utf8.count <= 4_096, let url = URL(string: value),
                       allowedPageURL(url, matchingPath: first.path) else {
                     throw DriveFailure.invalidResponse
+                }
+                if items.count >= Self.listingLimit {
+                    truncated = true
+                    break
                 }
                 next = url
             } else {
@@ -187,6 +195,26 @@ public extension DriveReading {
         }
         return try DrivePage(driveID: driveID, parentID: parentID, items: items,
                              isTruncated: truncated)
+    }
+
+    private func fileURL(for item: GraphItem, in driveID: String) throws -> URL? {
+        // OpenCloud's Graph children omit webDavUrl. Its DAV space endpoint reads
+        // the same file by the space-relative parentReference.path and name.
+        guard item.file != nil, item.id.hasPrefix(driveID + "!"),
+              let parent = item.parentReference, let path = parent.path,
+              parent.driveId == nil || parent.driveId == driveID,
+              path == "." || path.hasPrefix("/"), path.utf8.count <= 4_096 else { return nil }
+        let folders = path == "/" || path == "." ? [] : path.dropFirst()
+            .split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let segments = [driveID] + folders + [item.name]
+        guard segments.allSatisfy({ segment in
+            !segment.isEmpty && segment != "." && segment != ".."
+                && !segment.contains("/") && !segment.contains("\\")
+                && !segment.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+                && segment.utf8.count <= 1_024
+        }) else { return nil }
+        let encoded = try segments.map(encodedPathComponent)
+        return try endpoint(percentEncodedPath: "/dav/spaces/" + encoded.joined(separator: "/"))
     }
 
     private func json(_ url: URL) async throws -> Data {
@@ -279,6 +307,8 @@ public extension DriveReading {
         let raw = Self.header("x-atum-drive-denial", in: response.headers)
         let reason = raw.flatMap(DriveDenialReason.init(rawValue:)) ?? .unknown
         switch response.status {
+        case 400 where reason == .invalidPath:
+            return .denied(reason)
         case 401:
             return usesAccountGrant ? .serviceUnavailable(retryAfter: nil) : .reauthenticationRequired
         case 403:
@@ -326,6 +356,10 @@ public extension DriveReading {
             return false
         }
         return url.path.hasPrefix("/graph/v1.0/") || url.path.hasPrefix("/dav/spaces/")
+    }
+
+    private func isDownloadURL(_ url: URL) -> Bool {
+        allowedReadURL(url) && url.path.hasPrefix("/dav/spaces/") && url.query == nil
     }
 
     private func allowedPageURL(_ url: URL, matchingPath path: String) -> Bool {
@@ -401,24 +435,44 @@ private struct GraphItem: Decodable {
     struct ParentReference: Decodable {
         let driveId: String?
         let id: String?
+        let path: String?
+    }
+
+    struct Listed: Decodable {
+        let id: String?
+        let rawWebDavURL: String?
+        let item: GraphItem?
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case webDavURL = "webDavUrl"
+        }
+
+        init(from decoder: any Decoder) throws {
+            // Check IDs and URLs even when unrelated metadata cannot be decoded.
+            let fields = try? decoder.container(keyedBy: CodingKeys.self)
+            id = try? fields?.decode(String.self, forKey: .id)
+            do {
+                rawWebDavURL = try fields?.decodeIfPresent(String.self, forKey: .webDavURL)
+            } catch {
+                rawWebDavURL = nil
+                item = nil
+                return
+            }
+            item = try? GraphItem(from: decoder)
+        }
     }
 
     let id: String
     let name: String
     let eTag: String
     let size: Int64
-    let webDavURL: URL?
     let lastModifiedDateTime: String?
     let folder: Folder?
     let file: File?
     let parentReference: ParentReference?
 
-    private enum CodingKeys: String, CodingKey {
-        case id, name, eTag, size, lastModifiedDateTime, folder, file, parentReference
-        case webDavURL = "webDavUrl"
-    }
-
-    func item() throws -> DriveItem {
+    func item(webDavURL: URL?) throws -> DriveItem {
         guard (folder == nil) != (file == nil) else { throw DriveFailure.invalidResponse }
         // A file is read through its WebDAV address; only folders may lack one.
         guard file == nil || webDavURL != nil else { throw DriveFailure.invalidResponse }
