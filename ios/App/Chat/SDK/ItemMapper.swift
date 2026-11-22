@@ -100,13 +100,13 @@ final class ItemMapper {
         let sender = event.sender
         let sentEventID: String? = if case let .sent(eventId)? = event.localSendState { eventId } else { nil }
         let ref = ChatEventRef(event.eventOrTransactionId)
-        // agent-turns/1.4 markers come from the SDK's latest full event JSON
-        // (including edits); AtumTurnMarkers unwraps content/m.new_content. Parse them only for this room's agents, so a
-        // stranger cannot make a notice look transient or an interim.
+        // Parse only this room's agents. The SDK's latest full event JSON
+        // is the original until edited. Only edits need the debug info,
+        // which also serializes the full timeline item.
         let markers = room.context.transientAgentUserIDs.contains(sender) && (kind == .notice || kind == .message) &&
             !hiddenPlaintext
             ? AtumTurnMarkers.parse(json: event.lazyProvider.latestJson(),
-                                    originalJSON: event.lazyProvider.debugInfo().originalJson)
+                                    originalJSON: content.isEdited ? event.lazyProvider.debugInfo().originalJson : nil)
             : AtumTurnMarkers()
         var item = ChatItem(
             // §2.3 rule 2, the one place a row's ID is chosen; the rule is

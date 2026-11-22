@@ -3641,12 +3641,14 @@ final class LiveAppModel {
     /// `/agents` and room membership can arrive after a deep link opened the
     /// chat. Desktop reprojects when its agent key changes; rebuild our SDK
     /// mapper as well because old items were mapped before that identity existed.
-    private func refreshConversationIdentity() {
+    @discardableResult
+    private func refreshConversationIdentity() -> Bool {
         guard let conversation, let current = context,
               let info = conversationInfo(roomID: conversation.roomID, title: conversation.title,
                                           ownUserID: current.runtime.ticket.session.userID),
-              conversation.updateRoomInfo(info, makeTyping: Self.typingFactory(for: info)) else { return }
+              conversation.updateRoomInfo(info, makeTyping: Self.typingFactory(for: info)) else { return false }
         attachConversation()
+        return true
     }
 
     /// The chat's kind and who is who in it (§2.7), from the same tested
@@ -4414,7 +4416,7 @@ final class LiveAppModel {
         }
         matrix.onSessionReady = { [weak self, weak matrix] in
             guard let self, let matrix, self.liveMatrix === matrix else { return }
-            self.attachConversation()
+            if !self.refreshConversationIdentity() { self.attachConversation() }
             Task { @MainActor [weak self] in
                 await self?.refreshShareActivity()
                 await self?.refreshAppBotPointers()
