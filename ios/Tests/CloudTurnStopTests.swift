@@ -72,6 +72,8 @@ extension CloudTurnStopTests {
         XCTAssertEqual(try CloudScheduleStop.Request(agent: agent, execution: a).requestId, input.requestId)
         XCTAssertNotEqual(try CloudScheduleStop.Request(agent: agent, execution: b).requestId, input.requestId)
         XCTAssertNil(ChatScheduleExecution(job: "fixture-job", execution: "urn:other"))
+        XCTAssertNotEqual(ChatScheduleExecution(job: "fixture-job", execution: "é"),
+                          ChatScheduleExecution(job: "fixture-job", execution: "e\u{301}"))
     }
 
     func testScheduledStopRequiresCorrelatedAndConsistentFlags() throws {

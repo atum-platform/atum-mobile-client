@@ -60,7 +60,7 @@ public struct CompanyTurnMarker: Equatable, Hashable, Sendable {
 
     static func parse(_ content: [String: Any], at: Date?) -> AtumTurnMarkers? {
         guard let kind = content["msgtype"] as? String, let body = content["body"] as? String,
-              body.unicodeScalars.count <= 1_000,
+              (1...1_000).contains(body.utf16.count),
               let relation = content["m.relates_to"] as? [String: Any],
               Set(relation.keys) == ["rel_type", "event_id", "is_falling_back", "m.in_reply_to"],
               relation["rel_type"] as? String == "m.thread", jsonBool(relation["is_falling_back"]) == false,
@@ -98,7 +98,7 @@ public struct CompanyTurnMarker: Equatable, Hashable, Sendable {
               presentation == nil || presentation is [String: Any],
               let phase = raw["phase"] as? String, ["working", "waiting", "settled"].contains(phase),
               let activity = raw["kind"] as? String, ["todo", "heartbeat", "device", "touch_id", "settled"].contains(activity),
-              raw["device"] == nil || (raw["device"] as? String).map({ $0.unicodeScalars.count <= 80 }) == true,
+              raw["device"] == nil || (raw["device"] as? String).map({ (1...80).contains($0.utf16.count) }) == true,
               raw["heartbeat"] == nil || jsonBool(raw["heartbeat"]) != nil else { return nil }
         let progress = AtumTurnMarkers.progress(raw, presentation: presentation)
         return AtumTurnMarkers(progress: progress, company: marker)
@@ -119,7 +119,7 @@ public struct CompanyTurnMarker: Equatable, Hashable, Sendable {
               let id = matrixID(original["event_id"], prefix: "$"), relation["event_id"] as? String == id,
               Set(outer.keys).isSubset(of: allowed),
               let msgtype = outer["msgtype"] as? String, msgtype == replacement["msgtype"] as? String,
-              let body = outer["body"] as? String, body.unicodeScalars.count <= 1_002,
+              let body = outer["body"] as? String, (1...1_002).contains(body.utf16.count),
               let outerMarker = outer[key] as? [String: Any], let innerMarker = replacement[key] as? [String: Any],
               let outerData = try? JSONSerialization.data(withJSONObject: outerMarker, options: .sortedKeys),
               let innerData = try? JSONSerialization.data(withJSONObject: innerMarker, options: .sortedKeys),

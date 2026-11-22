@@ -35,7 +35,7 @@ public struct AtumTurnMarkers: Equatable, Sendable {
 
         var markers = AtumTurnMarkers(interim: jsonBool(shown["io.atum.interim"]) == true)
         guard let raw = shown["io.atum.progress"] as? [String: Any] else { return markers }
-        var progress = progress(raw, presentation: shown["io.atum.presentation"])
+        var progress = Self.progress(raw, presentation: shown["io.atum.presentation"])
         if raw["profile"] as? String == "atum.agent-turns/1.3", raw["scope"] as? String == "owner_private",
            raw["trigger"] as? String == "cron", shown["msgtype"] as? String == "m.notice",
            progress.phase != .unknown, let kind = progress.kind,
@@ -125,6 +125,15 @@ public struct ChatScheduleExecution: Equatable, Hashable, Sendable {
         }), !execution.contains(":") else { return nil }
         self.job = job
         self.execution = execution
+    }
+
+    public static func == (left: Self, right: Self) -> Bool {
+        left.job.utf8.elementsEqual(right.job.utf8) && left.execution.utf8.elementsEqual(right.execution.utf8)
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(Array(job.utf8))
+        hasher.combine(Array(execution.utf8))
     }
 
     static func parse(_ value: Any?) -> ChatScheduleExecution? {
