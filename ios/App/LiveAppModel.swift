@@ -310,7 +310,7 @@ final class LiveAppModel {
         balance: { [weak self] in self?.freshWalletAvailable }
     )
 
-    /// Spendable micro-Protons from a fresh wallet read only.
+    /// The ledger balance for purchase authorization, from a fresh wallet read only.
     var freshWalletAvailable: Int64? {
         walletRead.condition == .fresh ? walletRead.value?.balances.available : nil
     }
@@ -6899,7 +6899,7 @@ final class LiveAppModel {
             }
             return LiveProductStoreRead(
                 availability: .ready,
-                walletMicroProtons: walletRead.value?.balances.available,
+                walletMicroProtons: walletRead.value?.displayMicroProtons,
                 items: items,
                 apps: apps,
                 staleAvailability: staleAvailability

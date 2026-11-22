@@ -393,13 +393,16 @@ import AtumChat
             XCTAssertNil(request.value(forHTTPHeaderField: "x-atum-principal"))
             XCTAssertFalse(request.httpShouldHandleCookies)
             XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Atum-Wallet-Projection"),
+                           request.url?.path == "/api/matrix/v1/wallet" ? "1.4" : nil)
             switch request.url?.path {
             case "/api/matrix/v1/agents": return .json(try! fixture.data("agents.response.json"))
             case "/api/matrix/v1/apps": return .json(self.appCatalogBody())
             case "/api/matrix/v1/store/catalog": return .json(self.storeCatalogBody())
             case "/api/matrix/v1/wallet":
+                let wallet = #"{"unit":"micro_proton","balances":{"available":25,"paid":25,"earned":0,"promo":0,"held":0},"allowance":null,"checkoutOpen":false,"spendableMicroProtons":20,"unbilledMicroProtons":5}"#
                 return .init(headers: ["Content-Type": "Application/JSON; charset=utf-8"],
-                             chunks: [try! fixture.data("wallet.response.json")])
+                             chunks: [Data(wallet.utf8)])
             case "/api/matrix/v1/wallet/history": return .json(try! fixture.data("wallet-history.response.json"))
             case "/api/matrix/v1/aliases/lookup":
                 XCTAssertEqual(request.url?.query, "handle=lan_anh")
@@ -420,7 +423,8 @@ import AtumChat
         XCTAssertEqual(apps.apps.first?.bot?.userID.rawValue, "@app-moon:atumplatform.com")
         XCTAssertEqual(store.items.first?.itemID, "skill/official/decision-journal")
         XCTAssertEqual(store.items.first?.title.localized(locale: "en"), "Decision journal")
-        XCTAssertGreaterThanOrEqual(wallet.balances.available, 0)
+        XCTAssertEqual(wallet.displayMicroProtons, 20)
+        XCTAssertEqual(wallet.balances.available, 25)
         XCTAssertFalse(history.entries.isEmpty)
         XCTAssertEqual(alias.humanMessageTarget?.rawValue, "@user-0123456789abcdef0123456789abcdef:atum.test")
         XCTAssertEqual(NativeDomainProtocol.state.requests.map { $0.url?.absoluteString }, [

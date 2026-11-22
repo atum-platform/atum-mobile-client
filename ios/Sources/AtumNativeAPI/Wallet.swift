@@ -26,15 +26,31 @@ public struct WalletResponse: Decodable, Equatable, Sendable {
         }
     }
     public let balances: Balances
+    public let spendableMicroProtons: Int64?
+    public let unbilledMicroProtons: Int64?
+    public var displayMicroProtons: Int64 { spendableMicroProtons ?? balances.available }
     public let allowance: Allowance?
     /// Domain metadata only. It is never purchase-path authorization.
     public let checkoutOpen: Bool
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
-        try c.closed(["unit", "balances", "allowance", "checkoutOpen"])
+        try c.closed(["unit", "balances", "allowance", "checkoutOpen",
+                      "spendableMicroProtons", "unbilledMicroProtons"])
         guard try c.value("unit", as: String.self) == "micro_proton" else { throw ContractViolation.invalidValue }
         balances = try c.value("balances"); allowance = try c.nullable("allowance")
         checkoutOpen = try c.value("checkoutOpen")
+        if c.contains(Field("spendableMicroProtons")) || c.contains(Field("unbilledMicroProtons")) {
+            spendableMicroProtons = try c.nullableInteger("spendableMicroProtons")
+            unbilledMicroProtons = try c.nullableInteger("unbilledMicroProtons")
+            switch (spendableMicroProtons, unbilledMicroProtons) {
+            case (nil, nil): break
+            case let (spendable?, unbilled?) where spendable == max(0, balances.available - unbilled): break
+            default: throw ContractViolation.invariant
+            }
+        } else {
+            spendableMicroProtons = nil
+            unbilledMicroProtons = nil
+        }
     }
 }
 

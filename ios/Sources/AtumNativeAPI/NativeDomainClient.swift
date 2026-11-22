@@ -43,6 +43,8 @@ public struct AgentsRead: Sendable {
     private static let officialAccountsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/official-accounts")!
     private static let storeCatalogURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/store/catalog")!
     private static let walletURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet")!
+    private static let walletProjectionHeader = "X-Atum-Wallet-Projection"
+    private static let walletProjectionVersion = "1.4"
     private static let walletHistoryURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet/history")!
     private static let aliasLookupURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/lookup")!
     private static let aliasCheckURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/check")!
@@ -412,7 +414,9 @@ public struct AgentsRead: Sendable {
     }
 
     public func wallet() async throws -> WalletResponse {
-        try await read(WalletResponse.self, url: Self.walletURL)
+        try await requestWithHeaders(WalletResponse.self, url: Self.walletURL,
+                                     method: "GET", body: nil, acceptsAssistantNameRefusal: false,
+                                     extraHeaders: [Self.walletProjectionHeader: Self.walletProjectionVersion]).value
     }
 
     /// Starts or observes this signed-in account's personal Drive mapping.
@@ -1412,6 +1416,9 @@ public struct AgentsRead: Sendable {
               (0...4_500_000).contains(maximumResponseBodyBytes),
               (method == "GET") == (body == nil),
               extraHeaders.allSatisfy({ name, value in
+                  if name == Self.walletProjectionHeader {
+                      return method == "GET" && url == Self.walletURL && value == Self.walletProjectionVersion
+                  }
                   if url.path.hasPrefix(Self.baseURL.path + "/store/") {
                       if name == StoreWire.capabilitiesHeader { return value == StoreWire.capabilities }
                       if name == "Idempotency-Key" {
