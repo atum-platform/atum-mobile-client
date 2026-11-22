@@ -333,6 +333,8 @@ extension AssistantTurnStopTests {
 
         stop.observe(.init(unanswered: "$question", working: true, hasScheduledWork: true))
         XCTAssertNil(stop.selection)
+        XCTAssertEqual(stop.phase, .working)
+        XCTAssertFalse(stop.offersStop)
         XCTAssertNil(stop.beginStop(newRequestID: "unresolved"))
     }
 }

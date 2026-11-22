@@ -85,12 +85,11 @@ public struct AssistantTurnSignal: Equatable, Sendable {
     }
 }
 
-/// The platform's answer to one stop request (`cloud-execution/1` §3.5).
+/// The platform's answer to a turn Stop or an exact scheduled Stop.
 public enum AssistantTurnStopResult: Equatable, Sendable {
-    /// `stopped`: final; nothing will ever dispatch the turn.
+    /// The turn cannot dispatch, or the exact execution confirmed interruption.
     case stopped
-    /// `stop_requested`: the running holder was told; the room's answer or
-    /// notice shows the end.
+    /// Stop is pending. The running holder or the timeline may confirm it.
     case stopRequested
     /// `completed`: the turn had already finished; nothing was stopped.
     case completed
@@ -161,7 +160,7 @@ public struct AssistantTurnStop: Equatable, Sendable {
     public init() {}
 
     /// Stop is offered (and can be tapped) in these phases.
-    public var offersStop: Bool { phase == .working || phase == .failed }
+    public var offersStop: Bool { selection != nil && (phase == .working || phase == .failed) }
     /// The composer shows the turn as in progress.
     public var isWorking: Bool { phase != .idle }
 
@@ -172,6 +171,9 @@ public struct AssistantTurnStop: Equatable, Sendable {
             : signal.unanswered.map { AssistantTurnStopIntent.Target.turn(eventID: $0) }
         guard let selected else {
             self = AssistantTurnStop()
+            // The composer can show an unavailable Stop while the exact
+            // cron target is missing. It stays disabled until a tuple arrives.
+            if signal.hasScheduledWork && signal.working { phase = .working }
             return
         }
         if selected == selection {
