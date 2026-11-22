@@ -7,14 +7,14 @@ import XCTest
 /// folder search with its scope line, the swipeable preview and Share.
 final class DriveRevampUITests: AtumUITestCase {
     private struct Words {
-        let list, icons, group, kind, size, allFiles, search: String
+        let list, icons, group, kind, size, driveName, search: String
     }
 
     private static let words: [String: Words] = [
         "en": Words(list: "List", icons: "Icons", group: "Group", kind: "Kind", size: "Size",
-                    allFiles: "All files", search: "Search Drive"),
+                    driveName: "Atum Drive", search: "Search Drive"),
         "vi": Words(list: "Danh sách", icons: "Biểu tượng", group: "Nhóm", kind: "Loại",
-                    size: "Kích thước", allFiles: "Tất cả tệp", search: "Tìm trong Drive"),
+                    size: "Kích thước", driveName: "Atum Drive", search: "Tìm trong Drive"),
     ]
 
     @MainActor
@@ -75,7 +75,7 @@ final class DriveRevampUITests: AtumUITestCase {
         var app = launchDrive()
         XCTAssertTrue(element(app, "drive.grid").exists, "Icons is the default view")
         let words = Self.words["en"]!
-        element(app, "drive.destination").buttons[words.allFiles].tap()
+        element(app, "drive.destination").buttons[words.driveName].tap()
         choose(app, words.list)
         XCTAssertTrue(element(app, "drive.list").waitForExistence(timeout: 3))
         above(item(app, "Archive 2024.zip"), item(app, "Budget 2026.xlsx"))
@@ -92,7 +92,7 @@ final class DriveRevampUITests: AtumUITestCase {
         XCTAssertTrue(element(app, "drive.group.kind:folder").exists, "Group By was remembered")
         choose(app, words.group, "None")
         XCTAssertFalse(element(app, "drive.group.kind:folder").waitForExistence(timeout: 1))
-        element(app, "drive.destination").buttons[words.allFiles].tap()
+        element(app, "drive.destination").buttons[words.driveName].tap()
         above(item(app, "Team offsite.mov"), item(app, "Archive 2024.zip"))
     }
 
@@ -240,7 +240,7 @@ final class DriveRevampUITests: AtumUITestCase {
         keepScreenshot(prefix + "-2-view-menu", of: app)
         menuItem(app, words.list).tap()
 
-        element(app, "drive.destination").buttons[words.allFiles].tap()
+        element(app, "drive.destination").buttons[words.driveName].tap()
         choose(app, words.group, words.kind)
         // Kind groups sort by their names, so which comes first depends on the language.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "drive.group.kind:"))

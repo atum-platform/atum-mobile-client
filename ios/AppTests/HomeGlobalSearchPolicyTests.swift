@@ -86,32 +86,14 @@ final class HomeGlobalSearchPolicyTests: XCTestCase {
         XCTAssertTrue(service.transport is LiveCompanySearchTransport)
     }
 
-    /// atum-desktop#48: the field reads just "Search" in every locale while
-    /// the pinned export still has the retired long words; anything else the
-    /// export carries wins, so a repin needs no code change.
-    func testThePlaceholderIsDesktopsShortSearchUntilTheExportCarriesIt() {
-        XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: "en", exported: "Search chats, people, apps…"), "Search")
-        XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: "vi",
-                                                        exported: "Tìm cuộc trò chuyện, người và ứng dụng…"),
-                       "Tìm kiếm")
-        XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: "ja", exported: nil), "検索")
-        XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: "zh", exported: ""), "搜索")
-        XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: "zh-Hant", exported: "搜尋聊天、聯絡人和應用程式…"), "搜尋")
-        XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: "en", exported: "Find"), "Find")
-        XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: "xx", exported: nil), "Search")
-    }
-
-    /// The pinned export's own words for the key resolve to desktop's short
-    /// ones in all five locales, and the spoken name is still exported.
     func testThePinnedExportResolvesToTheShortPlaceholder() throws {
         let copy = try AtumCopy()
-        let key = HomeSearchPromptCopy.placeholderKey
-        XCTAssertTrue(copy.contains(key))
-        XCTAssertTrue(copy.contains("desktop.atum.roster.search"))
-        for locale in ["en", "vi", "ja", "zh", "zh-Hant"] {
-            let exported = try copy.text(key, locale: locale)
-            XCTAssertEqual(HomeSearchPromptCopy.placeholder(locale: locale, exported: exported),
-                           HomeSearchPromptCopy.current[locale], locale)
+        let placeholders = ["en": "Search", "vi": "Tìm kiếm", "ja": "検索", "zh": "搜索", "zh-Hant": "搜尋"]
+        XCTAssertEqual(Set(placeholders.keys), copy.locales)
+        for (locale, placeholder) in placeholders {
+            XCTAssertEqual(try copy.text("desktop.atum.roster.searchPlaceholder", locale: locale), placeholder, locale)
+            XCTAssertFalse(try copy.text("desktop.atum.roster.search", locale: locale).isEmpty, locale)
         }
+        XCTAssertEqual(try copy.text("desktop.atum.roster.search", locale: "en"), "Search everything")
     }
 }

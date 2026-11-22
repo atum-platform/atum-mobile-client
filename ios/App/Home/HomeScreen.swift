@@ -757,14 +757,7 @@ struct HomeScreen: View {
     private var searching: Bool { searchFocused || !query.isEmpty }
 
     private var searchField: some View {
-        HomeSearchField(query: $query, prompt: searchPrompt, label: copy(.search), focused: $searchFocused)
-    }
-
-    /// Desktop #48: the field shows just "Search"; VoiceOver keeps "Search everything".
-    private var searchPrompt: String {
-        let key = HomeSearchPromptCopy.placeholderKey
-        return HomeSearchPromptCopy.placeholder(locale: design.locale,
-                                                exported: design.copy.contains(key) ? design.text(key) : nil)
+        HomeSearchField(query: $query, prompt: copy(.searchPlaceholder), label: copy(.search), focused: $searchFocused)
     }
 
     private func endSearch() {
@@ -3122,6 +3115,7 @@ private enum HomeCopyKey: String {
     /// The top-left avatar opens Settings, so that is what it is called.
     case settings = "desktop.atum.settings.title"
     case search = "desktop.atum.roster.search"
+    case searchPlaceholder = "desktop.atum.roster.searchPlaceholder"
     case startChat = "desktop.atum.roster.startChat"
     case emptySearch = "desktop.atum.roster.emptySearch"
     case emptySearchHint = "desktop.atum.roster.emptySearchHint"

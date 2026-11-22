@@ -1,69 +1,67 @@
 # Wave 4 copy repin
 
-The Wave 4 repin is blocked by an upstream manifest mismatch. The phone still
-pins atum-desktop `4f193a16e135869e2bf5d6d2dc69429b160762ba`.
+The iPhone pins atum-desktop `46f5a5181666e1b9ecaf508f70e26ab3896f957e`
+(PR #102), manifest `be38f8aa7e060582161990d1a5de60b6291993fd3bfeb71a015673cddb32dead`.
+The importer now accepts the restored app icon's bytes and the matching
+manifest hash. The previous pin was `4f193a16e135869e2bf5d6d2dc69429b160762ba`.
+The importer updated the lock, catalog, contract, inventory, manifest, and app
+icon. The phone copy map and prototype catalog fixture are byte-identical.
 
-## Import blocker
+## Catalog and consumers
 
-The importer rejected both the atum-desktop#101 merge commit
-`c2d71828f42fa3b60bef57087887cfb4ee2a4073` and its export commit
-`c34e651ec7fdf1c347dbec64b4d7b9cd99f471ca`. Both carry manifest
-`2ea06dd33d1da9aa28ca41ec80693b3cb531df05ba95b6ee82d50c046acaaff1`.
-Comparing the committed archive against the manifest found one mismatch.
-Desktop `57bdc29f` restored an Atum-owned image at
-`app-icon/atum-app-icon-1024.png`. The committed bytes hash to
-`cf67ad54eb5dcc9e4a860e0532fa48b2882c192b55c3e83b287f80e5747248eb`.
-The manifest still expects the prior image's hash,
-`8b5b59a60ca7f1cfd8065fb059d8df1a60064723532766e9ddbf4d24d8cc23f4`.
-The phone needs a published desktop revision whose manifest agrees with its
-committed export. The existing importer can then install the full export by
-revision and verify it before replacing the phone's pin.
+The catalog grew from 3,884 to 4,081 entries. It adds 184 keys and 15 branches,
+removes two keys, and refreshes one key across all five locales.
 
-## Consumer audit
+- Drive's root destination now uses `src.matrix.drive-copy.matrixDriveCopy.browser.drive`
+  through `DriveCopy.driveName`. The old `browser.allFiles` key was removed.
+  Recents reads the pinned `browser.recents` directly. AppTests read both
+  destinations from the pin, and the Drive UI tests select “Atum Drive” in
+  English and Vietnamese.
+- The model picker uses `src.matrix.model-picker-copy.COPY.chatgptInWork`
+  for `.notReady`. The old `COPY.chatgptCloudNotReady` key was removed.
+- Home reads the refreshed `desktop.atum.roster.searchPlaceholder` directly.
+  The AppTest checks the five short values and the separate spoken label from
+  `desktop.atum.roster.search`.
+- The 44 newly exported `DrivePendingCopy` entries already read the pin
+  first and match the previous fallback values in all five locales.
 
-Compared with the current phone pin, Wave 4 adds 199 catalog entries (184 keys
-plus 15 branches), removes two, and refreshes one across all five locales.
-The phone copy map is byte-identical. Neither removed key appears in the
-prototype catalog fixture.
+## Pending copy
 
-- `DriveCopy.allFiles` feeds the destination picker in `DriveScreen`. Use the
-  `browser.drive` export already read by `DriveCopy.driveName`. Update the
-  destination labels in `DriveRevampUITests` to “Atum Drive” in English and
-  Vietnamese and the Drive places assertion in `AccountSettingsStateTests`
-  to use the new pin.
-- `PhoneModelPickerCopy.unavailable(.notReady)` reads
-  `COPY.chatgptCloudNotReady`. Move it and `PhoneModelPickerCopyTests` to
-  `COPY.chatgptInWork`. `PhoneModelPickerProjection` mentions the old key in
-  a comment only.
-- `HomeScreen.searchPrompt` reads `desktop.atum.roster.searchPlaceholder`
-  through `HomeSearchPromptCopy`. Read the same key directly once the pin
-  carries the short value and remove the fallback. In
-  `HomeGlobalSearchPolicyTests`, check all five short values against the pin
-  directly and keep the spoken-label check on `desktop.atum.roster.search`.
-  `HomeShellUITests` already expects the short visible label.
+- Drive still falls back for `matrixDriveCopy.gridView`, `listView`,
+  `viewMode`, `search`, `searchEmpty`, `preview.error`, `preview.loading`,
+  and `preview.unavailable`, plus `mobilePhoneCopy.drive.searchFolderOnly`.
+- The four entries in the scanner's `PENDING` set are still absent.
+  These are `mobileDeviceCopy.dictationListening` and the model picker's
+  `COPY.taglineEveryday`, `COPY.taglineHard`, and `COPY.taglineFlagship`.
+- `shared.matrix-status-line-copy.matrixVideoConsentWaitCopy` is named in
+  the copy inventory. The pinned desktop source declares five locales, and
+  the generated catalog and contract omit the key. The turn-state branch
+  retains its existing English fallback.
 
-The retired-literal scan of `ios/AppTests` and `ios/UITests` found the Drive
-assertions and the Home fallback tests above. All 44 Drive fallback entries
-that Wave 4 promotes match the exported values in the five locales. The removed
-and refreshed keys all take zero arguments. No retained key changes its argument
-contract. None of the 52 new argument-bearing entries (including exact-value
-and absent-value branches) has a phone caller on the baseline branch. The five
-new exact-value selectors use numeric argument slots. The parallel turn branch
-adds a heartbeat descriptor whose value is an integer. Its rendering call must
-pass that value as `.number`, matching the new contract.
+## Argument contracts
 
-`test_copy_keys_in_pin.py` reports 75 missing literal occurrences (72 distinct
-keys) on the baseline. Comparing its scanner to the Wave 4 catalog and contract
-with the planned rekey gives the same 75 occurrences and zero newly missing.
-All four entries in `PENDING` are still absent from the export.
+No retained entry changed its parameter contract. Both removed keys and
+the refreshed key take zero arguments. The 44 newly pinned Drive fallback
+entries take zero arguments. The 52 newly added argument-bearing entries
+comprise 37 keys and 15 branches. The audit found no phone callers for them
+on this branch, including calls through composed key prefixes. All five
+new exact-value selector groups target numeric arguments.
+
+The turn-state branch carries heartbeat minutes as an integer. When its
+footer lookup is wired during assembly, pass `.number(Int64(minutes))` for
+`shared.matrix-status-line-copy.matrixProgressCopy.heartbeat`. Its seven
+tool activity keys and approval wait are also available through the lookup.
 
 ## Verification
 
-- `scripts/import-design-exports --verify` passes on the current pin.
-- `test_import_design_exports` passed 8 tests and `test_native_catalog` passed 4.
-- `test_copy_keys_in_pin` ran 3 tests with the 1 existing missing-key failure.
-- Locked `swift test -j 2` passed 735 tests, including 3 prototype catalog tests.
-- The locked Debug `AtumMobile` simulator build succeeded on the current pin.
-  The first build stalled during app compilation and was cancelled. The
-  single-job retry succeeded under `/Volumes/AtumTestFlight/dd-w4-copy-repin`,
-  and `lipo` confirmed `arm64`.
+The verification commands ran one at a time under the shared heavy-build lock.
+Swift scratch and Xcode derived data were under
+`/Volumes/AtumTestFlight/dd-w4-copy-repin`.
+
+- Importer `--verify` accepted the pin. Importer tests passed 8/8 and native
+  catalog tests passed 4/4.
+- `test_copy_keys_in_pin` still reports 75 missing literal occurrences
+  across 72 keys, exactly matching the baseline by key and occurrence count.
+  The misses come from Team Space (67 occurrences), App Panel (6), Drive's
+  guarded folder-search scope (1), and Home's guarded main-agent label (1).
+- `swift test -j 2` passed 735/735, including all three prototype catalog tests.

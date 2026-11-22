@@ -347,14 +347,18 @@ final class AccountSettingsStateTests: XCTestCase {
     }
 
     @MainActor
-    func testDrivePlacesReadTheDesktopsWordsInAllFiveLocales() {
+    func testDrivePlacesReadTheDesktopsWordsInAllFiveLocales() throws {
+        let design = try LiveDesign()
+        let drive = DriveCopy(design: design)
+        let recentsKey = "src.matrix.drive-copy.matrixDriveCopy.browser.recents"
+        let driveKey = "src.matrix.drive-copy.matrixDriveCopy.browser.drive"
         for locale in Self.locales {
-            let normalized = AccountSettingsText.normalizedLocale(locale)
-            XCTAssertNotNil(DriveCopy.recentsFallback[normalized], locale)
-            XCTAssertNotNil(DriveCopy.allFilesFallback[normalized], locale)
+            XCTAssertFalse(try design.copy.text(recentsKey, locale: locale).isEmpty, locale)
+            XCTAssertEqual(try design.copy.text(driveKey, locale: locale), "Atum Drive", locale)
         }
-        XCTAssertEqual(DriveCopy.recentsFallback["vi"], "Gần đây")
-        XCTAssertEqual(DriveCopy.allFilesFallback["zh-hant"], "所有檔案")
+        XCTAssertEqual(drive.recents, design.text(recentsKey))
+        XCTAssertEqual(drive.driveName, design.text(driveKey))
+        XCTAssertEqual(try design.copy.text(recentsKey, locale: "vi"), "Gần đây")
     }
 
     func testEveryDriveFamilyHasAPhosphorGlyph() {
