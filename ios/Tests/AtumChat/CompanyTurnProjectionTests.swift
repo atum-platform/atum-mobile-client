@@ -100,6 +100,23 @@ final class CompanyTurnProjectionTests: XCTestCase {
         XCTAssertEqual(F.ids(Projection.rows([progress], context: channelTimeline)), ["line"])
     }
 
+    func testCompanyFooterDisappearsWhileTheNextRoomBindingIsAttaching() throws {
+        let bound = context()
+        let note = F.text("question", from: F.me)
+        let progress = try item("line", wire())
+        var projector = TimelineProjector(generation: 1, context: bound)
+        var conversation = ConversationCore(context: bound, draft: "keep my draft")
+        _ = conversation.receive(try projector.apply([.append([note, progress])], now: F.at(0)), now: F.at(0))
+        XCTAssertEqual(F.ids(conversation.snapshot.rows), ["question", Projection.typingRowID])
+
+        var unbound = bound
+        unbound.companyTurnScope = .channel(threadRoot: "$root", binding: nil)
+        conversation.detached()
+        conversation.updateContext(unbound)
+        XCTAssertEqual(F.ids(conversation.snapshot.rows), ["question"])
+        XCTAssertEqual(conversation.draft, "keep my draft")
+    }
+
     func testCompanyShapeRejectsLeakedFieldsWrongAudienceAndThreadFallback() throws {
         var content = wire()
         var raw = try XCTUnwrap(content["io.atum.progress"] as? [String: Any])

@@ -226,8 +226,14 @@ public struct ConversationCore: Sendable {
     public var snapshot: Snapshot {
         let base = projected?.snapshot ?? .empty
         let held = heldRows
-        guard mergedRows != nil || !held.isEmpty || localChange != nil || !retryingIDs.isEmpty else { return base }
         var rows = mergedRows ?? base.rows
+        // Keep the transcript during attachment, but a previous company
+        // binding cannot continue to authorize its synthetic footer.
+        let hasStaleCompanyFooter = replacesIdentityProjection
+            && rows.last?.id == Projection.typingRowID && rows.last?.item.companyTurn != nil
+        guard mergedRows != nil || !held.isEmpty || localChange != nil
+                || !retryingIDs.isEmpty || hasStaleCompanyFooter else { return base }
+        if hasStaleCompanyFooter { rows.removeLast() }
         if !retryingIDs.isEmpty {
             for index in rows.indices where retryingIDs.contains(rows[index].id) && rows[index].delivery == .failed {
                 rows[index].delivery = .sending
@@ -241,7 +247,7 @@ public struct ConversationCore: Sendable {
         if mergedRows != nil || !held.isEmpty {
             rows = Grouping.apply(to: rows, context: context, groupsRuns: false)
         }
-        return Snapshot(rows: rows, change: localChange ?? (mergedRows != nil ? .inPlace : base.change),
+        return Snapshot(rows: rows, change: localChange ?? (mergedRows != nil || hasStaleCompanyFooter ? .inPlace : base.change),
                         generation: base.generation)
     }
 
