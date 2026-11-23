@@ -249,22 +249,28 @@ final class S1MatrixUITests: TranscriptUITestCase {
         let text = "Ma trận \(cell.tag)"
         field.typeText(text)
         element(app, AccessibilityID.composerSend).tap()
-        let row = latest(app)
+        // My message is found by its unique text across the transcript, not
+        // as `row.latest`: Atum's answer becomes the newest row about 7.6 s
+        // after the send, which a slow run reaches before Seen is checked.
+        let row = transcript(app)
+        let seenWord = word("Đã xem", "Seen")
         let sendingWord = word("Đang gửi", "Sending")
         let sentWord = word("Đã gửi", "Sent")
         let sending = row.descendants(matching: .any).matching(NSPredicate(
             format: "label CONTAINS %@ AND label CONTAINS %@", text, sendingWord)).firstMatch
         if sending.waitForExistence(timeout: 1) { keepScreenshot("send-sending--\(cell.tag)", of: app) }
-        let unread = row.descendants(matching: .any).matching(NSPredicate(
+        let settled = row.descendants(matching: .any).matching(NSPredicate(
             format: "label CONTAINS %@ AND NOT (label CONTAINS %@) AND NOT (label CONTAINS %@)",
             text, sendingWord, word("Chưa gửi được", "Not sent"))).firstMatch
-        XCTAssertTrue(unread.waitForExistence(timeout: 5), "the clock never went")
-        if !row.descendants(matching: .any)["delivery.seen"].exists {
-            keepScreenshot("send-unread--\(cell.tag)", of: app)
-        }
-        XCTAssertFalse(unread.label.contains(sentWord), "no Sent receipt (desktop #89): \(unread.label)")
+        XCTAssertTrue(settled.waitForExistence(timeout: 5), "the clock never went")
+        XCTAssertFalse(settled.label.contains(sentWord), "no Sent receipt (desktop #89): \(settled.label)")
+        // Settled and nobody has read it yet: just its time.
+        let unread = row.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@ AND NOT (label CONTAINS %@) AND NOT (label CONTAINS %@)",
+            text, sendingWord, seenWord)).firstMatch
+        if unread.exists { keepScreenshot("send-unread--\(cell.tag)", of: app) }
         let seen = row.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@ AND label CONTAINS %@", text, word("Đã xem", "Seen"))).firstMatch
+            format: "label CONTAINS %@ AND label CONTAINS %@", text, seenWord)).firstMatch
         XCTAssertTrue(seen.waitForExistence(timeout: 8), "no Seen on my message")
         XCTAssertTrue(row.descendants(matching: .any)["delivery.seen"].exists, "the reader's face says Seen")
         XCTAssertFalse(seen.label.contains(sentWord), "the faces are the only receipt: \(seen.label)")

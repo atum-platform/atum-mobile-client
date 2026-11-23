@@ -51,3 +51,11 @@ the read signal itself (faces only, no ticks) now matches.
 - Run 1: `swift test --package-path ios` passed 748/748. Debug
   `build-for-testing` failed: in U4 a local `settled` flag shadowed the
   `settled(_:_:)` helper. Renamed the flag; run 2 reruns the build and tests.
+- Run 2: Debug `build-for-testing` passed. AppTests `S6PresentationTests`
+  passed 8/8. The S1 matrix (`testSendThenSeen`, `testFailedSendSheet`) passed
+  in vi-light, en-light and en-dark. In vi-dark `testSendThenSeen` failed "no
+  Seen": the wait was scoped to `row.latest`, and on the slow run Atum's answer
+  (about 7.6 s after the send) became the newest row first. The test now finds
+  my message by its unique text in the transcript. The composer UI tests ran
+  0 tests because the verify script named the wrong class (`ComposerUITests`).
+  Run 3 reruns both.
