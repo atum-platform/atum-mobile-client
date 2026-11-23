@@ -14,6 +14,15 @@ The integration starts from the copy repin to desktop `46f5a518` and merges the 
 - A private Chief of Staff room uses its ready platform pair and the exact joined account/agent membership of the current unencrypted room. The binding includes the membership incarnation. The chat store revalidates the scope before attaching to a renewed session and rebuilds its mapper on scope changes. The previous company footer is removed while the new mapper attaches, and the transcript and draft stay in place. Unadmitted markers remain ordinary messages.
 - A Stop callback is scoped to the open assistant store, so a receipt from a closed chat cannot affect a reopened one. The merged data lane displays the wallet 1.4 spendable Proton balance, retries an eligible model pick once with refreshed revision and policy fences, and skips same-sender cleared working lines in roster previews. Purchase affordability continues to use the ledger.
 
+## Review fixes
+
+- The private Chief of Staff and channel-thread bindings each expire against a monotonic deadline 60 seconds after their successful read began. Expiry clears the binding and removes its footer even while a membership read or timeline attachment is stalled. The session, membership and refresh generation fence late results.
+- Refused Stops are keyed by the attempted turn event or exact job and execution pair for that agent. Either endpoint can refuse its source while the other route and later sources remain available.
+- An ambiguous model write retains the dispatched request ID and snapshot, including the refreshed revision and policy digest from a conflict retry. Repeating the same choice replays that write even after a newer snapshot arrives. A different choice gets its own request.
+- A correlated interrupted or finished receipt suppresses that exact schedule for the open conversation, including across timeline reattachment. Other schedules and ordinary turns still participate in selection. Abandoned cron footers age out after nine minutes from the latest accepted revision, using the desktop company-progress presentation bound.
+- The company interim projector keeps the accepted revision, body and relations while taking reactions, receipts and sender metadata from the incoming item. The rendered Markdown uses the accepted body.
+- The Stop UI fixtures wait for the composer field to become hittable and take keyboard focus before typing. The existing Stop assertions still run after that wait.
+
 ## Remaining parity and verification scope
 
 - A native top-level interim still needs a publisher marker when its event shape is indistinguishable from a final reply.
@@ -38,3 +47,19 @@ The integrated checks used the shared heavy-build lock, two build jobs, and an i
 The initial package run used a core compiled before the binding-expiry edit. The first simulator build caught the immutable thread context. The successful package rerun and simulator build include both fixes, and the initial logs and build bundle were kept.
 
 The lane's Swift and Xcode `Intermediates.noindex` directories were removed after their last runs. The test logs, `Logs`, `TestResults`, and result bundles remain on the external volume.
+
+### Review-fix verification
+
+One batch ran under the shared heavy-build lock with two build jobs. It reused the already-booted iPhone 17 on iOS 27.0. The boot-state search emitted a diagnostic and a redundant boot request was refused because the device was already booted. Boot status and the final `simctl shutdown all` both exited 0.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Swift package | 1,722 passed, 0 failed. This includes the scoped Stop refusal, exact picker replay, terminal schedule receipt, abandoned schedule expiry and company interim metadata cases. | `fix-round-package.log` |
+| Debug simulator build | Passed, arm64. | `fix-round-debug-build.log`, `fix-round-debug-build.xcresult` |
+| Focused AppTests | 165 passed, 0 failed, including proof expiry during a stalled member read and rejection of superseded results. | `fix-round-app-tests.log`, `fix-round-app-tests.xcresult` |
+| Picker UI | 5 passed. | `fix-round-ui-tests.log`, `fix-round-ui-tests.xcresult` |
+| Stop UI | 4 passed, including `testStopWhileWorkingThenStopped`. | `fix-round-ui-tests.log`, `fix-round-ui-tests.xcresult` |
+| Transcript UI | 2 passed, 1 failed. The timed `testReplyAtBottomHidesTheWorkingLine` observed zero working rows at its first assertion after the delayed initial timeline paint. The UI command exited 65. | `fix-round-ui-tests.log`, `fix-round-ui-tests.xcresult` |
+| Public boundary | `python3 scripts/public_guard.py --base origin/main --head HEAD` exited 0. | `fix-round-guard-final.log` |
+
+The logs and result bundles are in `/Volumes/AtumTestFlight/dd-w4-ab-wiring`. The batch's exit codes are in `fix-round-verification.log`. Cleanup removed only this lane's `Build/Intermediates.noindex` and preserved the logs, TestResults and result bundles.

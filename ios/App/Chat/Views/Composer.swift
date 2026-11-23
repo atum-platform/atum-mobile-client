@@ -283,12 +283,15 @@ struct ChatComposer: View {
     /// nothing; after a failure the retry re-sends the same request ID, so
     /// the platform (idempotent on owner and request ID) never sees two.
     private func stopTurn() {
-        guard let turnStopActions,
+        guard showsStopButton, let turnStopActions,
               let intent = turn.stop.beginStop(newRequestID: UUID().uuidString.lowercased()) else { return }
         haptics.stopped()
         Task { @MainActor in
             let result = await turnStopActions.stop(intent)
             turn.stop.resolve(result, for: intent)
+            if case let .schedule(execution) = intent.target, result == .completed || result == .stopped {
+                await (store as? LiveConversationStore)?.settleSchedule(execution)
+            }
             // Not stopped: Stop comes back and the warning says so; the
             // turn stays shown as in progress.
             if result == .failed { haptics.failed() }
@@ -300,7 +303,8 @@ struct ChatComposer: View {
     }
 
     private var showsStopButton: Bool {
-        guard turnStopActions != nil, store.editTarget == nil else { return false }
+        guard let turnStopActions, store.editTarget == nil else { return false }
+        if let target = turn.stop.selection, turnStopActions.unavailableTargets.contains(target) { return false }
         switch turn.stop.phase {
         case .working, .failed, .stopping: return true
         case .idle, .stopped, .finishing: return false
@@ -754,7 +758,14 @@ extension ChatActions {
 /// agent, mapped to `AssistantTurnStopResult`. Anything short of a confirmed
 /// reply is `.failed`.
 struct AssistantTurnStopActions {
+    let unavailableTargets: Set<AssistantTurnStopIntent.Target>
     let stop: @MainActor (AssistantTurnStopIntent) async -> AssistantTurnStopResult
+
+    init(unavailableTargets: Set<AssistantTurnStopIntent.Target> = [],
+         stop: @escaping @MainActor (AssistantTurnStopIntent) async -> AssistantTurnStopResult) {
+        self.unavailableTargets = unavailableTargets
+        self.stop = stop
+    }
 }
 
 /// The composer's turn state, observed on its own so the pill re-renders

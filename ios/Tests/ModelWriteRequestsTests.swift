@@ -69,7 +69,8 @@ final class ManagedModelPickerStateTests: XCTestCase {
         }
         _ = await started.first(where: { _ in true })
 
-        let result = await state.save(from: before, requestID: requestID,
+        let result = await state.save(from: before, choice: .offer(model: "nhat-thuc", effort: .high),
+                                         requestID: requestID,
                                       refreshAfterSecondConflict: false, isCurrent: { true }, fetch: { before }) { _, _ in after }
         guard case .saved = result else { return XCTFail("Expected a save") }
         // A pre-write read can report the same revision and still hold old policy or choice.
@@ -86,7 +87,8 @@ final class ManagedModelPickerStateTests: XCTestCase {
         var finish: CheckedContinuation<Snapshot, Never>?
         var olderWrites = 0
         let pending = Task {
-            await state.save(from: before, requestID: requestID,
+            await state.save(from: before, choice: .offer(model: "nhat-thuc", effort: .high),
+                                         requestID: requestID,
                              refreshAfterSecondConflict: true, isCurrent: { true }, fetch: {
                 await withCheckedContinuation { completion in
                     finish = completion
@@ -99,7 +101,8 @@ final class ManagedModelPickerStateTests: XCTestCase {
             }
         }
         _ = await started.first(where: { _ in true })
-        _ = await state.save(from: before, requestID: ModelWriteRequests<NativeID>.freshID(),
+        _ = await state.save(from: before, choice: .offer(model: "nhat-thuc", effort: .high),
+                                         requestID: ModelWriteRequests<NativeID>.freshID(),
                              refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { before }) { _, _ in after }
         finish?.resume(returning: before)
         guard case .failed = await pending.value else { return XCTFail("The older pick was superseded") }
@@ -108,12 +111,40 @@ final class ManagedModelPickerStateTests: XCTestCase {
         XCTAssertEqual(held, after)
     }
 
+    func testExplicitRetryReplaysTheRefencedWriteAfterTransportFailure() async throws {
+        let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
+        let choice = ManagedModelPickerChoice.offer(model: "nhat-thuc", effort: .high)
+        var writes: [(Snapshot, NativeID)] = []
+        let failed = await state.save(from: before, choice: choice, requestID: requestID,
+                                      refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { after }) { fence, id in
+            writes.append((fence, id))
+            if writes.count == 1 { throw ManagedModelFenceConflict.policy }
+            throw NativeDomainClientFailure.transportUnavailable
+        }
+        guard case .failed = failed else { return XCTFail("Expected the lost transport response") }
+        XCTAssertEqual(writes.map { $0.0 }, [before, after])
+        let actualID = try XCTUnwrap(writes.last?.1)
+        XCTAssertNotEqual(actualID, requestID)
+
+        let latest = Snapshot(revision: 9, model: "nhat-thuc")
+        _ = try await state.read(isCurrent: { true }) { latest }
+        let result = await state.save(from: latest, choice: choice, requestID: ModelWriteRequests<NativeID>.freshID(),
+                                      refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { latest }) { fence, id in
+            XCTAssertEqual(fence, after)
+            XCTAssertEqual(id, actualID)
+            return latest
+        }
+        guard case let .saved(saved) = result else { return XCTFail("Expected the original write's receipt") }
+        XCTAssertEqual(saved, latest)
+    }
+
     func testOtherConflictsDoNotReadOrRetry() async throws {
         let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
         let body = Data(#"{"error":"matrix_409","details":{"reason":"model_unavailable"}}"#.utf8)
         let refusal = try NativeHTTPFailure(status: 409, headers: [:], body: body)
         var writes = 0
-        let result = await state.save(from: before, requestID: requestID,
+        let result = await state.save(from: before, choice: .offer(model: "nhat-thuc", effort: .high),
+                                         requestID: requestID,
                                       refreshAfterSecondConflict: true, isCurrent: { true }, fetch: {
             XCTFail("Only a fence conflict can re-read")
             return after

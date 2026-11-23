@@ -37,6 +37,13 @@ public enum TransientLines {
         return item.isProgressLine || retiredWaitLines.contains(item.body.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    /// Keep abandoned cron notices for at most three quiet heartbeats,
+    /// matching the desktop company-progress display timeout.
+    static func scheduleExpiry(_ item: ChatItem) -> Date? {
+        guard let progress = item.progress, progress.isScheduled else { return nil }
+        return (progress.scheduledRevisedAt ?? item.timestamp).addingTimeInterval(540.001)
+    }
+
     /// What the chat shows of `items`, in timeline order:
     /// - an agent's redacted message shows nothing, not a "deleted" tombstone
     ///   (the agent removes only its own working lines and a duplicated
@@ -47,7 +54,8 @@ public enum TransientLines {
     ///   says `settled`, or the same agent posted a later message that is
     ///   neither a working line nor an interim remark (the answer, an outcome
     ///   notice). A line that is still the newest thing the agent said stays.
-    public static func visibleItems(_ items: [ChatItem], agents: Set<String>) -> [ChatItem] {
+    public static func visibleItems(_ items: [ChatItem], agents: Set<String>, now: Date? = nil,
+                                    settledSchedules: Set<ChatScheduleExecution> = []) -> [ChatItem] {
         var ended = Set<SenderThread>()
         var kept: [ChatItem] = []
         kept.reserveCapacity(items.count)
@@ -66,6 +74,8 @@ public enum TransientLines {
             }
             let lane = SenderThread(sender: item.sender, root: item.threadRoot)
             if isTransientLine(item, agents: agents) {
+                if let execution = item.progress?.schedule, settledSchedules.contains(execution) { continue }
+                if let now, let expiry = scheduleExpiry(item), now >= expiry { continue }
                 // Exact company and cron progress lines settle independently
                 // of ordinary messages, including another execution's result.
                 let exact = item.companyTurn != nil || item.progress?.schedule != nil

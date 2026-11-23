@@ -205,7 +205,8 @@ public struct AgentsRead: Sendable {
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
-    public func cloudScheduleStop(_ input: CloudScheduleStop.Request) async throws -> AssistantTurnStopResult {
+    public func cloudScheduleStop(_ input: CloudScheduleStop.Request,
+                                  onRouteUnavailable: @MainActor () -> Void = {}) async throws -> AssistantTurnStopResult {
         let body: Data
         do { body = try input.body() }
         catch { throw NativeDomainClientFailure.invalidRequest }
@@ -213,6 +214,7 @@ public struct AgentsRead: Sendable {
         let receipt = try await performAuthorized(url: url, body: body, extraHeaders: [
             "Origin": Self.scheduleStopOrigin, CloudScheduleStop.bridgeHeader: CloudScheduleStop.bridgeVersion
         ], maximumResponseBodyBytes: 4_096)
+        if [403, 404, 503].contains(receipt.status) { onRouteUnavailable() }
         do { return try CloudScheduleStop.result(status: receipt.status, data: receipt.body, for: input) }
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
