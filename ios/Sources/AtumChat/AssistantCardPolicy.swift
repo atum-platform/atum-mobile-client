@@ -142,6 +142,17 @@ public struct AssistantCardEdit: Equatable, Sendable {
         if normalized(draft) == normalized(submitted) { draft = latest }
     }
 
+    /// The person typed past `submitted` after that save was sent.
+    public func hasNewerDraft(than submitted: String) -> Bool {
+        normalized(draft) != normalized(submitted)
+    }
+
+    /// An explicit Retry over another device's change: the latest value
+    /// becomes the baseline, so the draft is written over it.
+    public mutating func rebase(_ latest: String) {
+        saved = latest
+    }
+
     /// Esc / Cancel / an external change not being edited.
     public mutating func revert() {
         draft = saved
@@ -161,6 +172,9 @@ public struct AssistantCardSaveBand<Field: Hashable & Sendable, Note: Equatable 
     public struct Failure: Equatable, Sendable {
         public let field: Field
         public let note: Note
+        /// Saves of this field wait for an explicit Retry (a newer draft
+        /// met another device's change to the same field).
+        public let held: Bool
     }
 
     public private(set) var failures: [Failure] = []
@@ -184,10 +198,16 @@ public struct AssistantCardSaveBand<Field: Hashable & Sendable, Note: Equatable 
         outcome = note
     }
 
-    public mutating func failed(_ field: Field, note: Note) {
+    public mutating func failed(_ field: Field, note: Note, held: Bool = false) {
         failures.removeAll { $0.field == field }
-        failures.append(Failure(field: field, note: note))
+        failures.append(Failure(field: field, note: note, held: held))
         outcome = nil
+    }
+
+    /// Automatic saves (leaving the field, a queued save) skip this field
+    /// until the person presses Retry or discards the draft.
+    public func isHeld(_ field: Field) -> Bool {
+        failures.contains { $0.field == field && $0.held }
     }
 
     /// The person discarded `field`'s edit: nothing is left to retry there.

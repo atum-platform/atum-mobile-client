@@ -19,6 +19,12 @@ public struct AssistantPersona: Equatable, Sendable {
     public let instructions: String
     fileprivate let head: String
     fileprivate let sections: [Section]
+    /// The text reads differently to a fence-aware parse than to desktop's
+    /// (a template title inside a code fence, a repeated `Who you are` or
+    /// `What you do` section, an unclosed fence). The card shows it but does
+    /// not offer per-field editing, and `AssistantPersonaMerge` never writes
+    /// over it.
+    public fileprivate(set) var isAmbiguous = false
 }
 
 /// One editable persona field on the card (desktop `PersonaChange['field']`).
@@ -46,16 +52,38 @@ public enum AssistantPersonaPolicy {
 
     static let fieldHeading = "<!-- atum:persona-heading -->"
 
+    /// Desktop's parse (`parsePersona`), which the card shows and edits,
+    /// with `isAmbiguous` set when a fence-aware reading of the same text
+    /// disagrees with it. The phone never grows a second interpretation:
+    /// such a persona is read-only here.
     public static func parse(_ soul: String, inherited: Bool = false,
                              primary: Bool = false) -> AssistantPersona {
+        var persona = parse(soul, inherited: inherited, primary: primary, fenceAware: false)
+        let aware = parse(soul, inherited: inherited, primary: primary, fenceAware: true)
+        persona.isAmbiguous = persona.kind != aware.kind
+            || persona.nameLine != aware.nameLine
+            || persona.who != aware.who
+            || persona.what != aware.what
+            || persona.instructions != aware.instructions
+            || repeatsAField(persona) || repeatsAField(aware)
+            || fences(soul).unclosed
+        return persona
+    }
+
+    private static func repeatsAField(_ persona: AssistantPersona) -> Bool {
+        [whoTitle, whatTitle].contains { title in
+            persona.sections.filter { $0.title == title }.count > 1
+        }
+    }
+
+    private static func parse(_ soul: String, inherited: Bool, primary: Bool,
+                              fenceAware: Bool) -> AssistantPersona {
         let ns = soul as NSString
-        // Only headings outside fenced code are structure: a literal
-        // `## Who you are` in an example block stays part of its field.
-        let fences = fencedRanges(soul)
+        let fenced = fenceAware ? fences(soul).ranges : []
         let starts: [(location: Int, title: String)] = h2Regex
             .matches(in: soul, range: NSRange(location: 0, length: ns.length))
             .filter { $0.range(at: 1).location == NSNotFound }
-            .filter { match in !fences.contains { NSLocationInRange(match.range.location, $0) } }
+            .filter { match in !fenced.contains { NSLocationInRange(match.range.location, $0) } }
             .map { ($0.range.location, ns.substring(with: $0.range(at: 2)).trimmed) }
         let head = starts.first.map { ns.substring(to: $0.location) } ?? soul
         let sections = starts.enumerated().map { index, start in
@@ -112,99 +140,113 @@ public enum AssistantPersonaPolicy {
     }
 
     /// The persona with the given fields set. Untouched sections and the head
-    /// are kept exactly; an emptied field drops its section; a new one is
-    /// added in the template's order. With no persona at all and nothing
-    /// typed, the result is empty (the assistant keeps Atum's own).
+    /// are kept byte for byte (line endings, trailing spaces, the final
+    /// newline); a changed field replaces only its own slice, and a new
+    /// boundary gets just the separator it needs, in the text's own line
+    /// ending. An emptied field drops its section; a new one is added in the
+    /// template's order. With no persona at all and nothing typed, the
+    /// result is empty (the assistant keeps Atum's own).
     public static func render(_ parsed: AssistantPersona, name: String,
                               who: String? = nil, what: String? = nil,
                               instructions: String? = nil) -> String {
-        if parsed.kind == .primary {
-            let who = (who ?? parsed.who).trimmed
-            let what = (what ?? parsed.what).trimmed
-            let heading = parsed.heading != nil ? "# \(name)" : nil
-            let head = [heading, parsed.nameLine].compactMap { $0 }.joined(separator: "\n\n")
-            var sections = ""
-            var seenWho = false
-            for item in parsed.sections {
-                if item.title == whoTitle, !seenWho {
-                    seenWho = true
-                    if who == sectionBody(item) {
-                        sections += item.raw
-                    } else if !who.isEmpty {
-                        sections += section(whoTitle, who) + separator(item.raw)
-                    }
-                } else {
-                    sections += item.raw
-                }
-            }
-            if !who.isEmpty, !parsed.sections.contains(where: { $0.title == whoTitle }) {
-                sections = section(whoTitle, who)
-                    + (sections.isEmpty ? "" : "\n\n" + sections.trimmedStart)
-            }
-            let body = what.isEmpty ? "" : "\n\n" + markFieldHeadings(what)
-            return [head + body, sections.trimmed]
-                .filter { !$0.isEmpty }
-                .joined(separator: "\n\n")
-                .trimmedEnd
-        }
-
-        if parsed.kind == .custom {
-            let original = rawPersona(parsed)
+        let original = rawPersona(parsed)
+        let newline = original.contains("\r\n") ? "\r\n" : "\n"
+        let soul: String
+        switch parsed.kind {
+        case .primary:
+            soul = renderPrimary(parsed, name: name, who: (who ?? parsed.who).trimmed,
+                                 what: (what ?? parsed.what).trimmed, newline: newline)
+        case .custom:
             let main = (instructions ?? parsed.instructions).trimmed
             let who = (who ?? parsed.who).trimmed
             let mainChanged = instructions != nil && main != parsed.instructions.trimmed
             let whoChanged = who != parsed.who.trimmed
             if !mainChanged && !whoChanged { return original }
-            if !mainChanged { return renderCustomWho(parsed, who: who) }
-            var soul = renderCustomMain(parsed, instructions: markFieldHeadings(main, customMain: true))
+            if !mainChanged {
+                soul = renderCustomWho(parsed, who: who, newline: newline)
+                break
+            }
+            var text = renderCustomMain(parsed, instructions: markFieldHeadings(main, customMain: true))
             let whoSections = parsed.sections.filter { $0.title == whoTitle }
-            if whoChanged {
-                if !who.isEmpty { soul = appendSection(soul, section(whoTitle, who)) }
-                // A second `Who you are` section is not shown; keep it as written.
-                for item in whoSections.dropFirst() { soul = appendSection(soul, item.raw) }
-                return soul
+            if whoChanged, !who.isEmpty { text = appendSection(text, section(whoTitle, who, newline)) }
+            for item in whoChanged ? Array(whoSections.dropFirst()) : whoSections {
+                text = appendSection(text, item.raw)
             }
-            for item in whoSections {
-                soul = appendSection(soul, item.raw)
-            }
-            return soul
+            soul = text
+        case .template:
+            soul = renderTemplate(parsed, name: name, who: (who ?? parsed.who).trimmed,
+                                  what: (what ?? parsed.what).trimmed, newline: newline)
         }
+        return keepingEnd(soul, of: original)
+    }
 
-        let values = [
-            whoTitle: (who ?? parsed.who).trimmed,
-            whatTitle: (what ?? parsed.what).trimmed,
-        ]
-        var parts = [String]()
+    private static func renderTemplate(_ parsed: AssistantPersona, name: String,
+                                       who: String, what: String, newline: String) -> String {
+        let values = [whoTitle: who, whatTitle: what]
+        var body = ""
         var seen = Set<String>()
         for item in parsed.sections {
-            if let value = values[item.title] {
-                // A repeated section is not a field; keep it as written.
-                guard seen.insert(item.title).inserted else {
-                    parts.append(item.raw)
-                    continue
-                }
-                if value == sectionBody(item) { parts.append(item.raw) }
-                else if !value.isEmpty { parts.append(section(item.title, value) + separator(item.raw)) }
+            if let value = values[item.title], seen.insert(item.title).inserted {
+                if value == sectionBody(item) { body += item.raw }
+                else if !value.isEmpty { body += section(item.title, value, newline) + separator(item.raw) }
             } else {
-                parts.append(item.raw)
+                body += item.raw
             }
         }
         // New sections, in the template's order: who before what.
         for title in [whoTitle, whatTitle] where !seen.contains(title) {
             guard let value = values[title], !value.isEmpty else { continue }
-            if let previous = parts.popLast() { parts.append(previous.trimmedEnd + "\n\n") }
-            parts.append(section(title, value))
+            body = appendSection(body, section(title, value, newline))
         }
         let head = parsed.head
         let onlyHeading = head.trimmed.isEmpty
             || head.range(of: #"^\s*# [^\r\n]*\s*$"#, options: .regularExpression) != nil
         // Nothing left but (at most) a heading: no persona.
-        if parts.isEmpty && onlyHeading { return "" }
-        let lead: String
-        if head.trimmed.isEmpty { lead = "# \(name)\n\n" }
-        else if !parts.isEmpty { lead = head.trimmedEnd + "\n\n" }
-        else { lead = head }
-        return (lead + parts.joined()).trimmedEnd
+        if body.isEmpty && onlyHeading { return "" }
+        if head.trimmed.isEmpty { return "# \(name)" + newline + newline + body }
+        if parsed.sections.isEmpty { return appendSection(head, body) }
+        return head + body
+    }
+
+    private static func renderPrimary(_ parsed: AssistantPersona, name: String,
+                                      who: String, what: String, newline: String) -> String {
+        var prefix = parsed.head
+        if parsed.heading != nil {
+            // The platform keeps the heading in step with the name.
+            prefix = prefix.replacingOccurrences(
+                of: #"^(\s*)# [^\r\n]*"#,
+                with: "$1# " + NSRegularExpression.escapedTemplate(for: name),
+                options: .regularExpression)
+        }
+        if what != parsed.what.trimmed, let nameLine = parsed.nameLine,
+           let line = prefix.range(of: nameLine) {
+            prefix = String(prefix[..<line.upperBound])
+                + (what.isEmpty ? "" : newline + newline + markFieldHeadings(what))
+            if !parsed.sections.isEmpty { prefix += newline + newline }
+        }
+        var body = ""
+        var found = false
+        for item in parsed.sections {
+            guard item.title == whoTitle, !found else {
+                body += item.raw
+                continue
+            }
+            found = true
+            if who == sectionBody(item) { body += item.raw }
+            else if !who.isEmpty { body += section(whoTitle, who, newline) + separator(item.raw) }
+        }
+        guard !who.isEmpty, !found else { return prefix + body }
+        // A new personality goes before the primary's other sections.
+        return body.isEmpty
+            ? appendSection(prefix, section(whoTitle, who, newline))
+            : prefix + section(whoTitle, who, newline) + newline + newline + body
+    }
+
+    /// The text's own ending (final newline, trailing spaces) stays as it
+    /// was, whatever the last slice became.
+    private static func keepingEnd(_ soul: String, of original: String) -> String {
+        guard !soul.isEmpty else { return "" }
+        return soul.trimmedEnd + String(original[original.trimmedEndIndex...])
     }
 
     /// Desktop's quiet length hint: the combined instructions are longer than
@@ -234,8 +276,11 @@ public enum AssistantPersonaPolicy {
     /// The UTF-16 ranges of fenced code blocks (CommonMark: a line of three
     /// or more backticks or tildes, indented at most three spaces, closed by
     /// a line of the same character at least as long; an unclosed fence runs
-    /// to the end).
-    static func fencedRanges(_ text: String) -> [NSRange] {
+    /// to the end). Only used to detect text desktop's parser would read
+    /// differently, never to decide structure.
+    static func fencedRanges(_ text: String) -> [NSRange] { fences(text).ranges }
+
+    static func fences(_ text: String) -> (ranges: [NSRange], unclosed: Bool) {
         let ns = text as NSString
         var ranges = [NSRange]()
         var open: (start: Int, char: Character, count: Int)?
@@ -263,7 +308,7 @@ public enum AssistantPersonaPolicy {
         if let fence = open {
             ranges.append(NSRange(location: fence.start, length: ns.length - fence.start))
         }
-        return ranges
+        return (ranges, open != nil)
     }
 
     private static let headingRegex = try! NSRegularExpression(
@@ -362,8 +407,8 @@ public enum AssistantPersonaPolicy {
                                          options: .regularExpression).trimmed
     }
 
-    private static func section(_ title: String, _ body: String) -> String {
-        "## \(title)\n\n\(markFieldHeadings(body.trimmed))"
+    private static func section(_ title: String, _ body: String, _ newline: String = "\n") -> String {
+        "## \(title)" + newline + newline + markFieldHeadings(body.trimmed)
     }
 
     private static func appendSection(_ soul: String, _ raw: String) -> String {
@@ -373,7 +418,8 @@ public enum AssistantPersonaPolicy {
         return soul + gap + raw
     }
 
-    private static func renderCustomWho(_ parsed: AssistantPersona, who: String) -> String {
+    private static func renderCustomWho(_ parsed: AssistantPersona, who: String,
+                                        newline: String) -> String {
         var found = false
         var soul = parsed.head
         for item in parsed.sections {
@@ -390,10 +436,10 @@ public enum AssistantPersonaPolicy {
             if who == sectionBody(item) {
                 soul += item.raw
             } else if !who.isEmpty {
-                soul += section(whoTitle, who) + separator(item.raw)
+                soul += section(whoTitle, who, newline) + separator(item.raw)
             }
         }
-        return !who.isEmpty && !found ? appendSection(soul, section(whoTitle, who)) : soul
+        return !who.isEmpty && !found ? appendSection(soul, section(whoTitle, who, newline)) : soul
     }
 
     private static func renderCustomMain(_ parsed: AssistantPersona, instructions: String) -> String {
@@ -425,6 +471,10 @@ public enum AssistantPersonaMerge {
         /// This field changed elsewhere since the edit began (or the persona
         /// changed shape): show the latest version, do not write.
         case elsewhere
+        /// The latest persona is ambiguous, or the assembled text would not
+        /// read back as intended (or would read differently on desktop): do
+        /// not write; the draft stays and the save fails with Retry.
+        case unsafe
     }
 
     /// The field an edit lands in for this persona: the personality is always
@@ -446,17 +496,26 @@ public enum AssistantPersonaMerge {
     public static func prepare(field: AssistantPersonaField, before: String, after: String,
                                soul: String, name: String, primary: Bool) -> Outcome {
         let current = AssistantPersonaPolicy.parse(soul, primary: primary)
+        if current.isAmbiguous { return .unsafe }
         let currentField = visibleField(current, field)
         if field != .who, field != currentField { return .elsewhere }
         let latest = value(current, currentField).trimmed
         if latest == after.trimmed { return .unchanged }
         if latest != before.trimmed { return .elsewhere }
-        return .write(AssistantPersonaPolicy.render(
+        let written = AssistantPersonaPolicy.render(
             current, name: name,
             who: field == .who ? after : nil,
             what: field == .what ? after : nil,
             instructions: field == .instructions ? after : nil
-        ))
+        )
+        // Round-trip guard: both fields must read back exactly as intended,
+        // and desktop's parser must agree with a fence-aware one.
+        let reread = AssistantPersonaPolicy.parse(written, primary: primary)
+        let expectedWho = field == .who ? after.trimmed : current.who
+        let expectedMain = field == .who ? value(current, visibleField(current, .what)) : after.trimmed
+        guard !reread.isAmbiguous, reread.who == expectedWho,
+              value(reread, visibleField(reread, .what)) == expectedMain else { return .unsafe }
+        return .write(written)
     }
 }
 

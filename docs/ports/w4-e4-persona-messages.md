@@ -74,34 +74,65 @@ card's footnote. The phone cannot read the Hermes JSON, so the constant is
 mirrored in `contextFileMaxChars`. The effective limit can vary by model or
 profile, and desktop uses the same default.
 
-### Review fixes (Codex review of `6894b2e`)
+### Review fixes
 
+Two Codex review rounds, on `6894b2e` (r1) and `4395675` (r2). The r2
+direction from the coordinator was the simplest safe behaviour, not a more
+complete parser.
+
+- **One parser, plus a guard.** The card shows and edits desktop's parse
+  (`parsePersona`, which splits on any unmarked `## ` line). A second,
+  fence-aware parse of the same text is used only to check it.
+  - *Read.* `AssistantPersona.isAmbiguous` is set when the two parses
+    disagree about any field, when a `Who you are` or `What you do` title
+    repeats, or when a code fence is never closed (`fences`). Examples are a
+    template title inside a code fence and two `Who you are` sections. An
+    ambiguous persona is shown, but its fields are read-only. No exported
+    copy key says why, so there is no message (see Copy below).
+  - *Write.* `AssistantPersonaMerge.prepare` returns `.unsafe` and writes
+    nothing in three cases: the latest persona is ambiguous, the assembled
+    text is ambiguous, or either field would not read back exactly as
+    intended. The draft stays and the band shows save-failed with Retry.
+  - So a phone save never writes text that desktop reads differently. This
+    covers an open fence typed into Personality swallowing Purpose, and
+    clearing the first of two personalities promoting the hidden one. No
+    desktop change is needed for this. Fenced template titles that someone
+    types *into* a field still save: desktop's `markFieldHeadings` marks
+    them, and both parses keep them inside the field. That is desktop's
+    PR #95 marker unchanged, not a phone-only addition. The r1 fence-aware
+    structure was replaced by this guard.
 - **A newer draft survives an earlier save.** Each persona save remembers
-  the draft it sent. When that save is confirmed (or the latest already
-  says it), `AssistantCardEdit.settle(_:submitted:)` always advances the
-  field's confirmed baseline, even while the field is focused, and keeps a
-  draft typed after the save started. That draft is written by the queued
-  save (or the next blur) on the new baseline, not mistaken for another
-  device's edit.
-- **Fenced code is not structure.** `parse` only treats `## ` headings
-  outside fenced code blocks (CommonMark backtick/tilde fences, see
-  `fencedRanges`) as section boundaries. A literal `## Who you are` in an
-  example stays in the main field and survives a Personality edit with its
-  closing fence. Desktop's parser still has this bug. When the phone writes
-  the main field, it still marks template titles inside fences, so desktop
-  does not split them either.
-- **Repeated sections are kept.** Only the first `Who you are` (and, for
-  the template, `What you do`) section is the field. Later sections with
-  the same title are not shown and are written back exactly as they were,
-  whichever field is edited. Before this fix the renderer dropped them.
-- **Failures stay with their field.** The note band is
-  `AssistantCardSaveBand` (AtumChat). A failure belongs to its field until
-  that field is retried, settles, or is discarded (keyboard Undo, or
-  nothing left to write). A save of another field does not clear it. With
-  several failures the band shows the latest, and Retry targets it. The
-  earlier one returns once that settles.
+  the draft it sent. On success, or when the latest already says it,
+  `AssistantCardEdit.settle(_:submitted:)` moves the baseline forward,
+  even while the field is focused. A draft typed after the send is kept for
+  the next write.
+- **A same-field conflict keeps a newer draft.** Say the phone sends A→B,
+  the person types C, and the server already says D. If the field still
+  holds what was sent, it shows D with desktop's conflict line, as before.
+  If the person typed past it, C stays, the conflict line appears with
+  Retry, and the field is *held* (`AssistantCardSaveBand.isHeld`): leaving
+  it again writes nothing. Retry rebases C on D and writes it. Undo shows D.
+- **Failures stay with their field.** `AssistantCardSaveBand` ties each
+  failure to its field until that field is retried, settles, or is
+  discarded. A save of another field does not clear it. A refused rename
+  (too long, taken, reserved) shows under the name field
+  (`assistant.card.name-refused`), not in the band, so it never hides
+  another field's Retry.
+- **Byte fidelity.** Renders keep every untouched slice exactly: CRLF,
+  trailing spaces, and the text's final newline. A replaced field keeps the
+  separator after it. A new boundary gets only the separator it needs, in
+  the text's own line ending. The primary keeps its head and last section
+  as written. Before this fix it rebuilt the head and trimmed the end.
 - **BOM.** The length hint drops a leading U+FEFF before counting, as
   Hermes reads `SOUL.md` as `utf-8-sig` (`agent/prompt_builder.py`).
+
+### Desktop follow-up
+
+Desktop's `parsePersona` treats a template title inside a code fence, or
+after an unclosed fence, as a section boundary. It also shows only the
+first of two `Who you are` sections and drops the second on a Personality
+edit. The phone avoids both by making such personas read-only. Desktop
+should get the same guard, or fence-aware parsing, in its own change.
 
 ### Known gap (matches desktop)
 
@@ -124,6 +155,10 @@ pending fallback.
 
 Both take no arguments. An AppTest checks their values in all five locales
 against desktop `copy.ts`.
+
+Missing key: there is no exported line for "this persona can't be edited
+here" (the closest, `routineReadOnly` "View only", belongs to routines). An
+ambiguous persona is read-only without a message until the export adds one.
 
 ## Not ported (phone has no equivalent surface)
 
