@@ -152,19 +152,36 @@ public enum Projection {
                             replyDetails: [String: ChatReplyDetails] = [:],
                             options: ProjectionOptions = .s1a, now: Date? = nil,
                             calendar: Calendar = .current) -> [ChatRow] {
+        var companyTurns = CompanyTurnMemory()
+        return projectedRows(companyTurns.prepare(items, context: context, now: now).items,
+                             context: context, typingNames: typingNames, isLoadingEarlier: isLoadingEarlier,
+                             replyDetails: replyDetails, options: options, now: now, calendar: calendar).rows
+    }
+
+    fileprivate static func projectedRows(_ items: [ChatItem], context: RoomContext, typingNames: [String],
+                                          isLoadingEarlier: Bool, replyDetails: [String: ChatReplyDetails],
+                                          options: ProjectionOptions, now: Date?, calendar: Calendar,
+                                          settledSchedules: Set<ChatScheduleExecution> = [])
+        -> (rows: [ChatRow], scheduleExpires: Date?) {
         // agent-turns/1.4 A7: an agent's working line lives only while its
         // turn works, and a redacted agent message shows nothing. Both rules
         // run before answer detection, so a hidden line never is the newest
         // thing the agent said.
-        let shownItems = TransientLines.visibleItems(items, agents: context.transientAgentUserIDs)
-        let working = context.kind == .assistant
-            ? TransientLines.workingLine(shownItems, agents: context.transientAgentUserIDs,
-                                         sender: context.workingLineSenderID)
-            : nil
+        let companyAgent = context.activeCompanyBinding?.agentUserID
+        let agents = context.companyView ? Set([companyAgent].compactMap { $0 }) : context.transientAgentUserIDs
+        let shownItems = TransientLines.visibleItems(items, agents: agents, now: now,
+                                                     settledSchedules: settledSchedules)
+        let working = shownItems.last { item in
+            guard TransientLines.isTransientLine(item, agents: agents) else { return false }
+            if context.companyView { return item.companyTurn != nil && item.sender == companyAgent }
+            return context.kind == .assistant
+                && (context.workingLineSenderID == nil || item.sender == context.workingLineSenderID)
+                && item.threadRoot == nil
+        }
         var visible = shownItems.filter { item in
             // Every transient event leaves the transcript, including older live
             // lines from legacy publishers. Only the selected line feeds the footer.
-            guard !TransientLines.isTransientLine(item, agents: context.transientAgentUserIDs) else { return false }
+            guard !TransientLines.isTransientLine(item, agents: agents) else { return false }
             switch item.kind {
             case .dayDivider: return options.showsDayDividers
             case .readMarker: return options.showsReadMarker
@@ -192,7 +209,9 @@ public enum Projection {
         let marks = options.marksSentAndSeen ? Delivery.marks(for: items, context: context) : nil
         // B10: a real typing signal is the room saying an answer is coming;
         // the quiet line waits until it ends, never sits beside the dots.
-        let noAnswerID: String? = if typingNames.isEmpty, let after = options.noAnswerAfter, let now {
+        let personalAssistant = context.kind == .assistant && !context.companyView
+        let noAnswerID: String? = if personalAssistant, typingNames.isEmpty, working == nil,
+                                    let after = options.noAnswerAfter, let now {
             Delivery.noAnswerItemID(items, context: context, now: now, after: after)
         } else {
             nil
@@ -243,11 +262,24 @@ public enum Projection {
         }
         // Desktop's loadingIndicator: one stable synthetic row, never the
         // progress event itself (no quote, delivery, timestamp or edited mark).
-        if context.kind == .assistant, working != nil || !typingNames.isEmpty {
-            rows.append(ChatRow(item: ChatItem(id: typingRowID, kind: .typing(names: typingNames),
-                                               body: working?.body ?? "")))
+        if working != nil || (personalAssistant && !typingNames.isEmpty) {
+            var footer = ChatItem(id: typingRowID, kind: .typing(names: typingNames), body: working?.body ?? "",
+                                  progress: working?.progress)
+            footer.companyTurn = working?.companyTurn
+            if let working, footer.progress?.isScheduled == true {
+                switch working.delivery {
+                case .remote, .sent:
+                    if working.eventID?.hasPrefix("$") != true || working.sender != context.workingLineSenderID {
+                        footer.progress?.schedule = nil
+                    }
+                case .sending, .failed:
+                    footer.progress?.schedule = nil
+                }
+            }
+            rows.append(ChatRow(item: footer))
         }
-        return Grouping.apply(to: rows, context: context, groupsRuns: options.groupsRuns, calendar: calendar)
+        return (Grouping.apply(to: rows, context: context, groupsRuns: options.groupsRuns, calendar: calendar),
+                working.flatMap(TransientLines.scheduleExpiry))
     }
 
     /// B21, desktop's rule (`D194: apps/desktop/src/matrix/app.tsx:498-505`):
@@ -317,11 +349,13 @@ public struct ProjectedTimeline: Equatable, Sendable {
 /// input changes (typing names, the loading row, the clock).
 public struct TimelineProjector: Sendable {
     public private(set) var buffer = TimelineBuffer()
+    private var companyTurns = CompanyTurnMemory()
     public let generation: UInt64
     public var context: RoomContext
     public var options: ProjectionOptions
     public var calendar: Calendar
     public var typingNames: [String] = []
+    public var settledSchedules = Set<ChatScheduleExecution>()
     public var isLoadingEarlier = false
     /// B21 quote details by item ID, from the source's batches
     /// (`ChatTimelineBatch.replyDetails`).
@@ -349,15 +383,18 @@ public struct TimelineProjector: Sendable {
     /// did since the last pass (`.inPlace` for typing, loading and the clock).
     public mutating func project(change: SnapshotChange = .inPlace, now: Date) -> ProjectedTimeline {
         sequence &+= 1
-        let rows = Projection.rows(buffer.items, context: context, typingNames: typingNames,
-                                   isLoadingEarlier: isLoadingEarlier, replyDetails: replyDetails,
-                                   options: options, now: now, calendar: calendar)
+        let company = companyTurns.prepare(buffer.items, context: context, now: now)
+        let (rows, scheduleExpires) = Projection.projectedRows(
+            company.items, context: context, typingNames: typingNames, isLoadingEarlier: isLoadingEarlier,
+            replyDetails: replyDetails, options: options, now: now, calendar: calendar,
+            settledSchedules: settledSchedules)
         let deadline: Date? = if typingNames.isEmpty, let after = options.noAnswerAfter {
             Delivery.noAnswerDeadline(buffer.items, context: context, now: now, after: after)
         } else {
             nil
         }
+        let refresh = [deadline, company.expires, scheduleExpires].compactMap { $0 }.min()
         return ProjectedTimeline(snapshot: Snapshot(rows: rows, change: change, generation: generation),
-                                 nextNoAnswerChange: deadline, sequence: sequence)
+                                 nextNoAnswerChange: refresh, sequence: sequence)
     }
 }

@@ -45,7 +45,7 @@ struct ChatRowView: View, Equatable {
         case .timelineStart:
             TimelineStartRow()
         case let .typing(names):
-            if row.item.body.isEmpty {
+            if row.item.body.isEmpty && row.item.progress?.presentation == nil {
                 TypingRow(names: names)
             } else {
                 WorkingLineRow(row: row)

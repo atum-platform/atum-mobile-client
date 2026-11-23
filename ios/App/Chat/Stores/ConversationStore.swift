@@ -17,7 +17,7 @@ import UIKit
 struct ConversationRoomInfo: Sendable {
     let roomID: String
     let title: String
-    let context: RoomContext
+    var context: RoomContext
     /// Server-authored names for agents and catalog bots (sender labels).
     let knownNames: [String: String]
     /// Catalog bot identities remain explicit even in a group room, where
@@ -374,6 +374,13 @@ final class LiveConversationStore: ConversationStore {
         return true
     }
 
+    func updateChannelThreadBinding(_ binding: CompanyTurnBinding?) -> Bool {
+        guard let rootID = info.threadRootID, case .channel = info.context.companyTurnScope else { return false }
+        var updated = info
+        updated.context.companyTurnScope = .channel(threadRoot: rootID, binding: binding)
+        return updateRoomInfo(updated)
+    }
+
     // MARK: Protocol
 
     func handle(_ input: FollowInput) {
@@ -623,6 +630,13 @@ final class LiveConversationStore: ConversationStore {
         await install(controller, generation: generation)
     }
 
+    func settleSchedule(_ execution: ChatScheduleExecution) async {
+        guard !isClosed, settledSchedules.insert(execution).inserted else { return }
+        await controller?.settleSchedule(execution)
+    }
+
+    private var settledSchedules = Set<ChatScheduleExecution>()
+
     private func install(_ controller: TimelineController, generation: UInt64) async {
         guard generation == self.generation, !isClosed else {
             controller.close()
@@ -638,7 +652,7 @@ final class LiveConversationStore: ConversationStore {
         // handled as attached; sends held meanwhile go out now.
         run(core.attached(now: clock()))
         sync()
-        await controller.start()
+        await controller.start(settledSchedules: settledSchedules)
         guard generation == self.generation, !isClosed else { return }
         if !core.typingNames.isEmpty { await controller.setTyping(core.typingNames) }
     }

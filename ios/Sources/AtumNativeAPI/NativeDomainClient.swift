@@ -1,3 +1,4 @@
+import AtumChat
 import Foundation
 
 /// Failure metadata intentionally excludes request credentials and response
@@ -37,12 +38,15 @@ public struct AgentsRead: Sendable {
 /// SwiftUI receives typed domain values and safe failures only.
 @MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, CompanyInvitesAPI, ApplePurchasesAPI {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
+    private static let scheduleStopOrigin = "https://api.atumplatform.com"
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
     private static let agentLifecycleURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents/lifecycle")!
     private static let appsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/apps")!
     private static let officialAccountsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/official-accounts")!
     private static let storeCatalogURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/store/catalog")!
     private static let walletURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet")!
+    private static let walletProjectionHeader = "X-Atum-Wallet-Projection"
+    private static let walletProjectionVersion = "1.4"
     private static let walletHistoryURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/wallet/history")!
     private static let aliasLookupURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/lookup")!
     private static let aliasCheckURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/aliases/check")!
@@ -198,6 +202,20 @@ public struct AgentsRead: Sendable {
             maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 262_144
         )
         do { return try CloudTurnStop.response(response.body, for: input) }
+        catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    public func cloudScheduleStop(_ input: CloudScheduleStop.Request,
+                                  onRouteUnavailable: @MainActor () -> Void = {}) async throws -> AssistantTurnStopResult {
+        let body: Data
+        do { body = try input.body() }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let url = URL(string: Self.scheduleStopOrigin + CloudScheduleStop.path)!
+        let receipt = try await performAuthorized(url: url, body: body, extraHeaders: [
+            "Origin": Self.scheduleStopOrigin, CloudScheduleStop.bridgeHeader: CloudScheduleStop.bridgeVersion
+        ], maximumResponseBodyBytes: 4_096)
+        if [403, 404, 503].contains(receipt.status) { onRouteUnavailable() }
+        do { return try CloudScheduleStop.result(status: receipt.status, data: receipt.body, for: input) }
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
@@ -412,7 +430,9 @@ public struct AgentsRead: Sendable {
     }
 
     public func wallet() async throws -> WalletResponse {
-        try await read(WalletResponse.self, url: Self.walletURL)
+        try await requestWithHeaders(WalletResponse.self, url: Self.walletURL,
+                                     method: "GET", body: nil, acceptsAssistantNameRefusal: false,
+                                     extraHeaders: [Self.walletProjectionHeader: Self.walletProjectionVersion]).value
     }
 
     /// Starts or observes this signed-in account's personal Drive mapping.
@@ -547,6 +567,14 @@ public struct AgentsRead: Sendable {
         try CompanyWorkspaceWire.decodeChannelDirectory(
             try await companyData(url: try companyURL(companyID, suffix: "channels"),
                                   method: "GET", body: nil))
+    }
+
+    /// Desktop's unversioned GET view, scoped to the requested company.
+    public func companyChannelAgent(companyID: NativeID) async throws -> CompanyChannelAgent {
+        let agent = try await read(CompanyChannelAgent.self, url: try companyURL(companyID, suffix: "ai"),
+                                  maximumResponseBodyBytes: 4_096)
+        guard agent.companyID == companyID else { throw NativeDomainClientFailure.invalidResponse }
+        return agent
     }
 
     public func acceptCompanyInvitation(companyID: NativeID, requestID: NativeID,
@@ -969,13 +997,8 @@ public struct AgentsRead: Sendable {
 
     public func writeManagedModel(agentPrincipal: NativeID,
                                   value: ManagedModelWrite) async throws -> ManagedModelSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(ManagedModelSnapshot.self,
-                                         url: try agentURL(agentPrincipal, suffix: "model-choice"),
-                                         method: "PUT", body: body,
-                                         acceptsAssistantNameRefusal: false)
+        let snapshot = try await putModelChoice(ManagedModelSnapshot.self,
+                                                url: agentURL(agentPrincipal, suffix: "model-choice"), value: value)
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
         }
@@ -1002,14 +1025,9 @@ public struct AgentsRead: Sendable {
     public func writeManagedModelDestination(agentPrincipal: NativeID,
                                              value: ManagedModelDestinationWrite) async throws
         -> ManagedModelDestinationSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(
+        let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
-            method: "PUT", body: body,
-            acceptsAssistantNameRefusal: false
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
@@ -1023,19 +1041,32 @@ public struct AgentsRead: Sendable {
     public func writeManagedModelSubscription(agentPrincipal: NativeID,
                                               value: ManagedModelSubscriptionWrite) async throws
         -> ManagedModelDestinationSnapshot {
-        let body: Data
-        do { body = try JSONEncoder().encode(value) }
-        catch { throw NativeDomainClientFailure.invalidRequest }
-        let snapshot = try await request(
+        let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: try agentURL(agentPrincipal, suffix: "model-destinations"),
-            method: "PUT", body: body,
-            acceptsAssistantNameRefusal: false
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
         }
         return snapshot
+    }
+
+    private func putModelChoice<Snapshot: Decodable, Write: Encodable>(
+        _ type: Snapshot.Type, url: URL, value: Write
+    ) async throws -> Snapshot {
+        let body: Data
+        do { body = try JSONEncoder().encode(value) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let result = try await response(url: url, method: "PUT", body: body,
+                                        maximumRequestBodyBytes: 262_144,
+                                        maximumResponseBodyBytes: 262_144, acceptedStatuses: [200, 409])
+        if result.status == 409 {
+            if let conflict = try? NativeAPI.decode(ManagedModelFenceConflictResponse.self, from: result.body) {
+                throw conflict.reason
+            }
+            throw NativeDomainClientFailure.http(try httpFailure(result))
+        }
+        return try decode(type, data: result.body)
     }
 
     /// `atum.chatgpt-relay/1`: whether an owner Mac relays its ChatGPT plan
@@ -1308,14 +1339,14 @@ public struct AgentsRead: Sendable {
     /// `POST` with the same single-flight 401 refresh as `request`, but
     /// returning the raw response so a caller can answer a refused body
     /// itself (the assistant placement retries a 4xx with the empty body).
-    private func performAuthorized(url: URL, body: Data,
-                                   extraHeaders: [String: String] = [:]) async throws -> NativeDomainHTTPResponse {
+    private func performAuthorized(url: URL, body: Data, extraHeaders: [String: String] = [:],
+                                   maximumResponseBodyBytes: Int = 262_144) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false)
         try requireActiveTask()
         let first = try await perform(url: url, token: firstToken, method: "POST", body: body,
-                                      maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 262_144,
+                                      maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
                                       extraHeaders: extraHeaders)
         try requireActiveTask()
         guard first.status == 401 else { return first }
@@ -1325,7 +1356,7 @@ public struct AgentsRead: Sendable {
         let refreshedToken = try await authorize(forceRefresh: true)
         try requireActiveTask()
         let second = try await perform(url: url, token: refreshedToken, method: "POST", body: body,
-                                       maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: 262_144,
+                                       maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
                                        extraHeaders: extraHeaders)
         try requireActiveTask()
         if second.status == 401 {
@@ -1412,6 +1443,13 @@ public struct AgentsRead: Sendable {
               (0...4_500_000).contains(maximumResponseBodyBytes),
               (method == "GET") == (body == nil),
               extraHeaders.allSatisfy({ name, value in
+                  if url.path == CloudScheduleStop.path, method == "POST" {
+                      return (name == "Origin" && value == Self.scheduleStopOrigin)
+                          || (name == CloudScheduleStop.bridgeHeader && value == CloudScheduleStop.bridgeVersion)
+                  }
+                  if name == Self.walletProjectionHeader {
+                      return method == "GET" && url == Self.walletURL && value == Self.walletProjectionVersion
+                  }
                   if url.path.hasPrefix(Self.baseURL.path + "/store/") {
                       if name == StoreWire.capabilitiesHeader { return value == StoreWire.capabilities }
                       if name == "Idempotency-Key" {
@@ -1448,6 +1486,7 @@ public struct AgentsRead: Sendable {
         request.httpShouldHandleCookies = false
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         let operation = NativeDomainJSONOperation(request: request, protocolClasses: protocolClasses,
+                                                  timeout: url.path == CloudScheduleStop.path ? 40 : 15,
                                                   maximumBodyBytes: maximumResponseBodyBytes)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { operation.start($0) }
@@ -1526,6 +1565,7 @@ public struct AgentsRead: Sendable {
     private func isApprovedURL(_ url: URL) -> Bool {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
+        if url.path == CloudScheduleStop.path { return url.query == nil }
         guard url.path.hasPrefix(Self.baseURL.path + "/") else { return false }
         let phoneRoot = Self.baseURL.path + "/device-services"
         let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
@@ -1601,7 +1641,7 @@ public struct AgentsRead: Sendable {
         if parts.count == 1 { return true }
         if parts.count == 2 {
             return ["accept", "leave", "channels", "conversations", "private-cos", "invite", "invitations",
-                    "invite-links"].contains(parts[1])
+                    "invite-links", "ai"].contains(parts[1])
         }
         // invite-links/{id}/revoke (wire 1.2)
         if parts[1] == "invite-links" {
@@ -1686,6 +1726,7 @@ private final class NativeDomainJSONOperation: NSObject, URLSessionDataDelegate,
     private let request: URLRequest
     private let protocolClasses: [URLProtocol.Type]?
     private let maximumBodyBytes: Int
+    private let timeout: TimeInterval
     private var session: URLSession?
     private var task: URLSessionTask?
     private var continuation: CheckedContinuation<NativeDomainHTTPResponse, any Error>?
@@ -1695,9 +1736,10 @@ private final class NativeDomainJSONOperation: NSObject, URLSessionDataDelegate,
     private var acceptedResponse = false
     private var finished = false
 
-    init(request: URLRequest, protocolClasses: [URLProtocol.Type]?, maximumBodyBytes: Int) {
+    init(request: URLRequest, protocolClasses: [URLProtocol.Type]?, timeout: TimeInterval, maximumBodyBytes: Int) {
         self.request = request
         self.protocolClasses = protocolClasses
+        self.timeout = timeout
         self.maximumBodyBytes = maximumBodyBytes
     }
 
@@ -1711,8 +1753,8 @@ private final class NativeDomainJSONOperation: NSObject, URLSessionDataDelegate,
             config.urlCredentialStorage = nil
             config.urlCache = nil
             config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-            config.timeoutIntervalForRequest = 15
-            config.timeoutIntervalForResource = 30
+            config.timeoutIntervalForRequest = timeout
+            config.timeoutIntervalForResource = max(30, timeout)
             config.waitsForConnectivity = false
             if let protocolClasses { config.protocolClasses = protocolClasses }
             let queue = OperationQueue()

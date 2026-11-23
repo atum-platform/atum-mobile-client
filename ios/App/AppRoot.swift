@@ -894,6 +894,9 @@ struct AppRoot: View {
             )
             .modifier(CompanyThreadPanelHost(model: model, design: design, coordinator: companyThreads,
                                              roomID: roomID))
+            .task(id: model.privateCosTurnKey(roomID: roomID)) {
+                await model.refreshPrivateCosTurnPresentation(roomID: roomID)
+            }
         } else if let opening = model.appBotRoomOpening, opening.roomID == roomID {
             AppBotRoomOpeningView(opening: opening, design: design) {
                 model.retryAppBotJoin(roomID: roomID)

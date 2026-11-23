@@ -15,17 +15,20 @@ extension ScriptedChats {
     /// 100 s.
     static func chatTimelineParity(_ env: ScriptedEnvironment, reading: Bool = false) -> ScriptedScript {
         let name = (reading ? ScriptedScenario.chatTimelineReading : .chatTimelineParity).rawValue
-        let activity = reading ? "Đang đọc…" : "Đang chạy tác vụ…"
+        let activity = "Đang chạy tác vụ…"
         var initial = shortTranscript(name: name, messages: 6, env: env, seed: 31, minutesAgo: 4)
         let questionID = "\(name).question"
         initial.append(ChatItem(id: questionID, kind: .message, sender: Cast.me, isOwn: true,
                                 timestamp: env.ago(minutes: 1), eventOrTransactionId: .event("$" + questionID),
                                 body: "Tóm tắt giúp mình báo cáo quý 3 nhé.", receiptUserIDs: [Cast.atum]))
         let lineID = "\(name).working"
-        var line = notice(lineID, activity, replyTo: "$" + questionID)
+        var line = notice(lineID, reading ? "" : activity, replyTo: "$" + questionID)
         // Match the SDK's full event envelope so a screenshot also exercises
         // the marker shape that was missed by the original phone parser.
-        line.progress = AtumTurnMarkers.parse(json: #"{"type":"m.room.message","content":{"msgtype":"m.notice","io.atum.progress":{"phase":"working","kind":"activity","revision":1}}}"#).progress
+        let json = reading
+            ? #"{"type":"m.room.message","content":{"msgtype":"m.notice","io.atum.progress":{"phase":"working","kind":"todo","revision":1},"io.atum.presentation":{"version":1,"code":"tool_activity","args":{"activity":"read"}}}}"#
+            : #"{"type":"m.room.message","content":{"msgtype":"m.notice","io.atum.progress":{"phase":"working","kind":"activity","revision":1}}}"#
+        AtumTurnMarkers.parse(json: json).apply(to: &line)
         var interim = answer("\(name).interim", "Mình sẽ đọc báo cáo và tóm tắt các điểm chính.",
                              replyTo: "$" + questionID)
         interim.interim = true
@@ -33,7 +36,7 @@ extension ScriptedChats {
             ScriptedStep(at: 3, .typing([Cast.atum])),
             ScriptedStep(at: 5, .arrive(interim)),
             ScriptedStep(at: 6, .arrive(line)),
-            ScriptedStep(at: 8, .edit(id: lineID, body: reading ? activity : activity + "\n✓ Đọc báo cáo quý 3\n• Viết bản tóm tắt")),
+            ScriptedStep(at: 8, .edit(id: lineID, body: reading ? "" : activity + "\n✓ Đọc báo cáo quý 3\n• Viết bản tóm tắt")),
             // Scripted chats end their typing (`ScriptedTests`), long after the captures.
             ScriptedStep(at: 100, .typing([]))
         ]

@@ -18,6 +18,32 @@ import AtumChat
         }, protocolClasses: [NativeDomainProtocol.self])
     }
 
+    func testCompanyTurnAgentReadMatchesTheRequestedCompany() async throws {
+        let company = try NativeID("11111111-1111-4111-8111-a11111111111")
+        let foreign = try NativeID("22222222-2222-4222-8222-a22222222222")
+        let agent = "@fixture-agent:example.test"
+        let answer = Data("""
+        {"schemaVersion":1,"companyId":"\(company.rawValue)",
+         "agent":{"principal":"\(agentPrincipal)","userId":"\(agent)","displayName":"Chief of Staff"},
+         "enabled":true,"revision":1,"state":"ready","canManage":false}
+        """.utf8)
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertNil(request.value(forHTTPHeaderField: CompanyWire.headerName))
+            let route = request.url?.path ?? ""
+            XCTAssertTrue([company, foreign].contains { route == "/api/matrix/v1/companies/\($0.rawValue)/ai" })
+            return .json(answer)
+        }
+        let client = client(TestAuthorization(first: "synthetic-company-view"))
+        let identity = try await client.companyChannelAgent(companyID: company)
+        XCTAssertEqual(identity.userID, agent)
+        XCTAssertEqual(identity.principal.rawValue, agentPrincipal)
+        do {
+            _ = try await client.companyChannelAgent(companyID: foreign)
+            XCTFail("A mismatched company cannot prove a channel agent")
+        } catch NativeDomainClientFailure.invalidResponse {}
+    }
+
     private func body(of request: URLRequest) -> Data? {
         if let body = request.httpBody { return body }
         guard let stream = request.httpBodyStream else { return nil }
@@ -174,8 +200,8 @@ import AtumChat
     }
 
     private func managedModelBody(revision: Int = 1,
-                                  effort: String = "medium") throws -> Data {
-        let digest = String(repeating: "a", count: 64)
+                                  effort: String = "medium",
+                                  digest: String = String(repeating: "a", count: 64)) throws -> Data {
         return try JSONSerialization.data(withJSONObject: [
             "profile": "atum.model-choice/1.1",
             "agentPrincipal": agentPrincipal,
@@ -393,13 +419,16 @@ import AtumChat
             XCTAssertNil(request.value(forHTTPHeaderField: "x-atum-principal"))
             XCTAssertFalse(request.httpShouldHandleCookies)
             XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Atum-Wallet-Projection"),
+                           request.url?.path == "/api/matrix/v1/wallet" ? "1.4" : nil)
             switch request.url?.path {
             case "/api/matrix/v1/agents": return .json(try! fixture.data("agents.response.json"))
             case "/api/matrix/v1/apps": return .json(self.appCatalogBody())
             case "/api/matrix/v1/store/catalog": return .json(self.storeCatalogBody())
             case "/api/matrix/v1/wallet":
+                let wallet = #"{"unit":"micro_proton","balances":{"available":25,"paid":25,"earned":0,"promo":0,"held":0},"allowance":null,"checkoutOpen":false,"spendableMicroProtons":20,"unbilledMicroProtons":5}"#
                 return .init(headers: ["Content-Type": "Application/JSON; charset=utf-8"],
-                             chunks: [try! fixture.data("wallet.response.json")])
+                             chunks: [Data(wallet.utf8)])
             case "/api/matrix/v1/wallet/history": return .json(try! fixture.data("wallet-history.response.json"))
             case "/api/matrix/v1/aliases/lookup":
                 XCTAssertEqual(request.url?.query, "handle=lan_anh")
@@ -420,7 +449,8 @@ import AtumChat
         XCTAssertEqual(apps.apps.first?.bot?.userID.rawValue, "@app-moon:atumplatform.com")
         XCTAssertEqual(store.items.first?.itemID, "skill/official/decision-journal")
         XCTAssertEqual(store.items.first?.title.localized(locale: "en"), "Decision journal")
-        XCTAssertGreaterThanOrEqual(wallet.balances.available, 0)
+        XCTAssertEqual(wallet.displayMicroProtons, 20)
+        XCTAssertEqual(wallet.balances.available, 25)
         XCTAssertFalse(history.entries.isEmpty)
         XCTAssertEqual(alias.humanMessageTarget?.rawValue, "@user-0123456789abcdef0123456789abcdef:atum.test")
         XCTAssertEqual(NativeDomainProtocol.state.requests.map { $0.url?.absoluteString }, [
@@ -895,6 +925,80 @@ import AtumChat
         XCTAssertEqual(saved.revision, 2)
         XCTAssertEqual(saved.choice.effort, .high)
         XCTAssertEqual(step, 2)
+    }
+
+    func testManagedModelPolicyConflictRetriesTheSamePickUnderTheNewDigest() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let requestID = ModelWriteRequests<NativeID>.freshID()
+        let api = client(TestAuthorization(first: "p2-model-token"))
+        let picker = ManagedModelPickerState<ManagedModelSnapshot>(revision: \.revision)
+        let newDigest = String(repeating: "b", count: 64)
+        var calls: [String] = []
+        var firstBody: [String: Any]?
+        NativeDomainProtocol.state.handler = { request in
+            calls.append(request.httpMethod ?? "")
+            switch calls.count {
+            case 1: return .json(try! self.managedModelBody())
+            case 2:
+                firstBody = try! JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as? [String: Any]
+                return .init(status: 409, chunks: [Data(#"{"error":"matrix_409","details":{"reason":"policy_changed"},"policyDigest":"\#(newDigest)"}"#.utf8)])
+            case 3:
+                return .json(try! self.managedModelBody(digest: newDigest))
+            default:
+                let retry = try! JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as! [String: Any]
+                XCTAssertEqual(retry["expectedRevision"] as? Int, 1)
+                XCTAssertEqual(retry["policyDigest"] as? String, newDigest)
+                XCTAssertEqual(retry["choice"] as? [String: String], firstBody?["choice"] as? [String: String])
+                XCTAssertEqual(firstBody?["requestId"] as? String, requestID.rawValue)
+                XCTAssertNotEqual(firstBody?["policyDigest"] as? String, newDigest)
+                XCTAssertNotEqual(retry["requestId"] as? String, requestID.rawValue)
+                return .json(try! self.managedModelBody(revision: 2, effort: "high", digest: newDigest))
+            }
+        }
+        let fetch = { try await api.managedModels(agentPrincipal: principal) }
+        let initial = try await picker.read(isCurrent: { true }, fetch: fetch)
+        let result = await picker.save(from: initial, choice: .offer(model: "sonnet", effort: .high),
+                                       requestID: requestID, refreshAfterSecondConflict: false, isCurrent: { true }, fetch: fetch) { fence, id in
+            let write = try ManagedModelWrite(requestId: id, snapshot: fence, model: "sonnet", effort: .high)
+            return try await api.writeManagedModel(agentPrincipal: principal, value: write)
+        }
+        guard case let .saved(saved) = result else { return XCTFail("The fresh policy should save the pick") }
+        XCTAssertEqual(saved.choice.effort, .high)
+        XCTAssertEqual(saved.revision, 2)
+        XCTAssertEqual(calls, ["GET", "PUT", "GET", "PUT"])
+    }
+
+    func testDestinationRevisionConflictRetriesOnceAndKeepsTheFinalReadback() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let requestID = ModelWriteRequests<NativeID>.freshID()
+        let api = client(TestAuthorization(first: "p2-destination-token"))
+        let picker = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        var calls: [String] = []
+        var revisions: [Int] = []
+        NativeDomainProtocol.state.handler = { request in
+            calls.append(request.httpMethod ?? "")
+            switch request.httpMethod {
+            case "GET": return .json(try! self.managedModelDestinationsBody(revision: 3 + revisions.count))
+            default:
+                let body = try! JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as! [String: Any]
+                revisions.append(try! XCTUnwrap(body["expectedRevision"] as? Int))
+                return .init(status: 409, chunks: [Data(#"{"error":"matrix_409","details":{"reason":"revision_conflict"},"revision":\#(3 + revisions.count)}"#.utf8)])
+            }
+        }
+        let fetch = { try await api.managedModelDestinations(agentPrincipal: principal) }
+        let initial = try await picker.read(isCurrent: { true }, fetch: fetch)
+        let model = "nhat-thuc"
+        let destination = try ManagedModelDestinationID("cloud")
+        let result = await picker.save(from: initial, choice: .destination(destination, model: model),
+                                       requestID: requestID, refreshAfterSecondConflict: true, isCurrent: { true }, fetch: fetch) { fence, id in
+            let write = try ManagedModelDestinationWrite(requestId: id, snapshot: fence,
+                                                         destination: destination, model: model)
+            return try await api.writeManagedModelDestination(agentPrincipal: principal, value: write)
+        }
+        guard case let .refused(latest) = result else { return XCTFail("Two conflicts must end the attempt") }
+        XCTAssertEqual(latest?.revision, 5)
+        XCTAssertEqual(revisions, [3, 4])
+        XCTAssertEqual(calls, ["GET", "PUT", "GET", "PUT", "GET"])
     }
 
     func testManagedModelDestinationReadAndWriteUseTheFrozenOwnerRoute() async throws {
@@ -3016,7 +3120,10 @@ extension NativeDomainClientTests {
             state.observe(.init(unanswered: stopEventID, working: true))
             let first = try XCTUnwrap(state.beginStop(newRequestID: stopRequestID))
             var unavailable = false
-            state.resolve(await route.stop(first, using: value, onRouteUnavailable: { unavailable = true }),
+            state.resolve(await route.stop(first, using: value, onRouteUnavailable: { target in
+                XCTAssertEqual(target, first.target)
+                unavailable = true
+            }),
                           for: first)
             XCTAssertEqual(state.phase, .failed)
             XCTAssertTrue(state.offersStop)
@@ -3356,5 +3463,91 @@ extension NativeDomainClientTests {
         } catch {
             XCTAssertEqual(AgentAliasRefusal.from(error), .closed)
         }
+    }
+}
+
+extension NativeDomainClientTests {
+    func testScheduledStopUsesAuthenticatedShellAndReplaysTheExactBodyOn401() async throws {
+        let agent = try stopAgent()
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: agent, roomID: "!fixture:example.test",
+                                                        routeAvailable: true))
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "fixture-job", execution: "run-a"))
+        let input = try CloudScheduleStop.Request(agent: agent.principal, execution: execution)
+        let expected = try input.body()
+        let pending = Data("""
+        {"ok":true,"requestId":"\(input.requestId.rawValue)","state":"pending","cancelled":false,"interrupted":false}
+        """.utf8)
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://api.atumplatform.com/api/host/stop")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Origin"), "https://api.atumplatform.com")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Atum-Host-Bridge-Contract"), "atum.s2.host-bridge/1.0.0")
+            XCTAssertFalse(request.httpShouldHandleCookies)
+            XCTAssertEqual(self.body(of: request), expected)
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer stop-old-token" {
+                return .init(status: 401)
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer stop-new-token")
+            return .json(pending)
+        }
+        let authorization = TestAuthorization(first: "stop-old-token", refreshed: "stop-new-token")
+        let intent = AssistantTurnStopIntent(target: .schedule(execution), requestID: "composer-intent")
+        let result = await route.stop(intent, using: client(authorization))
+        XCTAssertEqual(result, .stopRequested)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
+
+        NativeDomainProtocol.state.handler = { _ in .init(status: 403) }
+        var refusedTarget: AssistantTurnStopIntent.Target?
+        let refused = await route.stop(intent, using: client(TestAuthorization(first: "stop-new-token")),
+                                       onRouteUnavailable: { refusedTarget = $0 })
+        XCTAssertEqual(refused, .failed)
+        XCTAssertEqual(refusedTarget, intent.target)
+    }
+}
+
+extension NativeDomainClientTests {
+    func testStopRefusalsOnlyDisableTheAttemptedSourceAcrossBothRoutes() async throws {
+        let agent = try stopAgent()
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: agent, roomID: stopRoomID, routeAvailable: true))
+        let api = client(TestAuthorization(first: "stop-fixture-token"))
+        let manual = AssistantTurnStopIntent(eventID: stopEventID, requestID: stopRequestID)
+        let laterManual = AssistantTurnStopIntent(eventID: "$later", requestID: stopRequestID)
+        let firstExecution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "first"))
+        let nextExecution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "next"))
+        let scheduled = AssistantTurnStopIntent(target: .schedule(firstExecution), requestID: "first")
+        let laterSchedule = AssistantTurnStopIntent(target: .schedule(nextExecution), requestID: "next")
+        let nextID = try CloudScheduleStop.Request(agent: agent.principal, execution: nextExecution).requestId.rawValue
+
+        NativeDomainProtocol.state.handler = { request in
+            switch request.url?.path {
+            case "/api/matrix/v1/cloud/stop":
+                if String(decoding: self.body(of: request) ?? Data(), as: UTF8.self).contains("$later") {
+                    return .json(self.stopReply("stopped", eventID: "$later"))
+                }
+                return .init(status: 403, chunks: [Data(#"{"error":"matrix_403","details":{"reason":"not_admitted"}}"#.utf8)])
+            case "/api/host/stop":
+                if String(decoding: self.body(of: request) ?? Data(), as: UTF8.self).contains(nextID) {
+                    return .json(Data("""
+                        {"ok":true,"requestId":"\(nextID)","state":"finished","cancelled":false,"interrupted":false}
+                        """.utf8))
+                }
+                return .init(status: 403)
+            default:
+                XCTFail("unexpected Stop route")
+                return .init(status: 404)
+            }
+        }
+        var unavailable = Set<AssistantTurnStopIntent.Target>()
+        for (intent, expected) in [(manual, AssistantTurnStopResult.failed), (scheduled, .failed),
+                                   (manual, .failed), (scheduled, .failed),
+                                   (laterManual, .stopped), (laterSchedule, .completed)] {
+            let result = await route.stop(intent, using: api, unavailableTargets: unavailable,
+                                          onRouteUnavailable: { unavailable.insert($0) })
+            XCTAssertEqual(result, expected)
+        }
+        XCTAssertEqual(unavailable, [manual.target, scheduled.target])
+        XCTAssertEqual(NativeDomainProtocol.state.requests.compactMap { $0.url?.path },
+                       ["/api/matrix/v1/cloud/stop", "/api/host/stop", "/api/matrix/v1/cloud/stop", "/api/host/stop"])
     }
 }
