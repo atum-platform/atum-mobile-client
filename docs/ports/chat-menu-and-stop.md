@@ -78,7 +78,10 @@ the text showed twice), its reaction capsule covered the bubble above, and the
   - In a host that supplies `AssistantTurnStopActions` (`ChatInfoActions.assistantTurnStop`),
     the empty send circle becomes Stop: the same 36 pt ink circle with the
     `StopFilled` glyph, a 44 pt target, and no change to the row's height.
-  - It then shows "Stop requested. Waiting for confirmation." or "Task stopped".
+  - Its wording now follows desktop as rendered (Wave 4 E5): "Stopping…" on
+    the control, a refused band, and "Stopped." only for an exact scheduled
+    Stop. See `w4-e5-stop-wording.md`; the earlier "Stop requested…" and
+    "Task stopped" lines are gone.
   - A light haptic plays on Stop and a warning haptic on failure.
   - With a draft, send shows instead, so the person can add to the request.
   - Only assistant chats get the action.

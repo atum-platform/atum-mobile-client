@@ -1,3 +1,4 @@
+import Accessibility
 import AtumChat
 import AtumDesign
 import AtumNativeAPI
@@ -16,7 +17,8 @@ import UniformTypeIdentifiers
 // my assistant works on a turn (review C1) the composer knows it
 // (`AssistantTurnStop`): VoiceOver reads the pill as working, and in a host
 // that can reach the platform's stop route (`AssistantTurnStopActions`) the
-// empty circle becomes Stop, then shows "Stop requested…" or "Task stopped".
+// empty circle becomes Stop, then the disabled "Stopping…" control until the
+// agent confirms (desktop #46, #87; `docs/ports/w4-e5-stop-wording.md`).
 // STYLE §11's working placeholder ("Add to your request…") waits for its
 // exported key. There is no focus control.
 //
@@ -94,13 +96,7 @@ struct ChatComposer: View {
                     .transition(.opacity)
             } else if let line = turnLine {
                 // An honest stop state: only what the platform answered.
-                Text(line)
-                    .font(.footnote)
-                    .foregroundStyle(design.color("soft", scheme: scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 16)
-                    .accessibilityIdentifier(Self.turnLineID)
-                    .transition(.opacity)
+                turnNotice(line)
             } else {
                 ComposerTypingLine(store: store, design: design)
             }
@@ -255,27 +251,81 @@ struct ChatComposer: View {
         .accessibilityIdentifier(AccessibilityID.composerSend)
     }
 
-    /// Review C1: the send circle's Stop state, the same ink circle with the
-    /// stop glyph (desktop FlowChat-2). Disabled while a request is out.
-    private var stopButton: some View {
-        let stopping = turn.stop.phase == .stopping
-        return Button(action: stopTurn) {
-            Image(design.symbol("StopFilled"))
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(design.color("onInk", scheme: scheme))
-                .frame(width: Self.circle, height: Self.circle)
-                .background(Circle().fill(design.color("ink", scheme: scheme)))
-                // The visual stays a 36 pt circle and the row keeps its
-                // height; the target is 44 pt each way (review C7): 44 wide
-                // in the layout, and 4 pt above and below by its shape.
-                .frame(width: Self.target, height: Self.circle)
-                .contentShape(Rectangle().inset(by: -(Self.target - Self.circle) / 2))
+    /// Review C1 and Wave 4 E5: the send circle's Stop state as the desktop
+    /// composer draws it. Idle: the ink circle with the stop glyph, "Stop".
+    /// While a request is out or `stop_requested` is unconfirmed: a disabled
+    /// ink capsule reading "Stopping…" (desktop `ak-btn--primary`). Once
+    /// answered for this turn: the glyph again, disabled. Desktop dims a
+    /// disabled Stop to 30 %.
+    @ViewBuilder private var stopButton: some View {
+        switch turn.stop.control {
+        case .hidden:
+            EmptyView()
+        case let .stop(enabled):
+            Button(action: stopTurn) {
+                Image(design.symbol("StopFilled"))
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(design.color("onInk", scheme: scheme))
+                    .frame(width: Self.circle, height: Self.circle)
+                    .background(Circle().fill(design.color("ink", scheme: scheme)))
+                    // The visual stays a 36 pt circle and the row keeps its
+                    // height; the target is 44 pt each way (review C7): 44 wide
+                    // in the layout, and 4 pt above and below by its shape.
+                    .frame(width: Self.target, height: Self.circle)
+                    .contentShape(Rectangle().inset(by: -(Self.target - Self.circle) / 2))
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : Self.disabledStopOpacity)
+            .accessibilityLabel(ChatCopy.text(design, ChatCopy.Key.stopTurn))
+            .accessibilityIdentifier(Self.stopID)
+            .transition(.opacity)
+        case .stopping:
+            let stopping = ChatCopy.text(design, ChatCopy.Key.turnStopping)
+            Button(action: stopTurn) {
+                Text(stopping)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .foregroundStyle(design.color("onInk", scheme: scheme))
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: Self.circle)
+                    .background(Capsule().fill(design.color("ink", scheme: scheme)))
+                    .fixedSize()
+                    .contentShape(Rectangle().inset(by: -(Self.target - Self.circle) / 2))
+            }
+            .buttonStyle(.plain)
+            .disabled(true)
+            .opacity(Self.disabledStopOpacity)
+            // Desktop `aria-label` and its `role="status"` text: VoiceOver
+            // reads the control as "Stopping…", dimmed, and hears it once
+            // when it starts (`announceStopping`).
+            .accessibilityLabel(stopping)
+            .accessibilityIdentifier(Self.stopID)
+            .transition(.opacity)
         }
-        .buttonStyle(.plain)
-        .disabled(!turn.stop.offersStop)
-        .opacity(stopping ? 0.4 : 1)
-        .accessibilityLabel(ChatCopy.text(design, ChatCopy.Key.stopTurn))
-        .accessibilityIdentifier(Self.stopID)
+    }
+
+    /// Desktop `NoticeBand` in the composer dock: one quiet glass band, the
+    /// info glyph, ink text (`[data-matrix-composer-dock] > .notice-band`).
+    private func turnNotice(_ line: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(design.symbol("Info"))
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(design.color("soft", scheme: scheme))
+                .accessibilityHidden(true)
+            Text(line)
+                .font(.subheadline)
+                .foregroundStyle(design.color("ink", scheme: scheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 12)
+        .padding(.leading, 14)
+        .padding(.trailing, 12)
+        .modifier(LiveGlass(design: design, radius: Double(design.kit.radius(.lg))))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(line)
+        .accessibilityIdentifier(Self.turnLineID)
         .transition(.opacity)
     }
 
@@ -286,33 +336,48 @@ struct ChatComposer: View {
         guard let turnStopActions,
               let intent = turn.stop.beginStop(newRequestID: UUID().uuidString.lowercased()) else { return }
         haptics.stopped()
+        announce(ChatCopy.text(design, ChatCopy.Key.turnStopping))
         Task { @MainActor in
             let result = await turnStopActions.stop(intent)
             turn.stop.resolve(result, for: intent)
-            // Not stopped: Stop comes back and the warning says so; the
+            // Not stopped: Stop comes back and the refused band says so; the
             // turn stays shown as in progress.
-            if result == .failed { haptics.failed() }
-            if result == .stopRequested, case .schedule = intent.target {
+            if result == .failed {
+                haptics.failed()
+                announce(ChatCopy.text(design, ChatCopy.Key.turnStopRefused))
+            }
+            if result == .stopped, case .schedule = intent.target {
+                announce(ChatCopy.text(design, ChatCopy.Key.scheduledStopped))
+            }
+            guard result == .stopRequested else { return }
+            if case .schedule = intent.target {
+                // Desktop re-offers an exact scheduled Stop after the delay.
                 do { try await Task.sleep(for: AssistantTurnStop.scheduledRetryDelay) } catch { return }
                 turn.stop.retryPendingSchedule(for: intent)
+            } else {
+                // Desktop settles a turn's unconfirmed Stop quietly.
+                do { try await Task.sleep(for: AssistantTurnStop.settleDelay) } catch { return }
+                turn.stop.settlePendingTurn(for: intent)
             }
         }
     }
 
+    /// Desktop's `role="status"`: the words are read once as they appear.
+    private func announce(_ text: String) {
+        AccessibilityNotification.Announcement(text).post()
+    }
+
     private var showsStopButton: Bool {
         guard turnStopActions != nil, store.editTarget == nil else { return false }
-        switch turn.stop.phase {
-        case .working, .failed, .stopping: return true
-        case .idle, .stopped, .finishing: return false
-        }
+        return turn.stop.control != .hidden
     }
 
     private var turnLine: String? {
         guard turnStopActions != nil else { return nil }
-        switch turn.stop.phase {
-        case .stopping: return ChatCopy.text(design, ChatCopy.Key.turnStopRequested)
-        case .stopped: return ChatCopy.text(design, ChatCopy.Key.turnStopped)
-        default: return nil
+        switch turn.stop.notice {
+        case .refused: return ChatCopy.text(design, ChatCopy.Key.turnStopRefused)
+        case .scheduledStopped: return ChatCopy.text(design, ChatCopy.Key.scheduledStopped)
+        case nil: return nil
         }
     }
 
@@ -466,6 +531,8 @@ struct ChatComposer: View {
     /// The Kit's phone control height: the least a control may take to tap.
     private static let target: CGFloat = 44
     static let stopID = "composer.stop"
+    /// Desktop `disabled:opacity-30` on the composer Stop.
+    static let disabledStopOpacity = 0.3
     static let turnLineID = "composer.turn"
     /// The pill's accessibility identifier (WS3's own, beside the frozen
     /// `composer.field` and `composer.send`).

@@ -935,9 +935,21 @@ final class TurnStopUITests: WS3UITestCase {
 
     @MainActor
     private func ask(_ app: XCUIApplication) {
-        field(app).tap()
-        field(app).typeText("Tóm tắt giúp mình")
-        element(app, AccessibilityID.composerSend).tap()
+        let composer = field(app)
+        XCTAssertTrue(composer.waitForExistence(timeout: 8), "no composer field")
+        // A loaded simulator can drop the first tap or be slow to hand the
+        // field the keyboard (the #64 flake): tap again until it has focus,
+        // and type only then.
+        var focused = false
+        for _ in 0..<4 where !focused {
+            composer.tap()
+            focused = eventually(6) { (composer.value(forKey: "hasKeyboardFocus") as? Bool) == true }
+        }
+        XCTAssertTrue(focused, "the composer field did not take focus")
+        composer.typeText("Tóm tắt giúp mình")
+        let send = element(app, AccessibilityID.composerSend)
+        XCTAssertTrue(send.waitForExistence(timeout: 5), "no send circle")
+        send.tap()
     }
 
     @MainActor
@@ -946,6 +958,12 @@ final class TurnStopUITests: WS3UITestCase {
         return text.split(separator: "\n").map { String($0.split(separator: " ", maxSplits: 1).last ?? "") }
     }
 
+    /// Desktop `cloud.stopping` (atum-desktop #46): the control's own label
+    /// while a stop is unconfirmed.
+    private let stopping = "Đang dừng…"
+    /// Desktop `cloud.stopRefused`.
+    private let refused = "Chưa dừng được câu trả lời này. Có thể trợ lý đã trả lời xong."
+
     @MainActor
     func testStopWhileWorkingThenStopped() {
         let app = launch(answer: "stopped")
@@ -953,6 +971,7 @@ final class TurnStopUITests: WS3UITestCase {
         let stop = element(app, "composer.stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 8), "Stop while Atum works")
         XCTAssertEqual(stop.label, "Dừng")
+        XCTAssertTrue(stop.isEnabled)
         assertSingleWorkingRow(app)
         // This fixture acknowledges Stop but does not fabricate a synced
         // turn-end event. Footer disappearance is proved by TranscriptUITests
@@ -963,26 +982,38 @@ final class TurnStopUITests: WS3UITestCase {
         keepEvidence("stop-1-working", of: app)
         stop.tap()
         stop.tap()  // a second tap while the request is out sends nothing
-        let line = element(app, "composer.turn")
-        XCTAssertTrue(line.waitForExistence(timeout: 3))
-        XCTAssertTrue(eventually(5) { line.label == "Đã dừng tác vụ" }, line.label)
-        XCTAssertFalse(stop.exists, "no Stop once stopped")
+        XCTAssertTrue(eventually(2) { stop.label == self.stopping }, "Stopping… from the tap: \(stop.label)")
+        XCTAssertFalse(stop.isEnabled)
+        keepEvidence("stop-2-stopping", of: app)
+        // Confirmed: desktop leaves the Stop glyph, disabled, until the turn
+        // ends, with no band under the composer.
+        XCTAssertTrue(eventually(5) { stop.label == "Dừng" }, stop.label)
+        XCTAssertFalse(stop.isEnabled, "no second Stop once stopped")
+        XCTAssertFalse(element(app, "composer.turn").exists, "a turn's stop has no band")
         XCTAssertEqual(stopRequests().count, 1, "\(stopRequests())")
-        keepEvidence("stop-2-stopped", of: app)
+        keepEvidence("stop-3-stopped", of: app)
     }
 
     @MainActor
-    func testStopRequestedWaitsForConfirmation() {
+    func testStopRequestedSaysStoppingThenSettles() {
         let app = launch(answer: "stop_requested")
         ask(app)
         let stop = element(app, "composer.stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 8))
         stop.tap()
-        let line = element(app, "composer.turn")
-        XCTAssertTrue(line.waitForExistence(timeout: 3))
-        XCTAssertEqual(line.label, "Đã yêu cầu dừng. Đang chờ xác nhận.")
-        XCTAssertFalse(stop.isEnabled, "never shown as stopped on stop_requested")
-        keepEvidence("stop-3-requested", of: app)
+        XCTAssertTrue(eventually(3) { stop.label == self.stopping }, stop.label)
+        // The request is answered `stop_requested`: still Stopping…, never stopped.
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        XCTAssertEqual(stop.label, stopping, "never shown as stopped on stop_requested")
+        XCTAssertFalse(stop.isEnabled)
+        XCTAssertFalse(element(app, "composer.turn").exists)
+        keepEvidence("stop-4-requested", of: app)
+        // Desktop `MATRIX_STOP_SETTLE_MS`: after 15 s it settles quietly.
+        XCTAssertTrue(eventually(20) { stop.label == "Dừng" }, "settled: \(stop.label)")
+        XCTAssertFalse(stop.isEnabled, "settled Stop stays disabled")
+        XCTAssertFalse(element(app, "composer.turn").exists, "settles without a word")
+        XCTAssertEqual(stopRequests().count, 1)
+        keepEvidence("stop-5-settled", of: app)
     }
 
     @MainActor
@@ -992,14 +1023,82 @@ final class TurnStopUITests: WS3UITestCase {
         let stop = element(app, "composer.stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 8))
         stop.tap()
-        XCTAssertTrue(eventually(5) { stop.exists && stop.isEnabled && self.stopRequests().count == 1 },
+        XCTAssertTrue(eventually(5) { stop.exists && stop.isEnabled && stop.label == "Dừng"
+                          && self.stopRequests().count == 1 },
                       "Stop comes back after the failure")
-        XCTAssertFalse(element(app, "composer.turn").exists, "nothing claims it stopped")
+        let band = element(app, "composer.turn")
+        XCTAssertTrue(band.waitForExistence(timeout: 3), "the refused band")
+        XCTAssertEqual(band.label, refused)
+        keepEvidence("stop-6-refused", of: app)
         stop.tap()
-        XCTAssertTrue(eventually(5) { self.element(app, "composer.turn").label == "Đã dừng tác vụ" })
+        XCTAssertTrue(eventually(5) { !self.element(app, "composer.turn").exists
+                          && stop.label == "Dừng" && !stop.isEnabled },
+                      "the retry is confirmed; the band goes")
         let requests = stopRequests()
         XCTAssertEqual(requests.count, 2)
         XCTAssertEqual(Set(requests).count, 1, "the same event and request ID: \(requests)")
+    }
+
+    /// The runner beside the test run (`verify.sh`) applies `appearance
+    /// dark|light` to the simulator; true once applied.
+    @discardableResult
+    private func requestAppearance(_ value: String) -> Bool {
+        let file = TranscriptUITestCase.runnerRequest
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data("appearance \(value)".utf8).write(to: file)
+        let deadline = Date().addingTimeInterval(20)
+        while FileManager.default.fileExists(atPath: file.path), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        let applied = !FileManager.default.fileExists(atPath: file.path)
+        if !applied { try? FileManager.default.removeItem(at: file) }
+        return applied
+    }
+
+    /// Stopping… and the refused band in dark, kept as evidence.
+    @MainActor
+    func testStoppingAndTheRefusedBandInDark() {
+        XCTAssertTrue(requestAppearance("dark"), "no appearance runner beside the run")
+        addTeardownBlock { [self] in requestAppearance("light") }
+        let app = launch(answer: "failed-then-stopped")
+        ask(app)
+        let stop = element(app, "composer.stop")
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        keepEvidence("stop-dark-1-working", of: app)
+        stop.tap()
+        XCTAssertTrue(eventually(3) { stop.label == self.stopping }, stop.label)
+        keepEvidence("stop-dark-2-stopping", of: app)
+        let band = element(app, "composer.turn")
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertEqual(band.label, refused)
+        keepEvidence("stop-dark-3-refused", of: app)
+    }
+
+    /// At the largest accessibility text size the Stopping… control and the
+    /// refused band stay whole and on screen, and VoiceOver reads them.
+    @MainActor
+    func testStoppingFitsAtTheLargestTextSize() {
+        let app = XCUIApplication()
+        app.launchArguments = AtumLaunchArguments.arguments(scenario: .chatTurnStop)
+            + ["-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN",
+               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+               "-AtumUITestProbeDir", probe.path, AtumLaunchArguments.scriptedTurnStopFlag, "failed-then-stopped"]
+        app.launch()
+        XCTAssertTrue(element(app, AccessibilityID.transcript).waitForExistence(timeout: 15), "no transcript")
+        ask(app)
+        let stop = element(app, "composer.stop")
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        stop.tap()
+        XCTAssertTrue(eventually(3) { stop.label == self.stopping }, stop.label)
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(window.contains(stop.frame), "Stopping… on screen: \(stop.frame)")
+        XCTAssertGreaterThanOrEqual(stop.frame.height, 36)
+        keepEvidence("stop-ax-1-stopping", of: app)
+        let band = element(app, "composer.turn")
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertEqual(band.label, refused, "VoiceOver reads the band's words")
+        XCTAssertTrue(window.contains(band.frame), "the band on screen: \(band.frame)")
+        keepEvidence("stop-ax-2-refused", of: app)
     }
 
     @MainActor

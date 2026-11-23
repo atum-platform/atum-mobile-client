@@ -340,3 +340,102 @@ extension AssistantTurnStopTests {
         XCTAssertNil(stop.beginStop(newRequestID: "unresolved"))
     }
 }
+
+/// Wave 4 E5: what the composer draws, state by state, as the desktop
+/// composer renders it (atum-desktop #46 `e4ff060c`, #87).
+extension AssistantTurnStopTests {
+    func testTheTurnStopReadsStoppingThenSettlesQuietly() throws {
+        var stop = AssistantTurnStop()
+        XCTAssertEqual(stop.control, .hidden)
+        XCTAssertNil(stop.notice)
+        stop.observe(.init(unanswered: "$q1", working: true))
+        XCTAssertEqual(stop.control, .stop(enabled: true))
+        let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
+        XCTAssertEqual(stop.control, .stopping, "Stopping… from the tap")
+        stop.resolve(.stopRequested, for: intent)
+        XCTAssertEqual(stop.control, .stopping, "stop_requested is never stopped")
+        XCTAssertNil(stop.notice)
+        stop.settlePendingTurn(for: AssistantTurnStopIntent(eventID: "$q1", requestID: "other"))
+        XCTAssertEqual(stop.phase, .stopping, "another request's timer changes nothing")
+        stop.settlePendingTurn(for: intent)
+        XCTAssertEqual(stop.phase, .settled)
+        XCTAssertEqual(stop.control, .stop(enabled: false), "the label goes; Stop stays disabled")
+        XCTAssertNil(stop.notice, "settles without a word")
+        XCTAssertNil(stop.beginStop(newRequestID: "r2"))
+        stop.observe(.idle)
+        XCTAssertEqual(stop.control, .hidden)
+    }
+
+    func testAConfirmedTurnStopOrACompletedTurnLeavesADisabledStopAndNoLine() throws {
+        for result in [AssistantTurnStopResult.stopped, .completed] {
+            var stop = inProgress()
+            let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
+            stop.resolve(result, for: intent)
+            XCTAssertEqual(stop.control, .stop(enabled: false), "\(result)")
+            XCTAssertNil(stop.notice, "desktop shows no band for a turn: \(result)")
+            stop.observe(.idle)
+            XCTAssertEqual(stop.control, .hidden)
+            XCTAssertNil(stop.notice)
+        }
+    }
+
+    func testARefusedStopSaysSoAndOffersStopAgain() throws {
+        var stop = inProgress()
+        let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
+        stop.resolve(.failed, for: intent)
+        XCTAssertEqual(stop.control, .stop(enabled: true))
+        XCTAssertEqual(stop.notice, .refused)
+        _ = stop.beginStop(newRequestID: "r2")
+        XCTAssertEqual(stop.control, .stopping)
+        XCTAssertNil(stop.notice, "the band goes while the retry is out")
+    }
+
+    func testAConfirmedScheduledStopSaysStoppedUntilAnotherTurnIsNamed() throws {
+        let run = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run-a"))
+        var stop = AssistantTurnStop()
+        stop.observe(.init(unanswered: nil, working: true, scheduled: run))
+        let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
+        stop.settlePendingTurn(for: intent)
+        XCTAssertEqual(stop.phase, .stopping, "a scheduled Stop never settles; it is re-offered")
+        stop.resolve(.stopped, for: intent)
+        XCTAssertEqual(stop.control, .stop(enabled: false))
+        XCTAssertEqual(stop.notice, .scheduledStopped)
+        // The run's marker clears: the band stays, Stop goes.
+        stop.observe(.idle)
+        XCTAssertEqual(stop.control, .hidden)
+        XCTAssertEqual(stop.notice, .scheduledStopped)
+        XCTAssertFalse(stop.isWorking)
+        stop.observe(.init(unanswered: "$q1", working: false))
+        XCTAssertEqual(stop.notice, .scheduledStopped, "nothing named yet")
+        // A new turn is named: the band goes.
+        stop.observe(.init(unanswered: "$q1", working: true))
+        XCTAssertNil(stop.notice)
+        XCTAssertEqual(stop.control, .stop(enabled: true))
+    }
+
+    func testAScheduledStopRequestedIsReofferedAndAnUnresolvedRunIsDisabled() throws {
+        let run = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run-a"))
+        var stop = AssistantTurnStop()
+        stop.observe(.init(unanswered: nil, working: true, scheduled: run))
+        let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
+        stop.resolve(.stopRequested, for: intent)
+        XCTAssertEqual(stop.control, .stopping)
+        stop.retryPendingSchedule(for: intent)
+        XCTAssertEqual(stop.control, .stop(enabled: true))
+        XCTAssertNil(stop.notice)
+
+        var unresolved = AssistantTurnStop()
+        unresolved.observe(.init(unanswered: "$q1", working: true, hasScheduledWork: true))
+        XCTAssertEqual(unresolved.control, .stop(enabled: false), "no exact target: a disabled Stop")
+    }
+
+    func testAScheduledStoppedBandClearsWhenAnUnresolvedRunAppears() throws {
+        let run = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run-a"))
+        var stop = AssistantTurnStop()
+        stop.observe(.init(unanswered: nil, working: true, scheduled: run))
+        let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
+        stop.resolve(.stopped, for: intent)
+        stop.observe(.init(unanswered: nil, working: true, hasScheduledWork: true))
+        XCTAssertNil(stop.notice)
+    }
+}

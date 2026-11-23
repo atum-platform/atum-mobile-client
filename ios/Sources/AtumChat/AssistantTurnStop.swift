@@ -135,8 +135,13 @@ public struct AssistantTurnStop: Equatable, Sendable {
         /// A turn is in progress and may be stopped.
         case working
         /// A stop was sent and not answered, or answered `stop_requested`:
-        /// "Stop requested. Waiting for confirmation." until the turn ends.
+        /// the control reads "Stopping…" (desktop `cloud.stopping`, #46)
+        /// until the turn ends or the settle delay passes.
         case stopping
+        /// A turn's `stop_requested` outlived the settle delay without the
+        /// agent confirming: desktop's `settled`. Stop stays, disabled and
+        /// quiet, until the turn ends. Never shown as stopped.
+        case settled
         /// The platform answered `stopped`.
         case stopped
         /// The platform answered `completed`: nothing to stop; the answer is
@@ -156,8 +161,15 @@ public struct AssistantTurnStop: Equatable, Sendable {
     /// The key of this turn's stop request, kept for an idempotent retry.
     public private(set) var requestID: String?
     private var scheduledStopPending = false
+    /// A confirmed exact scheduled Stop leaves "Stopped." under the composer
+    /// after the run's marker clears, until another turn is named (desktop
+    /// `useMatrixCloudStop().stopped`).
+    public private(set) var scheduledStopConfirmed = false
 
     public static let scheduledRetryDelay: Duration = .seconds(15)
+    /// Desktop `MATRIX_STOP_SETTLE_MS`: how long an unconfirmed Stop keeps
+    /// saying "Stopping…".
+    public static let settleDelay: Duration = .seconds(15)
 
     public init() {}
 
@@ -172,7 +184,9 @@ public struct AssistantTurnStop: Equatable, Sendable {
             ? signal.scheduled.map(AssistantTurnStopIntent.Target.schedule)
             : signal.unanswered.map { AssistantTurnStopIntent.Target.turn(eventID: $0) }
         guard let selected else {
+            let keepsStopped = scheduledStopConfirmed && !signal.hasScheduledWork
             self = AssistantTurnStop()
+            scheduledStopConfirmed = keepsStopped
             // The composer can show an unavailable Stop while the exact
             // cron target is missing. It stays disabled until a tuple arrives.
             if signal.hasScheduledWork && signal.working { phase = .working }
@@ -184,7 +198,10 @@ public struct AssistantTurnStop: Equatable, Sendable {
             return
         }
         guard signal.working else {
+            // Nothing is named yet, so a scheduled "Stopped." stays.
+            let keepsStopped = scheduledStopConfirmed && !signal.hasScheduledWork
             self = AssistantTurnStop()
+            scheduledStopConfirmed = keepsStopped
             return
         }
         self = AssistantTurnStop()
@@ -209,13 +226,24 @@ public struct AssistantTurnStop: Equatable, Sendable {
     public mutating func resolve(_ result: AssistantTurnStopResult, for intent: AssistantTurnStopIntent) {
         guard intent.target == selection, intent.requestID == requestID, phase == .stopping else { return }
         switch result {
-        case .stopped: phase = .stopped
+        case .stopped:
+            phase = .stopped
+            if case .schedule = intent.target { scheduledStopConfirmed = true }
         case .stopRequested:
             if case .schedule = intent.target { scheduledStopPending = true }
             phase = .stopping
         case .completed: phase = .finishing
         case .failed: phase = .failed
         }
+    }
+
+    /// Desktop settles a turn's unconfirmed Stop after `settleDelay`: the
+    /// "Stopping…" label goes, Stop stays disabled, nothing claims stopped.
+    /// A scheduled Stop uses `retryPendingSchedule` instead.
+    public mutating func settlePendingTurn(for intent: AssistantTurnStopIntent) {
+        guard case .turn = intent.target, phase == .stopping, intent.target == selection,
+              intent.requestID == requestID else { return }
+        phase = .settled
     }
 
     /// Desktop re-offers Stop after a pending/unknown schedule receipt. This
@@ -225,5 +253,40 @@ public struct AssistantTurnStop: Equatable, Sendable {
               intent.requestID == requestID else { return }
         scheduledStopPending = false
         phase = .working
+    }
+
+    /// What the composer draws for this state, as the desktop composer
+    /// renders it (`app.tsx` `cloudStop.shown` / `stopping` / `ready`).
+    public enum Control: Equatable, Sendable {
+        /// No Stop: the send circle (or nothing) as usual.
+        case hidden
+        /// The stop glyph. Disabled while a request was already answered
+        /// for this turn, or while a scheduled run has no exact target.
+        case stop(enabled: Bool)
+        /// The labelled, disabled "Stopping…" control.
+        case stopping
+    }
+
+    /// The one line above the composer (desktop `NoticeBand`).
+    public enum Notice: Equatable, Sendable {
+        /// `cloud.stopRefused`: the request was refused or unreachable.
+        case refused
+        /// `matrixAgentStatusCopy.stopped`: a confirmed exact scheduled Stop.
+        case scheduledStopped
+    }
+
+    public var control: Control {
+        switch phase {
+        case .idle: return .hidden
+        case .working, .failed: return .stop(enabled: offersStop)
+        case .stopping: return .stopping
+        case .settled, .stopped, .finishing: return .stop(enabled: false)
+        }
+    }
+
+    public var notice: Notice? {
+        if phase == .failed { return .refused }
+        if scheduledStopConfirmed && (phase == .stopped || phase == .idle) { return .scheduledStopped }
+        return nil
     }
 }
