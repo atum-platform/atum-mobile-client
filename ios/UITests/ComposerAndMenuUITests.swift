@@ -166,12 +166,14 @@ class WS3UITestCase: AtumUITestCase {
         return itself.exists || labelContains(element(app, identifier), text).exists
     }
 
-    /// The bubble in `row` that reads `text`, once it also reads either
-    /// settled word ("Đã gửi", "Đã xem").
+    /// The bubble in `row` that reads `text`, once it has settled: no clock
+    /// ("Đang gửi") and no failure ("Chưa gửi được"). A settled message
+    /// says nothing more until someone reads it (desktop #89: no "Đã gửi").
     @MainActor
     func settled(_ row: XCUIElement, _ text: String) -> XCUIElement {
         row.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@ AND (label CONTAINS %@ OR label CONTAINS %@)", text, "Đã gửi", "Đã xem"))
+            format: "label CONTAINS %@ AND NOT (label CONTAINS %@) AND NOT (label CONTAINS %@)",
+            text, "Đang gửi", "Chưa gửi được"))
             .firstMatch
     }
 
@@ -305,9 +307,11 @@ final class ComposerUITests: WS3UITestCase {
 
     /// U4: the row exists at the first check after the tap with the literal
     /// text and a clock; the field is empty, the keyboard stays, and more
-    /// typing lands in the field. U4b: "Đã gửi", then "Đã xem", on the sent
-    /// row itself (`chat.send` accepts after 1.5 s and Atum's receipt lands
-    /// about 2.65 s later, so neither mark can be missed).
+    /// typing lands in the field. U4b, one read signal (desktop #89): once
+    /// accepted the clock goes and nothing says "Đã gửi"; then "Đã xem" (the
+    /// reader's face) on the sent row itself (`chat.send` accepts after 1.5 s
+    /// and Atum's receipt lands about 2.65 s later, so neither state can be
+    /// missed).
     @MainActor
     func testU4SendIsInstantLiteralAndKeepsTheKeyboard() {
         let app = launchChat(.chatSend)
@@ -339,7 +343,8 @@ final class ComposerUITests: WS3UITestCase {
         let spoken = labels.first { $0.contains(text) } ?? ""
         XCTAssertTrue(spoken.contains(text), "literal text, no formatting: \(labels)")
         let sending = spoken.contains("Đang gửi")
-        let settled = spoken.contains("Đã gửi") || spoken.contains("Đã xem")
+        let settled = !sending && !spoken.contains("Chưa gửi được")
+        XCTAssertFalse(spoken.contains("Đã gửi"), "no Sent receipt (desktop #89): \(spoken)")
         if firstCheck < 1.5 {
             XCTAssertTrue(sending, "a clock before acceptance, \(firstCheck) s after the tap: \(spoken)")
         } else {
@@ -349,18 +354,17 @@ final class ComposerUITests: WS3UITestCase {
         XCTAssertEqual(Self.text(of: field), "", "the draft cleared in the same frame")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "the keyboard stays")
 
-        // U4b, scoped to the sent row: until it settles, my older message
-        // carries the newest settled mark.
-        if !bubble(latest, text, reading: "Đã xem").exists {
-            XCTAssertTrue(bubble(latest, text, reading: "Đã gửi").waitForExistence(timeout: 4),
-                          "Sent once the server accepts it")
-        }
-        keepScreenshot("U4b-1-sent", of: app)
+        // U4b, scoped to the sent row: once the server accepts it the clock
+        // goes and the bubble reads just its text and time, no "Đã gửi".
+        XCTAssertTrue(settled(latest, text).waitForExistence(timeout: 4), "the clock goes once the server accepts it")
+        XCTAssertFalse(bubble(latest, text, reading: "Đã gửi").exists, "no Sent receipt (desktop #89)")
+        keepScreenshot("U4b-1-unread", of: app)
         field.typeText("thêm")
         XCTAssertEqual(Self.text(of: field), "thêm", "focus kept: more typing lands in the field")
         XCTAssertTrue(bubble(latest, text, reading: "Đã xem").waitForExistence(timeout: 15),
                       "Seen once Atum's receipt lands")
-        XCTAssertFalse(bubble(latest, text, reading: "Đã gửi").exists, "Sent gave way to Seen")
+        XCTAssertTrue(latest.descendants(matching: .any)["delivery.seen"].exists, "the reader's face says Seen")
+        XCTAssertFalse(bubble(latest, text, reading: "Đã gửi").exists, "the faces are the only receipt")
         keepScreenshot("U4b-2-seen", of: app)
     }
 

@@ -4,6 +4,8 @@
 public enum ChatCopyKey: String, CaseIterable, Sendable {
     // Delivery (B7, B8)
     case pending = "src.matrix.copy.copies.pending"
+    /// Desktop keeps it for the forward dialog's button; never a receipt
+    /// (#89: a bubble says read only through its readers' faces).
     case sent = "src.matrix.chat-copy.copies.sent"
     case seen = "src.matrix.chat-copy.copies.seen"
     case seenBy = "src.matrix.chat-copy.copies.seenBy"

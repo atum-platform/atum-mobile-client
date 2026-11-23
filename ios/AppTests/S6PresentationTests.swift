@@ -30,6 +30,35 @@ final class S6PresentationTests: XCTestCase {
         XCTAssertFalse(presenter.covers)
     }
 
+    /// Desktop #89 (owner 2026-11-19): one read signal. A settled message
+    /// nobody has read says nothing after its time, in words or on its line;
+    /// the clock, the failure and the readers' faces keep theirs.
+    @MainActor
+    func testABubbleSaysReadOnlyThroughItsReadersFaces() throws {
+        let copy = ChatCopy(design: try LiveDesign())
+        XCTAssertNil(ChatRowText.delivery(.none, kind: .assistant, copy: copy), "no Sent receipt in the label")
+        XCTAssertNil(ChatRowText.delivery(.none, kind: .group, copy: copy))
+        XCTAssertEqual(ChatRowText.delivery(.sending, kind: .person, copy: copy), copy.text(.pending))
+        XCTAssertEqual(ChatRowText.delivery(.failed, kind: .person, copy: copy), copy.text(.notSent))
+        XCTAssertEqual(ChatRowText.delivery(.seen(readerCount: 1), kind: .assistant, copy: copy), copy.text(.seen))
+        XCTAssertEqual(ChatRowText.delivery(.seen(readerCount: 2), kind: .group, copy: copy),
+                       copy.text(.seenBy, .number(2)))
+
+        let item = ChatItem(id: "q", kind: .message, sender: "@me:atum.test", isOwn: true, body: "Hi")
+        let settled = Projection.rows([item], context: RoomContext(kind: .person, ownUserID: "@me:atum.test"),
+                                      options: .s1)
+        XCTAssertEqual(settled.first { $0.id == "q" }?.delivery, DeliveryMark.none,
+                       "my newest settled message carries no mark")
+        // A flat run's line holds no time, so a settled unread message draws
+        // no line at all, not an empty one or a lone separator.
+        XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item), isLatestAnswer: false, flat: true))
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, grouping: RowGrouping(showsTime: true)),
+                                         isLatestAnswer: false, flat: false), "a bubble run keeps its time")
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .seen(readerCount: 1)),
+                                         isLatestAnswer: false, flat: true), "the faces still show")
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .sending), isLatestAnswer: false, flat: true))
+    }
+
     func testRecoveryKeyGroupsOnlyWhileActiveAndRedactsEveryCharacterOtherwise() {
         let key = "SYNTH ETIC RECO VERY KEY1"
         XCTAssertEqual(RecoveryKeyDisplay.value(key, sceneIsActive: true),
