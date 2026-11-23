@@ -126,6 +126,9 @@ final class LiveConversationStore: ConversationStore {
     let ownUserID: String
     let roomIsEncrypted: Bool?
     let mediaComposer: ChatMediaComposerState
+    /// My assistant's turn and its Stop, scoped to this room so it survives
+    /// the composer being rebuilt (search open/close; review r1).
+    let turnStop = AssistantTurnStopController()
     /// The room's agent or bot users; the environment uses it for faces and
     /// the transient-line rule.
     private(set) var agentUserIDs: Set<String>
