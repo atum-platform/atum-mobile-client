@@ -29,7 +29,12 @@ The integrated checks used the shared heavy-build lock, two build jobs, and an i
 | Swift package | 1,717 passed, 0 failed. AtumChat ran 748, AtumDesign and Native API ran 905, AtumDrive ran 48, and AtumTelemetry ran 16. | `package-final.log` |
 | Debug simulator build | Passed, arm64. | `debug-build-retry.log`, `debug-build-retry.xcresult` |
 | Focused AppTests | 164 passed, 0 failed. Includes the cleared working-line roster case. | `app-tests.log`, `app-tests.xcresult` |
-| Focused UI tests | 13 passed, 1 failed. All 5 picker, 2 roster, and 3 transcript tests passed. The last of 4 Stop tests failed while XCTest attempted to focus the composer field. Its isolated rerun is queued. | `ui-tests.log`, `ui-tests.xcresult` |
-| Public boundary | Exit 0 against `origin/main` after the copy repin PR merged. | `guard-checkpoint.log` |
+| Picker UI | 5 passed. | `ui-tests.log`, `ui-tests.xcresult` |
+| Roster UI | 2 passed, including the S1 Matrix roster and Home roster. | `ui-tests.log`, `ui-tests.xcresult` |
+| Transcript UI | 3 passed, including the descriptor-only reading footer in light and dark appearance. | `ui-tests.log`, `ui-tests.xcresult` |
+| Stop UI | 3 passed, 1 failed while XCTest attempted to focus the composer field. The isolated retry timed out during simulator app launch, before it reached the Stop assertions. | `ui-tests.log`, `ui-tests.xcresult`, `ui-stop-retry.log`, `ui-stop-retry.xcresult` |
+| Public boundary | `python3 scripts/public_guard.py --base origin/main --head HEAD` exited 0. | `guard-final.log` |
 
 The initial package run used a core compiled before the binding-expiry edit. The first simulator build caught the immutable thread context. The successful package rerun and simulator build include both fixes, and the initial logs and build bundle were kept.
+
+The lane's Swift and Xcode `Intermediates.noindex` directories were removed after their last runs. The test logs, `Logs`, `TestResults`, and result bundles remain on the external volume.
