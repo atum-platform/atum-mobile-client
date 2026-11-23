@@ -21,12 +21,89 @@ KEY = re.compile(r'"((?:desktop|src|shared)\.[A-Za-z0-9_.\-=]+)"')
 
 # Keys the pin does not carry yet. Each is read only after `design.copy.contains`
 # says it is there, with a fallback or nothing shown. Remove an entry once the key
-# lands in the pin; add one only together with that guard.
+# lands in the pin; add one only if its reader already guards it or gains a guard.
 PENDING = {
     "src.matrix.mobile-device-copy.mobileDeviceCopy.dictationListening",
     "src.matrix.model-picker-copy.COPY.taglineEveryday",
     "src.matrix.model-picker-copy.COPY.taglineHard",
     "src.matrix.model-picker-copy.COPY.taglineFlagship",
+
+    # App panel pages
+    "src.matrix.app-bots.panel.panelCopy.failed",
+    "src.matrix.app-bots.panel.panelCopy.noScreens",
+    "src.matrix.app-bots.panel.panelCopy.openIn",
+
+    # Team Space Activity, Drafts, pinned messages, and saved messages
+    "src.matrix.team-space.activity-copy.copy.all",
+    "src.matrix.team-space.activity-copy.copy.emptyAllBody",
+    "src.matrix.team-space.activity-copy.copy.emptyAllTitle",
+    "src.matrix.team-space.activity-copy.copy.emptyMentionsBody",
+    "src.matrix.team-space.activity-copy.copy.emptyMentionsTitle",
+    "src.matrix.team-space.activity-copy.copy.failed",
+    "src.matrix.team-space.activity-copy.copy.filterLabel",
+    "src.matrix.team-space.activity-copy.copy.loadMore",
+    "src.matrix.team-space.activity-copy.copy.mention",
+    "src.matrix.team-space.activity-copy.copy.mentions",
+    "src.matrix.team-space.activity-copy.copy.open",
+    "src.matrix.team-space.activity-copy.copy.someone",
+    "src.matrix.team-space.activity-copy.copy.threadReply",
+    "src.matrix.team-space.activity-copy.copy.title",
+    "src.matrix.team-space.activity-copy.copy.unread",
+    "src.matrix.team-space.drafts-copy.copy.emptyBody",
+    "src.matrix.team-space.drafts-copy.copy.emptyTitle",
+    "src.matrix.team-space.drafts-copy.copy.failed",
+    "src.matrix.team-space.drafts-copy.copy.open",
+    "src.matrix.team-space.drafts-copy.copy.roomDraft",
+    "src.matrix.team-space.drafts-copy.copy.threadDraft",
+    "src.matrix.team-space.drafts-copy.copy.title",
+    "src.matrix.team-space.pinned-copy.copy.noPinnedMessages",
+    "src.matrix.team-space.pinned-copy.copy.pinnedMessageCount.one",
+    "src.matrix.team-space.pinned-copy.copy.pinnedMessageCount.other",
+    "src.matrix.team-space.pinned-copy.copy.pinnedMessageUnavailable",
+    "src.matrix.team-space.pinned-copy.copy.pinnedMessages",
+    "src.matrix.team-space.saved-messages-copy.copy.emptyBody",
+    "src.matrix.team-space.saved-messages-copy.copy.emptyTitle",
+    "src.matrix.team-space.saved-messages-copy.copy.failed",
+    "src.matrix.team-space.saved-messages-copy.copy.title",
+    "src.matrix.team-space.saved-messages-copy.copy.unavailable",
+    "src.matrix.team-space.saved-messages-copy.copy.unavailableBody",
+    "src.matrix.team-space.saved-messages-copy.copy.you",
+
+    # Company and room threads
+    "src.matrix.team-space.company-threads-copy.copy.actionFailed",
+    "src.matrix.team-space.company-threads-copy.copy.emptyFollowingBody",
+    "src.matrix.team-space.company-threads-copy.copy.emptyFollowingTitle",
+    "src.matrix.team-space.company-threads-copy.copy.emptyRecentBody",
+    "src.matrix.team-space.company-threads-copy.copy.emptyRecentTitle",
+    "src.matrix.team-space.company-threads-copy.copy.emptyUnreadBody",
+    "src.matrix.team-space.company-threads-copy.copy.emptyUnreadTitle",
+    "src.matrix.team-space.company-threads-copy.copy.filterLabel",
+    "src.matrix.team-space.company-threads-copy.copy.follow",
+    "src.matrix.team-space.company-threads-copy.copy.following",
+    "src.matrix.team-space.company-threads-copy.copy.lastReply",
+    "src.matrix.team-space.company-threads-copy.copy.loadMore",
+    "src.matrix.team-space.company-threads-copy.copy.markRead",
+    "src.matrix.team-space.company-threads-copy.copy.noPreview",
+    "src.matrix.team-space.company-threads-copy.copy.open",
+    "src.matrix.team-space.company-threads-copy.copy.recent",
+    "src.matrix.team-space.company-threads-copy.copy.replies.one",
+    "src.matrix.team-space.company-threads-copy.copy.replies.other",
+    "src.matrix.team-space.company-threads-copy.copy.title",
+    "src.matrix.team-space.company-threads-copy.copy.unfollow",
+    "src.matrix.team-space.company-threads-copy.copy.unread",
+    "src.matrix.thread-copy.copy.lastReply",
+    "src.matrix.thread-copy.copy.reply",
+    "src.matrix.thread-copy.copy.thread",
+    "src.matrix.thread-copy.copy.threadOptions",
+
+    # Drive folder search
+    "src.matrix.mobile-copy.mobilePhoneCopy.drive.searchFolderOnly",
+}
+
+# These fallback tables declare their keys separately from their guarded readers.
+PENDING_TABLE_READERS = {
+    ROOT / "ios/App/Company/TeamSpacePendingCopy.swift": ROOT / "ios/App/Company/TeamSpaceCopy.swift",
+    ROOT / "ios/App/Company/TeamSpaceThreadsPendingCopy.swift": ROOT / "ios/App/Company/CompanyThreadsCopy.swift",
 }
 
 
@@ -73,8 +150,13 @@ class CopyKeysInPinTests(unittest.TestCase):
         self.assertEqual(set(files), PENDING, "a PENDING key is no longer named in the app")
         for key, paths in files.items():
             for path in paths:
-                self.assertIn("copy.contains(", path.read_text(),
-                              f"{key} is pending but {path.relative_to(ROOT)} never checks the pin")
+                reader = PENDING_TABLE_READERS.get(path, path)
+                source = reader.read_text()
+                if reader != path:
+                    self.assertIn(f"{path.stem}.tables[", source,
+                                  f"{reader.relative_to(ROOT)} no longer uses {path.name}")
+                self.assertIn("copy.contains(", source,
+                              f"{key} is pending but {reader.relative_to(ROOT)} never checks the pin")
 
     def test_the_phone_does_not_reference_retired_work_copy(self):
         work = "src.matrix.mobile-copy.mobileScreensCopy.work."
