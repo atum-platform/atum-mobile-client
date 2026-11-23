@@ -157,6 +157,30 @@ The filtered `HostAgentDeskTests`, `NativeDomainClientTests`, and
 `AgentDeskPolicyTests` passed all 122 tests. The Debug simulator
 `build-for-testing` also passed under the shared lock.
 
+## UI fix: All settings below the fold
+
+On `9e33c18`, `AgentDeskBellUITests` failed at "All settings stayed on the
+desk", both on hosted UI shard 0 and locally. This was a test bug, not a product
+bug. The r2 Save check added a second sent file (`bao-cao.pdf`), which pushed
+All settings below the bottom edge once More is open. XCTest's built-in
+scroll-to-visible worked out the button's position after the scroll, then tapped
+while the page was still moving. On iOS, a tap on a moving scroll view only stops
+the scroll, so the button never fired. The screen recording shows the page
+reaching All settings about 2 s after the tap. In r6 the button was already on
+screen, so the test never had to scroll.
+
+A person scrolls first and then taps, so the app needed no change. The test now
+does the same: it swipes the desk up, waits until All settings is hittable and
+stays in the same place on two reads in a row, and then taps it. The assertions
+are unchanged.
+
+Verified under the shared lock in run `bell68b` (logs and result bundle are
+`/Volumes/AtumTestFlight/dd-w4-e3/{debug-build,ui-bell}-bell68b.*`). The Debug
+`build-for-testing` succeeded. `AgentDeskBellUITests/testDeskAndBellInEnglishAndVietnameseLightAndDark`
+passed: 1 test, 0 failures, 592 s, with All settings reached in en and vi,
+light and dark. No package source or `ChatPanelHost` changed, so no `swift test`
+or `ChatPanelUITests` rerun was needed.
+
 ## Copy
 
 Every visible string comes from the pinned export through `design.text(key)`.

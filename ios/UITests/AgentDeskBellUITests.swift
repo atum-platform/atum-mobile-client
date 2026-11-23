@@ -91,8 +91,19 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertTrue(waitFor(3) { (brief.value as? String) == "0" }, "the routine did not pause with it")
         XCTAssertTrue(waitFor(3) { self.probeLines("agent-desk.txt").contains { $0.text == "control pause" } })
 
-        // All settings is the agent's card, one Back away.
-        element(app, "desk.allSettings").tap()
+        // All settings is the agent's card, one Back away. With two sent files it
+        // sits below the fold: scroll to it as a person does and tap it once the
+        // page is at rest. XCTest's own scroll-to-visible taps mid-scroll, and a
+        // tap on a moving scroll view only stops it.
+        let allSettings = element(app, "desk.allSettings")
+        element(app, "desk.page").swipeUp()
+        var lastFrame = CGRect.null
+        XCTAssertTrue(waitFor(5) {
+            let frame = allSettings.frame
+            defer { lastFrame = frame }
+            return allSettings.isHittable && frame == lastFrame
+        }, "All settings never came to rest on screen: \(boundedHierarchy(app))")
+        allSettings.tap()
         XCTAssertTrue(waitFor(3) { !self.element(app, "desk.page").exists }, "All settings stayed on the desk")
         XCTAssertTrue(element(app, "info.sheet").exists)
         app.terminate()
