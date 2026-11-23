@@ -126,6 +126,9 @@ final class LiveConversationStore: ConversationStore {
     let ownUserID: String
     let roomIsEncrypted: Bool?
     let mediaComposer: ChatMediaComposerState
+    /// My assistant's turn and its Stop, scoped to this room so it survives
+    /// the composer being rebuilt (search open/close; review r1).
+    let turnStop = AssistantTurnStopController()
     /// The room's agent or bot users; the environment uses it for faces and
     /// the transient-line rule.
     private(set) var agentUserIDs: Set<String>
@@ -630,6 +633,13 @@ final class LiveConversationStore: ConversationStore {
         await install(controller, generation: generation)
     }
 
+    func settleSchedule(_ execution: ChatScheduleExecution) async {
+        guard !isClosed, settledSchedules.insert(execution).inserted else { return }
+        await controller?.settleSchedule(execution)
+    }
+
+    private var settledSchedules = Set<ChatScheduleExecution>()
+
     private func install(_ controller: TimelineController, generation: UInt64) async {
         guard generation == self.generation, !isClosed else {
             controller.close()
@@ -645,7 +655,7 @@ final class LiveConversationStore: ConversationStore {
         // handled as attached; sends held meanwhile go out now.
         run(core.attached(now: clock()))
         sync()
-        await controller.start()
+        await controller.start(settledSchedules: settledSchedules)
         guard generation == self.generation, !isClosed else { return }
         if !core.typingNames.isEmpty { await controller.setTyping(core.typingNames) }
     }

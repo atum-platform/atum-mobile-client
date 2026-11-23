@@ -22,6 +22,35 @@ final class ConversationTests: XCTestCase {
     private let dmRoom = "!dm:example.invalid"
     private let channelRoom = "!general:example.invalid"
 
+    @MainActor
+    func testMembershipProofExpiresDuringAStalledRefreshAndSupersededResultsAreDiscarded() async {
+        let lease = CompanyTurnProofLease(lifetime: .milliseconds(100))
+        let generation = lease.reset()
+        let expiry = expectation(description: "clear the binding while the member read is suspended")
+        var binding: String? = "verified"
+        XCTAssertTrue(lease.arm(from: .now) {
+            binding = nil
+            expiry.fulfill()
+        })
+        let (read, finishRead) = AsyncStream<String>.makeStream()
+        let stalled = Task {
+            for await result in read {
+                if lease.isCurrent(generation) { binding = result }
+            }
+        }
+        XCTAssertTrue(lease.isLive)
+        await fulfillment(of: [expiry], timeout: 2)
+        XCTAssertNil(binding)
+        XCTAssertFalse(lease.isLive)
+
+        let newerGeneration = lease.reset()
+        finishRead.yield("superseded")
+        finishRead.finish()
+        await stalled.value
+        XCTAssertTrue(lease.isCurrent(newerGeneration))
+        XCTAssertNil(binding)
+    }
+
     // MARK: Stub
 
     /// One stub for both authorities: the company reads and the 1.3 / 1.5 calls.

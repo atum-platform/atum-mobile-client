@@ -10,6 +10,53 @@ struct CompanyTurnMembershipKey: Equatable {
     let heroes: Set<String>
 }
 
+/// The joined-member proof has its own clock. Neither a blocked refresh nor
+/// a blocked timeline attach can postpone withdrawal.
+@MainActor
+final class CompanyTurnProofLease {
+    static let refreshInterval: Duration = .seconds(30)
+
+    private let lifetime: Duration
+    private var generation: UInt64 = 0
+    private var deadline: ContinuousClock.Instant?
+    private var expiryTask: Task<Void, Never>?
+
+    init(lifetime: Duration = .seconds(60)) {
+        self.lifetime = lifetime
+    }
+
+    var isLive: Bool { deadline.map { ContinuousClock.now < $0 } ?? false }
+
+    @discardableResult
+    func reset() -> UInt64 {
+        generation &+= 1
+        clearDeadline()
+        return generation
+    }
+
+    func isCurrent(_ generation: UInt64) -> Bool { self.generation == generation }
+
+    func clearDeadline() {
+        expiryTask?.cancel()
+        expiryTask = nil
+        deadline = nil
+    }
+
+    func arm(from readStarted: ContinuousClock.Instant, onExpiry: @escaping @MainActor () -> Void) -> Bool {
+        clearDeadline()
+        let deadline = readStarted.advanced(by: lifetime)
+        guard ContinuousClock.now < deadline else { return false }
+        self.deadline = deadline
+        expiryTask = Task { [weak self] in
+            do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.clearDeadline()
+            onExpiry()
+        }
+        return true
+    }
+}
+
 // TS-6b: the thread rows Team Space and a channel's thread panel show, read
 // through the live Matrix session and fenced to the platform's company
 // directory, plus the follow / read writes and the thread's own chat store.

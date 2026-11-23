@@ -165,13 +165,16 @@ public enum ChatCopyKey: String, CaseIterable, Sendable {
     case appBotGotIt = "src.matrix.mobile-copy.mobileChatCopy.appBot.gotIt"
     case appBotRoomFailed = "src.matrix.mobile-copy.mobileChatCopy.appBot.roomFailed"
 
-    // The composer's working state and Stop (review C1). "Stop" is the
-    // desktop composer's own label; the three lines are the exported phone
-    // chat states (`mobileDeviceCopy.chatStates*`).
+    // The composer's working state and Stop (review C1, Wave 4 E5). Every
+    // word is the desktop composer's own (`app.tsx` MatrixComposer, #46,
+    // #87): "Stop" on the glyph, "Stopping…" while unconfirmed, the refused
+    // band, and "Stopped." for a confirmed exact scheduled Stop. The pill's
+    // working value is the exported phone chat state.
     case stopTurn = "shared.matrix-action-copy.matrixActionCopy.cancelHermes"
     case turnRunning = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesTurnRunningText"
-    case turnStopRequested = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesStopRequestedText"
-    case turnStopped = "src.matrix.mobile-device-copy.mobileDeviceCopy.chatStatesStoppedText"
+    case turnStopping = "src.matrix.mobile-copy.mobileScreensCopy.cloud.stopping"
+    case turnStopRefused = "src.matrix.mobile-copy.mobileScreensCopy.cloud.stopRefused"
+    case scheduledStopped = "shared.matrix-agent-status-copy.matrixAgentStatusCopy.stopped"
 
     // In-chat search (HC-6): desktop `chat-search-copy.ts`.
     case searchChat = "src.matrix.chat-search-copy.copies.search"

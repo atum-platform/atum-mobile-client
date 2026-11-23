@@ -957,8 +957,8 @@ import AtumChat
         }
         let fetch = { try await api.managedModels(agentPrincipal: principal) }
         let initial = try await picker.read(isCurrent: { true }, fetch: fetch)
-        let result = await picker.save(from: initial, requestID: requestID,
-                                       refreshAfterSecondConflict: false, isCurrent: { true }, fetch: fetch) { fence, id in
+        let result = await picker.save(from: initial, choice: .offer(model: "sonnet", effort: .high),
+                                       requestID: requestID, refreshAfterSecondConflict: false, isCurrent: { true }, fetch: fetch) { fence, id in
             let write = try ManagedModelWrite(requestId: id, snapshot: fence, model: "sonnet", effort: .high)
             return try await api.writeManagedModel(agentPrincipal: principal, value: write)
         }
@@ -989,8 +989,8 @@ import AtumChat
         let initial = try await picker.read(isCurrent: { true }, fetch: fetch)
         let model = "nhat-thuc"
         let destination = try ManagedModelDestinationID("cloud")
-        let result = await picker.save(from: initial, requestID: requestID,
-                                       refreshAfterSecondConflict: true, isCurrent: { true }, fetch: fetch) { fence, id in
+        let result = await picker.save(from: initial, choice: .destination(destination, model: model),
+                                       requestID: requestID, refreshAfterSecondConflict: true, isCurrent: { true }, fetch: fetch) { fence, id in
             let write = try ManagedModelDestinationWrite(requestId: id, snapshot: fence,
                                                          destination: destination, model: model)
             return try await api.writeManagedModelDestination(agentPrincipal: principal, value: write)
@@ -3120,7 +3120,10 @@ extension NativeDomainClientTests {
             state.observe(.init(unanswered: stopEventID, working: true))
             let first = try XCTUnwrap(state.beginStop(newRequestID: stopRequestID))
             var unavailable = false
-            state.resolve(await route.stop(first, using: value, onRouteUnavailable: { unavailable = true }),
+            state.resolve(await route.stop(first, using: value, onRouteUnavailable: { target in
+                XCTAssertEqual(target, first.target)
+                unavailable = true
+            }),
                           for: first)
             XCTAssertEqual(state.phase, .failed)
             XCTAssertTrue(state.offersStop)
@@ -3495,10 +3498,87 @@ extension NativeDomainClientTests {
         XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
 
         NativeDomainProtocol.state.handler = { _ in .init(status: 403) }
-        var disabled = false
+        var refusedTarget: AssistantTurnStopIntent.Target?
         let refused = await route.stop(intent, using: client(TestAuthorization(first: "stop-new-token")),
-                                       onRouteUnavailable: { disabled = true })
+                                       onRouteUnavailable: { refusedTarget = $0 })
         XCTAssertEqual(refused, .failed)
-        XCTAssertFalse(disabled, "schedule refusal does not disable manual turn Stop")
+        XCTAssertEqual(refusedTarget, intent.target)
+    }
+}
+
+extension NativeDomainClientTests {
+    func testStopRefusalsOnlyDisableTheAttemptedSourceAcrossBothRoutes() async throws {
+        let agent = try stopAgent()
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: agent, roomID: stopRoomID, routeAvailable: true))
+        let api = client(TestAuthorization(first: "stop-fixture-token"))
+        let manual = AssistantTurnStopIntent(eventID: stopEventID, requestID: stopRequestID)
+        let laterManual = AssistantTurnStopIntent(eventID: "$later", requestID: stopRequestID)
+        let firstExecution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "first"))
+        let nextExecution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "next"))
+        let scheduled = AssistantTurnStopIntent(target: .schedule(firstExecution), requestID: "first")
+        let laterSchedule = AssistantTurnStopIntent(target: .schedule(nextExecution), requestID: "next")
+        let nextID = try CloudScheduleStop.Request(agent: agent.principal, execution: nextExecution).requestId.rawValue
+
+        NativeDomainProtocol.state.handler = { request in
+            switch request.url?.path {
+            case "/api/matrix/v1/cloud/stop":
+                if String(decoding: self.body(of: request) ?? Data(), as: UTF8.self).contains("$later") {
+                    return .json(self.stopReply("stopped", eventID: "$later"))
+                }
+                return .init(status: 403, chunks: [Data(#"{"error":"matrix_403","details":{"reason":"not_admitted"}}"#.utf8)])
+            case "/api/host/stop":
+                if String(decoding: self.body(of: request) ?? Data(), as: UTF8.self).contains(nextID) {
+                    return .json(Data("""
+                        {"ok":true,"requestId":"\(nextID)","state":"finished","cancelled":false,"interrupted":false}
+                        """.utf8))
+                }
+                return .init(status: 403)
+            default:
+                XCTFail("unexpected Stop route")
+                return .init(status: 404)
+            }
+        }
+        var unavailable = Set<AssistantTurnStopIntent.Target>()
+        for (intent, expected) in [(manual, AssistantTurnStopResult.failed), (scheduled, .failed),
+                                   (manual, .failed), (scheduled, .failed),
+                                   (laterManual, .stopped), (laterSchedule, .completed)] {
+            let result = await route.stop(intent, using: api, unavailableTargets: unavailable,
+                                          onRouteUnavailable: { unavailable.insert($0) })
+            XCTAssertEqual(result, expected)
+        }
+        XCTAssertEqual(unavailable, [manual.target, scheduled.target])
+        XCTAssertEqual(NativeDomainProtocol.state.requests.compactMap { $0.url?.path },
+                       ["/api/matrix/v1/cloud/stop", "/api/host/stop", "/api/matrix/v1/cloud/stop", "/api/host/stop"])
+    }
+}
+
+extension NativeDomainClientTests {
+    /// Review r1: a transient 503 from the host Stop route is a refusal to
+    /// show and retry, not a definitive denial. Only 403 and 404 withdraw
+    /// the execution's Stop.
+    func testScheduledStop503StaysRetryableAndOnlyDenialsWithdrawIt() async throws {
+        let agent = try stopAgent()
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: agent, roomID: stopRoomID, routeAvailable: true))
+        let api = client(TestAuthorization(first: "stop-fixture-token"))
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "transient"))
+        for (status, withdrawn) in [(503, false), (403, true), (404, true)] {
+            NativeDomainProtocol.state.reset()
+            NativeDomainProtocol.state.handler = { _ in .init(status: status) }
+            var state = AssistantTurnStop()
+            state.observe(.init(unanswered: nil, working: true, scheduled: execution))
+            let intent = try XCTUnwrap(state.beginStop(newRequestID: "scheduled-\(status)"))
+            var unavailable = Set<AssistantTurnStopIntent.Target>()
+            let result = await route.stop(intent, using: api, unavailableTargets: unavailable,
+                                          onRouteUnavailable: { unavailable.insert($0) })
+            XCTAssertEqual(result, .failed, "\(status)")
+            state.resolve(result, for: intent)
+            XCTAssertEqual(state.notice, .refused, "\(status): the refused band")
+            XCTAssertEqual(state.control, .stop(enabled: true), "\(status)")
+            XCTAssertEqual(unavailable.contains(intent.target), withdrawn, "\(status)")
+            // The retry reaches the route again only when nothing withdrew it.
+            let retry = await route.stop(intent, using: api, unavailableTargets: unavailable)
+            XCTAssertEqual(retry, .failed)
+            XCTAssertEqual(NativeDomainProtocol.state.requests.count, withdrawn ? 1 : 2, "\(status)")
+        }
     }
 }

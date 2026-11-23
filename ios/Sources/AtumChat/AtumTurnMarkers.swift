@@ -49,6 +49,9 @@ public struct AtumTurnMarkers: Equatable, Sendable {
                 && first?["scope"] as? String == "owner_private"
                 && ChatScheduleExecution.parse(first?["schedule"]) == selected) {
                 progress.schedule = selected
+                progress.scheduledRevisedAt = jsonInteger(envelope["origin_server_ts"]).map {
+                    Date(timeIntervalSince1970: Double($0) / 1_000)
+                }
             }
         }
         markers.progress = progress
