@@ -92,3 +92,20 @@ to the view state:
   #64 flake.
 - The scheduled variant is covered by package tests only. No scripted cron
   scenario exists for UI.
+
+### Local run log
+
+- **Run 1:** killed while still queued, at the coordinator's request.
+- **Run 2:** the merge with the #64 fix round conflicted. Resolved in
+  `f873bb4`.
+- **Run 3:** slimmed run (`/Volumes/AtumTestFlight/dd-w4-e5/verify.sh`).
+  - Package tests: 28, 0 failures.
+  - Debug build: succeeded.
+  - `ComposerDictationTests`: 12, 0 failures.
+  - `TurnStopUITests`: 5 of 6 passed. `testStopWhileWorkingThenStopped`
+    failed inside `ask()`: "The composer field did not take keyboard focus".
+    - The simulator was loaded: each element query took about 10 s, so the
+      polled focus checks used up their limits after a single tap.
+    - `ask()` now taps, then waits up to 20 s for the keyboard with XCTest's own
+      expectation, and retries the tap up to three times.
+- **Retry run** (`verify-retry.sh`): only the failing test and the new tests.

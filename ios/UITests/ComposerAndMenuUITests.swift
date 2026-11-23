@@ -939,13 +939,18 @@ final class TurnStopUITests: WS3UITestCase {
         guard eventually(15, { composer.exists && composer.isHittable }) else {
             return XCTFail("The composer field did not become hittable")
         }
+        // On a loaded simulator one element query can take ~10 s, so a
+        // polled focus check spent its whole budget without a second tap
+        // (run-3). Wait on the keyboard with XCTest's own expectation, long
+        // enough for a slow snapshot, and tap again only if it never came.
         let focus = NSPredicate(format: "hasKeyboardFocus == true")
-        for _ in 0..<3 {
-            if focus.evaluate(with: composer) { break }
+        let keyboard = app.keyboards.firstMatch
+        var focused = false
+        for _ in 0..<3 where !focused {
             composer.tap()
-            if eventually(8, { focus.evaluate(with: composer) }) { break }
+            focused = keyboard.waitForExistence(timeout: 20) || focus.evaluate(with: composer)
         }
-        guard focus.evaluate(with: composer) else {
+        guard focused else {
             return XCTFail("The composer field did not take keyboard focus")
         }
         composer.typeText("Tóm tắt giúp mình")
