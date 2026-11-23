@@ -266,3 +266,18 @@ no rebuild:
 `TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock /bin/bash /Volumes/AtumTestFlight/dd-w4-e2/verify.sh tests`.
 It writes `app-tests.xcresult` and `ui-{en,vi}-{light,dark}.xcresult`, with
 captures under `ui-scratch/ui-evidence/`.
+
+### Review r1 verification (2026-11-23)
+
+The run took the shared lock with
+`/Volumes/AtumTestFlight/dd-w4-e2/verify-r1.sh`, started 16:53:05 and ended
+16:57:23, EXIT_MARKER 0. Per the owner's slim rule it ran only the focused
+package tests and the Debug build. No UI suites ran locally; those run on
+the hosted PR shards.
+
+| Check | Result |
+| --- | --- |
+| `swift test --filter 'ChatGPTTraining\|ManagedModelPickerState\|ModelWriteRequests\|NativeDomainClientTests'` | Pass. 115 tests, 0 failures: `ChatGPTTrainingConsentTests` 8, `ChatGPTTrainingTests` 4, `ManagedModelPickerStateTests` 4, `ModelWriteRequestsTests` 4, `NativeDomainClientTests` 95. |
+| Debug simulator `build-for-testing` (AtumMobile, compiles AppTests and UITests) | Pass, `debug-build-r1.xcresult`. No warnings in the touched files. |
+| `ChatGPTTrainingGateTests` (AppTests) and `ChatGPTTrainingUITests` | Compiled, not run locally. They run on the hosted PR shards. |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | Exit 0 on its own. |
