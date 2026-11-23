@@ -1104,11 +1104,12 @@ public struct AgentsRead: Sendable {
     /// fenced like the Atum write. The platform accepts only a connected
     /// subscription and a model it serves now; a refusal changes nothing.
     public func writeManagedModelSubscription(agentPrincipal: NativeID,
-                                              value: ManagedModelSubscriptionWrite) async throws
+                                              value: ManagedModelSubscriptionWrite,
+                                              isCurrent: @MainActor () -> Bool = { true }) async throws
         -> ManagedModelDestinationSnapshot {
         let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value, isCurrent: isCurrent
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
@@ -1117,14 +1118,15 @@ public struct AgentsRead: Sendable {
     }
 
     private func putModelChoice<Snapshot: Decodable, Write: Encodable>(
-        _ type: Snapshot.Type, url: URL, value: Write
+        _ type: Snapshot.Type, url: URL, value: Write, isCurrent: @MainActor () -> Bool = { true }
     ) async throws -> Snapshot {
         let body: Data
         do { body = try JSONEncoder().encode(value) }
         catch { throw NativeDomainClientFailure.invalidRequest }
         let result = try await response(url: url, method: "PUT", body: body,
                                         maximumRequestBodyBytes: 262_144,
-                                        maximumResponseBodyBytes: 262_144, acceptedStatuses: [200, 409])
+                                        maximumResponseBodyBytes: 262_144, acceptedStatuses: [200, 409],
+                                        isCurrent: isCurrent)
         if result.status == 409 {
             if let conflict = try? NativeAPI.decode(ManagedModelFenceConflictResponse.self, from: result.body) {
                 throw conflict.reason
@@ -1144,6 +1146,59 @@ public struct AgentsRead: Sendable {
     /// The status never carries the key.
     public func providerConnectionsStatus() async throws -> ProviderConnectionsStatus {
         try await read(ProviderConnectionsStatus.self, url: Self.providerConnectionsURL)
+    }
+
+    // MARK: ChatGPT with Google data (Shell training-confirmation r3)
+
+    /// The account's one-time training-off confirmation. Any answer other than
+    /// a readable 200 throws: a failed read never counts as confirmed.
+    public func chatGPTTraining() async throws -> ChatGPTTrainingStatus {
+        let answer = try await trainingConfirmationCall(method: "GET", body: nil)
+        guard answer.status == 200 else { throw NativeDomainClientFailure.invalidResponse }
+        return try ChatGPTTrainingStatus.decode(answer.body)
+    }
+
+    /// POST only after the person ticked the box and pressed Confirm, for the
+    /// connection the card read; never automatic and never retried here.
+    public func confirmChatGPTTraining(
+        connectionID: String, isCurrent: @MainActor () -> Bool = { true }
+    ) async -> ChatGPTTrainingConfirmResult {
+        guard ChatGPTTrainingStatus.isUUID(connectionID),
+              let body = try? JSONEncoder().encode(ChatGPTTrainingConfirmRequest(connectionID: connectionID)),
+              let answer = try? await trainingConfirmationCall(method: "POST", body: body, isCurrent: isCurrent)
+        else { return .unavailable }
+        if answer.status == 409 { return .stale }
+        // A 200 counts only as a complete current record for the connection
+        // this press named; any other answer is not this confirmation.
+        guard answer.status == 200, let status = try? ChatGPTTrainingStatus.decode(answer.body),
+              status.current, status.connectionID == connectionID else { return .unavailable }
+        return .confirmed(status)
+    }
+
+    /// The Shell route answers `{"state": …}` refusals, not the domain error
+    /// envelope, so the caller reads the status itself. One refresh after a
+    /// 401, as `s1Request` does; a second 401 is only "unavailable" here and
+    /// never signs the phone out.
+    private func trainingConfirmationCall(method: String, body: Data?,
+                                          isCurrent: @MainActor () -> Bool = { true }) async throws
+        -> NativeDomainHTTPResponse {
+        try requireActiveTask()
+        let headers = [ChatGPTTraining.contractHeader: ChatGPTTraining.contract]
+        let token = try await authorize(forceRefresh: false, reportsAuthenticationFailure: false)
+        try requireActiveTask()
+        let first = try await perform(url: ChatGPTTraining.url, token: token,
+                                      method: method, body: body,
+                                      maximumRequestBodyBytes: 1_024,
+                                      maximumResponseBodyBytes: ChatGPTTraining.maximumResponseBytes,
+                                      extraHeaders: headers, isCurrent: isCurrent)
+        try requireActiveTask()
+        guard first.status == 401 else { return first }
+        let refreshed = try await authorize(forceRefresh: true, reportsAuthenticationFailure: false)
+        try requireActiveTask()
+        return try await perform(url: ChatGPTTraining.url, token: refreshed, method: method, body: body,
+                                 maximumRequestBodyBytes: 1_024,
+                                 maximumResponseBodyBytes: ChatGPTTraining.maximumResponseBytes,
+                                 extraHeaders: headers, isCurrent: isCurrent)
     }
 
     // MARK: Agent home (`atum.agent-home/2.5`)
@@ -1358,7 +1413,8 @@ public struct AgentsRead: Sendable {
                           maximumResponseBodyBytes: Int,
                           extraHeaders: [String: String] = [:],
                           acceptedStatuses: Set<Int> = [200],
-                          reportsAuthenticationFailure: Bool = true) async throws -> NativeDomainHTTPResponse {
+                          reportsAuthenticationFailure: Bool = true,
+                          isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false,
@@ -1368,7 +1424,7 @@ public struct AgentsRead: Sendable {
                                       companyWire: companyWire,
                                       maximumRequestBodyBytes: maximumRequestBodyBytes,
                                       maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                      extraHeaders: extraHeaders)
+                                      extraHeaders: extraHeaders, isCurrent: isCurrent)
         try requireActiveTask()
         if acceptedStatuses.contains(first.status) { return first }
         if first.status == 422, acceptsAssistantNameRefusal {
@@ -1387,7 +1443,7 @@ public struct AgentsRead: Sendable {
                                        companyWire: companyWire,
                                        maximumRequestBodyBytes: maximumRequestBodyBytes,
                                        maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                       extraHeaders: extraHeaders)
+                                       extraHeaders: extraHeaders, isCurrent: isCurrent)
         try requireActiveTask()
         if acceptedStatuses.contains(second.status) { return second }
         if second.status == 422, acceptsAssistantNameRefusal {
@@ -1503,7 +1559,8 @@ public struct AgentsRead: Sendable {
                          body: Data?, companyWire: CompanyWire? = nil, maximumRequestBodyBytes: Int,
                          maximumResponseBodyBytes: Int,
                          extraHeaders: [String: String] = [:],
-                         canSend: DeskSendCheck? = nil) async throws -> NativeDomainHTTPResponse {
+                         canSend: DeskSendCheck? = nil,
+                         isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         guard isApprovedURL(url), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
               !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
               maximumRequestBodyBytes >= 0, (body?.count ?? 0) <= maximumRequestBodyBytes,
@@ -1539,6 +1596,10 @@ public struct AgentsRead: Sendable {
                       return value == AppPanelContract.profile && method == "GET"
                           && isAppPath(url.path) && url.path.hasSuffix("/manifest")
                   }
+                  if name == ChatGPTTraining.contractHeader {
+                      return value == ChatGPTTraining.contract && url.path == ChatGPTTraining.url.path
+                          && ["GET", "POST"].contains(method)
+                  }
                   if name == CompanyInviteReadiness.profileHeader {
                       return value == CompanyInviteReadiness.profile && method == "GET"
                           && url.path == Self.companyCapabilitiesURL.path && companyWire == .v1_3
@@ -1561,8 +1622,9 @@ public struct AgentsRead: Sendable {
                                                   maximumBodyBytes: maximumResponseBodyBytes)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                // Keep the context check and URLSession start in one main-actor turn.
-                guard canSend?() != false else {
+                // Keep the context checks and URLSession start in one main-actor turn.
+                // Authorization may have suspended, so check on every dispatch, including a 401 replay.
+                guard canSend?() != false, isCurrent() else {
                     continuation.resume(throwing: NativeDomainClientFailure.cancelled)
                     return
                 }
@@ -1643,8 +1705,10 @@ public struct AgentsRead: Sendable {
     private func isApprovedURL(_ url: URL) -> Bool {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
+        // The Shell routes outside the domain prefix, each by its exact path.
         if url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path { return url.query == nil }
         if url.path == CloudScheduleStop.path { return url.query == nil }
+        if url.path == ChatGPTTraining.url.path { return url.query == nil }
         guard url.path.hasPrefix(Self.baseURL.path + "/") else { return false }
         let phoneRoot = Self.baseURL.path + "/device-services"
         let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
