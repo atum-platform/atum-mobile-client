@@ -11,13 +11,13 @@ final class ChatKindsUITests: TranscriptUITestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text))
     }
 
-    /// B13: the system context menu is a real presentation over the chat.
-    /// Moon's later answer lands while it is open; no private receipt may go
-    /// out until the preview disappears and the transcript is visible again.
+    /// B13: the message menu covers the chat when Moon's answer lands.
+    /// The transcript sends a receipt once the preview disappears.
     @MainActor
-    func testContextMenuPreventsReadReceiptUntilDismissed() {
-        let (app, start) = launchTimedChat(ScriptedScenario.botMoonNotice.rawValue,
-                                           extra: probeArguments, leadIn: 35)
+    func testContextMenuPreventsReadReceiptUntilDismissed() throws {
+        let app = launchChat(ScriptedScenario.botMoonNotice.rawValue,
+                             extra: probeArguments + ["-AtumScriptedHoldMoonAnswer"])
+        XCTAssertTrue(latest(app).waitForExistence(timeout: 30), "the initial timeline did not paint")
         let target = labelled(app, "mình là Moon").firstMatch
         XCTAssertTrue(target.waitForExistence(timeout: 5), "the menu target did not appear")
         target.press(forDuration: 1.2)
@@ -31,7 +31,14 @@ final class ChatKindsUITests: TranscriptUITestCase {
         XCTAssertTrue(copy.waitForExistence(timeout: 5), "the context menu did not open")
         let coveredAt = Date()
 
-        wait(until: start.addingTimeInterval(8))
+        let release = probeFolder.appendingPathComponent("release-moon-answer")
+        try Data().write(to: release, options: .atomic)
+        XCTAssertTrue(waitFor(30) {
+            self.probeLines("clock.txt").contains {
+                $0.text == "moon-answer-projected" && $0.time >= coveredAt
+            }
+        }, "Moon's answer did not reach the transcript while the menu was open")
+        wait(3)
         XCTAssertTrue(copy.exists, "the menu disappeared before the scripted answer arrived")
         let whileCovered = probeLines("receipts.txt").filter { $0.text.contains("receipt read") }
         XCTAssertTrue(whileCovered.allSatisfy { $0.time < coveredAt },

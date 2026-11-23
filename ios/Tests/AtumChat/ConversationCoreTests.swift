@@ -301,7 +301,7 @@ final class ConversationCoreTests: XCTestCase {
     /// U5, D8 (coordinator decision 9): "Thử lại" on a recoverable failure
     /// re-enables the room's queue, which tells the timeline nothing, so the
     /// row shows the clock again at once and keeps it until the source sends
-    /// its next state for that item; then "Đã gửi".
+    /// its next state for that item; then just its time (no Sent, #89).
     func testThuLaiOnARecoverableFailureShowsTheClockUntilTheSourcesNextState() {
         let failed = F.echo("r", "hi", delivery: .failed(isRecoverable: true))
         var core = attachedCore([F.mine("m"), failed])
@@ -316,11 +316,11 @@ final class ConversationCoreTests: XCTestCase {
         _ = core.receive(projection([reacted, failed], change: .inPlace, touched: ["m"]), now: now)
         XCTAssertEqual(mark(core, "r"), .sending, "still going out")
 
-        // The server accepted it: the source's next state, then "Đã gửi".
+        // The server accepted it: the source's next state, then no mark.
         var sent = failed
         sent.delivery = .sent(eventID: "$r")
         _ = core.receive(projection([reacted, sent], change: .inPlace, touched: ["r"]), now: now)
-        XCTAssertEqual(mark(core, "r"), .sent)
+        XCTAssertEqual(mark(core, "r"), DeliveryMark.none)
         XCTAssertTrue(core.retryingIDs.isEmpty)
     }
 

@@ -3,7 +3,11 @@ import Foundation
 /// The small mark under one of my messages (B7). Every case is declared in
 /// S0 so row views switch over the full set; the S1a projection emits only
 /// `none`, `sending` and `failed`, and the S1 projection
-/// (`ProjectionOptions.marksSentAndSeen`) adds `sent` and `seen`.
+/// (`ProjectionOptions.marksSentAndSeen`) adds `seen`.
+///
+/// One read signal (desktop #89, owner 2026-11-19): a settled message nobody
+/// has read yet carries no mark, just its time, as in any messaging app; the
+/// readers' faces are the only receipt. The Sent tick and "Đã gửi" are gone.
 public enum DeliveryMark: Equatable, Hashable, Sendable {
     case none
     /// A clock on every message that is still sending, so three quick sends
@@ -13,9 +17,6 @@ public enum DeliveryMark: Equatable, Hashable, Sendable {
     /// "Xóa" (B8). Whether the failure is recoverable picks the retry call,
     /// not the mark: `Delivery.retry(for:)` reads it from `ChatItem.delivery`.
     case failed
-    /// "Đã gửi" with a check, only on my newest settled message in an
-    /// assistant or bot chat.
-    case sent
     /// "Đã xem" once another member's receipt sits on this item or a later
     /// one. `readerCount` is how many other members have read it; groups show
     /// "Đã xem · N", other rooms ignore the number.
@@ -74,12 +75,9 @@ public enum Delivery {
     ///   receipt sits on that very item (the Element X model: the reader's
     ///   avatar appears under the message their receipt names), counting each
     ///   reader once;
-    /// - "Đã gửi" only under my newest message, once it has settled and while
-    ///   nobody has read it yet, in every room kind (desktop `send-state.tsx`:
-    ///   `latest && message.sent`, `latest` being my newest message whatever
-    ///   its state; §9.1: never under older unread messages). While a newer
-    ///   one is still sending, its clock is the only mark;
-    /// - older unread settled messages show nothing.
+    /// - a settled message nobody has read shows nothing, my newest included
+    ///   (desktop #89: no Sent tick; the readers' faces are the one read
+    ///   signal).
     ///
     /// My own account's receipts (the Mac) never count.
     public static func marks(for items: [ChatItem], context: RoomContext) -> [String: DeliveryMark] {
@@ -94,10 +92,6 @@ public enum Delivery {
                 marks[item.id] = .seen(readerCount: readers.count)
             }
         }
-        guard let newest = items.lastIndex(where: { $0.isOwn && isMessageLike($0.kind) }),
-              isSettledOwnMessage(items[newest]),
-              marks[items[newest].id] == nil else { return marks }
-        marks[items[newest].id] = .sent
         return marks
     }
 
