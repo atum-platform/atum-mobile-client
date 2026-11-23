@@ -281,3 +281,28 @@ the hosted PR shards.
 | Debug simulator `build-for-testing` (AtumMobile, compiles AppTests and UITests) | Pass, `debug-build-r1.xcresult`. No warnings in the touched files. |
 | `ChatGPTTrainingGateTests` (AppTests) and `ChatGPTTrainingUITests` | Compiled, not run locally. They run on the hosted PR shards. |
 | `python3 scripts/public_guard.py --base origin/main --head HEAD` | Exit 0 on its own. |
+### Review r3
+
+- Both phone pickers pass the current selection token to the confirmation
+  card and the shared subscription save. If the picker closes during the
+  recovery GET after a 409, the card drops the result and sends no POST.
+- The shared save checks the selection alongside the account and assistant
+  scope before the first PUT and the conflict retry. Dismissal while the
+  destination readback or consent re-check is pending ends the save silently.
+- The native client repeats the scope and selection check immediately before
+  dispatch after authorization, including a replay after a 401.
+- A second fence conflict or a failed destination readback re-checks consent
+  before reporting a refusal. Revoked consent sends the owner back to the
+  training card.
+
+Verification ran under the shared heavy-build lock using the r3 script in
+`/Volumes/AtumTestFlight/dd-w4-e2`. The first Debug build exited 65 on a
+Swift closure-lifetime error in the shared save. The callback lifetime was
+fixed before the rerun.
+
+| Check | Result |
+| --- | --- |
+| `swift test --filter 'ChatGPTTraining\|ManagedModelPickerState\|ModelWriteRequests\|NativeDomainClientTests'` | Exit 0, 120 tests and 0 failures. Covers dismissal during the recovery GET, conflict readback and consent re-check, the refusal paths, and both sends after an authorization refresh. |
+| Debug simulator `build-for-testing` (AtumMobile) | Exit 0, `debug-build-r3.xcresult`. AppTests and UITests compiled. Zero simulator tests ran locally. |
+| Shared verification launcher | `EXIT_MARKER 0`. |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | Run separately on the committed revision. Output is in `guard-r3.log`. |

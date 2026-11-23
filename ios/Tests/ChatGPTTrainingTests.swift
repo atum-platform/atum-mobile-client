@@ -232,6 +232,110 @@ final class ChatGPTTrainingConsentTests: XCTestCase {
         XCTAssertEqual(stale, .askAgain(connectionID: nil))
     }
 
+    func testDismissalDuringTheRecoveryGetStopsTheConfirmationPost() async {
+        var lifetime = ModelPickerLifetime()
+        let selection = lifetime.beginSelection()
+        var reads = 0
+        var posts = 0
+        let conflict = await ChatGPTTrainingPress.confirm(connectionID: connection, read: { nil }) { _ in
+            .stale
+        }
+        guard case let .askAgain(connectionID) = conflict else { return XCTFail("expected an unread refresh") }
+        XCTAssertNil(connectionID)
+
+        let result = await ChatGPTTrainingPress.confirm(
+            connectionID: connectionID, isCurrent: { lifetime.isCurrent(selection) },
+            read: {
+                reads += 1
+                await Task.yield()
+                lifetime.retire()
+                return self.status(false, self.replaced, revision: nil)
+            }
+        ) { _ in
+            posts += 1
+            return .unavailable
+        }
+        XCTAssertEqual(result, .cancelled)
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(posts, 0)
+    }
+
+    func testDismissalDuringTheConflictReadbackStopsTheSecondPut() async {
+        await assertDismissalStopsTheSecondPut(duringReadback: true)
+    }
+
+    func testDismissalDuringTheConsentRecheckStopsTheSecondPut() async {
+        await assertDismissalStopsTheSecondPut(duringReadback: false)
+    }
+
+    private func assertDismissalStopsTheSecondPut(duringReadback: Bool) async {
+        struct Snapshot: Equatable, Sendable { let revision: Int64 }
+        var lifetime = ModelPickerLifetime()
+        let selection = lifetime.beginSelection()
+        let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
+        var writes = 0
+        var reads = 0
+        var checks = 0
+        let check = ChatGPTTrainingRecheck(consent: ChatGPTTrainingConsent(connectionID: connection, revision: 3)) {
+            checks += 1
+            if !duringReadback {
+                await Task.yield()
+                lifetime.retire()
+            }
+            return self.status(true, self.connection)
+        }
+        let result = await state.save(
+            from: Snapshot(revision: 7), choice: .subscription(.chatGPTPlan, model: "gpt-6.1", effort: .medium),
+            requestID: ModelWriteRequests<NativeID>.freshID(), refreshAfterSecondConflict: true,
+            isCurrent: { true }, fetch: {
+                reads += 1
+                if duringReadback {
+                    await Task.yield()
+                    lifetime.retire()
+                }
+                return Snapshot(revision: 8)
+            },
+            isSelectionCurrent: { lifetime.isCurrent(selection) }, revalidate: { await check.stillCurrent() }
+        ) { _, _ in
+            writes += 1
+            throw ManagedModelFenceConflict.revision
+        }
+        guard case .cancelled = result else { return XCTFail("expected cancellation, got \(result)") }
+        XCTAssertEqual(writes, 1)
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(checks, duringReadback ? 0 : 1)
+    }
+
+    func testFenceRefusalsRecheckConsentWhenReadbackFailsOrTheRetryConflicts() async {
+        struct Snapshot: Equatable, Sendable { let revision: Int64 }
+        for readbackFails in [true, false] {
+            let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
+            var writes = 0
+            var checks = 0
+            let result = await state.save(
+                from: Snapshot(revision: 7), choice: .subscription(.chatGPTPlan, model: "gpt-6.1", effort: .medium),
+                requestID: ModelWriteRequests<NativeID>.freshID(), refreshAfterSecondConflict: true,
+                isCurrent: { true }, fetch: {
+                    if readbackFails { throw NativeDomainClientFailure.transportUnavailable }
+                    return Snapshot(revision: 7 + Int64(writes))
+                },
+                revalidate: {
+                    checks += 1
+                    return !readbackFails && checks == 1
+                }
+            ) { _, _ in
+                writes += 1
+                throw ManagedModelFenceConflict.revision
+            }
+            guard case let .preconditionChanged(latest) = result else {
+                return XCTFail("expected the gate, got \(result)")
+            }
+            XCTAssertEqual(latest, readbackFails ? nil : Snapshot(revision: 9))
+            XCTAssertEqual(writes, readbackFails ? 1 : 2)
+            XCTAssertEqual(checks, writes)
+        }
+    }
+
     /// r1 finding 3: closing the picker retires the pending selection, so a
     /// late consent read can never start the write.
     func testDismissalAndANewerPickRetireAPendingSelection() {

@@ -49,7 +49,7 @@ final class ChatGPTTrainingGateTests: XCTestCase {
 
     func testAnotherSubscriptionNeverReadsTheConfirmation() async {
         var reads = 0
-        let training = ChatGPTTrainingActions(read: { reads += 1; return nil }, confirm: { _ in .unavailable })
+        let training = ChatGPTTrainingActions(read: { reads += 1; return nil }, confirm: { _, _ in .unavailable })
         let decision = await ChatGPTTrainingGate.decide(source: .opencodeGo, training: training)
         XCTAssertEqual(decision, .write(nil))
         XCTAssertEqual(reads, 0)
@@ -59,7 +59,7 @@ final class ChatGPTTrainingGateTests: XCTestCase {
         func gate(_ status: ChatGPTTrainingStatus?) async -> ChatGPTTrainingGate.Decision {
             await ChatGPTTrainingGate.decide(
                 source: .chatGPTPlan,
-                training: ChatGPTTrainingActions(read: { status }, confirm: { _ in .unavailable }))
+                training: ChatGPTTrainingActions(read: { status }, confirm: { _, _ in .unavailable }))
         }
         let current = ChatGPTTrainingStatus(current: true, connectionID: connection, confirmedAt: Date(),
                                             revision: 3)

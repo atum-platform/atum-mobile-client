@@ -666,7 +666,9 @@ struct ScriptedChatHost: View {
             read: { Self.subscriptionAccount(demo) },
             save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
                      effort: ManagedModelEffort, _: NativeID,
-                     _: ChatGPTTrainingConsent?) -> AssistantModelDestinationSaveResult in
+                     _: ChatGPTTrainingConsent?, isSelectionCurrent: @escaping @MainActor () -> Bool)
+                -> AssistantModelDestinationSaveResult in
+                guard isSelectionCurrent() else { return .cancelled }
                 let next = Self.subscriptionDestinations(
                     source: source == .opencodeGo ? "opencode_go" : "chatgpt_plan",
                     model: model, effort: effort.rawValue,
@@ -680,7 +682,8 @@ struct ScriptedChatHost: View {
                                           connectionID: Self.trainingConnection,
                                           confirmedAt: Self.trainingConfirmedAt, revision: 1)
                 },
-                confirm: { connectionID in
+                confirm: { connectionID, isSelectionCurrent in
+                    guard isSelectionCurrent() else { return .unavailable }
                     guard connectionID == Self.trainingConnection else { return .stale }
                     scriptedTrainingConfirmed = true
                     return .confirmed(ChatGPTTrainingStatus(current: true, connectionID: connectionID,

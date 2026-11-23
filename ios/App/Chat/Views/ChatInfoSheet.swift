@@ -310,6 +310,7 @@ enum AssistantModelDestinationLoadResult {
 }
 
 enum AssistantModelDestinationSaveResult {
+    case cancelled
     case saved(ManagedModelDestinationSnapshot)
     /// A conflict may carry the latest authoritative snapshot. Transport,
     /// old-provider and flag-off refusals carry nil; none is ever "saved".

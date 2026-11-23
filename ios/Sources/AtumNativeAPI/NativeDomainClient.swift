@@ -1039,11 +1039,12 @@ public struct AgentsRead: Sendable {
     /// fenced like the Atum write. The platform accepts only a connected
     /// subscription and a model it serves now; a refusal changes nothing.
     public func writeManagedModelSubscription(agentPrincipal: NativeID,
-                                              value: ManagedModelSubscriptionWrite) async throws
+                                              value: ManagedModelSubscriptionWrite,
+                                              isCurrent: @MainActor () -> Bool = { true }) async throws
         -> ManagedModelDestinationSnapshot {
         let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value, isCurrent: isCurrent
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
@@ -1052,14 +1053,15 @@ public struct AgentsRead: Sendable {
     }
 
     private func putModelChoice<Snapshot: Decodable, Write: Encodable>(
-        _ type: Snapshot.Type, url: URL, value: Write
+        _ type: Snapshot.Type, url: URL, value: Write, isCurrent: @MainActor () -> Bool = { true }
     ) async throws -> Snapshot {
         let body: Data
         do { body = try JSONEncoder().encode(value) }
         catch { throw NativeDomainClientFailure.invalidRequest }
         let result = try await response(url: url, method: "PUT", body: body,
                                         maximumRequestBodyBytes: 262_144,
-                                        maximumResponseBodyBytes: 262_144, acceptedStatuses: [200, 409])
+                                        maximumResponseBodyBytes: 262_144, acceptedStatuses: [200, 409],
+                                        isCurrent: isCurrent)
         if result.status == 409 {
             if let conflict = try? NativeAPI.decode(ManagedModelFenceConflictResponse.self, from: result.body) {
                 throw conflict.reason
@@ -1093,10 +1095,12 @@ public struct AgentsRead: Sendable {
 
     /// POST only after the person ticked the box and pressed Confirm, for the
     /// connection the card read; never automatic and never retried here.
-    public func confirmChatGPTTraining(connectionID: String) async -> ChatGPTTrainingConfirmResult {
+    public func confirmChatGPTTraining(
+        connectionID: String, isCurrent: @MainActor () -> Bool = { true }
+    ) async -> ChatGPTTrainingConfirmResult {
         guard ChatGPTTrainingStatus.isUUID(connectionID),
               let body = try? JSONEncoder().encode(ChatGPTTrainingConfirmRequest(connectionID: connectionID)),
-              let answer = try? await trainingConfirmationCall(method: "POST", body: body)
+              let answer = try? await trainingConfirmationCall(method: "POST", body: body, isCurrent: isCurrent)
         else { return .unavailable }
         if answer.status == 409 { return .stale }
         // A 200 counts only as a complete current record for the connection
@@ -1110,7 +1114,9 @@ public struct AgentsRead: Sendable {
     /// envelope, so the caller reads the status itself. One refresh after a
     /// 401, as `s1Request` does; a second 401 is only "unavailable" here and
     /// never signs the phone out.
-    private func trainingConfirmationCall(method: String, body: Data?) async throws -> NativeDomainHTTPResponse {
+    private func trainingConfirmationCall(method: String, body: Data?,
+                                          isCurrent: @MainActor () -> Bool = { true }) async throws
+        -> NativeDomainHTTPResponse {
         try requireActiveTask()
         let headers = [ChatGPTTraining.contractHeader: ChatGPTTraining.contract]
         let token = try await authorize(forceRefresh: false, reportsAuthenticationFailure: false)
@@ -1119,7 +1125,7 @@ public struct AgentsRead: Sendable {
                                       method: method, body: body,
                                       maximumRequestBodyBytes: 1_024,
                                       maximumResponseBodyBytes: ChatGPTTraining.maximumResponseBytes,
-                                      extraHeaders: headers)
+                                      extraHeaders: headers, isCurrent: isCurrent)
         try requireActiveTask()
         guard first.status == 401 else { return first }
         let refreshed = try await authorize(forceRefresh: true, reportsAuthenticationFailure: false)
@@ -1127,7 +1133,7 @@ public struct AgentsRead: Sendable {
         return try await perform(url: ChatGPTTraining.url, token: refreshed, method: method, body: body,
                                  maximumRequestBodyBytes: 1_024,
                                  maximumResponseBodyBytes: ChatGPTTraining.maximumResponseBytes,
-                                 extraHeaders: headers)
+                                 extraHeaders: headers, isCurrent: isCurrent)
     }
 
     // MARK: Agent home (`atum.agent-home/2.5`)
@@ -1342,7 +1348,8 @@ public struct AgentsRead: Sendable {
                           maximumResponseBodyBytes: Int,
                           extraHeaders: [String: String] = [:],
                           acceptedStatuses: Set<Int> = [200],
-                          reportsAuthenticationFailure: Bool = true) async throws -> NativeDomainHTTPResponse {
+                          reportsAuthenticationFailure: Bool = true,
+                          isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false,
@@ -1352,7 +1359,7 @@ public struct AgentsRead: Sendable {
                                       companyWire: companyWire,
                                       maximumRequestBodyBytes: maximumRequestBodyBytes,
                                       maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                      extraHeaders: extraHeaders)
+                                      extraHeaders: extraHeaders, isCurrent: isCurrent)
         try requireActiveTask()
         if acceptedStatuses.contains(first.status) { return first }
         if first.status == 422, acceptsAssistantNameRefusal {
@@ -1371,7 +1378,7 @@ public struct AgentsRead: Sendable {
                                        companyWire: companyWire,
                                        maximumRequestBodyBytes: maximumRequestBodyBytes,
                                        maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                       extraHeaders: extraHeaders)
+                                       extraHeaders: extraHeaders, isCurrent: isCurrent)
         try requireActiveTask()
         if acceptedStatuses.contains(second.status) { return second }
         if second.status == 422, acceptsAssistantNameRefusal {
@@ -1485,7 +1492,8 @@ public struct AgentsRead: Sendable {
     private func perform(url: URL, token: String, method: String,
                          body: Data?, companyWire: CompanyWire? = nil, maximumRequestBodyBytes: Int,
                          maximumResponseBodyBytes: Int,
-                         extraHeaders: [String: String] = [:]) async throws -> NativeDomainHTTPResponse {
+                         extraHeaders: [String: String] = [:],
+                         isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         guard isApprovedURL(url), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
               !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
               maximumRequestBodyBytes >= 0, (body?.count ?? 0) <= maximumRequestBodyBytes,
@@ -1542,7 +1550,14 @@ public struct AgentsRead: Sendable {
                                                   timeout: url.path == CloudScheduleStop.path ? 40 : 15,
                                                   maximumBodyBytes: maximumResponseBodyBytes)
         return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { operation.start($0) }
+            try await withCheckedThrowingContinuation { continuation in
+                // Authorization may have suspended. Check here for every dispatch, including a 401 replay.
+                guard isCurrent() else {
+                    continuation.resume(throwing: NativeDomainClientFailure.cancelled)
+                    return
+                }
+                operation.start(continuation)
+            }
         } onCancel: {
             operation.cancel()
         }

@@ -1221,6 +1221,47 @@ import AtumChat
         XCTAssertEqual(seen.filter { $0 == "POST Bearer p2-training-fresh" }.count, 1)
     }
 
+    func testRetiredChatGPTSelectionIsNotSentAfterAuthorizationRefresh() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let snapshot = try NativeAPI.decode(ManagedModelDestinationSnapshot.self, from: managedModelDestinationsBody())
+        let write = try ManagedModelSubscriptionWrite(
+            requestId: ModelWriteRequests<NativeID>.freshID(), snapshot: snapshot,
+            source: .chatGPTPlan, model: "gpt-6.1", effort: .medium
+        )
+        @MainActor final class Picker { var lifetime = ModelPickerLifetime() }
+        let picker = Picker()
+        let value = NativeDomainClient(testAuthorization: { forceRefresh in
+            if forceRefresh {
+                await Task.yield()
+                picker.lifetime.retire()
+            }
+            return forceRefresh ? "p2-refreshed" : "p2-original"
+        }, protocolClasses: [NativeDomainProtocol.self])
+        var sent: [String] = []
+        NativeDomainProtocol.state.handler = { request in
+            sent.append(request.httpMethod ?? "")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer p2-original")
+            return .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)])
+        }
+
+        let confirmation = picker.lifetime.beginSelection()
+        let result = await value.confirmChatGPTTraining(connectionID: "00000000-0000-4000-8000-0000000000c1") {
+            picker.lifetime.isCurrent(confirmation)
+        }
+        XCTAssertEqual(result, .unavailable)
+        XCTAssertFalse(picker.lifetime.isCurrent(confirmation))
+
+        let pick = picker.lifetime.beginSelection()
+        do {
+            _ = try await value.writeManagedModelSubscription(agentPrincipal: principal, value: write) {
+                picker.lifetime.isCurrent(pick)
+            }
+            XCTFail("A retired selection cannot replay its PUT")
+        } catch NativeDomainClientFailure.cancelled {}
+        XCTAssertFalse(picker.lifetime.isCurrent(pick))
+        XCTAssertEqual(sent, ["POST", "PUT"])
+    }
+
     func testAgentAvatarWriteBindsCanonicalTargetAndUsesBoundedImageBody() async throws {
         let target = try NativeID(agentPrincipal)
         let image = try AgentAvatarImage(type: .jpeg, data: Data([0xff, 0xd8, 0xff, 0xd9]))

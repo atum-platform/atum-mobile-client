@@ -7,7 +7,8 @@ import SwiftUI
 struct ChatGPTTrainingActions {
     /// nil when the read failed: a failed read never counts as confirmed.
     let read: () async -> ChatGPTTrainingStatus?
-    let confirm: (_ connectionID: String) async -> ChatGPTTrainingConfirmResult
+    let confirm: @MainActor (_ connectionID: String, _ isSelectionCurrent: @MainActor () -> Bool) async
+        -> ChatGPTTrainingConfirmResult
 }
 
 /// The words of the confirmation, from the pinned export
@@ -74,6 +75,7 @@ struct PendingChatGPTTraining {
 struct ChatGPTTrainingConfirmView: View {
     let design: LiveDesign
     let actions: ChatGPTTrainingActions
+    let isSelectionCurrent: @MainActor () -> Bool
     let onConfirmed: (ChatGPTTrainingStatus) -> Void
     let onKeep: () -> Void
 
@@ -87,9 +89,11 @@ struct ChatGPTTrainingConfirmView: View {
     enum Notice: String { case failed, stale }
 
     init(design: LiveDesign, actions: ChatGPTTrainingActions, status: ChatGPTTrainingStatus,
+         isSelectionCurrent: @escaping @MainActor () -> Bool,
          onConfirmed: @escaping (ChatGPTTrainingStatus) -> Void, onKeep: @escaping () -> Void) {
         self.design = design
         self.actions = actions
+        self.isSelectionCurrent = isSelectionCurrent
         self.onConfirmed = onConfirmed
         self.onKeep = onKeep
         _connectionID = State(initialValue: status.connectionID)
@@ -201,8 +205,13 @@ struct ChatGPTTrainingConfirmView: View {
         saving = true
         notice = nil
         defer { saving = false }
-        switch await ChatGPTTrainingPress.confirm(connectionID: connectionID, read: actions.read,
-                                                  confirm: actions.confirm) {
+        let result = await ChatGPTTrainingPress.confirm(
+            connectionID: connectionID, isCurrent: isSelectionCurrent, read: actions.read
+        ) { connection in
+            await actions.confirm(connection, isSelectionCurrent)
+        }
+        switch result {
+        case .cancelled: break
         case let .confirmed(status):
             onConfirmed(status)
         case let .askAgain(fresh):

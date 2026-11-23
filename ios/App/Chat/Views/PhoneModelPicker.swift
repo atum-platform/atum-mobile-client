@@ -9,11 +9,12 @@ import SwiftUI
 /// sign-in crosses: connecting a plan stays where the desktop does it.
 struct AssistantSubscriptionActions {
     let read: () async -> PhoneSubscriptionAccount
-    /// The last argument is the consent decision a ChatGPT write is made
+    /// The consent decision is what a ChatGPT write is made
     /// under (nil for any other plan); the save re-checks it before an
-    /// automatic retry and after a refusal.
-    let save: (ManagedModelDestinationSnapshot, ManagedModelDestinationSource, String, ManagedModelEffort,
-               NativeID, ChatGPTTrainingConsent?) async -> AssistantModelDestinationSaveResult
+    /// automatic retry and after a refusal. The selection must remain live for each send.
+    let save: @MainActor (ManagedModelDestinationSnapshot, ManagedModelDestinationSource, String, ManagedModelEffort,
+                          NativeID, ChatGPTTrainingConsent?, @escaping @MainActor () -> Bool) async
+        -> AssistantModelDestinationSaveResult
     /// The one-time training-off confirmation a ChatGPT pick needs first.
     /// Without it a ChatGPT pick is never written (`ChatGPTTrainingGate`).
     var training: ChatGPTTrainingActions?
@@ -125,6 +126,7 @@ struct PhoneConversationModelPicker: View {
         Group {
             if let confirming, let training = destinations?.subscriptions?.training {
                 ChatGPTTrainingConfirmView(design: design, actions: training, status: confirming.status,
+                                           isSelectionCurrent: { lifetime.isCurrent(confirming.selection) },
                                            onConfirmed: { confirmed(confirming, status: $0) },
                                            onKeep: { self.confirming = nil })
             } else if !rows.isEmpty {
@@ -282,6 +284,7 @@ struct PhoneConversationModelPicker: View {
                 onPick(model)
                 applyDestination(value)
                 destinationWrites.settled()
+            case .cancelled: break
             case let .refused(latest), let .consentRequired(_, latest):
                 if let latest { applyDestination(latest) }
                 saveFailed = true
@@ -325,8 +328,8 @@ struct PhoneConversationModelPicker: View {
     /// The card's confirmation starts the held pick's write only while that
     /// pick is still the picker's current selection.
     private func confirmed(_ pending: PendingChatGPTTraining, status: ChatGPTTrainingStatus) {
-        confirming = nil
         guard lifetime.isCurrent(pending.selection) else { return }
+        confirming = nil
         guard let consent = status.consent else {
             saveFailed = true
             return
@@ -359,7 +362,9 @@ struct PhoneConversationModelPicker: View {
         let operation = subscriptionWrites.begin(SubscriptionWrite(
             connection: row.connectionID, model: row.model, revision: destination.revision))
         Task { @MainActor in
-            let result = await save(destination, row.source, row.model, effort, operation, consent)
+            let result = await save(destination, row.source, row.model, effort, operation, consent) {
+                lifetime.isCurrent(selection)
+            }
             guard !Task.isCancelled, lifetime.isCurrent(selection) else { return }
             savingRowID = nil
             switch result {
@@ -369,6 +374,7 @@ struct PhoneConversationModelPicker: View {
                 onPick(row.model)
                 applyDestination(value)
                 subscriptionWrites.settled()
+            case .cancelled: break
             case let .consentRequired(status, latest):
                 // The consent changed under the write: nothing was retried.
                 // Back to the card for the connection the platform names now.
@@ -525,6 +531,7 @@ private struct PhoneDestinationModelPicker: View {
         Group {
             if let confirming, let training = actions.subscriptions?.training {
                 ChatGPTTrainingConfirmView(design: design, actions: training, status: confirming.status,
+                                           isSelectionCurrent: { lifetime.isCurrent(confirming.selection) },
                                            onConfirmed: { confirmed(confirming, status: $0) },
                                            onKeep: { self.confirming = nil })
             } else {
@@ -579,6 +586,7 @@ private struct PhoneDestinationModelPicker: View {
                 saveFailed = false
                 writes.settled()
                 onValue(value)
+            case .cancelled: break
             case let .refused(latest), let .consentRequired(_, latest):
                 if let latest {
                     // A conflict carries the authoritative snapshot: settled.
@@ -623,8 +631,8 @@ private struct PhoneDestinationModelPicker: View {
     }
 
     private func confirmed(_ pending: PendingChatGPTTraining, status: ChatGPTTrainingStatus) {
-        confirming = nil
         guard lifetime.isCurrent(pending.selection) else { return }
+        confirming = nil
         guard let consent = status.consent else {
             saveFailed = true
             return
@@ -653,7 +661,9 @@ private struct PhoneDestinationModelPicker: View {
         let operation = subscriptionWrites.begin(SubscriptionWrite(
             connection: row.connectionID, model: row.model, revision: value.snapshot.revision))
         Task { @MainActor in
-            let result = await save(value.snapshot, row.source, row.model, effort, operation, consent)
+            let result = await save(value.snapshot, row.source, row.model, effort, operation, consent) {
+                lifetime.isCurrent(selection)
+            }
             guard !Task.isCancelled, lifetime.isCurrent(selection) else { return }
             savingRowID = nil
             switch result {
@@ -662,6 +672,7 @@ private struct PhoneDestinationModelPicker: View {
                 saveFailed = false
                 subscriptionWrites.settled()
                 onValue(value)
+            case .cancelled: break
             case let .consentRequired(status, latest):
                 // The consent changed under the write: nothing was retried.
                 if let latest {

@@ -174,25 +174,33 @@ public enum ChatGPTTrainingPress {
         case askAgain(connectionID: String?)
         /// Nothing was recorded; the card keeps this connection (nil if unread).
         case failed(connectionID: String?)
+        /// The selection was retired while the press was pending.
+        case cancelled
     }
 
     @MainActor
     public static func confirm(connectionID: String?,
+                               isCurrent: () -> Bool = { true },
                                read: () async -> ChatGPTTrainingStatus?,
-                               confirm: (String) async -> ChatGPTTrainingConfirmResult) async -> Outcome {
+                               confirm: @MainActor (String) async -> ChatGPTTrainingConfirmResult) async -> Outcome {
+        guard isCurrent(), !Task.isCancelled else { return .cancelled }
         var connection = connectionID
         if connection == nil {
             let fresh = await read()
+            guard isCurrent(), !Task.isCancelled else { return .cancelled }
             if let fresh, fresh.current { return .confirmed(fresh) }
             connection = fresh?.connectionID
         }
         guard let connection else { return .failed(connectionID: nil) }
-        switch await confirm(connection) {
+        let result = await confirm(connection)
+        guard isCurrent(), !Task.isCancelled else { return .cancelled }
+        switch result {
         case let .confirmed(status):
             guard status.current, status.connectionID == connection else { return .failed(connectionID: connection) }
             return .confirmed(status)
         case .stale:
             let fresh = await read()
+            guard isCurrent(), !Task.isCancelled else { return .cancelled }
             if let fresh, fresh.current { return .confirmed(fresh) }
             return .askAgain(connectionID: fresh?.connectionID)
         case .unavailable:

@@ -1880,11 +1880,13 @@ final class LiveAppModel {
                     return await self?.readSubscriptionAccount()
                         ?? PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)
                 },
-                save: { [weak self] snapshot, source, model, effort, requestID, consent in
+                save: { [weak self] snapshot, source, model, effort, requestID, consent, isSelectionCurrent in
+                    guard isSelectionCurrent() else { return .cancelled }
                     guard let self, current() else { return .refused(nil) }
                     return await self.saveAssistantModelSubscription(
                         roomID: roomID, snapshot: snapshot, source: source,
-                        model: model, effort: effort, requestID: requestID, consent: consent
+                        model: model, effort: effort, requestID: requestID, consent: consent,
+                        isSelectionCurrent: isSelectionCurrent
                     )
                 },
                 // Bound to the client and scope this picker opened with: a
@@ -1895,10 +1897,11 @@ final class LiveAppModel {
                         guard let self, current() else { return nil }
                         return await self.readChatGPTTraining(client: client, isCurrent: current)
                     },
-                    confirm: { [weak self] connectionID in
-                        guard let self, current() else { return .unavailable }
-                        return await self.confirmChatGPTTraining(client: client, connectionID: connectionID,
-                                                                 isCurrent: current)
+                    confirm: { [weak self] connectionID, isSelectionCurrent in
+                        guard let self else { return .unavailable }
+                        return await self.confirmChatGPTTraining(client: client, connectionID: connectionID) {
+                            current() && isSelectionCurrent()
+                        }
                     }
                 )
             )
@@ -2222,7 +2225,7 @@ final class LiveAppModel {
         switch result {
         case let .saved(value): return .saved(value)
         case let .refused(latest), let .preconditionChanged(latest): return .conflict(latest)
-        case .failed: return .failed
+        case .failed, .cancelled: return .failed
         }
     }
 
@@ -2396,7 +2399,7 @@ final class LiveAppModel {
         let result = await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot,
                                                           choice: .destination(destination, model: model),
                                                           requestID: requestID) {
-            client, principal, fence, id in
+            client, principal, fence, id, _ in
             let write = try ManagedModelDestinationWrite(
                 requestId: id, snapshot: fence, destination: destination, model: model
             )
@@ -2405,6 +2408,7 @@ final class LiveAppModel {
         switch result {
         case let .saved(value): return .saved(value)
         case let .refused(latest), let .preconditionChanged(latest): return .refused(latest)
+        case .cancelled: return .cancelled
         case .failed: return .refused(nil)
         }
     }
@@ -2436,9 +2440,9 @@ final class LiveAppModel {
     /// Sends the person's explicit confirmation for the connection the card
     /// read. A sign-out, account switch or scope change mid-flight is "unavailable".
     private func confirmChatGPTTraining(client: NativeDomainClient, connectionID: String,
-                                        isCurrent: () -> Bool) async -> ChatGPTTrainingConfirmResult {
+                                        isCurrent: @MainActor () -> Bool) async -> ChatGPTTrainingConfirmResult {
         guard isCurrent() else { return .unavailable }
-        let result = await client.confirmChatGPTTraining(connectionID: connectionID)
+        let result = await client.confirmChatGPTTraining(connectionID: connectionID, isCurrent: isCurrent)
         guard isCurrent() else { return .unavailable }
         return result
     }
@@ -2457,7 +2461,8 @@ final class LiveAppModel {
                                                 model: String,
                                                 effort: ManagedModelEffort,
                                                 requestID: NativeID,
-                                                consent: ChatGPTTrainingConsent?) async
+                                                consent: ChatGPTTrainingConsent?,
+                                                isSelectionCurrent: @escaping @MainActor () -> Bool) async
         -> AssistantModelDestinationSaveResult {
         var recheck: ChatGPTTrainingRecheck?
         if source == .chatGPTPlan {
@@ -2473,12 +2478,13 @@ final class LiveAppModel {
         let revalidate: (() async -> Bool)? = recheck.map { check in { await check.stillCurrent() } }
         let result = await saveAssistantDestinationChoice(
             roomID: roomID, snapshot: snapshot, choice: .subscription(source, model: model, effort: effort),
-            requestID: requestID, revalidate: revalidate
-        ) { client, principal, fence, id in
+            requestID: requestID, isSelectionCurrent: isSelectionCurrent, revalidate: revalidate
+        ) { client, principal, fence, id, isCurrent in
             let write = try ManagedModelSubscriptionWrite(
                 requestId: id, snapshot: fence, source: source, model: model, effort: effort
             )
-            return try await client.writeManagedModelSubscription(agentPrincipal: principal, value: write)
+            return try await client.writeManagedModelSubscription(agentPrincipal: principal, value: write,
+                                                                  isCurrent: isCurrent)
         }
         switch result {
         case let .saved(value): return .saved(value)
@@ -2489,15 +2495,17 @@ final class LiveAppModel {
             // person retries through the gate.
             if let status = recheck?.latest, !status.current { return .consentRequired(status, latest: latest) }
             return .refused(latest)
+        case .cancelled: return .cancelled
         case .failed: return .refused(nil)
         }
     }
 
     private func saveAssistantDestinationChoice(
         roomID: String, snapshot: ManagedModelDestinationSnapshot, choice: ManagedModelPickerChoice,
-        requestID: NativeID, revalidate: (() async -> Bool)? = nil,
-        write: (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID) async throws
-            -> ManagedModelDestinationSnapshot
+        requestID: NativeID, isSelectionCurrent: @escaping @MainActor () -> Bool = { true },
+        revalidate: (() async -> Bool)? = nil,
+        write: @MainActor (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID,
+                           @MainActor () -> Bool) async throws -> ManagedModelDestinationSnapshot
     ) async -> ManagedModelPickerState<ManagedModelDestinationSnapshot>.SaveResult {
         guard let client = domainClient, let agent = agentForRoom(roomID),
               snapshot.agentPrincipal == agent.principal else { return .failed }
@@ -2505,9 +2513,11 @@ final class LiveAppModel {
         let result = await modelDestinationState(for: agent.principal).save(
             from: snapshot, choice: choice, requestID: requestID, refreshAfterSecondConflict: true,
             isCurrent: current, fetch: { try await client.managedModelDestinations(agentPrincipal: agent.principal) },
-            revalidate: revalidate
+            isSelectionCurrent: isSelectionCurrent, revalidate: revalidate
         ) { fence, id in
-            try await write(client, agent.principal, fence, id)
+            try await write(client, agent.principal, fence, id) {
+                current() && isSelectionCurrent()
+            }
         }
         return result
     }
