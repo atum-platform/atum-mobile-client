@@ -192,4 +192,10 @@ r2 run log:
 - **Run r2b:** the package build failed. The `AtumChat` package also targets
   macOS 13, and `@Observable` needs macOS 14. The controller and its tests now
   carry `@available(macOS 14.0, *)`, as `SharedCollectionsModel` does.
-- **Run r2c:** rerun of the same script.
+- **Run r2c** (`/Volumes/AtumTestFlight/dd-w4-e5/run-r2c.out`): passed.
+  - Filtered package suites: the Stop state, controller, copy contract and
+    turn-stop client tests, plus the Stop tests in `NativeDomainClientTests`.
+    0 failures (`swift-test-r2.log`). Every new r2 test is listed as passed.
+  - Debug build: succeeded (`debug-build-r2.log`).
+  - `TurnStopUITests`: all 6 passed in one pass, including the draft check
+    (`ui-stop-r2.log`, `ui-stop-r2.xcresult`).
