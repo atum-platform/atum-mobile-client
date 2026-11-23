@@ -33,6 +33,8 @@ The verification batch used the shared build lock, two build jobs, the shared pa
 | `swift test --filter AtumDesignTests` | 897 passed, 0 failed on the corrected wallet transport | `package-final.log` |
 | App unit tests | 95 passed, including the cleared-working-line roster case | `app-tests.xcresult`, `app-tests.log` |
 | Picker UI, four selected `ChatInfoUITests` | 4 passed | `ui-tests.xcresult`, `ui-tests.log` |
-| Roster UI, `S1MatrixUITests.testRoster` | Initial setup needed an appearance helper. The helper applied light appearance on retry, then the build volume disconnected during the test. | `ui-tests.xcresult`, `ui-roster-retry.log`, `appearance-runner.log` |
+| Roster UI, `S1MatrixUITests.testRoster` | 1 passed after supplying the appearance helper and remounting the build volume | `ui-roster-resumed.xcresult`, `ui-roster-resumed.log` |
 
-The first package run exposed the transport's fixed extra-header allowlist. The corrected route permits projection 1.4 only on the wallet GET. The app build used that correction. The public guard exited 0 on implementation head `a49df76`. Live Matrix sync and live platform billing remain unverified.
+The first package run exposed the transport's fixed extra-header allowlist. The corrected route permits projection 1.4 only on the wallet GET. The app build used that correction. The first roster UI attempt stopped in setup because the public checkout lacked the appearance helper. A temporary helper serviced the retry, which the build-volume disconnect interrupted. The resumed roster test passed and the batch shut down the simulator. The build intermediates were removed and the result bundles retained.
+
+The public guard exited 0 on implementation head `a49df76`. Live Matrix sync, live platform billing and switching from a live ChatGPT plan to Atum in the composer remain unverified. This port applies the retry rules to the phone's existing model routes. The phone composer prefers its 1.1 offer when present, while `writeMatrixCloudAtumChoice` on desktop uses the destination route when configured.
