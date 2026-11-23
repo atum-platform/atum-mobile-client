@@ -163,13 +163,14 @@ enum ChatRowText {
         }
     }
 
-    /// B7: the delivery mark in words; nil when it shows nothing.
+    /// B7: the delivery mark in words; nil when it shows nothing. A settled,
+    /// unread message says nothing here (desktop #89: no "Sent" receipt);
+    /// "Đã xem" is the faces' state.
     static func delivery(_ mark: DeliveryMark, kind: RoomKind, copy: ChatCopy) -> String? {
         switch mark {
         case .none: nil
         case .sending: copy.text(.pending)
         case .failed: copy.text(.notSent)
-        case .sent: copy.text(.sent)
         case let .seen(readerCount):
             kind == .group && readerCount > 0 ? copy.text(.seenBy, .number(Int64(readerCount))) : copy.text(.seen)
         }

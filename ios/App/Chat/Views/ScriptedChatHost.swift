@@ -386,6 +386,11 @@ struct ScriptedChatHost: View {
         .environment(\.showsConnectionGlyph, Self.showsConnectionGlyph)
         .foregroundStyle(design.color("ink", scheme: scheme))
         .tint(design.color("ink", scheme: scheme))
+        .onChange(of: UITestProbe.moonAnswerRelease != nil && store.snapshot.rows.contains {
+            $0.id == UITestProbe.moonAnswerID
+        }) { _, arrived in
+            if arrived { UITestProbe.append("moon-answer-projected", to: "clock.txt") }
+        }
         .task {
             if let startAt = Self.startAt, startAt > Date() {
                 try? await Task.sleep(for: .seconds(startAt.timeIntervalSinceNow))
@@ -868,6 +873,13 @@ enum UITestProbe {
         return URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
     }()
 
+    /// B13 releases Moon's answer after XCTest observes the message menu.
+    static let moonAnswerRelease: URL? = {
+        guard ProcessInfo.processInfo.arguments.contains("-AtumScriptedHoldMoonAnswer") else { return nil }
+        return folder?.appendingPathComponent("release-moon-answer")
+    }()
+    static let moonAnswerID = "\(ScriptedScenario.botMoonNotice.rawValue).answer"
+
     /// `-AtumScriptedLateDetails`: the quotes of each older page arrive
     /// late, as the SDK delivers them (`ScriptedSourceProbe`).
     static let lateDetails = ProcessInfo.processInfo.arguments.contains("-AtumScriptedLateDetails")
@@ -925,6 +937,13 @@ actor ScriptedSourceProbe: ChatTimelineSource {
             relay = Task {
                 defer { continuation.finish() }
                 for await output in inner.outputs {
+                    if let release = UITestProbe.moonAnswerRelease, case let .batch(batch) = output,
+                       batch.diffs.contains(where: { $0.carriedItems.contains { $0.id == UITestProbe.moonAnswerID } }) {
+                        while !FileManager.default.fileExists(atPath: release.path) {
+                            do { try await Task.sleep(for: .milliseconds(100)) }
+                            catch { return }
+                        }
+                    }
                     // Reproduce a slow mapper/projector independently of the
                     // page call's return. Preserve output order, including idle.
                     if case let .batch(batch) = output,

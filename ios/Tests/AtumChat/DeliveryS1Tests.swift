@@ -3,8 +3,9 @@ import XCTest
 
 /// Plan S1 T for B7, B8 and B10, updated for §9.1: a clock on every pending
 /// item and a warning on failure; Seen where each reader's receipt sits (the
-/// Element X model); "Đã gửi" only under my last unread settled message;
-/// "Đã xem · N" in groups; the failure mapping by `isRecoverable`; the
+/// Element X model); no Sent tick anywhere (desktop #89, owner 2026-11-19:
+/// the faces are the one read signal, an unread message shows just its
+/// time); "Đã xem · N" in groups; the failure mapping by `isRecoverable`; the
 /// two-minute no-answer rule with an injected clock.
 final class DeliveryS1Tests: XCTestCase {
     private func read(_ item: ChatItem, by users: String...) -> ChatItem {
@@ -19,19 +20,19 @@ final class DeliveryS1Tests: XCTestCase {
 
     // MARK: B7
 
-    /// Desktop `send-state.tsx`: Sent is `latest && message.sent`, `latest`
-    /// being my newest message whatever its state (`latestOwnId`).
-    func testOnlyMyNewestMessageShowsSentOnceSettledAndPendingOnesKeepTheirClock() {
+    /// Desktop #89: once the server has it, the clock goes and nothing
+    /// claims a delivery; pending messages keep their clock.
+    func testASettledUnreadMessageCarriesNoMarkAndPendingOnesKeepTheirClock() {
         let items = [F.mine("q1"), F.echo("q2", delivery: .sent(eventID: "$q2")), F.echo("q3"), F.echo("q4")]
         XCTAssertEqual(marks(items), [.none, .none, .sending, .sending],
-                       "older settled messages show nothing while newer ones send; three quick sends show three clocks")
+                       "settled messages show nothing while newer ones send; three quick sends show three clocks")
         let settled = [F.mine("q1"), F.echo("q2", delivery: .sent(eventID: "$q2"))]
-        XCTAssertEqual(marks(settled), [.none, .sent])
+        XCTAssertEqual(marks(settled), [.none, .none], "no Sent tick on my newest message either")
     }
 
     func testAFailedNewestSendShowsOnlyItsWarning() {
         let items = [F.mine("q1"), F.echo("q2", delivery: .failed(isRecoverable: true))]
-        XCTAssertEqual(marks(items), [.none, .failed], "desktop: no Sent above a failed newest message")
+        XCTAssertEqual(marks(items), [.none, .failed], "the failed mark is unchanged and nothing sits above it")
     }
 
     // MARK: §9.1 Seen faces
@@ -84,37 +85,39 @@ final class DeliveryS1Tests: XCTestCase {
     func testSeenSitsOnTheMessageWhoseReceiptItIs() {
         XCTAssertEqual(marks([read(F.mine("q"), by: F.agent)]), [.seen(readerCount: 1)])
         let answered = [F.mine("q"), read(F.text("a", from: F.agent), by: F.agent)]
-        XCTAssertEqual(marks(answered), [.sent, .none],
+        XCTAssertEqual(marks(answered), [.none, .none],
                        "the reader's receipt sits on the answer, not on my earlier message")
         let older = [read(F.mine("q0"), by: F.agent), F.mine("q1")]
-        XCTAssertEqual(marks(older), [.seen(readerCount: 1), .sent],
+        XCTAssertEqual(marks(older), [.seen(readerCount: 1), .none],
                        "each reader's avatar appears under the message their receipt names")
     }
 
     func testMyOwnReceiptsFromTheMacNeverCountAsSeen() {
-        XCTAssertEqual(marks([read(F.mine("q"), by: F.me)]), [.sent])
+        XCTAssertEqual(marks([read(F.mine("q"), by: F.me)]), [.none])
     }
 
     func testAReceiptOnAHiddenRowIsNotMyMessagesReceipt() {
         let items = [F.mine("q"), read(ChatItem(id: "topic", kind: .roomState, sender: F.agent), by: F.agent)]
-        XCTAssertEqual(marks(items), [.sent],
+        XCTAssertEqual(marks(items), [.none],
                        "a receipt on a later hidden row does not move back to my message")
     }
 
-    func testGroupsCountEachReaderOncePeopleRoomsShowNoSent() {
+    func testGroupsCountEachReaderOnceAndNoRoomKindShowsSent() {
         let group = RoomContext(kind: .group, ownUserID: F.me)
         let items = [read(F.mine("q"), by: F.other, F.friend), read(F.text("t", from: F.other), by: F.other)]
         XCTAssertEqual(marks(items, group), [.seen(readerCount: 2), .none])
-        XCTAssertEqual(marks([F.mine("q")], F.personRoom()), [.sent],
-                       "§9.1: Sent sits under the last unread message in every room")
+        XCTAssertEqual(marks([F.mine("q")], F.personRoom()), [.none],
+                       "desktop #89: an unread message shows just its time in every room")
         XCTAssertEqual(marks([read(F.mine("q"), by: F.friend)], F.personRoom()), [.seen(readerCount: 1)])
-        XCTAssertEqual(marks([F.mine("q")], F.botRoom()), [.sent], "bot chats show Sent like assistants")
+        XCTAssertEqual(marks([F.mine("q")], F.botRoom()), [.none], "bot chats show no Sent either")
+        XCTAssertEqual(marks([F.mine("q")], RoomContext(kind: .group, ownUserID: F.me)), [.none])
     }
 
-    func testSettledMeansSentOrRemoteAndNoticesOrPlaceholdersNeverCarryIt() {
+    func testPlaceholdersNeverCarryAMarkAndAFailureKeepsItsWarning() {
         var deleted = F.mine("d")
         deleted.kind = .placeholder(.redacted)
-        XCTAssertEqual(marks([F.mine("q"), deleted]), [.sent, .none])
+        XCTAssertEqual(marks([F.mine("q"), deleted]), [.none, .none])
+        XCTAssertEqual(marks([read(deleted, by: F.agent)]), [.none], "a deleted message shows no faces")
         XCTAssertEqual(marks([F.echo("q", delivery: .failed(isRecoverable: false))]), [.failed])
     }
 
@@ -178,7 +181,7 @@ final class DeliveryS1Tests: XCTestCase {
         let items = [mine("q", minute: 0)]
         let flagged = Projection.rows(items, context: F.assistantRoom(), options: .s1, now: F.at(11))
         XCTAssertEqual(flagged.filter(\.showsNoAnswer).map(\.id), ["q"])
-        XCTAssertEqual(flagged.first?.delivery, .sent, "Sent and the no-answer line show together")
+        XCTAssertEqual(flagged.first?.delivery, DeliveryMark.none, "the no-answer flag needs no Sent mark")
         XCTAssertFalse(Projection.rows(items, context: F.assistantRoom(), options: .s1).contains(where: \.showsNoAnswer),
                        "no clock, no flag")
         XCTAssertFalse(Projection.rows(items, context: F.assistantRoom(), now: F.at(11)).contains(where: \.showsNoAnswer),

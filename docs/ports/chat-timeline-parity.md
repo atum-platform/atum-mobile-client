@@ -32,10 +32,10 @@ serves the 32 pt member rows.
   "+N" for the rest. Tapping shows every reader's name in a popover, the phone's
   form of desktop's tooltip. The button's accessibility label is `seen` in the
   assistant's chat, else `seenBy(N)`, with the names as its value.
-- Sent follows desktop's `latest && message.sent`: only my newest message, once it
-  has settled and while nobody has read it. While a newer message is still sending
-  or has failed, its clock or warning is the only mark. Before, an older settled
-  message kept "Đã gửi". Sent also gains desktop's check glyph.
+- One read signal (desktop #89, owner 2026-11-19; see `w4-read-signal.md`): the
+  readers' faces are the only receipt. The Sent check and "Đã gửi" are gone, so a
+  settled message nobody has read shows just its time. While a message is still
+  sending or has failed, its clock or warning is its mark.
 
 ## Typing (desktop `MatrixTypingLine`, `MatrixAgentWorking`)
 
@@ -72,7 +72,7 @@ bubble with the name and three dots in assistant and app chats.
 
 Desktop puts the clock in the quiet line under a bubble, not in a centred label:
 - under the last bubble of each run (`runEnd`, `src/matrix/app.tsx:1672`/`:1676`);
-- for my messages, sharing the line with Sent or Seen (`send-state.tsx:85`);
+- for my messages, sharing the line with the Seen faces (`send-state.tsx`);
 - under every answer of my agent, in the answer toolbar before Copy (`app.tsx:1748`).
 
 The phone drew a centred label only after a 60-minute gap. Now:
@@ -86,7 +86,7 @@ The phone drew a centred label only after a 60-minute gap. Now:
   Day dividers keep desktop's line and pill.
 - `RowGrouping.showsEdited` (desktop `personEdited`): people's edits, mine included.
   An agent's or app bot's edit (a streamed answer) no longer says "đã sửa".
-- `DeliveryLine` draws one line: "14:05 · đã sửa · ✓ Đã gửi" (or the Seen faces). For
+- `DeliveryLine` draws one line: "14:05 · đã sửa", then the Seen faces once read. For
   the newest answer it draws "14:05" then Copy, which moved here from its own row.
   "đã sửa" left the bubble. In team space flat runs the line carries no clock,
   because the run header already shows it.
@@ -119,7 +119,7 @@ pill (ground fill, `line` border, `soft` semibold caption). The labels are uncha
 | --- | --- | --- |
 | Answer toolbar: desktop has copy, 👍 good answer, 👎 bad answer and retry; the phone has copy only. Keys `goodAnswer` and `badAnswer` are not in the pin | `app.tsx:1759` | `App/Chat/Views/AnswerActionsRow.swift:10` |
 | Seen accessibility words: desktop says `seenBy(N)` in every chat but the assistant's; the phone's row label says it only in groups | `send-state.tsx:52` | `App/Chat/Views/ChatRowView.swift:178` (shared lane) |
-| "đã sửa" time tooltip (`editedAt` is not in the pin). When the edited message does not end its run, desktop puts "đã sửa" on its own line apart from Seen/Sent; the phone keeps one line | `app.tsx:1507`, `:1663` | `App/Chat/Views/DeliveryLine.swift` |
+| "đã sửa" time tooltip (`editedAt` is not in the pin). When the edited message does not end its run, desktop puts "đã sửa" on its own line apart from Seen; the phone keeps one line | `app.tsx:1507`, `:1663` | `App/Chat/Views/DeliveryLine.swift` |
 | Failed send line (TL-6, copy missing, see above) | `src/matrix/message-actions.tsx:487` | `App/Chat/Views/DeliveryLine.swift` (`.failed`) |
 | My agent answering in a group: desktop gives every answer its time and hides its "đã sửa"; live phone groups carry no agent IDs, so these get run-end times and still say "đã sửa" | `app.tsx:1115`, `:1153` | `App/LiveAppModel.swift:3316` |
 | Day labels: desktop uses Today/Yesterday, else the long weekday and date; the phone uses the weekday alone for 2–6 days ago | `src/matrix/message-time.ts` `matrixDayLabel` | `Sources/AtumChat/DayLabel.swift:31` |
