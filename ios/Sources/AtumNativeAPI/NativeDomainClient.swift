@@ -277,7 +277,9 @@ public struct AgentsRead: Sendable {
         let receipt = try await performAuthorized(url: url, body: body, extraHeaders: [
             "Origin": Self.scheduleStopOrigin, CloudScheduleStop.bridgeHeader: CloudScheduleStop.bridgeVersion
         ], maximumResponseBodyBytes: 4_096)
-        if [403, 404, 503].contains(receipt.status) { onRouteUnavailable() }
+        // Only a definitive denial withdraws this execution's Stop; a 503 is
+        // transient: refused band, Stop offered again (review r1).
+        if [403, 404].contains(receipt.status) { onRouteUnavailable() }
         do { return try CloudScheduleStop.result(status: receipt.status, data: receipt.body, for: input) }
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
