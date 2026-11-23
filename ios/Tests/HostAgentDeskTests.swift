@@ -77,6 +77,25 @@ final class HostAgentDeskTests: XCTestCase {
         XCTAssertEqual(HostAgentDesk.resolve(.failed, for: .pause, retried: false), .rollBackFailed)
     }
 
+    func testARollBackUndoesOnlyWhatItsOwnControlMoved() {
+        typealias Job = HostAgentDesk.Job
+        let before = [Job(id: "a", name: "A", state: .scheduled), Job(id: "b", name: "B", state: .scheduled)]
+        // A then B switched off; B's change landed after A's optimistic one.
+        let afterA = HostAgentDesk.optimistic(.routineOff(job: "a"), before)
+        let afterB = HostAgentDesk.optimistic(.routineOff(job: "b"), afterA)
+        // A fails: only A comes back on, B stays off.
+        let undone = HostAgentDesk.rollBack(.routineOff(job: "a"), from: before, in: afterB)
+        XCTAssertEqual(undone.map(\.state), [.scheduled, .paused])
+        // A field something else changed since is not touched.
+        var moved = afterA
+        moved[0].state = .running
+        XCTAssertEqual(HostAgentDesk.rollBack(.routineOff(job: "a"), from: before, in: moved)[0].state, .running)
+        // Pause rolls back every routine it paused, and only those.
+        let mixed = [Job(id: "a", name: "A", state: .scheduled), Job(id: "b", name: "B", state: .paused)]
+        let paused = HostAgentDesk.optimistic(.pause, mixed)
+        XCTAssertEqual(HostAgentDesk.rollBack(.pause, from: mixed, in: paused).map(\.state), [.scheduled, .paused])
+    }
+
     func testARoutineSwitchedOffOnItsOwnSwitchSaysNothingMore() throws {
         let jobs = try schedule([job("a", "paused", reason: "owner_routine_off"), job("b", "paused", reason: "owner_pause"),
                                  job("c", "paused"), job("d", "scheduled", next: "2026-11-24T08:00:00.000+07:00")]).jobs

@@ -3525,6 +3525,38 @@ extension NativeDomainClientTests {
         XCTAssertEqual(changed, .changed(1))
     }
 
+    func testHostDeskFilesNamesTheReadAdmissionBusy() async throws {
+        // Platform migration 0471: a second files read within 10 s is 429, not a broken folder.
+        NativeDomainProtocol.state.handler = { _ in .init(status: 429, chunks: [Data(#"{"error":"busy"}"#.utf8)]) }
+        let agent = try deskAgent
+        do {
+            _ = try await client(TestAuthorization(first: "t")).hostDeskFiles(agent: agent, path: "home/reports")
+            XCTFail("a busy read was a listing")
+        } catch {
+            XCTAssertEqual(error as? HostAgentDesk.ReadBusy, HostAgentDesk.ReadBusy())
+        }
+    }
+
+    func testHostDeskAndControlCapTheirRepliesAtTheContractLimits() async throws {
+        let agent = try deskAgent
+        // The desk: 64 KiB, refused by the transport before decoding.
+        NativeDomainProtocol.state.handler = { _ in
+            .init(headers: ["Content-Type": "application/json", "Content-Length": "65537"])
+        }
+        do {
+            _ = try await client(TestAuthorization(first: "t")).hostDeskSchedule(agent: agent)
+            XCTFail("an oversized desk reply was read")
+        } catch {
+            XCTAssertEqual(error as? NativeDomainClientFailure, .responseTooLarge)
+        }
+        // The control: 4 KiB, even on a 429 that would otherwise read as busy.
+        NativeDomainProtocol.state.handler = { _ in
+            .init(status: 429, headers: ["Content-Type": "application/json", "Content-Length": "4097"])
+        }
+        let outcome = await client(TestAuthorization(first: "t")).hostAgentControl(agent: agent, .pause)
+        XCTAssertEqual(outcome, .failed)
+    }
+
     func testHostAgentControlRefusesAReplyForAnotherAction() async throws {
         NativeDomainProtocol.state.handler = { _ in .json(Data(#"{"action":"resume","changed":1}"#.utf8)) }
         let agent = try deskAgent

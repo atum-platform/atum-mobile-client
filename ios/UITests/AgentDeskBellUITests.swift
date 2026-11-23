@@ -41,6 +41,7 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
                 XCUIDevice.shared.appearance = appearance
                 let tag = "\(language)-\(appearance == .dark ? "dark" : "light")"
                 try checkDesk(language: language, tag: tag)
+                try checkSave(tag: tag)
                 try checkBell(language: language, tag: tag)
             }
         }
@@ -94,6 +95,36 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         element(app, "desk.allSettings").tap()
         XCTAssertTrue(waitFor(3) { !self.element(app, "desk.page").exists }, "All settings stayed on the desk")
         XCTAssertTrue(element(app, "info.sheet").exists)
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
+    }
+
+    /// Save: a download that fails says so in an alert; one that works opens
+    /// the system's export sheet for that file.
+    @MainActor
+    private func checkSave(tag: String) throws {
+        // The probe folder is this test's: count only what this launch adds.
+        let pickers = { self.probeLines("agent-desk.txt").filter { $0.text.hasPrefix("save picker ") && $0.text.hasSuffix("ke-hoach-q4.pdf") }.count }
+        let opened = pickers()
+        let app = launch(.chatAgentDesk, language: tag.hasPrefix("vi") ? "vi" : "en")
+        XCTAssertTrue(element(app, "chat.more").waitForExistence(timeout: 15), boundedHierarchy(app))
+        element(app, "chat.more").tap()
+        XCTAssertTrue(element(app, "desk.page").waitForExistence(timeout: 5), boundedHierarchy(app))
+        element(app, "desk.page").swipeUp()
+        let broken = app.buttons["desk.file.save.chat.agent-desk.file.8"]
+        XCTAssertTrue(broken.waitForExistence(timeout: 3), boundedHierarchy(app))
+        broken.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "a failed Save said nothing: \(boundedHierarchy(app))")
+        keepScreenshot("w4-e3-desk-save-failed-\(tag)", of: app)
+        alert.buttons.firstMatch.tap()
+        XCTAssertTrue(waitFor(3) { !alert.exists }, "the alert stayed")
+        XCTAssertTrue(waitFor(3) { broken.isEnabled }, "Save stayed disabled after the failure")
+        XCTAssertEqual(pickers(), opened, "a failed download opened the export sheet")
+
+        app.buttons["desk.file.save.chat.agent-desk.file"].tap()
+        XCTAssertTrue(waitFor(8) { pickers() == opened + 1 }, "the export sheet never opened")
+        keepScreenshot("w4-e3-desk-save-picker-\(tag)", of: app)
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
     }

@@ -22,6 +22,11 @@ public enum HostAgentDesk {
     /// The Shell's shared cooldown answers a quick second control with 429;
     /// desktop retries once after this (`MATRIX_AGENT_CONTROL_RETRY_MS`).
     public static let controlRetryDelay: Duration = .milliseconds(10_500)
+    /// The Shell admits one `files` read per agent every 10 s (platform
+    /// migration 0471 `host_desk_read_admission`); a folder opened sooner is
+    /// answered 429 and asked again after this.
+    public static let readRetryDelay: Duration = .milliseconds(10_500)
+    public static let maximumControlBytes = 4 * 1024
     public static let pausedReasonMaximum = 160
 
     /// What a desk read asks for. Desktop's UI reads only these two.
@@ -213,6 +218,19 @@ public enum HostAgentDesk {
         }
     }
 
+    /// How one folder read ended. `busy` is the Shell's read admission (429):
+    /// nothing is wrong with the folder, it is asked again after the cooldown.
+    public enum FilesOutcome: Equatable, Sendable {
+        case listed(Files)
+        case busy
+        case failed
+    }
+
+    /// A desk read answered 429 by the Shell's read admission.
+    public struct ReadBusy: Error, Equatable, Sendable {
+        public init() {}
+    }
+
     public static func schedule(_ data: Data) throws -> Schedule {
         guard data.count <= maximumDeskBytes else { throw ContractViolation.invalidValue }
         return try NativeAPI.decode(Schedule.self, from: data)
@@ -273,7 +291,7 @@ public enum HostAgentDesk {
 
     /// Only the same action's `{action, changed}` is a reply.
     public static func controlReply(_ data: Data, for control: Control) throws -> ControlReply {
-        guard data.count <= 4096 else { throw ContractViolation.invalidValue }
+        guard data.count <= maximumControlBytes else { throw ContractViolation.invalidValue }
         let reply = try NativeAPI.decode(ControlReply.self, from: data)
         guard reply.action == control.action else { throw ContractViolation.invariant }
         return reply
@@ -354,6 +372,21 @@ extension HostAgentDesk {
             case let .routineOff(id):
                 if job.id == id, live.contains(job.state) { job.state = .paused }
             }
+            return job
+        }
+    }
+
+    /// Undo one control after the host refused it: only the routines that
+    /// control itself moved go back, and only while they still show what it
+    /// set, so a later switch's change is never erased.
+    public static func rollBack(_ control: Control, from before: [Job], in current: [Job]) -> [Job] {
+        let moved = optimistic(control, before)
+        let was = Dictionary(before.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+        let set = Dictionary(moved.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+        return current.map { job in
+            guard let old = was[job.id], let new = set[job.id], old != new, job.state == new else { return job }
+            var job = job
+            job.state = old
             return job
         }
     }

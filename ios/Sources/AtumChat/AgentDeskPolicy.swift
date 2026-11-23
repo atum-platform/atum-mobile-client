@@ -6,28 +6,49 @@ import Foundation
 /// execution authority, and Now never disagrees with the chat, because it
 /// reads the chat's own working footer.
 public enum AgentDeskPolicy {
-    /// Now: free (the desk says nothing at all) or working, with the working
-    /// line's own words. Desktop's Waiting and On your device come from
-    /// signals the phone's panel does not receive (an open ask, a native wait
-    /// phase, a reach-down device); they are not guessed here.
+    /// Now: free (the desk says nothing at all), working with the working
+    /// line's own words, or waiting while the native turn waits on the owner
+    /// (its progress marker in phase `waiting`, e.g. an approval). Desktop's
+    /// open asks and On your device come from signals the phone's panel does
+    /// not receive; they are not guessed here.
     public enum Now: Equatable, Sendable {
         case free
         case working(since: Date?, line: String?, steps: [WorkingLineText.Step])
+        case waiting(since: Date?, line: String?)
     }
 
     /// How many sent files the desk's Files section shows (`MATRIX_AGENT_DESK_FILES_MAX`).
     public static let sentFilesMaximum = 4
 
     /// Working while the chat shows its working footer (typing or a live
-    /// working line). Since: the question it answers, i.e. the newest own
-    /// message before the footer, else unknown (the head then says only the state).
-    public static func now(rows: [ChatRow]) -> Now {
+    /// working line). Its words are the transcript's own (`WorkingLineRow`):
+    /// a coded status reads through `exported`, the same lookup the chat uses.
+    /// Since: the question it answers, i.e. the newest own message before the
+    /// footer, else unknown (the head then says only the state).
+    public static func now(rows: [ChatRow], exported: (String, Int?) -> String? = { _, _ in nil }) -> Now {
         guard let footer = rows.last(where: { if case .typing = $0.item.kind { true } else { false } }) else {
             return .free
         }
-        let text = WorkingLineText(body: footer.item.body)
+        let progress = footer.item.progress
         let asked = rows.last(where: { $0.item.isOwn && $0.item.kind.isEventContent })?.item.timestamp
-        return .working(since: asked, line: text.current, steps: text.steps)
+        // A heartbeat says only that it is still at it (desktop drops its words).
+        let parts: (current: String?, steps: [WorkingLineText.Step]) = progress?.kind == "heartbeat" ? (nil, [])
+            : lineParts(WorkingLineText(body: footer.item.body, presentation: progress?.presentation,
+                                        exported: exported))
+        if progress?.phase == .waiting {
+            return .waiting(since: asked, line: parts.current)
+        }
+        return .working(since: asked, line: parts.current, steps: parts.steps)
+    }
+
+    /// Desktop `matrixProgressLineParts`: a native Hermes todo list has only
+    /// marked lines; then every line is a step and there is no headline.
+    static func lineParts(_ text: WorkingLineText) -> (current: String?, steps: [WorkingLineText.Step]) {
+        guard let current = text.current, let first = current.unicodeScalars.first,
+              "✓✔•◦".unicodeScalars.contains(first) else { return (text.current, text.steps) }
+        let done = first == "✓" || first == "✔"
+        let step = current.replacingOccurrences(of: "^[✓✔•◦]\\s*", with: "", options: .regularExpression)
+        return (nil, [WorkingLineText.Step(text: step, done: done)] + text.steps)
     }
 
     /// Whole minutes since `since`, or nil under one (desktop `matrixAgentDeskMinutes`).

@@ -112,9 +112,10 @@ touched. Everything else lives in `ios/App/Chat/AgentDeskLive.swift`.
   ("…"). This is a follow-up for that lane: open the panel with `.agentDesk`.
 - **Stop on the desk.** The Stop lane owns Stop. With the desk at medium, the
   composer's own Stop stays in view under it.
-- **Waiting for you, the ask, and On your device.** These read an open ask, the native
-  wait phase and Mac reach-down. The panel does not receive those signals, and they
-  are not guessed. The phone is cloud-only, so it has no Devices section.
+- **The ask and On your device.** These read an open ask and Mac reach-down. The
+  panel does not receive those signals, and they are not guessed. The phone is
+  cloud-only, so it has no Devices section. (Waiting is ported in fix round r2: see
+  below.)
 - **The model row in Controls.** W4-E2 owns the model picker. The card ("All
   settings") still has it.
 - **The address bar and the browser frame.** The phone has no in-app browser tabs.
@@ -124,12 +125,27 @@ touched. Everything else lives in `ios/App/Chat/AgentDeskLive.swift`.
   "Connect your Atum account" need sources the phone does not have yet: approval
   requests in the bell, per-agent readiness on `/agents`, and sign-in notices.
 
+## Fix round r2 (review of `3529715`)
+
+| Finding | Fix | Test |
+|---|---|---|
+| 1. Folder taps hit the Shell's 10 s `files` read admission (platform migration 0471): 429 collapsed to nil, stale rows under a new Back, and re-tapping never restarted | `HostAgentDesk.FilesOutcome` keeps `busy` apart (the client throws `HostAgentDesk.ReadBusy` on 429). `AgentDeskModel` (`ios/App/Chat/AgentDeskModel.swift`) asks a busy folder again after `readRetryDelay` (10.5 s) while it is still the folder asked for. The shown path changes only when its own listing arrives. Confirmed listings are cached for Back. A refused folder clears the request, so it can be tapped again | `AgentDeskBellTests.testAFolderOpenedInsideTheReadCooldownWaitsAndShowsOnlyWhenListed`, `testARefusedFolderCanBeOpenedAgain`, `NativeDomainClientTests.testHostDeskFilesNamesTheReadAdmissionBusy` |
+| 2. Overlapping switches could erase a change, and Pause/Resume could arrive out of order | One control at a time, like `RoomMutationQueue` serializes a room field (`ios/App/Home/RoomMutationQueue.swift:8`): every schedule switch is disabled while one settles (`controlPending`). `HostAgentDesk.rollBack` undoes only what that control moved, and only while it still shows that value. An ambiguous failure (`.failed`) reads the host's schedule again | `AgentDeskBellTests.testControlsReachTheHostOneAtATimeAndUndoOnlyTheirOwnChange`, `HostAgentDeskTests.testARollBackUndoesOnlyWhatItsOwnControlMoved` |
+| 3. The 10.5 s retry could still send after the desk closed or the account changed | `AgentDeskModel.disappear()` cancels the control task, including its sleep. `AgentDeskActions.fenced(by:)` checks the account, the client, the agent and `runsOnHermes` before every send and again on every reply | `AgentDeskBellTests.testTheDelayedRetryIsNeverSentAfterTheDeskCloses`, `testNoHostCallIsSentOnceTheAccountOrAgentChanged` |
+| 4. Now lost live status | `AgentDeskPolicy.now(rows:exported:)` reads the footer's `progress` with the transcript's own status lookup (`WorkingLineRow.swift:18`). Phase `waiting` is desktop's Waiting (`waiting` copy, a still dot, its line, no checklist), never Working. A heartbeat drops its words, as on desktop. An all-marked Hermes checklist keeps every step (desktop `matrixProgressLineParts`). Each step's done state is the `isSelected` trait on its words | `AgentDeskPolicyTests.testNowReadsTheTranscriptsStatusAndSaysWaitingDuringAKnownWait`, `testAnAllMarkedChecklistKeepsEveryStep` |
+| 5. A failed Save said nothing | The Shared Collections alert (`SharedCollectionsSection.swift:771`): `errorGeneric` with `dismiss`. The scripted desk has a second file whose first download fails. The export sheet writes a debug probe line when it opens | `AgentDeskBellUITests.checkSave` (en/vi × light/dark) |
+| 6. Response limits | The desk reply is capped at `HostAgentDesk.maximumDeskBytes` (64 KiB) and the control reply at `maximumControlBytes` (4 KiB). Both are passed to `performAuthorized` | `NativeDomainClientTests.testHostDeskAndControlCapTheirRepliesAtTheContractLimits` |
+
+Reviewer's wording for 4 was "suppress Now during a known wait". The phone instead
+ports desktop's Waiting block, because desktop renders it and the `waiting` key is
+in the pin. Working is still never shown during a wait.
+
 ## Copy
 
 Every visible string comes from the pinned export through `design.text(key)`.
 Nothing is hard-coded, the vendored export and `atum-design.lock` are unchanged,
 and one key is pending (below). Keys used:
-`shared.matrix-agent-desk-copy.matrixAgentDeskCopy.{desk, working, minutes,
+`shared.matrix-agent-desk-copy.matrixAgentDeskCopy.{desk, working, waiting, minutes,
 steerHint, queueHint, files, sentHere, save, saveShort, more, less, onItsComputer,
 back, controls, notifications, moreControls, routines, paused, nextRun,
 allSettings, pause, pauseHint, controlFailed, computerOff}` and

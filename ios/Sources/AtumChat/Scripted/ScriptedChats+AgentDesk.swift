@@ -16,6 +16,13 @@ extension ScriptedChats {
             timestamp: env.ago(minutes: 8), eventOrTransactionId: .event("$" + fileID), body: "ke-hoach-q4.pdf",
             media: ChatMedia(sourceHandle: "scripted:" + fileID, mimetype: "application/pdf",
                              filename: "ke-hoach-q4.pdf", isAnimated: false, byteSize: 48_128)))
+        // A second file whose first download fails (`ScriptedMediaAccess`'s `.file.8`): Save says so.
+        let brokenID = "\(name).file.8"
+        initial.append(ChatItem(
+            id: brokenID, kind: .file(name: "bao-cao.pdf"), sender: Cast.atum, senderName: Cast.names[Cast.atum],
+            timestamp: env.ago(minutes: 7), eventOrTransactionId: .event("$" + brokenID), body: "bao-cao.pdf",
+            media: ChatMedia(sourceHandle: "scripted:" + brokenID, mimetype: "application/pdf",
+                             filename: "bao-cao.pdf", isAnimated: false, byteSize: 12_288)))
         let questionID = "\(name).question"
         initial.append(ChatItem(id: questionID, kind: .message, sender: Cast.me, isOwn: true,
                                 timestamp: env.ago(minutes: 5), eventOrTransactionId: .event("$" + questionID),

@@ -29,6 +29,39 @@ final class AgentDeskPolicyTests: XCTestCase {
         XCTAssertEqual(steps, [.init(text: "Đọc tệp", done: true), .init(text: "Viết tóm tắt", done: false)])
     }
 
+    func testNowReadsTheTranscriptsStatusAndSaysWaitingDuringAKnownWait() {
+        let question = row("q", sender: "@me:atum.test", own: true, at: 1, body: "Gửi giúp mình")
+        var footer = row("typing", .typing(names: []), sender: "", body: "")
+        footer.item.progress = ChatProgress(phase: .waiting, kind: "approval_wait",
+                                            presentation: .approvalWait)
+        let exported: (String, Int?) -> String? = { key, _ in "exported:" + key }
+        // An approval wait is never Working: it is the wait, in the chat's own words.
+        guard case let .waiting(since, line) = AgentDeskPolicy.now(rows: [question, footer], exported: exported) else {
+            return XCTFail("a wait read as working")
+        }
+        XCTAssertEqual(since, base.addingTimeInterval(60))
+        XCTAssertEqual(line, TurnStatusPendingCopy.text(.approvalWait, exported: exported))
+        XCTAssertNotNil(line)
+        // A coded working status reads through the same lookup the transcript uses.
+        footer.item.progress = ChatProgress(phase: .working, kind: "activity", presentation: .toolActivity(.web))
+        footer.item.body = "raw-code\n✓ Đọc tệp"
+        guard case let .working(_, working, steps) = AgentDeskPolicy.now(rows: [question, footer], exported: exported) else {
+            return XCTFail("not working")
+        }
+        XCTAssertEqual(working, "exported:" + ChatProgressPresentation.toolActivity(.web).exportKey)
+        XCTAssertEqual(steps, [.init(text: "Đọc tệp", done: true)])
+    }
+
+    func testAnAllMarkedChecklistKeepsEveryStep() {
+        let footer = row("typing", .typing(names: []), sender: "", body: "✓ Đọc tệp\n✓ Viết nháp\n• Gửi")
+        guard case let .working(_, line, steps) = AgentDeskPolicy.now(rows: [footer]) else {
+            return XCTFail("not working")
+        }
+        XCTAssertNil(line)
+        XCTAssertEqual(steps, [.init(text: "Đọc tệp", done: true), .init(text: "Viết nháp", done: true),
+                               .init(text: "Gửi", done: false)])
+    }
+
     func testMinutesStartAtOneWholeMinute() {
         XCTAssertNil(AgentDeskPolicy.minutes(since: nil, now: base))
         XCTAssertNil(AgentDeskPolicy.minutes(since: base, now: base.addingTimeInterval(59)))

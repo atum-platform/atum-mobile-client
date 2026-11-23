@@ -21,6 +21,7 @@ enum ScriptedAgentDesk {
             files: { path in
                 let json = path == nil ? home : path == "home/reports" ? reports : nil
                 return json.flatMap { try? HostAgentDesk.files(Data($0.utf8), for: path) }
+                    .map(HostAgentDesk.FilesOutcome.listed) ?? .failed
             },
             control: { control in
                 UITestProbe.append("control \(control.action)", to: "agent-desk.txt")

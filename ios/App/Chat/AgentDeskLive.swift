@@ -15,23 +15,51 @@ extension LiveAppModel {
         var actions = AgentDeskActions(agentUserID: context.agent.matrixUser?.rawValue,
                                        steers: context.agent.runsOnHermes)
         guard context.agent.runsOnHermes else { return actions }
-        // A reply that lands after the account, client or agent changed is dropped.
+        // Checked before every send and again on every reply: nothing is sent,
+        // and nothing lands, after the account, client or agent changed or the
+        // agent stopped running on Hermes.
         let current: @MainActor () -> Bool = { [weak self] in
             guard let now = self?.agentDeskContext(roomID: roomID) else { return false }
-            return now.client === client && now.agent.principal == principal
+            return now.client === client && now.agent.principal == principal && now.agent.runsOnHermes
         }
-        actions.schedule = { () async -> HostAgentDesk.Schedule? in
-            let schedule = try? await client.hostDeskSchedule(agent: principal)
-            return current() ? schedule : nil
+        actions.schedule = { try? await client.hostDeskSchedule(agent: principal) }
+        actions.files = { (path: String?) async -> HostAgentDesk.FilesOutcome in
+            do { return .listed(try await client.hostDeskFiles(agent: principal, path: path)) }
+            catch is HostAgentDesk.ReadBusy { return .busy }
+            catch { return .failed }
         }
-        actions.files = { (path: String?) async -> HostAgentDesk.Files? in
-            let files = try? await client.hostDeskFiles(agent: principal, path: path)
-            return current() ? files : nil
+        actions.control = { control in await client.hostAgentControl(agent: principal, control) }
+        return actions.fenced(by: current)
+    }
+}
+
+extension AgentDeskActions {
+    /// Every host call checks `current` before it is sent and again when it
+    /// answers: a call is never sent, and a reply never lands, once the
+    /// account, client or agent changed or the agent left Hermes.
+    func fenced(by current: @escaping @MainActor () -> Bool) -> AgentDeskActions {
+        var fenced = self
+        if let schedule {
+            fenced.schedule = {
+                guard current() else { return nil }
+                let read = await schedule()
+                return current() ? read : nil
+            }
         }
-        actions.control = { (control: HostAgentDesk.Control) async -> HostAgentDesk.ControlOutcome in
-            let outcome = await client.hostAgentControl(agent: principal, control)
-            return current() ? outcome : .failed
+        if let files {
+            fenced.files = { path in
+                guard current() else { return .failed }
+                let outcome = await files(path)
+                return current() ? outcome : .failed
+            }
         }
-        return actions
+        if let control {
+            fenced.control = { request in
+                guard current() else { return .failed }
+                let outcome = await control(request)
+                return current() ? outcome : .failed
+            }
+        }
+        return fenced
     }
 }

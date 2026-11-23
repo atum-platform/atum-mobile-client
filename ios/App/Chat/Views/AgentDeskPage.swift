@@ -16,7 +16,8 @@ struct AgentDeskActions {
     /// `POST /api/host/desk` `{read: schedule}`; nil without the host route.
     var schedule: (@MainActor () async -> HostAgentDesk.Schedule?)?
     /// `POST /api/host/desk` `{read: files, path?}`; nil without the host route.
-    var files: (@MainActor (String?) async -> HostAgentDesk.Files?)?
+    /// A busy outcome is the Shell's 10 s read admission, asked again later.
+    var files: (@MainActor (String?) async -> HostAgentDesk.FilesOutcome)?
     /// `POST /api/host/agent-control`; nil without the host route.
     var control: (@MainActor (HostAgentDesk.Control) async -> HostAgentDesk.ControlOutcome)?
 }
@@ -61,16 +62,12 @@ struct AgentDeskPage: View {
     let close: () -> Void
 
     @Environment(\.colorScheme) private var scheme
-    @State private var jobs: [HostAgentDesk.Job]?
-    @State private var problem: Problem?
+    @State private var model: AgentDeskModel
     @State private var muted: Bool
     @State private var moreOpen = false
-    @State private var ownPath: String?
-    @State private var ownView: HostAgentDesk.Files?
     @State private var saving: LiveMediaFile?
     @State private var savePending: String?
-
-    enum Problem: Equatable { case failed, stopped }
+    @State private var saveFailed = false
 
     init(design: LiveDesign, info: ChatInfoPresentation, actions: AgentDeskActions, chat: AgentDeskChat?,
          setMuted: ((String, Bool) -> Void)?, allSettings: @escaping () -> Void, close: @escaping () -> Void) {
@@ -82,6 +79,7 @@ struct AgentDeskPage: View {
         self.allSettings = allSettings
         self.close = close
         _muted = State(initialValue: info.isMuted)
+        _model = State(initialValue: AgentDeskModel(actions: actions))
     }
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -91,12 +89,16 @@ struct AgentDeskPage: View {
 
     var body: some View {
         let rows = chat?.rows ?? []
-        let now = AgentDeskPolicy.now(rows: rows)
+        // The transcript's own status lookup (`WorkingLineRow.swift:18`).
+        let now = AgentDeskPolicy.now(rows: rows) { key, minutes in
+            guard design.copy.contains(key) else { return nil }
+            return design.text(key, arguments: minutes.map { [.number(Int64($0))] } ?? [])
+        }
         let sent = AgentDeskPolicy.sentFiles(rows: rows, agentUserID: actions.agentUserID)
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 AgentDeskNow(design: design, now: now, steers: actions.steers)
-                if !sent.isEmpty || shownOwnView != nil {
+                if !sent.isEmpty || model.shownOwnView != nil {
                     filesSection(sent)
                 }
                 controlsSection
@@ -116,21 +118,19 @@ struct AgentDeskPage: View {
             }
         }
         .onChange(of: info.isMuted) { _, value in muted = value }
-        .task { await readSchedule() }
-        .task(id: ownPath) { await readOwnFiles(ownPath) }
+        .onAppear { model.appear() }
+        .onDisappear { model.disappear() }
         .sheet(item: $saving) { file in
             AgentDeskExporter(url: file.url) { saving = nil }
                 .ignoresSafeArea()
         }
+        // The Shared Collections pattern (`SharedCollectionsSection.swift:771`).
+        .alert(ChatCopy.text(design, .errorGeneric), isPresented: $saveFailed) {
+            Button(ChatCopy.text(design, .dismiss), role: .cancel) {}
+        }
     }
 
     // MARK: Files
-
-    /// Desktop shows its own files only while the folder has rows or is a subfolder.
-    private var shownOwnView: HostAgentDesk.Files? {
-        guard let ownView, !ownView.rows.isEmpty || ownPath != nil else { return nil }
-        return ownView
-    }
 
     private func filesSection(_ sent: [ChatItem]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -146,7 +146,7 @@ struct AgentDeskPage: View {
                 .accessibilityHint(copy("sentHere"))
                 .accessibilityIdentifier("desk.files.sent")
             }
-            if let view = shownOwnView {
+            if let view = model.shownOwnView {
                 Text(copy("onItsComputer"))
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -187,8 +187,8 @@ struct AgentDeskPage: View {
 
     private func ownFiles(_ view: HostAgentDesk.Files) -> some View {
         AgentDeskGroup(design: design) {
-            if ownPath != nil {
-                Button { ownPath = HostAgentDesk.parent(of: ownPath) } label: {
+            if model.ownPath != nil {
+                Button { model.back() } label: {
                     deskRow(glyph: .chevronLeft, title: copy("back"), chevron: false)
                 }
                 .buttonStyle(.plain)
@@ -198,7 +198,7 @@ struct AgentDeskPage: View {
             ForEach(Array(view.rows.enumerated()), id: \.element.id) { index, row in
                 if index > 0 { AgentDeskDivider() }
                 if row.kind == .folder {
-                    Button { ownPath = view.deskPath + "/" + row.name } label: {
+                    Button { model.open(view.deskPath + "/" + row.name) } label: {
                         deskRow(glyph: .folder, title: row.name, chevron: true)
                     }
                     .buttonStyle(.plain)
@@ -221,16 +221,15 @@ struct AgentDeskPage: View {
 
     // MARK: Controls
 
-    private var canControl: Bool { actions.control != nil && !(jobs ?? []).isEmpty }
-
     private var controlsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             heading(copy("controls"))
             AgentDeskGroup(design: design) {
-                if canControl {
+                if model.canControl {
                     toggleRow(glyph: .clock, title: copy("pause"), id: "desk.pause",
-                              isOn: Binding(get: { HostAgentDesk.isPaused(jobs) },
-                                            set: { on in run(on ? .pause : .resume) }))
+                              isOn: Binding(get: { HostAgentDesk.isPaused(model.jobs) },
+                                            set: { on in model.run(on ? .pause : .resume) }))
+                        .disabled(model.controlPending)
                         .accessibilityHint(AgentDeskCopy.pendingText(design, "pauseHint") ?? "")
                     AgentDeskDivider()
                 }
@@ -253,7 +252,7 @@ struct AgentDeskPage: View {
                     moreBody
                 }
             }
-            if let problem {
+            if let problem = model.problem {
                 Text(copy(problem == .stopped ? "computerOff" : "controlFailed"))
                     .font(.footnote)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -267,7 +266,7 @@ struct AgentDeskPage: View {
     }
 
     @ViewBuilder private var moreBody: some View {
-        if let jobs, !jobs.isEmpty {
+        if let jobs = model.jobs, !jobs.isEmpty {
             AgentDeskDivider()
             Text(copy("routines"))
                 .font(.footnote.weight(.semibold))
@@ -308,10 +307,11 @@ struct AgentDeskPage: View {
             Spacer(minLength: 8)
             if actions.control != nil, HostAgentDesk.isSwitchable(job) {
                 Toggle(isOn: Binding(get: { job.state != .paused },
-                                     set: { on in run(on ? .routineOn(job: job.id) : .routineOff(job: job.id)) })) {
+                                     set: { on in model.run(on ? .routineOn(job: job.id) : .routineOff(job: job.id)) })) {
                     Text(verbatim: job.name)
                 }
                 .labelsHidden()
+                .disabled(model.controlPending)
                 .accessibilityIdentifier("desk.routine." + job.id)
             }
         }
@@ -373,51 +373,13 @@ struct AgentDeskPage: View {
 
     // MARK: Reads and controls
 
-    private func readSchedule() async {
-        guard let read = actions.schedule, let schedule = await read(), !Task.isCancelled else { return }
-        jobs = schedule.jobs
-    }
-
-    private func readOwnFiles(_ path: String?) async {
-        guard let read = actions.files else { return }
-        let view = await read(path)
-        guard !Task.isCancelled, path == ownPath else { return }
-        // A refusal of the home reads as none; a refused subfolder keeps the last listing.
-        if let view { ownView = view } else if path == nil { ownView = nil }
-    }
-
-    /// Optimistic: the switch moves at once and rolls back if the host refuses
-    /// or changes nothing; a busy reply (the shared cooldown) is retried once.
-    private func run(_ control: HostAgentDesk.Control) {
-        guard let send = actions.control, let before = jobs else { return }
-        problem = nil
-        jobs = HostAgentDesk.optimistic(control, before)
-        Task { @MainActor in
-            var retried = false
-            while true {
-                let outcome = await send(control)
-                switch HostAgentDesk.resolve(outcome, for: control, retried: retried) {
-                case .keep: return
-                case .rollBack: jobs = before; return
-                case .rollBackStopped: jobs = before; problem = .stopped; return
-                case .rollBackFailed: jobs = before; problem = .failed; return
-                case .retryAfterCooldown:
-                    retried = true
-                    try? await Task.sleep(for: HostAgentDesk.controlRetryDelay)
-                }
-            }
-        }
-    }
-
     private func save(_ item: ChatItem) {
         guard let media = item.media, let chat else { return }
         savePending = item.id
         Task { @MainActor in
             let file = await chat.media.file(media)
             savePending = nil
-            if let file { saving = file } else {
-                AccessibilityNotification.Announcement(ChatCopy.text(design, .errorGeneric)).post()
-            }
+            if let file { saving = file } else { saveFailed = true }
         }
     }
 
@@ -460,12 +422,31 @@ private struct AgentDeskNow: View {
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        if case let .working(since, line, steps) = now {
+        switch now {
+        case .free:
+            EmptyView()
+        case let .working(since, line, steps):
+            block(state: "working", since: since, line: line, steps: steps, waiting: false)
+        case let .waiting(since, line):
+            block(state: "waiting", since: since, line: line, steps: [], waiting: true)
+        }
+    }
+
+    private func block(state: String, since: Date?, line: String?, steps: [WorkingLineText.Step],
+                       waiting: Bool) -> some View {
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
-                        AtomWait().frame(width: 16, height: 16).accessibilityHidden(true)
-                        Text(verbatim: head(since: since, now: context.date))
+                        Group {
+                            // Waiting is still, as desktop's dot; working turns.
+                            if waiting {
+                                Circle().fill(design.kit.color(.warn, scheme: scheme)).frame(width: 8, height: 8)
+                            } else {
+                                AtomWait()
+                            }
+                        }
+                        .frame(width: 16, height: 16).accessibilityHidden(true)
+                        Text(verbatim: head(state: state, since: since, now: context.date))
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(atum.color(.muted, scheme: scheme))
                             .accessibilityIdentifier("desk.now.head")
@@ -473,18 +454,19 @@ private struct AgentDeskNow: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityHint(AgentDeskCopy.text(design, steers ? "steerHint" : "queueHint"))
                     if let line {
-                        AgentDeskClamped(design: design, text: line, font: .body)
-                            .accessibilityIdentifier("desk.now.line")
+                        AgentDeskClamped(design: design, text: line, font: .body, id: "desk.now.line")
                     }
                     if !steps.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                                     Image(atum.symbol(step.done ? .check : .circle))
                                         .font(.caption)
                                         .foregroundStyle(atum.color(step.done ? .ink : .soft, scheme: scheme))
                                         .accessibilityHidden(true)
-                                    AgentDeskClamped(design: design, text: step.text, font: .subheadline)
+                                    // VoiceOver hears whether each step is done (the check is drawn only).
+                                    AgentDeskClamped(design: design, text: step.text, font: .subheadline,
+                                                     done: step.done, id: "desk.now.step.\(index)")
                                 }
                             }
                         }
@@ -496,11 +478,10 @@ private struct AgentDeskNow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("desk.now")
-        }
     }
 
-    private func head(since: Date?, now: Date) -> String {
-        let state = AgentDeskCopy.text(design, "working")
+    private func head(state name: String, since: Date?, now: Date) -> String {
+        let state = AgentDeskCopy.text(design, name)
         guard let minutes = AgentDeskPolicy.minutes(since: since, now: now) else { return state }
         return state + " · " + AgentDeskCopy.text(design, "minutes", [.number(Int64(minutes))])
     }
@@ -511,6 +492,9 @@ private struct AgentDeskClamped: View {
     let design: LiveDesign
     let text: String
     let font: Font
+    /// A checklist step: its completion is a trait on its words.
+    var done: Bool?
+    let id: String
 
     @State private var open = false
     @State private var overflows = false
@@ -521,6 +505,8 @@ private struct AgentDeskClamped: View {
             Text(verbatim: text)
                 .font(font)
                 .lineLimit(open ? nil : 3)
+                .accessibilityAddTraits(done == true ? .isSelected : [])
+                .accessibilityIdentifier(id)
                 .background {
                     // The full height against the clamped one decides whether More shows.
                     ViewThatFits(in: .vertical) {
@@ -565,6 +551,9 @@ private struct AgentDeskExporter: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
         picker.delegate = context.coordinator
+        #if DEBUG
+        UITestProbe.append("save picker " + url.lastPathComponent, to: "agent-desk.txt")
+        #endif
         return picker
     }
 

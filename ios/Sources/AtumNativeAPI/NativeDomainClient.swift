@@ -217,6 +217,7 @@ public struct AgentsRead: Sendable {
     }
 
     /// One folder of an agent's own files on its cloud computer: listing only.
+    /// The Shell's read admission (429) throws `HostAgentDesk.ReadBusy`.
     public func hostDeskFiles(agent: NativeID, path: String?) async throws -> HostAgentDesk.Files {
         let data = try await hostDesk(agent: agent, read: .files(path: path))
         do { return try HostAgentDesk.files(data, for: path) }
@@ -229,7 +230,9 @@ public struct AgentsRead: Sendable {
         catch { throw NativeDomainClientFailure.invalidRequest }
         let response = try await performAuthorized(
             url: Self.hostDeskURL, body: body,
-            extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion])
+            extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion],
+            maximumResponseBodyBytes: HostAgentDesk.maximumDeskBytes)
+        if response.status == 429 { throw HostAgentDesk.ReadBusy() }
         guard response.status == 200 else {
             throw response.status >= 500 ? NativeDomainClientFailure.transportUnavailable
                 : NativeDomainClientFailure.invalidResponse
@@ -244,7 +247,8 @@ public struct AgentsRead: Sendable {
         do {
             let response = try await performAuthorized(
                 url: Self.hostControlURL, body: body,
-                extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion])
+                extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion],
+                maximumResponseBodyBytes: HostAgentDesk.maximumControlBytes)
             switch response.status {
             case 200:
                 guard let reply = try? HostAgentDesk.controlReply(response.body, for: control) else { return .failed }

@@ -272,6 +272,7 @@
 		EFC69E79BE67062220B8627A /* ChatCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 497568A9F56073BDA95243DD /* ChatCopy.swift */; };
 		F3A4E61D85DA39BB439C4940 /* ChatMenuModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C2D233CDEE56FC9C676BE05 /* ChatMenuModel.swift */; };
 		C7BD7B25E0813F4D79DEAAA9 /* AgentDeskLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F25F540E102351543FF986 /* AgentDeskLive.swift */; };
+		3E7A91C24D5B6F08A1C2D3E4 /* AgentDeskModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F8BA2D35E6C7019B2D3E4F5 /* AgentDeskModel.swift */; };
 		F0A0C3B6AFD5AB5C803C8D97 /* AccountProfileEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896B46FF8920F34300401246 /* AccountProfileEditor.swift */; };
 		F18BB8507585F8EF716E8CE3 /* ChatScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC86D770CEC88C3D071341B /* ChatScreen.swift */; };
 		7AF5F0B26BAC5D5AEC9D6BE2 /* ChatRenameAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFCBEC9B0954FCA25EF4A54 /* ChatRenameAlert.swift */; };
@@ -423,6 +424,7 @@
 		497568A9F56073BDA95243DD /* ChatCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatCopy.swift; sourceTree = "<group>"; };
 		1C2D233CDEE56FC9C676BE05 /* ChatMenuModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMenuModel.swift; sourceTree = "<group>"; };
 		B1F25F540E102351543FF986 /* AgentDeskLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDeskLive.swift; sourceTree = "<group>"; };
+		4F8BA2D35E6C7019B2D3E4F5 /* AgentDeskModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDeskModel.swift; sourceTree = "<group>"; };
 		4A5F646A651995AC791525E8 /* JumpPillButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JumpPillButton.swift; sourceTree = "<group>"; };
 		4C83FBB5F314CFF28A1C2482 /* MathFonts-LPPL-1.3c.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "MathFonts-LPPL-1.3c.txt"; sourceTree = "<group>"; };
 		4D1FA5F91786EC2378A9735B /* AtumTelemetry.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AtumTelemetry.xcconfig; sourceTree = "<group>"; };
@@ -748,6 +750,7 @@
 				497568A9F56073BDA95243DD /* ChatCopy.swift */,
 				1C2D233CDEE56FC9C676BE05 /* ChatMenuModel.swift */,
 				B1F25F540E102351543FF986 /* AgentDeskLive.swift */,
+				4F8BA2D35E6C7019B2D3E4F5 /* AgentDeskModel.swift */,
 				96C132C300E528E45BF97650 /* Dictation */,
 				08670D0E3DB9150100076701 /* Media */,
 				3790A2024D758CE3F1732883 /* SDK */,
@@ -1607,6 +1610,7 @@
 				EFC69E79BE67062220B8627A /* ChatCopy.swift in Sources */,
 				F3A4E61D85DA39BB439C4940 /* ChatMenuModel.swift in Sources */,
 				C7BD7B25E0813F4D79DEAAA9 /* AgentDeskLive.swift in Sources */,
+				3E7A91C24D5B6F08A1C2D3E4 /* AgentDeskModel.swift in Sources */,
 				039FE585E321A87ABA34B56E /* ChatEnvironment.swift in Sources */,
 				A4D363820259C15FD5D9D830 /* ChatFaces.swift in Sources */,
 				D93763C7460FBB31966798C8 /* ChatInfoSheet.swift in Sources */,
