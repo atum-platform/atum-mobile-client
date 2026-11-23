@@ -70,8 +70,37 @@ final class AssistantCardCopyTests: XCTestCase {
     func testTheCardRowWordsAreInThePin() throws {
         let pin = try AtumCopy()
         for key: AssistantCardCopyKey in [.pet, .petChoose, .skills, .skillsLabel, .findSkills, .offline,
-                                          .routines, .setupRow, .footnote, .saveFailed] {
+                                          .routines, .setupRow, .footnote, .saveFailed,
+                                          .longPersona, .personaConflict] {
             XCTAssertTrue(pin.contains(key.rawValue), "\(key)")
+        }
+    }
+
+    /// Desktop PR #95's two persona lines, read from the pin exactly as the
+    /// desktop `copy.ts` writes them (no phone fallback exists for either).
+    func testThePersonaLengthAndConflictLinesAreDesktopsWords() throws {
+        let pin = try AtumCopy()
+        let expected: [AssistantCardCopyKey: [String: String]] = [
+            .longPersona: [
+                "en": "Your agent may only load part of these instructions.",
+                "vi": "Trợ lý có thể chỉ đọc một phần hướng dẫn này.",
+                "ja": "エージェントが読み込むのは、この指示の一部だけになることがあります。",
+                "zh": "助手可能只会加载部分指令。",
+                "zh-Hant": "助理可能只會載入部分指令。",
+            ],
+            .personaConflict: [
+                "en": "This field changed while you were editing. Showing the latest version.",
+                "vi": "Mục này đã thay đổi trong lúc bạn chỉnh sửa. Đang hiển thị bản mới nhất.",
+                "ja": "編集中にこの項目が変更されました。最新の内容を表示しています。",
+                "zh": "此项在编辑时发生了更改。已显示最新版本。",
+                "zh-Hant": "此欄在編輯時發生變更。已顯示最新版本。",
+            ],
+        ]
+        for (key, locales) in expected {
+            XCTAssertEqual(pin.parameterKinds(key.rawValue) ?? [], [], "\(key)")
+            for (locale, value) in locales {
+                XCTAssertEqual(try pin.text(key.rawValue, locale: locale), value, "\(key) \(locale)")
+            }
         }
     }
 

@@ -125,12 +125,33 @@ struct AssistantCard: View {
 
     private enum Field: Hashable {
         case name, what, who, instructions
+
+        var persona: AssistantPersonaField? {
+            switch self {
+            case .name: nil
+            case .what: .what
+            case .who: .who
+            case .instructions: .instructions
+            }
+        }
+
+        init(_ field: AssistantPersonaField) {
+            switch field {
+            case .what: self = .what
+            case .who: self = .who
+            case .instructions: self = .instructions
+            }
+        }
     }
 
     private enum Note: Equatable {
         case saved
         case failed
         case changedElsewhere
+        /// Desktop PR #95: one persona field changed elsewhere while it was
+        /// being edited. The field shows the latest version; the other
+        /// field's edits are kept.
+        case personaConflict
         case refused(String)
     }
 
@@ -436,6 +457,9 @@ struct AssistantCard: View {
         case .changedElsewhere:
             noteBand(text: copy.text(.changedElsewhere, [.text(displayName)]), retry: true,
                      identifier: "assistant.card.changed-elsewhere")
+        case .personaConflict:
+            noteBand(text: copy.text(.personaConflict), retry: false,
+                     identifier: "assistant.card.persona-conflict")
         case .saved, nil:
             EmptyView()
         }
@@ -484,11 +508,19 @@ struct AssistantCard: View {
                     instructionField
                 } else {
                     purposeField
-                    personalityRow
                 }
+                personalityRow
                 Text(copy.text(.footnote))
                     .font(.footnote)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
+                if AssistantPersonaPolicy.exceedsContextBudget(snapshot?.definition?.soul ?? "") {
+                    // Desktop's quiet length hint, under the footnote in the same voice.
+                    Text(copy.text(.longPersona))
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.muted, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("assistant.card.long-persona")
+                }
                 if loading, snapshot == nil {
                     ProgressView().controlSize(.small)
                 }
@@ -522,10 +554,12 @@ struct AssistantCard: View {
 
     private var instructionField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(copy.text(.instructions))
+            // Desktop labels a hand-written persona's text like any other
+            // assistant's main field (`PersonaFields`, `purposeLabel`).
+            Text(copy.text(.purposeLabel, [.text(displayName)]))
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
-            TextField(copy.text(.instructions), text: $instructionsEdit.draft, axis: .vertical)
+            TextField(copy.text(.purposePlaceholder), text: $instructionsEdit.draft, axis: .vertical)
                 .lineLimit(3...12)
                 .focused($focused, equals: .instructions)
                 .disabled(!editable)
@@ -1003,51 +1037,90 @@ struct AssistantCard: View {
         }
     }
 
+    /// Desktop PR #95: a persona edit is a field delta (`before` → `after`)
+    /// rendered against the latest confirmed definition when it is sent, so
+    /// a write never restores stale text in the other field. A revision
+    /// conflict confirms the newer definition and tries once more; a change
+    /// elsewhere to this same field shows the latest version instead.
     @MainActor private func savePersona(_ field: Field, base: AgentDefinitionSnapshot) async {
-        guard let definition, let currentPersona = persona, var value = base.definition else { return }
-        let edit: AssistantCardEdit = switch field {
+        guard let definition, let personaField = field.persona else { return }
+        let edit = self.edit(personaField)
+        guard let after = edit.pendingSave() else { return }
+        let before = edit.saved
+        note = nil
+        retryField = nil
+        var base = base
+        var conflicts = 0
+        while true {
+            guard var value = base.definition else { return }
+            let outcome = AssistantPersonaMerge.prepare(
+                field: personaField, before: before, after: after, soul: value.soul,
+                name: base.assistant.displayName, primary: identity.isPrimary
+            )
+            switch outcome {
+            case .unchanged:
+                confirm(base, settling: personaField)
+                return
+            case .elsewhere:
+                confirm(base, settling: personaField)
+                note = .personaConflict
+                return
+            case let .write(soul):
+                // Desktop: after a second revision conflict the write is a failure.
+                guard conflicts < 2 else {
+                    note = .failed
+                    retryField = field
+                    return
+                }
+                value.soul = soul
+                switch await definition.save(base, value) {
+                case let .saved(saved):
+                    confirm(saved, settling: personaField)
+                    note = .saved
+                    return
+                case let .conflict(latest?):
+                    confirm(latest, settling: nil)
+                    base = latest
+                    conflicts += 1
+                case .conflict(nil), .failed:
+                    note = .failed
+                    retryField = field
+                    return
+                }
+            }
+        }
+    }
+
+    private func edit(_ field: AssistantPersonaField) -> AssistantCardEdit {
+        switch field {
         case .what: whatEdit
         case .who: whoEdit
         case .instructions: instructionsEdit
-        case .name: nameEdit
         }
-        guard edit.pendingSave() != nil else { return }
-        let soul = AssistantPersonaPolicy.render(
-            currentPersona,
-            name: base.assistant.displayName,
-            who: whoEdit.draft,
-            what: whatEdit.draft,
-            instructions: instructionsEdit.draft
-        )
-        guard soul != value.soul else { return }
-        value.soul = soul
-        note = nil
-        retryField = nil
-        let result = await definition.save(base, value)
-        switch result {
-        case let .saved(saved):
-            conflict = nil
-            snapshot = saved
-            let parsed = AssistantPersonaPolicy.parse(saved.definition?.soul ?? "",
-                                                      primary: identity.isPrimary)
-            persona = parsed
+    }
+
+    /// The definition the platform confirmed becomes the card's. `settling`
+    /// takes the latest value even though it was being edited (it was just
+    /// saved, or it changed elsewhere); every other field takes it only when
+    /// the person has nothing pending there, so their other edits are kept.
+    @MainActor private func confirm(_ value: AgentDefinitionSnapshot,
+                                    settling settled: AssistantPersonaField?) {
+        snapshot = value
+        conflict = nil
+        let parsed = AssistantPersonaPolicy.parse(value.definition?.soul ?? "",
+                                                  primary: identity.isPrimary)
+        persona = parsed
+        for field in AssistantPersonaField.allCases {
+            let latest = AssistantPersonaMerge.value(parsed, field)
+            let current = edit(field)
+            let settles = field == settled
+                || (settled.map { AssistantPersonaMerge.visibleField(parsed, $0) } == field)
+            guard settles || !current.isDirty, focused != Field(field) else { continue }
             switch field {
-            case .what: whatEdit.accept(parsed.what)
-            case .who: whoEdit.accept(parsed.who)
-            case .instructions: instructionsEdit.accept(parsed.instructions)
-            case .name: break
+            case .what: whatEdit.accept(latest)
+            case .who: whoEdit.accept(latest)
+            case .instructions: instructionsEdit.accept(latest)
             }
-            note = .saved
-        case let .conflict(latest):
-            conflict = latest
-            if let latest, let soul = latest.definition?.soul {
-                persona = AssistantPersonaPolicy.parse(soul, primary: identity.isPrimary)
-            }
-            note = .changedElsewhere
-            retryField = field
-        case .failed:
-            note = .failed
-            retryField = field
         }
     }
 
@@ -1160,6 +1233,9 @@ enum AssistantCardCopyKey: String {
     case personalityPlaceholder = "src.matrix.assistant-card.copy.assistantCardCopies.personalityPlaceholder"
     case instructions = "src.matrix.assistant-card.copy.assistantCardCopies.instructions"
     case footnote = "src.matrix.assistant-card.copy.assistantCardCopies.footnote"
+    /// Desktop PR #95's quiet length hint and per-field conflict line.
+    case longPersona = "src.matrix.assistant-card.copy.assistantCardCopies.longPersona"
+    case personaConflict = "src.matrix.assistant-card.copy.assistantCardCopies.personaConflict"
     case pet = "src.matrix.assistant-card.copy.assistantCardCopies.pet"
     case petChoose = "src.matrix.assistant-card.copy.assistantCardCopies.petChoose"
     case skills = "src.matrix.assistant-card.copy.assistantCardCopies.skills"

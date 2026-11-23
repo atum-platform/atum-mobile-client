@@ -31,6 +31,7 @@ struct ScriptedChatHost: View {
     @State private var scriptedRemoved = Set<String>()
     @State private var scriptedBanned: Set<String> = [ScriptedCast.anhKhoa]
     @State private var scriptedDefinition: AgentDefinitionSnapshot
+    @State private var scriptedElsewhereSent = false
     @State private var scriptedModels: ManagedModelSnapshot
     @State private var scriptedModelDestinations: ManagedModelDestinationSnapshot
     @State private var scriptedPresentation: AgentPresentationSnapshot
@@ -68,7 +69,12 @@ struct ScriptedChatHost: View {
         }
         _store = State(initialValue: store)
         _path = State(initialValue: [script.name])
-        _scriptedDefinition = State(initialValue: Self.definition(name: script.title))
+        _scriptedDefinition = State(initialValue: Self.definition(
+            name: script.title,
+            soul: Self.personaLong
+                ? "# \(script.title)\n\n## Who you are\n\nCalm.\n\n## What you do\n\n"
+                    + String(repeating: "Plans and writes. ", count: 1_200)
+                : nil))
         _scriptedModels = State(initialValue: Self.models())
         _scriptedModelDestinations = State(initialValue: Self.subscriptionDemo == nil
             ? Self.modelDestinations() : Self.subscriptionDestinations())
@@ -135,6 +141,13 @@ struct ScriptedChatHost: View {
     static let otherAssistantFlag = "-AtumScriptedOtherAssistant"
     private static let isOtherAssistant = ProcessInfo.processInfo.arguments.contains(otherAssistantFlag)
     private static let retireFails = ProcessInfo.processInfo.arguments.contains("-AtumScriptedRetireFails")
+    /// Desktop PR #95 scenarios: the first persona write meets a newer
+    /// definition whose "What you do" another device changed, and a persona
+    /// longer than the agent's context-file budget.
+    private static let personaElsewhere = ProcessInfo.processInfo.arguments
+        .contains("-AtumScriptedPersonaElsewhere")
+    private static let personaLong = ProcessInfo.processInfo.arguments.contains("-AtumScriptedPersonaLong")
+    static let scriptedElsewhereWhat = "Writes the weekly report."
     private static let scriptedAssistantID = try! NativeID("14600000-0000-4000-8000-0000000000a2")
     private static let pinsAreFull = ProcessInfo.processInfo.arguments
         .contains(AtumLaunchArguments.scriptedPinsFullFlag)
@@ -193,7 +206,22 @@ struct ScriptedChatHost: View {
                                 assistantDefinition: script.context.kind == .assistant
                                     ? AssistantDefinitionActions(
                                         read: { .value(scriptedDefinition) },
-                                        save: { _, definition in
+                                        save: { snapshot, definition in
+                                            if Self.personaElsewhere, !scriptedElsewhereSent {
+                                                // Another device's edit lands first: the
+                                                // write is refused for its stale revision.
+                                                scriptedElsewhereSent = true
+                                                scriptedDefinition = Self.definition(
+                                                    name: script.title,
+                                                    soul: (snapshot.definition?.soul ?? "")
+                                                        .replacingOccurrences(of: "Plans and writes.",
+                                                                              with: Self.scriptedElsewhereWhat),
+                                                    revision: Int(scriptedDefinition.definitionRevision + 1)
+                                                )
+                                                return .conflict(scriptedDefinition)
+                                            }
+                                            UITestProbe.append(definition.soul.replacingOccurrences(of: "\n", with: "|"),
+                                                               to: "persona-save.txt")
                                             scriptedDefinition = Self.definition(
                                                 name: script.title,
                                                 soul: definition.soul,

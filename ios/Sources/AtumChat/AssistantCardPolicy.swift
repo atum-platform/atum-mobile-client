@@ -74,7 +74,10 @@ public enum AssistantCardLayout {
             rows.append(.purpose)
             rows.append(.personality)
         case .custom:
+            // Desktop `PersonaFields`: a hand-written persona uses the same
+            // two fields, its text (less `Who you are`) and the personality.
             rows.append(.instructions)
+            rows.append(.personality)
         }
         if capabilities.hasHome { rows.append(.home) }
         if capabilities.hasModel { rows.append(.model) }

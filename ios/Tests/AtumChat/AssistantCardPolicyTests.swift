@@ -38,9 +38,9 @@ final class AssistantCardPolicyTests: XCTestCase {
         XCTAssertFalse(AssistantRetirePolicy.offersDelete(isPrimary: false, canRetire: false))
     }
 
-    func testACustomPersonaIsOneInstructionsFieldOnBothRoles() {
+    func testACustomPersonaIsItsTextAndAPersonalityOnBothRoles() {
         let expected: [AssistantCardRow] = [.photo, .name, .message, .handle, .instructions,
-                                            .home, .model, .pet, .skills, .routines]
+                                            .personality, .home, .model, .pet, .skills, .routines]
         XCTAssertEqual(AssistantCardLayout.rows(for: .primary,
                                                 capabilities: capabilities(persona: .custom)),
                        expected)
