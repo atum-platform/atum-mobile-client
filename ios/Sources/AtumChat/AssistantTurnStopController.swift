@@ -7,6 +7,7 @@ import Observation
 /// request was still out, so a second tap sent a second request ID. The state,
 /// the in-flight request and its timers live here for as long as the room is
 /// open; a new room has a new store and a new controller.
+@available(macOS 14.0, *)
 @MainActor @Observable
 public final class AssistantTurnStopController {
     /// What VoiceOver hears, only for an accepted transition in this chat.
@@ -19,7 +20,7 @@ public final class AssistantTurnStopController {
     public private(set) var stop = AssistantTurnStop()
     /// Set by the chat screen while it is shown, nil otherwise.
     @ObservationIgnored public var announce: (@MainActor (Announcement) -> Void)?
-    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
+    private let sleep: @Sendable (Duration) async throws -> Void
 
     public init(sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.sleep = sleep

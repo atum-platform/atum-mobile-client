@@ -184,3 +184,12 @@ Tests:
 - `NativeDomainClientTests.testScheduledStop503StaysRetryableAndOnlyDenialsWithdrawIt`.
 - `TurnStopUITests.testStopRequestedSaysStoppingThenSettles` now checks that a
   draft keeps "Stopping…" and that Send waits.
+
+r2 run log:
+
+- **Run r2:** the volume detached while the run was queued, so it never
+  started.
+- **Run r2b:** the package build failed. The `AtumChat` package also targets
+  macOS 13, and `@Observable` needs macOS 14. The controller and its tests now
+  carry `@available(macOS 14.0, *)`, as `SharedCollectionsModel` does.
+- **Run r2c:** rerun of the same script.

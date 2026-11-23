@@ -544,6 +544,7 @@ extension AssistantTurnStopTests {
 }
 
 /// Review r1, findings 1 and 2: the room-scoped controller.
+@available(macOS 14.0, *)
 @MainActor
 final class AssistantTurnStopControllerTests: XCTestCase {
     /// A Stop route the test answers by hand.
