@@ -40,6 +40,12 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
         case saved(Snapshot)
         case refused(Snapshot?)
         case failed
+        /// The picker retired this selection. No further write is sent.
+        case cancelled
+        /// The write's precondition (a ChatGPT write's consent) no longer
+        /// held when re-checked; nothing was retried. Carries a refreshed
+        /// snapshot when one was read.
+        case preconditionChanged(Snapshot?)
     }
 
     private let revision: KeyPath<Snapshot, Int64>
@@ -66,13 +72,21 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
         return snapshot
     }
 
+    /// `revalidate`, when given, is the write's precondition: it is checked
+    /// again before the automatic retry after a fence conflict and after a
+    /// refusal, so a retry never reuses a decision that no longer holds.
     public func save(from snapshot: Snapshot, choice: ManagedModelPickerChoice, requestID: NativeID,
                      refreshAfterSecondConflict: Bool, isCurrent: () -> Bool, fetch: () async throws -> Snapshot,
-                     write: (Snapshot, NativeID) async throws -> Snapshot) async -> SaveResult {
+                     isSelectionCurrent: () -> Bool = { true }, revalidate: (() async -> Bool)? = nil,
+                     write: @MainActor (Snapshot, NativeID) async throws -> Snapshot) async -> SaveResult {
+        guard isSelectionCurrent() else { return .cancelled }
         guard isCurrent(), !Task.isCancelled else { return .failed }
         latestIntent += 1
         let intent = latestIntent
-        func current() -> Bool { isCurrent() && !Task.isCancelled && latestIntent == intent }
+        func current() -> Bool {
+            isSelectionCurrent() && isCurrent() && !Task.isCancelled && latestIntent == intent
+        }
+        func inactiveResult() -> SaveResult { isSelectionCurrent() ? .failed : .cancelled }
 
         let retry = pending.flatMap { $0.choice == choice ? $0 : nil }
         var fence = retry?.fence ?? held ?? snapshot
@@ -80,41 +94,54 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
             ? requestID : ModelWriteRequests<NativeID>.freshID())
         pending = nil
         var refreshed: Snapshot?
+
+        func refuse() async -> SaveResult {
+            guard current() else { return inactiveResult() }
+            if let revalidate {
+                let holds = await revalidate()
+                guard current() else { return inactiveResult() }
+                if !holds { return .preconditionChanged(refreshed) }
+            }
+            return .refused(refreshed)
+        }
+
         for attempt in 0..<2 {
-            guard current() else { return .failed }
+            guard current() else { return inactiveResult() }
             // Keep the actual in-flight write available for an identical
             // retry even if it loses its response or its view goes away.
             pending = (choice, fence, id)
             do {
                 let saved = try await write(fence, id)
-                guard current() else { return .failed }
+                guard current() else { return inactiveResult() }
                 pending = nil
                 if let held, saved[keyPath: revision] < held[keyPath: revision] { return .saved(held) }
                 adoptedWrites += 1
                 held = saved
                 return .saved(saved)
             } catch is ManagedModelFenceConflict {
-                guard current() else { return .failed }
+                guard current() else { return inactiveResult() }
                 pending = nil
-                if attempt == 1 && !refreshAfterSecondConflict { return .refused(refreshed) }
+                if attempt == 1 && !refreshAfterSecondConflict { return await refuse() }
                 guard let latest = try? await read(isCurrent: current, fetch: fetch), current() else {
-                    return current() ? .refused(refreshed) : .failed
+                    return await refuse()
                 }
                 refreshed = latest
+                if attempt == 1 { return await refuse() }
+                if let revalidate {
+                    let holds = await revalidate()
+                    guard current() else { return inactiveResult() }
+                    if !holds { return .preconditionChanged(latest) }
+                }
                 fence = latest
                 // A changed fence makes this a new request under the platform's idempotency contract.
                 id = ModelWriteRequests<NativeID>.freshID()
             } catch {
-                guard current() else { return .failed }
-                if case NativeDomainClientFailure.http = error {
-                    pending = nil
-                    return .refused(refreshed)
-                }
-                if error is ContractViolation {
-                    pending = nil
-                    return .refused(refreshed)
-                }
-                return .failed
+                guard current() else { return inactiveResult() }
+                let refusal: Bool
+                if case NativeDomainClientFailure.http = error { refusal = true } else { refusal = error is ContractViolation }
+                guard refusal else { return .failed }
+                pending = nil
+                return await refuse()
             }
         }
         return .refused(refreshed)
