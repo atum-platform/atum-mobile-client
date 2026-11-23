@@ -314,6 +314,10 @@ enum AssistantModelDestinationSaveResult {
     /// A conflict may carry the latest authoritative snapshot. Transport,
     /// old-provider and flag-off refusals carry nil; none is ever "saved".
     case refused(ManagedModelDestinationSnapshot?)
+    /// A ChatGPT write whose consent no longer held when re-checked (a
+    /// revision-conflict retry or a refusal): nothing was retried, and the
+    /// picker returns to the training-off card with this fresh status.
+    case consentRequired(ChatGPTTrainingStatus, latest: ManagedModelDestinationSnapshot?)
 }
 
 struct AssistantModelDestinationActions {

@@ -51,7 +51,7 @@ final class ChatGPTTrainingGateTests: XCTestCase {
         var reads = 0
         let training = ChatGPTTrainingActions(read: { reads += 1; return nil }, confirm: { _ in .unavailable })
         let decision = await ChatGPTTrainingGate.decide(source: .opencodeGo, training: training)
-        XCTAssertEqual(decision, .write)
+        XCTAssertEqual(decision, .write(nil))
         XCTAssertEqual(reads, 0)
     }
 
@@ -61,10 +61,16 @@ final class ChatGPTTrainingGateTests: XCTestCase {
                 source: .chatGPTPlan,
                 training: ChatGPTTrainingActions(read: { status }, confirm: { _ in .unavailable }))
         }
-        let current = ChatGPTTrainingStatus(current: true, connectionID: connection, confirmedAt: Date())
+        let current = ChatGPTTrainingStatus(current: true, connectionID: connection, confirmedAt: Date(),
+                                            revision: 3)
         let missing = ChatGPTTrainingStatus(current: false, connectionID: connection, confirmedAt: nil)
         let decisionCurrent = await gate(current)
-        XCTAssertEqual(decisionCurrent, .write)
+        XCTAssertEqual(decisionCurrent, .write(ChatGPTTrainingConsent(connectionID: connection, revision: 3)),
+                       "the write carries the decision it is made under")
+        // A current answer without its revision is not a confirmation.
+        let incomplete = ChatGPTTrainingStatus(current: true, connectionID: connection, confirmedAt: Date())
+        let decisionIncomplete = await gate(incomplete)
+        XCTAssertEqual(decisionIncomplete, .ask(incomplete))
         let decisionMissing = await gate(missing)
         XCTAssertEqual(decisionMissing, .ask(missing))
         let decisionUnread = await gate(nil)

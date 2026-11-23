@@ -33,8 +33,9 @@ enum ChatGPTTrainingCopyKey: String, CaseIterable {
 /// the saved model stays as it is.
 enum ChatGPTTrainingGate {
     enum Decision: Equatable {
-        /// Not a ChatGPT pick, or the confirmation is current: write it.
-        case write
+        /// Not a ChatGPT pick (nil), or the confirmation is current: write it
+        /// under the consent decision the platform reported.
+        case write(ChatGPTTrainingConsent?)
         /// Ask once, in the picker, for this connection.
         case ask(ChatGPTTrainingStatus)
         /// The phone could not learn the answer: write nothing.
@@ -49,16 +50,20 @@ enum ChatGPTTrainingGate {
     @MainActor
     static func decide(source: ManagedModelDestinationSource,
                        training: ChatGPTTrainingActions?) async -> Decision {
-        guard source == .chatGPTPlan else { return .write }
+        guard source == .chatGPTPlan else { return .write(nil) }
         guard let training, let status = await training.read() else { return .failed }
-        return status.current ? .write : .ask(status)
+        if let consent = status.consent { return .write(consent) }
+        return .ask(status)
     }
 }
 
-/// A ChatGPT pick held on the confirmation card, with the status the card read.
+/// A ChatGPT pick held on the confirmation card, with the status the card
+/// read and the selection it belongs to: once the picker closes or another
+/// pick starts, the card's confirmation never starts this pick's write.
 struct PendingChatGPTTraining {
     let row: PhoneModelPickerProjection.Row
     let status: ChatGPTTrainingStatus
+    let selection: ModelPickerLifetime.Token
 }
 
 /// The confirmation, inside the picker where ChatGPT was chosen: one unticked
@@ -189,29 +194,24 @@ struct ChatGPTTrainingConfirmView: View {
         }
     }
 
+    /// One press (`ChatGPTTrainingPress`): a card that lost its connection
+    /// after a 409 reads the status again before it confirms anything.
     @MainActor private func confirm() async {
         guard ticked, !saving else { return }
         saving = true
         notice = nil
         defer { saving = false }
-        guard let connectionID else {
-            notice = .failed
-            return
-        }
-        switch await actions.confirm(connectionID) {
+        switch await ChatGPTTrainingPress.confirm(connectionID: connectionID, read: actions.read,
+                                                  confirm: actions.confirm) {
         case let .confirmed(status):
             onConfirmed(status)
-        case .stale:
-            // A new relay connection: read it, untick, and let the person confirm for it.
-            let fresh = await actions.read()
-            if let fresh, fresh.current {
-                onConfirmed(fresh)
-                return
-            }
-            self.connectionID = fresh?.connectionID
+        case let .askAgain(fresh):
+            // A new relay connection: untick and let the person confirm for it.
+            connectionID = fresh
             ticked = false
             notice = .stale
-        case .unavailable:
+        case let .failed(kept):
+            connectionID = kept
             notice = .failed
         }
     }

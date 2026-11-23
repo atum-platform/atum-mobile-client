@@ -1099,8 +1099,10 @@ public struct AgentsRead: Sendable {
               let answer = try? await trainingConfirmationCall(method: "POST", body: body)
         else { return .unavailable }
         if answer.status == 409 { return .stale }
+        // A 200 counts only as a complete current record for the connection
+        // this press named; any other answer is not this confirmation.
         guard answer.status == 200, let status = try? ChatGPTTrainingStatus.decode(answer.body),
-              status.current else { return .unavailable }
+              status.current, status.connectionID == connectionID else { return .unavailable }
         return .confirmed(status)
     }
 

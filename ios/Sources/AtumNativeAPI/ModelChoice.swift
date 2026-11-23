@@ -40,6 +40,10 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
         case saved(Snapshot)
         case refused(Snapshot?)
         case failed
+        /// The write's precondition (a ChatGPT write's consent) no longer
+        /// held when re-checked; nothing was retried. Carries a refreshed
+        /// snapshot when one was read.
+        case preconditionChanged(Snapshot?)
     }
 
     private let revision: KeyPath<Snapshot, Int64>
@@ -66,8 +70,12 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
         return snapshot
     }
 
+    /// `revalidate`, when given, is the write's precondition: it is checked
+    /// again before the automatic retry after a fence conflict and after a
+    /// refusal, so a retry never reuses a decision that no longer holds.
     public func save(from snapshot: Snapshot, choice: ManagedModelPickerChoice, requestID: NativeID,
                      refreshAfterSecondConflict: Bool, isCurrent: () -> Bool, fetch: () async throws -> Snapshot,
+                     revalidate: (() async -> Bool)? = nil,
                      write: (Snapshot, NativeID) async throws -> Snapshot) async -> SaveResult {
         guard isCurrent(), !Task.isCancelled else { return .failed }
         latestIntent += 1
@@ -101,20 +109,27 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
                     return current() ? .refused(refreshed) : .failed
                 }
                 refreshed = latest
+                if attempt == 0, let revalidate {
+                    let holds = await revalidate()
+                    guard current() else { return .failed }
+                    if !holds { return .preconditionChanged(latest) }
+                }
                 fence = latest
                 // A changed fence makes this a new request under the platform's idempotency contract.
                 id = ModelWriteRequests<NativeID>.freshID()
             } catch {
                 guard current() else { return .failed }
-                if case NativeDomainClientFailure.http = error {
-                    pending = nil
-                    return .refused(refreshed)
+                let refusal: Bool
+                if case NativeDomainClientFailure.http = error { refusal = true } else { refusal = error is ContractViolation }
+                guard refusal else { return .failed }
+                pending = nil
+                if let revalidate {
+                    // A refusal may be the relay or its consent changing under the write.
+                    let holds = await revalidate()
+                    guard current() else { return .failed }
+                    if !holds { return .preconditionChanged(refreshed) }
                 }
-                if error is ContractViolation {
-                    pending = nil
-                    return .refused(refreshed)
-                }
-                return .failed
+                return .refused(refreshed)
             }
         }
         return .refused(refreshed)

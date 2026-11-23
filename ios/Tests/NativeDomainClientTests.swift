@@ -1146,15 +1146,17 @@ import AtumChat
             }
             return answers.removeFirst()
         }
-        func projection(current: Bool, wording: String?) -> Data {
+        func projection(current: Bool, wording: String?, for answered: String? = nil,
+                        omitting missing: String? = nil) -> Data {
             let none: Any = NSNull()
-            let object: [String: Any] = [
+            var object: [String: Any] = [
                 "current": current,
                 "wordingVersion": wording.map { $0 as Any } ?? none,
-                "connectionId": connection,
+                "connectionId": answered ?? connection,
                 "confirmedAt": current ? "2026-11-20T08:00:00.000Z" as Any : none,
                 "revision": current ? 3 as Any : none,
             ]
+            if let missing { object.removeValue(forKey: missing) }
             return try! JSONSerialization.data(withJSONObject: object)
         }
 
@@ -1168,6 +1170,20 @@ import AtumChat
         }
         XCTAssertTrue(status.current)
         XCTAssertNotNil(status.confirmedAt)
+        XCTAssertEqual(status.consent, ChatGPTTrainingConsent(connectionID: connection, revision: 3))
+
+        // A current 200 for another relay connection is not this press's confirmation.
+        answers = [.json(projection(current: true, wording: "chatgpt-google-v1",
+                                    for: "00000000-0000-4000-8000-0000000000c2"))]
+        let otherConnection = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(otherConnection, .unavailable)
+
+        // A current 200 missing any part of its record is not a confirmation.
+        for missing in ["connectionId", "confirmedAt", "revision"] {
+            answers = [.json(projection(current: true, wording: "chatgpt-google-v1", omitting: missing))]
+            let incomplete = await value.confirmChatGPTTraining(connectionID: connection)
+            XCTAssertEqual(incomplete, .unavailable, "current without \(missing)")
+        }
 
         answers = [.init(status: 409, chunks: [Data(#"{"state":"refused"}"#.utf8)])]
         let stale = await value.confirmChatGPTTraining(connectionID: connection)

@@ -23,25 +23,53 @@ public enum ChatGPTTraining {
     public static let maximumResponseBytes = 16 * 1024
 }
 
+/// The consent decision a ChatGPT write is made under: the relay connection
+/// the confirmation binds to and the platform revision of that confirmation.
+/// A write carries it so a later re-read can tell whether the decision the
+/// person made (or the platform reported) still stands.
+public struct ChatGPTTrainingConsent: Equatable, Hashable, Sendable {
+    public let connectionID: String
+    public let revision: Int64
+
+    public init(connectionID: String, revision: Int64) {
+        self.connectionID = connectionID
+        self.revision = revision
+    }
+}
+
 /// The GET/POST projection, read strictly as the desktop reads it
 /// (`parseMatrixChatGptTraining`). `current` is true only for this build's
-/// wording and the account's current relay connection.
+/// wording, the account's current relay connection, and a complete record:
+/// a current answer without its connection, time or revision is not a
+/// confirmation.
 public struct ChatGPTTrainingStatus: Equatable, Sendable {
     public let current: Bool
     /// The current relay connection a confirmation binds to; nil while no relay is enabled.
     public let connectionID: String?
     /// When the current confirmation was made; nil unless `current`.
     public let confirmedAt: Date?
+    /// The confirmation's platform revision; nil unless `current`.
+    public let revision: Int64?
 
-    public init(current: Bool, connectionID: String?, confirmedAt: Date?) {
-        self.current = current
+    /// `current` holds only with every field of the record present.
+    public init(current: Bool, connectionID: String?, confirmedAt: Date?, revision: Int64? = nil) {
+        let complete = current && connectionID.map(Self.isUUID) == true && confirmedAt != nil && revision != nil
+        self.current = complete
         self.connectionID = connectionID
-        self.confirmedAt = confirmedAt
+        self.confirmedAt = complete ? confirmedAt : nil
+        self.revision = complete ? revision : nil
+    }
+
+    /// The decision a write may carry; nil unless the confirmation is current.
+    public var consent: ChatGPTTrainingConsent? {
+        guard current, let connectionID, let revision else { return nil }
+        return ChatGPTTrainingConsent(connectionID: connectionID, revision: revision)
     }
 
     /// A wording other than v1 is not current for this build. Any field
     /// outside the contract makes the whole answer unreadable: an unreadable
-    /// answer is never a confirmation.
+    /// answer is never a confirmation. A `current: true` that omits its
+    /// connection, time or revision reads as not confirmed.
     public static func decode(_ data: Data) throws -> ChatGPTTrainingStatus {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let currentValue = object["current"] as? NSNumber, isBoolean(currentValue)
@@ -57,11 +85,11 @@ public struct ChatGPTTrainingStatus: Equatable, Sendable {
               isNullOrAbsent(revision) || isRevision(revision)
         else { throw NativeDomainClientFailure.invalidResponse }
 
-        let current = currentValue.boolValue && (wording as? String) == ChatGPTTraining.wordingVersion
         return ChatGPTTrainingStatus(
-            current: current,
+            current: currentValue.boolValue && (wording as? String) == ChatGPTTraining.wordingVersion,
             connectionID: connection as? String,
-            confirmedAt: current ? (confirmed as? String).flatMap(date) : nil
+            confirmedAt: (confirmed as? String).flatMap(date),
+            revision: (revision as? NSNumber).map { $0.int64Value }
         )
     }
 
@@ -109,5 +137,117 @@ struct ChatGPTTrainingConfirmRequest: Encodable, Equatable {
         wordingVersion = ChatGPTTraining.wordingVersion
         connectionId = connectionID
         transferWordingVersion = ChatGPTTraining.transferWordingVersion
+    }
+}
+
+/// The re-check a ChatGPT write makes before an automatic retry and after a
+/// refusal: the consent status is read again (with the client and scope the
+/// write was bound to) and must still name the same connection and revision.
+/// Anything else, including a failed read, means the old decision is not
+/// reused; `latest` keeps what the re-read saw so the picker can ask again.
+@MainActor public final class ChatGPTTrainingRecheck {
+    public let consent: ChatGPTTrainingConsent
+    public private(set) var latest: ChatGPTTrainingStatus?
+    private let read: () async -> ChatGPTTrainingStatus?
+
+    public init(consent: ChatGPTTrainingConsent, read: @escaping () async -> ChatGPTTrainingStatus?) {
+        self.consent = consent
+        self.read = read
+    }
+
+    public func stillCurrent() async -> Bool {
+        let status = await read()
+        latest = status
+        return status?.consent == consent
+    }
+}
+
+/// One press of the card's Confirm (desktop `chatgpt-training-confirm.tsx`).
+/// The POST goes only for a connection the card read; when the card holds
+/// none (a refresh after a 409 failed), the press reads the status first and
+/// confirms for the connection it names. A 409 reads again and asks again.
+public enum ChatGPTTrainingPress {
+    public enum Outcome: Equatable, Sendable {
+        /// The confirmation is current: carry `status.consent` to the write.
+        case confirmed(ChatGPTTrainingStatus)
+        /// The relay changed: untick and ask again for this connection (nil if unread).
+        case askAgain(connectionID: String?)
+        /// Nothing was recorded; the card keeps this connection (nil if unread).
+        case failed(connectionID: String?)
+    }
+
+    @MainActor
+    public static func confirm(connectionID: String?,
+                               read: () async -> ChatGPTTrainingStatus?,
+                               confirm: (String) async -> ChatGPTTrainingConfirmResult) async -> Outcome {
+        var connection = connectionID
+        if connection == nil {
+            let fresh = await read()
+            if let fresh, fresh.current { return .confirmed(fresh) }
+            connection = fresh?.connectionID
+        }
+        guard let connection else { return .failed(connectionID: nil) }
+        switch await confirm(connection) {
+        case let .confirmed(status):
+            guard status.current, status.connectionID == connection else { return .failed(connectionID: connection) }
+            return .confirmed(status)
+        case .stale:
+            let fresh = await read()
+            if let fresh, fresh.current { return .confirmed(fresh) }
+            return .askAgain(connectionID: fresh?.connectionID)
+        case .unavailable:
+            return .failed(connectionID: connection)
+        }
+    }
+}
+
+/// The picker's selection lifetime, ported from the desktop picker's
+/// `beginSelection` (`model-picker.tsx`): every pick takes a token, a newer
+/// pick or the picker's dismissal retires it, and a continuation whose token
+/// is stale does nothing (no consent read result, no POST follow-up, no
+/// write). Loads take their own token so an interrupted read never leaves the
+/// picker stuck "loading".
+public struct ModelPickerLifetime: Equatable, Sendable {
+    public struct Token: Equatable, Hashable, Sendable {
+        fileprivate let generation: UInt64
+    }
+
+    private var selection: UInt64 = 0
+    private var load: UInt64 = 0
+    private var loadingToken: UInt64?
+
+    public init() {}
+
+    public var loading: Bool { loadingToken != nil }
+
+    public mutating func beginSelection() -> Token {
+        selection &+= 1
+        return Token(generation: selection)
+    }
+
+    public func isCurrent(_ token: Token) -> Bool { token.generation == selection }
+
+    /// nil while another load is in flight.
+    public mutating func beginLoad() -> Token? {
+        guard loadingToken == nil else { return nil }
+        load &+= 1
+        loadingToken = load
+        return Token(generation: load)
+    }
+
+    /// Whether a load's result may still be applied.
+    public func isCurrentLoad(_ token: Token) -> Bool { loadingToken == token.generation }
+
+    /// Always called (`defer`), also when the load was cancelled. An older
+    /// load ending never clears a newer one.
+    public mutating func endLoad(_ token: Token) {
+        if loadingToken == token.generation { loadingToken = nil }
+    }
+
+    /// The picker closed: every pending selection and load is stale.
+    public mutating func retire() {
+        selection &+= 1
+        load &+= 1
+        loadingToken = nil
     }
 }

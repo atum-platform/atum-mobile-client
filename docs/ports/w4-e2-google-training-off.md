@@ -167,6 +167,82 @@ The branch was also rebased onto `origin/main` `6dc8859` (W4-AB #64 and its
 fixes #65). The one conflict was `NativeDomainClient.isApprovedURL`; both
 exact-path Shell routes (`CloudScheduleStop` and `ChatGPTTraining`) are kept.
 
+## Review round r1 fixes (2026-11-23)
+
+Codex review r1 held the PR on five consent findings. Four are fixed on the
+phone; one, and part of another, need the platform.
+
+1. **A model write could outlive its consent (blocking). Fixed on the phone;
+   the atomic check is a platform follow-up.** The gate and the card now hand
+   the write the decision they read, `ChatGPTTrainingConsent` (relay
+   `connectionId` and confirmation `revision`). It travels through
+   `AssistantSubscriptionActions.save` into `LiveAppModel.saveAssistantModelSubscription`,
+   which refuses a ChatGPT write that has none. The shared save path
+   (`ManagedModelPickerState.save`, `ios/Sources/AtumNativeAPI/ModelChoice.swift`)
+   takes a `revalidate` precondition. It runs before the automatic retry
+   after a revision conflict and after any refusal. `ChatGPTTrainingRecheck`
+   re-reads consent with the client and scope the write was bound to. The
+   decision holds only if the same connection and revision are still
+   current. If it doesn't hold, nothing is retried and the result is
+   `.preconditionChanged`. When the platform now says "not current", the
+   picker returns to the card with the fresh status
+   (`AssistantModelDestinationSaveResult.consentRequired`). An unread or
+   re-confirmed status is a plain refusal, so the person picks again through
+   the gate.
+   **Platform follow-up:** the PUT can't carry the decision. The 1.5
+   `matrix_model_destination_write` (atum-platform
+   `supabase/migrations/0336_chatgpt_relay.sql` L403-447) accepts exactly
+   `choice, expectedRevision, policyDigest, profile, requestId`, and it
+   checks the relay but not the training confirmation. A revoke that lands
+   between the phone's re-read and the PUT is therefore still accepted. The
+   0538 relay admission re-checks consent before any Google data flows, so
+   Google data stays protected. The saved model choice can still go stale.
+   The fix belongs in the platform: an optional `trainingConfirmation:
+   {connectionId, revision}` precondition on the 1.5 write, checked in the
+   same transaction (`_modelChoiceError` `consent_changed`). The phone would
+   send the consent it already carries. No server code changed in this lane.
+2. **A malformed 200 could open the gate. Fixed.** `ChatGPTTrainingStatus`
+   is `current` only when it is complete: v1 wording, a UUID `connectionId`,
+   `confirmedAt` and `revision`. A `current: true` missing any of them reads
+   as not confirmed. The type's initializer enforces this as well, so
+   nothing can build an incomplete current record. The POST client accepts a
+   confirmation only if its `connectionId` equals the UUID it sent. Any other
+   answer is `.unavailable`.
+3. **Closing the picker left a pending selection alive. Fixed.** This ports
+   the desktop picker's selection lifetime (`beginSelection`,
+   `model-picker.tsx:379-383,1527-1538`) as `ModelPickerLifetime`. Each pick
+   takes a token. A newer pick or the picker's dismissal (`onDisappear` on a
+   stable container, so the card replacing the list does not count) retires
+   it. A stale token can't apply a consent read, can't let a card
+   confirmation start a write, and can't start the PUT. The training read
+   and POST closures in `LiveAppModel.assistantModelDestinationActions` are
+   bound to the captured `NativeDomainClient` and the existing
+   `modelPickerScope`. They no longer use whichever client is current when
+   they run.
+4. **Interrupted reads stalled recovery. Fixed.** Both pickers' loads take
+   a load token and release it in a `defer`, so a cancelled read (the list
+   giving way to the card, a closed sheet) never leaves the picker stuck
+   "loading". If a 409's refresh failed and the card has no connection, the
+   next press reads the status first (`ChatGPTTrainingPress`). It confirms
+   only for the connection that read names, and it never sends a Confirm
+   without one.
+5. **Locale binding of the hashed sentence. Platform follow-up, not
+   implemented.** The platform hashes against the owner's recorded language,
+   not the language the card showed. Binding the POST to the shown locale
+   needs a Shell contract change: for example, a `locale` field checked
+   against the per-language hash table. The phone keeps showing the pinned
+   sentences character for character.
+
+Tests (package): `ChatGPTTrainingTests` checks decoder strictness and that
+the type rejects incomplete records. `ChatGPTTrainingConsentTests` covers the
+re-check identity, conflict → gate with no retry, conflict with the same
+consent retrying once, refusal → re-check, the press's UUID match and read
+before confirm, dismissal and newer-pick invalidation, and load reset.
+`NativeDomainClientTests.testChatGPTTrainingUsesTheDesktopShellRouteAndExactBody`
+gains the cases for a POST answered with another UUID and for an incomplete
+current 200. `ChatGPTTrainingGateTests` (AppTests, on hosted shards) checks
+that `.write` carries the consent.
+
 ## Verification
 
 Each run took the shared heavy-build lock

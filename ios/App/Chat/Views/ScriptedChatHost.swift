@@ -665,7 +665,8 @@ struct ScriptedChatHost: View {
         return AssistantSubscriptionActions(
             read: { Self.subscriptionAccount(demo) },
             save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
-                     effort: ManagedModelEffort, _: NativeID) -> AssistantModelDestinationSaveResult in
+                     effort: ManagedModelEffort, _: NativeID,
+                     _: ChatGPTTrainingConsent?) -> AssistantModelDestinationSaveResult in
                 let next = Self.subscriptionDestinations(
                     source: source == .opencodeGo ? "opencode_go" : "chatgpt_plan",
                     model: model, effort: effort.rawValue,
@@ -676,13 +677,14 @@ struct ScriptedChatHost: View {
             training: ChatGPTTrainingActions(
                 read: {
                     ChatGPTTrainingStatus(current: !Self.trainingRequired || scriptedTrainingConfirmed,
-                                          connectionID: Self.trainingConnection, confirmedAt: nil)
+                                          connectionID: Self.trainingConnection,
+                                          confirmedAt: Self.trainingConfirmedAt, revision: 1)
                 },
                 confirm: { connectionID in
                     guard connectionID == Self.trainingConnection else { return .stale }
                     scriptedTrainingConfirmed = true
                     return .confirmed(ChatGPTTrainingStatus(current: true, connectionID: connectionID,
-                                                            confirmedAt: Date()))
+                                                            confirmedAt: Self.trainingConfirmedAt, revision: 1))
                 }))
     }
 
@@ -696,6 +698,7 @@ struct ScriptedChatHost: View {
         return arguments[index + 1] == "required"
     }()
     private static let trainingConnection = "14600000-0000-4000-8000-0000000000c1"
+    private static let trainingConfirmedAt = Date(timeIntervalSince1970: 1_795_000_000)
 
     private static func subscriptionDestinations(source: String = "chatgpt_plan", model: String = "gpt-6.1",
                                                  effort: String = "medium",
