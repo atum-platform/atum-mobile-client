@@ -152,7 +152,19 @@ struct PhoneConversationModelPicker: View {
     }
 
     @MainActor private func load(force: Bool) async {
-        guard !loading, force || snapshot == nil || destination == nil else { return }
+        guard !loading else { return }
+        // The composer hands in its cached 1.1 and 1.3 reads, but never the
+        // account's subscription status: without this read a relayed ChatGPT
+        // plan would show only its saved model, never the others it serves.
+        if !force, snapshot != nil, destination != nil {
+            guard account == nil, let read = destinations?.subscriptions?.read else { return }
+            loading = true
+            let subscriptionAccount = await read()
+            guard !Task.isCancelled else { return }
+            account = subscriptionAccount
+            loading = false
+            return
+        }
         loading = true
         unavailable = false
         loadFailed = false

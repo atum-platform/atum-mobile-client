@@ -142,6 +142,31 @@ other than the owner's recorded language has the same gap the desktop has.
 - **Live check pending.** Every test here runs against synthetic data. No
   production confirmation was sent from a phone in this lane.
 
+## Fix round: the missing ChatGPT plan rows (2026-11-23)
+
+The r3 run failed `ChatGPTTrainingUITests` in all four combinations at
+"no ChatGPT plan model". The failure hierarchy in `ui-en-light.xcresult`
+showed the Subscriptions section with only the saved `gpt-6.1` row, drawn
+as the saved-row fallback (model id, no display name), and never
+`gpt-6.1-mini`, even with the sheet expanded and scrolled to its foot.
+
+Cause: an app bug, not the test. The composer opens
+`PhoneConversationModelPicker` with its cached 1.1 and 1.3 reads, and
+`load(force:)` returned early whenever both were present. The account's
+subscription status (`destinations.subscriptions.read`) is never cached, so
+it was never read, and a relayed ChatGPT plan showed only its saved model.
+The same applied to the assistant card's picker. `ComposerAndMenuUITests`
+did not catch it because its pick step is skipped when the row is absent.
+
+Fix: with both reads cached, `load` still reads the subscription status once
+(when the picker has none yet), without re-reading 1.1 or 1.3. The training
+gate is unchanged: a ChatGPT pick still asks first and writes only after
+Confirm.
+
+The branch was also rebased onto `origin/main` `6dc8859` (W4-AB #64 and its
+fixes #65). The one conflict was `NativeDomainClient.isApprovedURL`; both
+exact-path Shell routes (`CloudScheduleStop` and `ChatGPTTraining`) are kept.
+
 ## Verification
 
 Each run took the shared heavy-build lock
