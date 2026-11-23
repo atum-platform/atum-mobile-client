@@ -34,6 +34,8 @@ struct ScriptedChatHost: View {
     @State private var scriptedElsewhereSent = false
     @State private var scriptedModels: ManagedModelSnapshot
     @State private var scriptedModelDestinations: ManagedModelDestinationSnapshot
+    /// Set by a scripted training-off confirmation (`-AtumScriptedTraining required`).
+    @State private var scriptedTrainingConfirmed = false
     @State private var scriptedPresentation: AgentPresentationSnapshot
     @State private var scriptedRoutines: AgentRoutinesSnapshot
     @State private var scriptedOpeningPhase: AppBotRoomOpeningPhase?
@@ -691,15 +693,43 @@ struct ScriptedChatHost: View {
         return AssistantSubscriptionActions(
             read: { Self.subscriptionAccount(demo) },
             save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
-                     effort: ManagedModelEffort, _: NativeID) -> AssistantModelDestinationSaveResult in
+                     effort: ManagedModelEffort, _: NativeID,
+                     _: ChatGPTTrainingConsent?, isSelectionCurrent: @escaping @MainActor () -> Bool)
+                -> AssistantModelDestinationSaveResult in
+                guard isSelectionCurrent() else { return .cancelled }
                 let next = Self.subscriptionDestinations(
                     source: source == .opencodeGo ? "opencode_go" : "chatgpt_plan",
                     model: model, effort: effort.rawValue,
                     revision: Int(scriptedModelDestinations.revision + 1))
                 scriptedModelDestinations = next
                 return .saved(next)
-            })
+            },
+            training: ChatGPTTrainingActions(
+                read: {
+                    ChatGPTTrainingStatus(current: !Self.trainingRequired || scriptedTrainingConfirmed,
+                                          connectionID: Self.trainingConnection,
+                                          confirmedAt: Self.trainingConfirmedAt, revision: 1)
+                },
+                confirm: { connectionID, isSelectionCurrent in
+                    guard isSelectionCurrent() else { return .unavailable }
+                    guard connectionID == Self.trainingConnection else { return .stale }
+                    scriptedTrainingConfirmed = true
+                    return .confirmed(ChatGPTTrainingStatus(current: true, connectionID: connectionID,
+                                                            confirmedAt: Self.trainingConfirmedAt, revision: 1))
+                }))
     }
+
+    /// `-AtumScriptedTraining required`: the account has no current
+    /// training-off confirmation, so a ChatGPT pick asks first (synthetic).
+    /// Without it the scripted confirmation is already current.
+    static let trainingFlag = "-AtumScriptedTraining"
+    private static let trainingRequired: Bool = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: trainingFlag), index + 1 < arguments.count else { return false }
+        return arguments[index + 1] == "required"
+    }()
+    private static let trainingConnection = "14600000-0000-4000-8000-0000000000c1"
+    private static let trainingConfirmedAt = Date(timeIntervalSince1970: 1_795_000_000)
 
     private static func subscriptionDestinations(source: String = "chatgpt_plan", model: String = "gpt-6.1",
                                                  effort: String = "medium",
