@@ -70,6 +70,92 @@ final class ChatInfoUITests: TranscriptUITestCase {
             .waitForExistence(timeout: 3))
     }
 
+    // MARK: Desktop PR #95: field merge, conflict line, length hint
+
+    @MainActor
+    private func openPersonaCard(language: String, locale: String, size: String, dark: Bool,
+                                 extra: [String]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.chatEmpty.rawValue)
+            + ["-AppleLanguages", "(\(language))", "-AppleLocale", locale,
+               "-UIPreferredContentSizeCategoryName", size,
+               "-atum.appearance", dark ? "dark" : "light"]
+            + probeArguments + extra
+        app.launch()
+        let title = element(app, "chat.title")
+        XCTAssertTrue(title.waitForExistence(timeout: 15)); title.tap()
+        return app
+    }
+
+    @MainActor
+    private func leaveField(_ app: XCUIApplication) {
+        let done = app.buttons.matching(identifier: "assistant.card.keyboard.done").firstMatch
+        if done.waitForExistence(timeout: 2) { done.tap() } else { app.swipeDown() }
+    }
+
+    /// Another device changed "What you do" while it was being edited: the
+    /// card writes nothing over it, shows desktop's conflict line (no Retry)
+    /// and the latest text.
+    @MainActor
+    func testAPurposeChangedElsewhereShowsTheLatestAndDesktopsLine() {
+        let app = openPersonaCard(language: "en", locale: "en_US", size: "UICTContentSizeCategoryL",
+                                  dark: false, extra: ["-AtumScriptedPersonaElsewhere"])
+        let purpose = element(app, "assistant.card.purpose")
+        XCTAssertTrue(purpose.waitForExistence(timeout: 5))
+        purpose.tap()
+        purpose.typeText(" And email.")
+        leaveField(app)
+        let band = element(app, "assistant.card.persona-conflict")
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["This field changed while you were editing. Showing the latest version."]
+            .exists)
+        XCTAssertFalse(app.buttons["Try again"].exists)
+        XCTAssertFalse(element(app, "assistant.card.saved").exists)
+        XCTAssertEqual(purpose.value as? String, "Writes the weekly report.")
+        XCTAssertTrue(probeLines("persona-save.txt").isEmpty, "the stale purpose was written")
+        keepScreenshot("w4-e4-persona-conflict-light", of: app)
+    }
+
+    /// A personality edit that meets the same newer definition is rebased on
+    /// it: the other device's purpose stays, the personality saves, and the
+    /// quiet length hint reads under the footnote (dark, AX5).
+    @MainActor
+    func testAPersonalityEditKeepsTheOtherDevicesPurposeInDarkAtAX5() {
+        let app = openPersonaCard(language: "vi", locale: "vi_VN",
+                                  size: "UICTContentSizeCategoryAccessibilityXXXL", dark: true,
+                                  extra: ["-AtumScriptedPersonaElsewhere", "-AtumScriptedPersonaLong"])
+        let personality = app.buttons.matching(identifier: "assistant.card.personality").firstMatch
+        for _ in 0..<10 where !(personality.exists && personality.isHittable) { app.swipeUp() }
+        XCTAssertTrue(personality.waitForExistence(timeout: 5)); personality.tap()
+        let field = element(app, "assistant.card.personality.field")
+        XCTAssertTrue(field.waitForExistence(timeout: 3))
+        // At AX5 the opened field can sit under the keyboard's edge: bring it
+        // into view and tap until it takes keyboard focus.
+        for _ in 0..<4 where !field.isHittable { app.swipeUp() }
+        for _ in 0..<3 where !app.keyboards.firstMatch.exists {
+            field.tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "the personality field never took focus")
+        field.typeText(" Vui vẻ.")
+        leaveField(app)
+        XCTAssertTrue(element(app, "assistant.card.saved").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "assistant.card.persona-conflict").exists)
+        let saves = probeLines("persona-save.txt").map(\.text)
+        XCTAssertEqual(saves.count, 1)
+        // Where the caret lands on tap varies, so read the section, not its order.
+        let who = saves.first?.components(separatedBy: "## Who you are||").last?
+            .components(separatedBy: "||## What you do").first ?? ""
+        XCTAssertTrue(who.contains("Calm.") && who.contains("Vui vẻ."), "\(who)")
+        XCTAssertTrue(saves.first?.contains("Writes the weekly report.") == true, "the other field was reverted")
+        XCTAssertFalse(saves.first?.contains("Plans and writes.") == true, "the other field was reverted")
+        let hint = element(app, "assistant.card.long-persona")
+        for _ in 0..<12 where !(hint.exists && hint.isHittable) { app.swipeUp() }
+        XCTAssertTrue(hint.exists && hint.isHittable, "the length hint is not reachable at AX5")
+        XCTAssertTrue(app.staticTexts["Trợ lý có thể chỉ đọc một phần hướng dẫn này."].exists)
+        keepScreenshot("w4-e4-persona-long-dark-ax5", of: app)
+    }
+
     @MainActor
     func testAssistantRoutineCreatesAndShowsAuthenticatedRunHistory() {
         let app = XCUIApplication()

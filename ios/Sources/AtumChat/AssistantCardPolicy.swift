@@ -74,7 +74,10 @@ public enum AssistantCardLayout {
             rows.append(.purpose)
             rows.append(.personality)
         case .custom:
+            // Desktop `PersonaFields`: a hand-written persona uses the same
+            // two fields, its text (less `Who you are`) and the personality.
             rows.append(.instructions)
+            rows.append(.personality)
         }
         if capabilities.hasHome { rows.append(.home) }
         if capabilities.hasModel { rows.append(.model) }
@@ -129,6 +132,27 @@ public struct AssistantCardEdit: Equatable, Sendable {
         draft = value
     }
 
+    /// The platform confirmed `latest` for the save that sent `submitted`.
+    /// The baseline always advances (even while the field is being typed
+    /// in), so a later save is not mistaken for another device's edit. The
+    /// draft takes `latest` only if the person has not typed past what was
+    /// sent; a newer draft is kept for the next write.
+    public mutating func settle(_ latest: String, submitted: String) {
+        saved = latest
+        if normalized(draft) == normalized(submitted) { draft = latest }
+    }
+
+    /// The person typed past `submitted` after that save was sent.
+    public func hasNewerDraft(than submitted: String) -> Bool {
+        normalized(draft) != normalized(submitted)
+    }
+
+    /// An explicit Retry over another device's change: the latest value
+    /// becomes the baseline, so the draft is written over it.
+    public mutating func rebase(_ latest: String) {
+        saved = latest
+    }
+
     /// Esc / Cancel / an external change not being edited.
     public mutating func revert() {
         draft = saved
@@ -136,6 +160,59 @@ public struct AssistantCardEdit: Equatable, Sendable {
 
     private func normalized(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// The card's one note band, with each failure tied to the field that
+/// failed. A save of another field never clears it; only retrying,
+/// resolving or discarding that field's edit does. The band shows the
+/// latest failure (and Retry targets that field); with none, the latest
+/// outcome (Saved, or a conflict line that offers no Retry).
+public struct AssistantCardSaveBand<Field: Hashable & Sendable, Note: Equatable & Sendable>: Equatable, Sendable {
+    public struct Failure: Equatable, Sendable {
+        public let field: Field
+        public let note: Note
+        /// Saves of this field wait for an explicit Retry (a newer draft
+        /// met another device's change to the same field).
+        public let held: Bool
+    }
+
+    public private(set) var failures: [Failure] = []
+    private var outcome: Note?
+
+    public init() {}
+
+    public var note: Note? { failures.last?.note ?? outcome }
+    public var retryField: Field? { failures.last?.field }
+
+    /// A save of `field` starts: its own failure (if any) is being retried.
+    public mutating func begin(_ field: Field) {
+        failures.removeAll { $0.field == field }
+        outcome = nil
+    }
+
+    /// `field` settled without needing Retry (saved, nothing to write, or
+    /// changed elsewhere). Another field's failure stays in front.
+    public mutating func settled(_ field: Field, note: Note?) {
+        failures.removeAll { $0.field == field }
+        outcome = note
+    }
+
+    public mutating func failed(_ field: Field, note: Note, held: Bool = false) {
+        failures.removeAll { $0.field == field }
+        failures.append(Failure(field: field, note: note, held: held))
+        outcome = nil
+    }
+
+    /// Automatic saves (leaving the field, a queued save) skip this field
+    /// until the person presses Retry or discards the draft.
+    public func isHeld(_ field: Field) -> Bool {
+        failures.contains { $0.field == field && $0.held }
+    }
+
+    /// The person discarded `field`'s edit: nothing is left to retry there.
+    public mutating func discard(_ field: Field) {
+        failures.removeAll { $0.field == field }
     }
 }
 

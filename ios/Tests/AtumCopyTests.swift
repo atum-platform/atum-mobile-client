@@ -63,6 +63,41 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testPauseHintUsesDesktopCopyInAllLocales() throws {
+        let copy = try AtumCopy()
+        let key = "shared.matrix-agent-desk-copy.matrixAgentDeskCopy.pauseHint"
+        let expected = [
+            "en": "Still answers you. Starts nothing on its own.",
+            "vi": "Vẫn trả lời bạn. Không tự bắt đầu việc gì.",
+            "ja": "返信は続けます。自分から作業は始めません。",
+            "zh": "仍会回复你，但不会自行开始任何事。",
+            "zh-Hant": "仍會回覆你，但不會自行開始任何事。",
+        ]
+        XCTAssertEqual(copy.locales, Set(expected.keys))
+        XCTAssertEqual(copy.parameterKinds(key), [])
+        for (locale, value) in expected {
+            XCTAssertEqual(try copy.text(key, locale: locale), value, locale)
+        }
+    }
+
+    func testConnectionsMacNamesPreserveDesktopFormattingAndFallbacks() throws {
+        let copy = try AtumCopy()
+        let prefix = "src.matrix.mobile-copy.mobileScreensCopy.connections."
+        let macs = "MacBook Air, Mac mini"
+        let cases = [
+            ("onMacs", "On \(macs)", "Trên \(macs)"),
+            ("lastSeen", "Last seen on \(macs)", "Lần cuối trên \(macs)"),
+        ]
+        for (name, english, vietnamese) in cases {
+            let key = prefix + name
+            XCTAssertEqual(copy.parameterKinds(key), ["string"])
+            for locale in copy.locales {
+                XCTAssertEqual(try copy.text(key, locale: locale, arguments: [.text(macs)]),
+                               locale == "vi" ? vietnamese : english, "\(name), \(locale)")
+            }
+        }
+    }
+
     func testTypedArgumentsAndMissingLocaleFailInsteadOfEnglishFallback() throws {
         let copy = try AtumCopy()
         XCTAssertThrowsError(try copy.text("desktop.atum.agents.photoUploading", locale: "vi", arguments: [.text("42")]))
