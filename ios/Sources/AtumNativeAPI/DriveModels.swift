@@ -253,7 +253,11 @@ public struct DrivePage: Codable, Equatable, Sendable {
         guard items.count <= 5_000, Set(items.map(\.id)).count == items.count else {
             throw ContractViolation.invalidValue
         }
-        self.items = items
+        // Desktop parity (atum-desktop `matrix/drive.ts` listing filter): names
+        // starting with "." are hidden engine, sync or system entries and never
+        // appear in Drive. Filtering here covers network pages, cached pages
+        // decoded from disk, and contract fixtures alike.
+        self.items = items.filter { !$0.name.hasPrefix(".") }
         self.isTruncated = isTruncated
     }
 
