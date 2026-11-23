@@ -50,6 +50,31 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testTeamSpaceInviteCountsUsePinnedPluralRoots() throws {
+        let copy = try AtumCopy()
+        let cases = [
+            ("shared.matrix-team-space-copy.copy.inviteLinkCapacity",
+             ["Up to 0 people can use it.", "One person can use it.", "Up to 2 people can use it."]),
+            ("shared.matrix-team-space-copy.copy.inviteLinkDuration",
+             ["Works for 0 days.", "Works for 1 day.", "Works for 2 days."]),
+            ("shared.matrix-team-space-copy.copy.inviteLinkExpires",
+             ["expires today", "expires in 1 day", "expires in 2 days"]),
+        ]
+        for (key, english) in cases {
+            for (count, expected) in english.enumerated() {
+                let arguments: [AtumCopy.Argument] = [.number(Int64(count))]
+                for locale in copy.locales {
+                    let value = try copy.text(key, locale: locale, arguments: arguments)
+                    if locale == "en" {
+                        XCTAssertEqual(value, expected, key)
+                    } else {
+                        XCTAssertFalse(value.isEmpty, "\(key), \(locale), \(count)")
+                    }
+                }
+            }
+        }
+    }
+
     func testScheduledRelayUsagePreservesDesktopCopy() throws {
         let copy = try AtumCopy()
         let key = "src.matrix.mobile-copy.mobileScreensCopy.relay.usageScheduled"

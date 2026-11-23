@@ -37,11 +37,6 @@ struct TeamSpaceCopy {
             .replacingOccurrences(of: "{1}", with: second)
     }
 
-    /// A count phrase: `.one` for 1, `.other` with the count, as the desktop function says it.
-    func count(_ key: String, _ value: Int) -> String {
-        text(key + (value == 1 ? ".one" : ".other"), value.formatted())
-    }
-
     /// A one-argument phrase ({0} in the pending table, `%1$@` in the export).
     func text(_ key: String, _ argument: String) -> String {
         if design.copy.contains(key) { return design.text(key, words: [argument]) }
@@ -156,14 +151,23 @@ struct TeamSpaceCopy {
     var inviteLinkCreating: String { text(Self.team + "inviteLinkCreating") }
     var inviteLinkCopied: String { text(Self.team + "inviteLinkCopied") }
     var inviteLinkAudience: String { text(Self.team + "inviteLinkAudience") }
-    func inviteLinkDuration(days: Int) -> String { count(Self.team + "inviteLinkDuration", days) }
-    func inviteLinkCapacity(uses: Int) -> String { count(Self.team + "inviteLinkCapacity", uses) }
+    func inviteLinkDuration(days: Int) -> String {
+        design.text("shared.matrix-team-space-copy.copy.inviteLinkDuration",
+                    arguments: [.number(Int64(days))])
+    }
+    func inviteLinkCapacity(uses: Int) -> String {
+        design.text("shared.matrix-team-space-copy.copy.inviteLinkCapacity",
+                    arguments: [.number(Int64(uses))])
+    }
     var inviteLinkReplayed: String { text(Self.team + "inviteLinkReplayed") }
     var inviteLinksActive: String { text(Self.team + "inviteLinksActive") }
     func inviteLinkUsage(used: Int, max: Int) -> String {
         text(Self.team + "inviteLinkUsage", String(used), String(max))
     }
-    func inviteLinkExpires(days: Int) -> String { count(Self.team + "inviteLinkExpires", days) }
+    func inviteLinkExpires(days: Int) -> String {
+        design.text("shared.matrix-team-space-copy.copy.inviteLinkExpires",
+                    arguments: [.number(Int64(days))])
+    }
     var inviteLinkRevoke: String { text(Self.team + "inviteLinkRevoke") }
     var inviteLinkRevoked: String { text(Self.team + "inviteLinkRevoked") }
 
