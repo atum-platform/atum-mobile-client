@@ -1657,24 +1657,12 @@ private struct HomeStartChatSheet: View {
         }
     }
 
-    // PENDING-COPY:desktop.matrixShell.mainAgent — the badge's spoken label.
-    // Until the export carries the key the star is decorative and the name
-    // alone is read.
-    private var mainAssistantLabel: String? {
-        let key = StartChatCopyKey.mainAgent.rawValue
-        return design.copy.contains(key) ? design.text(key) : nil
-    }
-
-    @ViewBuilder private var mainAssistantBadge: some View {
-        let star = Image(atum.symbol(.starFilled))
+    private var mainAssistantBadge: some View {
+        Image(atum.symbol(.starFilled))
             .font(.system(size: 13))
             .foregroundStyle(atum.kitColor(.ink3, scheme: scheme))
             .accessibilityIdentifier("home.startChat.mainAssistant")
-        if let label = mainAssistantLabel {
-            star.accessibilityLabel(Text(verbatim: label))
-        } else {
-            star.accessibilityHidden(true)
-        }
+            .accessibilityLabel(Text(verbatim: design.text(StartChatCopyKey.mainAgent.rawValue)))
     }
 
     @ViewBuilder private var creationActions: some View {
@@ -3200,8 +3188,7 @@ private enum HomeCopyKey: String {
 }
 
 private enum StartChatCopyKey: String {
-    /// PENDING-COPY: not in the export yet (desktop `i18n` `matrixShell.mainAgent`).
-    case mainAgent = "desktop.matrixShell.mainAgent"
+    case mainAgent = "src.matrix.mobile-copy.mobileScreensCopy.shell.mainAgent"
     case startTitle = "src.matrix.roster-create-copy.copies.startTitle"
     case startSearch = "src.matrix.roster-create-copy.copies.startSearch"
     case assistants = "src.matrix.roster-create-copy.copies.assistants"
