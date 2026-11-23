@@ -496,7 +496,7 @@ struct AssistantCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if retry {
-                Button(copy.text(.retry)) { retry() }
+                Button(copy.text(.retry)) { self.retry() }
                 .font(.footnote.weight(.semibold))
             }
         }

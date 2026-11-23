@@ -227,6 +227,10 @@ are under `/Volumes/AtumTestFlight/w4-e4-verify/<round>/`.
   AtumChatTests` passed 770/770. The Debug `build-for-testing` succeeded.
   Both persona UI tests passed. The first two r6 attempts were lost when the
   shared build volume detached and reattached; neither had reached a test.
+- r7 (review r2 fixes, `ea991aa`): `swift test --filter AtumChatTests`
+  passed 776/776. The Debug build failed: the band's `retry` flag shadowed
+  the new `retry()` method. Fixed by calling `self.retry()`. The first r7
+  attempt was lost to another build-volume detach.
 
 Not verified locally: VoiceOver reading of the hint (desktop marks it
 `role="status"`, and the phone shows it as static text), and the
