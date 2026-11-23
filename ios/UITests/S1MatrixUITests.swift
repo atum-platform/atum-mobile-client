@@ -245,7 +245,8 @@ final class S1MatrixUITests: TranscriptUITestCase {
         let app = launchChatCell(ScriptedScenario.chatSend.rawValue)
         let field = composerField(app)
         field.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        // 10 s: on a loaded simulator one keyboard query alone took over 2 s.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "no keyboard")
         let text = "Ma trận \(cell.tag)"
         field.typeText(text)
         element(app, AccessibilityID.composerSend).tap()

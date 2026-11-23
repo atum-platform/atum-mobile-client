@@ -59,3 +59,9 @@ the read signal itself (faces only, no ticks) now matches.
   my message by its unique text in the transcript. The composer UI tests ran
   0 tests because the verify script named the wrong class (`ComposerUITests`).
   Run 3 reruns both.
+- Run 3 (after a Mac restart): build passed. U5 retry and parked-retry
+  passed; U4 failed "Seen once Atum's receipt lands" for the same
+  `row.latest` race (the Seen wait began about 9 s after the send). U4b now
+  scopes to the sent bubble in the transcript. The matrix passed in vi-light
+  and en-light. Both dark cells failed at the existing 3 s keyboard wait,
+  before the send. That wait is now 10 s. Run 4 reruns U4 and the dark cells.

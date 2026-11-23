@@ -354,17 +354,21 @@ final class ComposerUITests: WS3UITestCase {
         XCTAssertEqual(Self.text(of: field), "", "the draft cleared in the same frame")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "the keyboard stays")
 
-        // U4b, scoped to the sent row: once the server accepts it the clock
-        // goes and the bubble reads just its text and time, no "Đã gửi".
-        XCTAssertTrue(settled(latest, text).waitForExistence(timeout: 4), "the clock goes once the server accepts it")
-        XCTAssertFalse(bubble(latest, text, reading: "Đã gửi").exists, "no Sent receipt (desktop #89)")
+        // U4b, scoped to the sent bubble by its text in the transcript, not
+        // as `row.latest`: Atum's answer becomes the newest row about 7.6 s
+        // after the send, which a slow run reaches before Seen is checked.
+        // Once the server accepts it the clock goes and the bubble reads just
+        // its text and time, no "Đã gửi".
+        let sent = element(app, AccessibilityID.transcript)
+        XCTAssertTrue(settled(sent, text).waitForExistence(timeout: 4), "the clock goes once the server accepts it")
+        XCTAssertFalse(bubble(sent, text, reading: "Đã gửi").exists, "no Sent receipt (desktop #89)")
         keepScreenshot("U4b-1-unread", of: app)
         field.typeText("thêm")
         XCTAssertEqual(Self.text(of: field), "thêm", "focus kept: more typing lands in the field")
-        XCTAssertTrue(bubble(latest, text, reading: "Đã xem").waitForExistence(timeout: 15),
+        XCTAssertTrue(bubble(sent, text, reading: "Đã xem").waitForExistence(timeout: 15),
                       "Seen once Atum's receipt lands")
-        XCTAssertTrue(latest.descendants(matching: .any)["delivery.seen"].exists, "the reader's face says Seen")
-        XCTAssertFalse(bubble(latest, text, reading: "Đã gửi").exists, "the faces are the only receipt")
+        XCTAssertTrue(sent.descendants(matching: .any)["delivery.seen"].exists, "the reader's face says Seen")
+        XCTAssertFalse(bubble(sent, text, reading: "Đã gửi").exists, "the faces are the only receipt")
         keepScreenshot("U4b-2-seen", of: app)
     }
 
