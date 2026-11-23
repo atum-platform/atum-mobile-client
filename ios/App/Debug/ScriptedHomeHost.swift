@@ -36,6 +36,11 @@ struct ScriptedHomeHost: View {
     /// Rooms the scripted account has left since launch (Home search's
     /// eligibility drops their results).
     @State private var scriptedLeftRooms = Set<String>()
+    /// `-AtumScriptedHire <free|paid|retry|short>`: the open Researcher
+    /// listing on the New assistant sheet (desktop D9). Without it the sheet
+    /// has no shelf, as for an account the platform offers none.
+    @State private var listingHire = ListingHireFlow()
+    @MainActor private static var scriptedHireAttempts = 0
     @Environment(\.colorScheme) private var scheme
     private let design: LiveDesign
 
@@ -52,6 +57,43 @@ struct ScriptedHomeHost: View {
             })
         } else {
             _rows = State(initialValue: productRows)
+        }
+    }
+
+    private static var hireMode: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-AtumScriptedHire"),
+              arguments.indices.contains(index + 1) else { return nil }
+        return arguments[index + 1]
+    }
+
+    /// The platform's slice 1 catalog row (0535), in its own two languages.
+    private static var scriptedListings: [OpenAgentListing] {
+        guard let listing = try? OpenAgentListing(
+            listingID: "open/agents/researcher", displayName: "Researcher",
+            title: ["en": "Researcher", "vi": "Nhà nghiên cứu"],
+            summary: ["en": "Finds sources, checks them, and writes up what they say.",
+                      "vi": "Tìm nguồn, kiểm tra và tóm tắt những gì nguồn nói."],
+            glyph: "🔎", skills: ["trend-researcher", "atum-weekly-digest"],
+            seatPriceProtons: 60_000, hireRequired: hireMode == "paid") else { return [] }
+        return [listing]
+    }
+
+    /// Answers a hire after a visible pause: `retry` fails the first try
+    /// (Retry then hires), `short` says the wallet is short, the rest hire.
+    @MainActor private static func readScriptedListings() async -> [OpenAgentListing] { scriptedListings }
+
+    @MainActor private static func scriptedHire(_ listing: OpenAgentListing, _ name: String,
+                                                _ confirmed: Bool) async -> ListingHireResult {
+        scriptedHireAttempts += 1
+        UITestProbe.append("hire \(listing.listingID) \(name) confirmed=\(confirmed) try=\(scriptedHireAttempts)",
+                           to: "home-actions.txt")
+        // Long enough for a loaded simulator to see "Hiring…".
+        try? await Task.sleep(for: .seconds(5))
+        switch hireMode {
+        case "retry" where scriptedHireAttempts == 1: return .refused(.retry)
+        case "short": return .refused(.short)
+        default: return .hired
         }
     }
 
@@ -134,7 +176,10 @@ struct ScriptedHomeHost: View {
                                 let taken = handle.rawValue.contains("taken")
                                 return AgentAliasCheck(handle: handle, available: !taken,
                                                        code: taken ? .unavailable : nil)
-                            }
+                            },
+                            listings: Self.hireMode == nil ? nil : Self.readScriptedListings,
+                            hire: Self.hireMode == nil ? nil : Self.scriptedHire,
+                            hireFlow: Self.hireMode == nil ? nil : listingHire
                         ),
                         exitRoom: { roomID, action in
                             rows.removeAll { $0.id == roomID }

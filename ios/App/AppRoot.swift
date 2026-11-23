@@ -63,6 +63,8 @@ struct AppRoot: View {
     @State private var rosterStore = RosterStore()
     /// HC-3: my assistants' typing, for Home's working atom.
     @State private var assistantActivity = HomeAssistantActivity()
+    /// A listing hire outlives the New assistant sheet (desktop D9).
+    @State private var listingHire = ListingHireFlow()
     @State private var openRequestGeneration: UInt64 = 0
     @State private var dismissChatPresentationRequest: UInt64 = 0
     @State private var signInAttempt = SignInAttemptGate()
@@ -961,7 +963,10 @@ struct AppRoot: View {
                 create: { name in await model.createAssistant(name) },
                 names: model.assistantNames,
                 checkHandle: model.newAssistantHandleCheck,
-                followUp: { model.assistantCreateFollowUp(roomID: $0) }
+                followUp: { model.assistantCreateFollowUp(roomID: $0) },
+                listings: { await model.openAgentListings() },
+                hire: { await model.hireListing($0, name: $1, hireConfirmed: $2) },
+                hireFlow: listingHire
             ) : nil,
             founderDraft: founderDraftActions(dismissAccountOnSent: false),
             exitRoom: { model.exitRoom($0, $1) },

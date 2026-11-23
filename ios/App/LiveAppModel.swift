@@ -1075,6 +1075,95 @@ final class LiveAppModel {
                                               generation: generation)
     }
 
+    // MARK: Open listing hire (desktop PR #100, D9 slice 1)
+
+    /// The open listings this person can hire, read each time the New
+    /// assistant sheet opens. Any failure is an empty shelf, and the sheet is
+    /// then exactly what it was before (desktop `useOpenListings`).
+    func openAgentListings() async -> [OpenAgentListing] {
+        guard canCreateAssistant, let client = domainClient else { return [] }
+        do {
+            let listings = try await client.openAgentListings()
+            guard domainClient === client else { return [] }
+            return listings
+        } catch {
+            LiveFlowLog.creation(.assistant, outcome: "listings_unread")
+            return []
+        }
+    }
+
+    /// Hires an open listing under `name` with `POST /agents` and its
+    /// `listingId` (the route desktop's `hireAgent` uses). An unfinished hire
+    /// of the same listing resumes under its stored request and name, so a
+    /// Retry, a confirmation or a relaunch never hires twice; a confirmation
+    /// given now carries over. The platform seeds the persona and skills and
+    /// always places it in the cloud, so no definition write follows.
+    func hireListing(_ listing: OpenAgentListing, name: String,
+                     hireConfirmed: Bool) async -> ListingHireResult {
+        guard let client = domainClient, let current = context,
+              let session = liveMatrix, session.isReady else { return .refused(.retry) }
+        let store = LiveListingHireStore(matrixUserID: current.runtime.ticket.session.userID)
+        var pending: LiveListingHireStore.Pending
+        if let earlier = store.pending(listing.listingID) {
+            pending = earlier
+        } else {
+            guard let requestID = try? NativeID(UUID().uuidString.lowercased()) else { return .refused(.retry) }
+            pending = .init(requestID: requestID.rawValue, name: name, hireConfirmed: false)
+        }
+        if hireConfirmed { pending.hireConfirmed = true }
+        store.save(pending, for: listing.listingID)
+        let request: AgentCreateRequest
+        do {
+            request = try AgentCreateRequest(
+                requestId: NativeID(pending.requestID), displayName: pending.name,
+                listingId: listing.listingID, hireConfirmed: pending.hireConfirmed,
+                disclosureVersion: assistantLifecycleCapability?.disclosureVersion)
+        } catch {
+            store.clear(listing.listingID, requestID: pending.requestID)
+            return .refused(.name)
+        }
+        LiveFlowLog.creation(.assistant, outcome: "hire_begin")
+        do {
+            let agent = try await client.createAgent(request)
+            store.clear(listing.listingID, requestID: pending.requestID)
+            LiveFlowLog.creation(.assistant, outcome: "hired")
+            if domainClient === client, liveMatrix === session {
+                await adoptHiredAssistant(agent, name: pending.name, client: client, session: session)
+            }
+            return .hired
+        } catch {
+            let refusal = OpenAgentHireRefusal.from(error)
+            if !refusal.keepsRequest { store.clear(listing.listingID, requestID: pending.requestID) }
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: refusal.logCode)
+            return .refused(refusal)
+        }
+    }
+
+    /// The hired assistant joins the roster as a made one does: `/agents` is
+    /// read again, its owner room's invite is accepted (an invite that came
+    /// before the roster knew the inviter is tried again), and its handle is
+    /// claimed in the background. Any failure is left to the assistant's card.
+    private func adoptHiredAssistant(_ agent: AgentsResponse.Agent, name: String,
+                                     client: NativeDomainClient, session: LiveMatrixSession) async {
+        if let response = try? await client.agents(), domainClient === client, liveMatrix === session {
+            agentsRead.receive(response)
+            refreshConversationIdentity()
+        }
+        guard liveMatrix === session else { return }
+        if let user = agent.matrixUser?.rawValue {
+            attemptedInvites.subtract(session.invites.filter { $0.inviterID == user }.map(\.roomID))
+        }
+        acceptKnownInvites(session.invites, session: session)
+        let handles = assistantHandleActions(assistantID: agent.id)
+        Task { @MainActor in
+            _ = await AgentHandleClaimWalk.run(
+                assistantID: handles.assistantID,
+                groups: AgentHandleRules.candidates(name: name),
+                calls: handles.directoryCalls,
+                requestID: { (try? NativeID(UUID().uuidString.lowercased()))! })
+        }
+    }
+
     private func finishAssistantLifecycle(_ first: AgentLifecycleSnapshot,
                                           requestID: NativeID,
                                           client: NativeDomainClient,
@@ -7038,6 +7127,66 @@ struct LiveHiddenRoomStore {
 /// provider state remain authoritative on the platform and never enter
 /// defaults. The key is derived from the owner's Matrix ID, so two accounts on
 /// the same phone can never resume each other's setup.
+/// The listing hires still unfinished, per account and listing: the request
+/// UUID, the name it was sent under and whether its price was confirmed. A
+/// hire resumes under exactly these, so it is never made twice.
+struct LiveListingHireStore {
+    struct Pending: Codable, Equatable {
+        let requestID: String
+        let name: String
+        var hireConfirmed: Bool
+    }
+
+    private let key: String
+    private let defaults: UserDefaults
+
+    init(matrixUserID: String, defaults: UserDefaults = .standard) {
+        key = "atum.live.listingHire.v1." + LiveFlowLog.fingerprint(matrixUserID)
+        self.defaults = defaults
+    }
+
+    private var all: [String: Pending] {
+        guard let data = defaults.data(forKey: key),
+              let value = try? JSONDecoder().decode([String: Pending].self, from: data) else { return [:] }
+        return value
+    }
+
+    private func write(_ value: [String: Pending]) {
+        if value.isEmpty { defaults.removeObject(forKey: key); return }
+        defaults.set(try? JSONEncoder().encode(value), forKey: key)
+    }
+
+    func pending(_ listingID: String) -> Pending? { all[listingID] }
+
+    func save(_ pending: Pending, for listingID: String) {
+        var value = all
+        value[listingID] = pending
+        write(value)
+    }
+
+    /// Clears only the request it observed, as the lifecycle store does.
+    func clear(_ listingID: String, requestID: String) {
+        var value = all
+        guard value[listingID]?.requestID == requestID else { return }
+        value[listingID] = nil
+        write(value)
+    }
+}
+
+extension OpenAgentHireRefusal {
+    /// A closed code for `LiveFlowLog`.
+    var logCode: String {
+        switch self {
+        case .hireRequired: "hire_required"
+        case .short: "short"
+        case .name: "name"
+        case .limit: "limit"
+        case .account: "account"
+        case .retry: "retry"
+        }
+    }
+}
+
 struct LiveAssistantLifecycleStore {
     private let key: String
     private let defaults: UserDefaults

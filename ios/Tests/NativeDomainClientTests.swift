@@ -3358,3 +3358,125 @@ extension NativeDomainClientTests {
         }
     }
 }
+
+// MARK: Open listing hire (desktop PR #100, platform 0535)
+
+extension NativeDomainClientTests {
+    private static let researcherRow = #"""
+    {"listingId":"open/agents/researcher","displayName":"Researcher",
+     "title":{"en":"Researcher","vi":"Nhà nghiên cứu"},
+     "summary":{"en":"Finds and checks sources.","vi":"Tìm và kiểm tra nguồn."},
+     "glyph":"🔎","accent":"#4b6bfb","visibility":"open","revision":1,
+     "skills":["trend-researcher","atum-weekly-digest"],
+     "seatPriceProtons":60000,"hireRequired":true}
+    """#
+
+    func testOpenCatalogReadsTheOneFixedQueryAndDropsRowsItCannotShow() async throws {
+        let value = client(TestAuthorization(first: "hire-token"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/matrix/v1/agents")
+            XCTAssertEqual(request.url?.query, "catalog=open")
+            XCTAssertNil(self.body(of: request))
+            return .json(Data(("[" + Self.researcherRow + #"""
+            ,{"listingId":"","displayName":"Broken","seatPriceProtons":1,"hireRequired":false}
+            ,{"listingId":"open/agents/x","displayName":"No price","hireRequired":false}
+            ,{"listingId":"open/agents/y","displayName":"Plain","title":"Plain title","skills":null,
+              "seatPriceProtons":0,"hireRequired":false}]
+            """#).utf8))
+        }
+        let listings = try await value.openAgentListings()
+        XCTAssertEqual(listings.map(\.listingID), ["open/agents/researcher", "open/agents/y"])
+        let researcher = try XCTUnwrap(listings.first)
+        XCTAssertEqual(researcher.title(locale: "vi"), "Nhà nghiên cứu")
+        XCTAssertEqual(researcher.title(locale: "ja"), "Researcher")
+        XCTAssertEqual(researcher.summary(locale: "en"), "Finds and checks sources.")
+        XCTAssertEqual(researcher.glyph, "🔎")
+        XCTAssertEqual(researcher.seatPriceProtons, 60_000)
+        XCTAssertTrue(researcher.hireRequired)
+        XCTAssertEqual(listings[1].title(locale: "vi"), "Plain title")
+        XCTAssertEqual(listings[1].skills, [])
+    }
+
+    func testOpenCatalogThatIsNotAListIsAnEmptyShelf() async throws {
+        NativeDomainProtocol.state.handler = { _ in .json(Data(#"{"rows":[]}"#.utf8)) }
+        let listings = try await client(TestAuthorization(first: "hire-token")).openAgentListings()
+        XCTAssertEqual(listings, [])
+    }
+
+    func testPlainCreateBodyIsUnchangedAndAHireCarriesItsListing() throws {
+        let id = try NativeID("00000000-0000-4000-8000-c9ead89f3604")
+        let plain = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(AgentCreateRequest(requestId: id, displayName: "Alfred"))) as? [String: Any]
+        XCTAssertEqual(Set(try XCTUnwrap(plain).keys), ["requestId", "displayName"])
+
+        let free = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            AgentCreateRequest(requestId: id, displayName: "Researcher", listingId: "open/agents/researcher")))
+            as? [String: Any]
+        XCTAssertEqual(Set(try XCTUnwrap(free).keys), ["requestId", "displayName", "listingId"])
+
+        let confirmed = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            AgentCreateRequest(requestId: id, displayName: "Researcher 2", listingId: "open/agents/researcher",
+                               hireConfirmed: true, disclosureVersion: 3))) as? [String: Any]
+        XCTAssertEqual(confirmed?["hireConfirmed"] as? Bool, true)
+        XCTAssertEqual(confirmed?["disclosureVersion"] as? Int, 3)
+        XCTAssertEqual(confirmed?["listingId"] as? String, "open/agents/researcher")
+
+        XCTAssertThrowsError(try AgentCreateRequest(requestId: id, displayName: "R", listingId: ""))
+        XCTAssertThrowsError(try AgentCreateRequest(requestId: id, displayName: "R",
+                                                    listingId: String(repeating: "x", count: 129)))
+    }
+
+    func testListingHirePostsTheExistingCreateRoute() async throws {
+        let value = client(TestAuthorization(first: "hire-token"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/matrix/v1/agents")
+            XCTAssertNil(request.url?.query)
+            let body = try! XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as? [String: Any])
+            XCTAssertEqual(body["listingId"] as? String, "open/agents/researcher")
+            XCTAssertEqual(body["displayName"] as? String, "Researcher")
+            XCTAssertNil(body["persona"])
+            var record = self.agentRecord(matrixUser: true)
+            record["cloud_placement"] = "placed"
+            return .json(try! JSONSerialization.data(withJSONObject: record))
+        }
+        let created = try await value.createAgent(AgentCreateRequest(
+            requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+            listingId: "open/agents/researcher"))
+        XCTAssertEqual(created.id.rawValue, agentID)
+    }
+
+    func testHireRefusalsMapAsDesktopsDo() async throws {
+        func refusal(_ status: Int, _ body: String) async -> OpenAgentHireRefusal {
+            NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(body.utf8)]) }
+            do {
+                _ = try await client(TestAuthorization(first: "hire-token")).createAgent(AgentCreateRequest(
+                    requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+                    listingId: "open/agents/researcher"))
+                XCTFail("hire accepted")
+                return .retry
+            } catch {
+                return OpenAgentHireRefusal.from(error)
+            }
+        }
+        let required = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_required","hire":{"price_protons":60000,"price_micro_protons":60000000000}}}"#)
+        XCTAssertEqual(required, .hireRequired(priceProtons: 60_000))
+        XCTAssertTrue(required.keepsRequest)
+        let malformedPrice = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_required","hire":{"price_protons":"lots"}}}"#)
+        XCTAssertEqual(malformedPrice, .hireRequired(priceProtons: nil))
+        let short = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_insufficient_protons","hire":{"price_protons":60000}}}"#)
+        XCTAssertEqual(short, .short)
+        XCTAssertTrue(short.keepsRequest)
+        let limit = await refusal(409, #"{"error":"matrix_409"}"#)
+        XCTAssertEqual(limit, .limit)
+        XCTAssertFalse(limit.keepsRequest)
+        let name = await refusal(422, #"{"error":"assistant_name_taken"}"#)
+        XCTAssertEqual(name, .name)
+        let account = await refusal(403, #"{"error":"matrix_403"}"#)
+        XCTAssertEqual(account, .account)
+        let outage = await refusal(503, #"{"error":"matrix_503"}"#)
+        XCTAssertEqual(outage, .retry)
+        XCTAssertTrue(outage.keepsRequest)
+    }
+}

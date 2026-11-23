@@ -38,6 +38,7 @@ public struct AgentsRead: Sendable {
 @MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, CompanyInvitesAPI, ApplePurchasesAPI {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
+    private static let openAgentCatalogURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents?catalog=open")!
     private static let agentLifecycleURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents/lifecycle")!
     private static let appsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/apps")!
     private static let officialAccountsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/official-accounts")!
@@ -834,6 +835,13 @@ public struct AgentsRead: Sendable {
         return agent
     }
 
+    /// The open listings this person can hire (platform 0535), for the
+    /// new-assistant sheet's shelf (desktop `listMatrixOpenAgents`). Hired
+    /// with `createAgent` and the listing's id.
+    public func openAgentListings() async throws -> [OpenAgentListing] {
+        try await read(OpenAgentCatalog.self, url: Self.openAgentCatalogURL).listings
+    }
+
     public func agentDefinition(assistantID: NativeID) async throws -> AgentDefinitionSnapshot {
         try await read(AgentDefinitionSnapshot.self, url: try agentDefinitionURL(assistantID))
     }
@@ -1557,6 +1565,8 @@ public struct AgentsRead: Sendable {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         let query = components.queryItems ?? []
         if dynamicAgentPath || dynamicCompanyPath || dynamicAppPath { return url.query == nil }
+        // `/agents` takes exactly one fixed query: the open catalog (0535).
+        if url.path == Self.agentsURL.path, url.query != nil { return url.query == "catalog=open" }
         if url.path == Self.aliasLookupURL.path {
             guard query.count == 1, query[0].name == "handle", let value = query[0].value,
                   (try? NativeHandle(value)) != nil else { return false }
