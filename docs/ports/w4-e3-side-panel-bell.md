@@ -145,4 +145,39 @@ locale.
 
 ## Verification
 
-VERIFICATION_PLACEHOLDER
+Runs go through the shared heavy-build lock
+(`lockf -k /Volumes/AtumTestFlight/.heavy-build.lock /Volumes/AtumTestFlight/w4-e3-verify.sh <round>`).
+They use the one iPhone 17 simulator, `-jobs 2`, and DerivedData at
+`/Volumes/AtumTestFlight/dd-w4-e3`. After the coordinator's update, later rounds
+waited behind the W4-AB fix round (pid 28475) and were slimmed. A slim round runs
+only the touched packages' swift tests, the Debug build, these AppTests, and only the
+new UI test. Failures were rerun as the failing test alone.
+
+| Check | Round | Result |
+|---|---|---|
+| `swift test -j 2` (all package targets, including the new `HostAgentDeskTests`, `AgentDeskPolicyTests` and the host-desk transport tests in `NativeDomainClientTests`) | r1 | 741 tests, 0 failures |
+| Debug simulator `build-for-testing` | r1, r2, r4–r6 | succeeded |
+| AppTests `AgentDeskBellTests` | r1 → r2 | r1 failed: `pauseHint` is not exported, and `LiveDesign.text` traps on a missing key, which also crashed the r1 UI run. After it was made pending, r2: 3/3 passed |
+| UI `AgentDeskBellUITests` (desk and bell, en/vi × light/dark) | r3 → r6 | r3–r5 failures were test driving: a swipe on the app closed the sheet; container identifiers hid row identifiers (fixed in the view with `.accessibilityElement(children: .contain)`); a centre tap on the Pause row lands on its label. **r6: passed** (575 s) |
+| UI regressions `ChatPanelUITests` (5 passed, 1 iPad skip), `HomeShellUITests/testHeaderShortSearchAndPlusAppearances` | r1 (before slimming) | passed |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | final | exit 0 |
+
+The r2 UI step was cut off by the session's background time limit, which counted
+its time queued on the lock. It was not a test failure.
+
+Evidence:
+
+- Screenshots: `/Volumes/AtumTestFlight/w4-e3-verify/r6/shots/w4-e3-{desk,desk-controls,bell-badge,bell-list,bell-empty}-{en,vi}-{light,dark}.png`
+- Result bundles: `/Volumes/AtumTestFlight/w4-e3-verify/r6/ui.xcresult` and `/Volumes/AtumTestFlight/w4-e3-verify/r2/app-tests.xcresult` (logs for all rounds under `/Volumes/AtumTestFlight/w4-e3-verify/`)
+
+Not verified live: no signed-in device run against production. The host routes'
+acceptance of the phone's grant was read from platform source, not exercised.
+Hosted CI will run the broad UI shards on the PR.
+
+## Follow-ups
+
+1. Watch on the working line, opening the panel on `.agentDesk` (persona/turn lane).
+2. Stop on the desk (Stop lane).
+3. Repin for `pauseHint`, then drop `AgentDeskCopy.pendingKeys`.
+4. More bell sources: approvals, per-agent readiness on `/agents`, new sign-in.
+5. A live check of the host desk routes with a signed-in Hermes agent.
