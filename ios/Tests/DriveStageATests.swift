@@ -307,6 +307,43 @@ final class DriveCacheTests: XCTestCase {
         XCTAssertNotNil(second)
         XCTAssertNotNil(third)
     }
+
+    /// Desktop parity: Drive never lists "."-prefixed names, whether the page
+    /// comes from the network or from a cache written by an older build.
+    func testPagesHideDotPrefixedEntriesIncludingCachedPages() throws {
+        let hidden = try DriveItem(
+            id: "storage-fixture$space-fixture!hidden",
+            name: ".DS_Store",
+            kind: .file,
+            etag: "etag-hidden",
+            size: 6,
+            webDavURL: URL(
+                string: "https://drive.atum.test/dav/spaces/storage-fixture$space-fixture/.DS_Store"
+            )!
+        )
+        let hiddenFolder = try DriveItem(
+            id: "storage-fixture$space-fixture!sync", name: ".sync", kind: .folder,
+            etag: "etag-sync", size: 0, webDavURL: nil
+        )
+        let visible = try item("visible")
+        let page = try DrivePage(
+            driveID: "storage-fixture$space-fixture",
+            parentID: DrivePage.rootParentID,
+            items: [hidden, visible, hiddenFolder]
+        )
+        XCTAssertEqual(page.items.map(\.name), ["visible.txt"])
+
+        // A page cached before this filter existed still holds the hidden rows.
+        struct LegacyPage: Encodable {
+            let driveID: String, parentID: String, items: [DriveItem], isTruncated: Bool
+        }
+        let legacy = try JSONEncoder().encode(LegacyPage(
+            driveID: "storage-fixture$space-fixture", parentID: DrivePage.rootParentID,
+            items: [hidden, visible, hiddenFolder], isTruncated: false
+        ))
+        let decoded = try JSONDecoder().decode(DrivePage.self, from: legacy)
+        XCTAssertEqual(decoded.items.map(\.name), ["visible.txt"])
+    }
 }
 
 @MainActor final class DriveClientTests: XCTestCase {
