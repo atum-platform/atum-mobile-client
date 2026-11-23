@@ -76,6 +76,17 @@ class CopyKeysInPinTests(unittest.TestCase):
                 self.assertIn("copy.contains(", path.read_text(),
                               f"{key} is pending but {path.relative_to(ROOT)} never checks the pin")
 
+    def test_the_phone_does_not_reference_retired_work_copy(self):
+        work = "src.matrix.mobile-copy.mobileScreensCopy.work."
+        plan_row = work + "planRow"
+        consent = work + "consent"
+        references = [
+            f"{path.relative_to(ROOT)}:{number}: {key}"
+            for key, path, number in key_literals()
+            if key == plan_row or key == consent or key.startswith(consent + ".")
+        ]
+        self.assertEqual(references, [], "retired Work copy is unavailable in the desktop export")
+
     def test_a_missing_key_is_reported(self):
         pinned = {"src.matrix.group-picker-copy.copies.block.full"}
         path = ROOT / "ios/App/Home/HomeScreen.swift"
