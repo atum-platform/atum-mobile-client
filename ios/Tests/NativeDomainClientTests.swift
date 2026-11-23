@@ -1147,11 +1147,15 @@ import AtumChat
             return answers.removeFirst()
         }
         func projection(current: Bool, wording: String?) -> Data {
-            try! JSONSerialization.data(withJSONObject: [
-                "current": current, "wordingVersion": wording ?? NSNull(), "connectionId": connection,
-                "confirmedAt": current ? "2026-11-20T08:00:00.000Z" : NSNull(),
-                "revision": current ? 3 : NSNull(),
-            ])
+            let none: Any = NSNull()
+            let object: [String: Any] = [
+                "current": current,
+                "wordingVersion": wording.map { $0 as Any } ?? none,
+                "connectionId": connection,
+                "confirmedAt": current ? "2026-11-20T08:00:00.000Z" as Any : none,
+                "revision": current ? 3 as Any : none,
+            ]
+            return try! JSONSerialization.data(withJSONObject: object)
         }
 
         answers = [.json(projection(current: false, wording: nil))]

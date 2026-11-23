@@ -144,4 +144,24 @@ other than the owner's recorded language has the same gap the desktop has.
 
 ## Verification
 
-See the table in the session section below.
+Each run took the shared heavy-build lock
+(`lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, `-jobs 2`). DerivedData
+is `/Volumes/AtumTestFlight/dd-w4-e2` and the simulator is an iPhone 17. The
+script is `/Volumes/AtumTestFlight/dd-w4-e2/verify.sh`, with modes
+`build` and `tests`. It was slimmed per the coordinator's 2026-11-23 lock
+rule: package tests, the Debug build, the touched AppTests, and only the new
+UI test in each language and appearance.
+
+| Check | Result |
+| --- | --- |
+| `swift test` (package, all targets) | Pass. 0 failures across the 16/48/898/735-test suites. Includes `ChatGPTTrainingTests` (3) and `NativeDomainClientTests.testChatGPTTrainingUsesTheDesktopShellRouteAndExactBody`. The first run failed on a type error in that test's own helper; it was fixed and rerun. |
+| Debug simulator `build-for-testing` (AtumMobile) | Pass, `debug-build.xcresult`. The first try hit the script's 40-minute timeout on a cold build; it passed on the incremental rerun. |
+| Focused AppTests (`ChatGPTTrainingGateTests`, `PhoneModelPickerCopyTests`, `AssistantHomeDestinationTests`) | **Not run.** The queued job reached the 2 h background ceiling just as it acquired the lock (10:05:10). |
+| `ChatGPTTrainingUITests` in en/vi × light/dark | **Not run**, for the same reason. |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | Exit 0 on its own. |
+
+Rerun only the missing steps. The build is already done, and the run needs
+no rebuild:
+`TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock /bin/bash /Volumes/AtumTestFlight/dd-w4-e2/verify.sh tests`.
+It writes `app-tests.xcresult` and `ui-{en,vi}-{light,dark}.xcresult`, with
+captures under `ui-scratch/ui-evidence/`.
