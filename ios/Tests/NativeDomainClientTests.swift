@@ -3694,3 +3694,34 @@ extension NativeDomainClientTests {
                        ["/api/matrix/v1/cloud/stop", "/api/host/stop", "/api/matrix/v1/cloud/stop", "/api/host/stop"])
     }
 }
+
+extension NativeDomainClientTests {
+    /// Review r1: a transient 503 from the host Stop route is a refusal to
+    /// show and retry, not a definitive denial. Only 403 and 404 withdraw
+    /// the execution's Stop.
+    func testScheduledStop503StaysRetryableAndOnlyDenialsWithdrawIt() async throws {
+        let agent = try stopAgent()
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: agent, roomID: stopRoomID, routeAvailable: true))
+        let api = client(TestAuthorization(first: "stop-fixture-token"))
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "transient"))
+        for (status, withdrawn) in [(503, false), (403, true), (404, true)] {
+            NativeDomainProtocol.state.reset()
+            NativeDomainProtocol.state.handler = { _ in .init(status: status) }
+            var state = AssistantTurnStop()
+            state.observe(.init(unanswered: nil, working: true, scheduled: execution))
+            let intent = try XCTUnwrap(state.beginStop(newRequestID: "scheduled-\(status)"))
+            var unavailable = Set<AssistantTurnStopIntent.Target>()
+            let result = await route.stop(intent, using: api, unavailableTargets: unavailable,
+                                          onRouteUnavailable: { unavailable.insert($0) })
+            XCTAssertEqual(result, .failed, "\(status)")
+            state.resolve(result, for: intent)
+            XCTAssertEqual(state.notice, .refused, "\(status): the refused band")
+            XCTAssertEqual(state.control, .stop(enabled: true), "\(status)")
+            XCTAssertEqual(unavailable.contains(intent.target), withdrawn, "\(status)")
+            // The retry reaches the route again only when nothing withdrew it.
+            let retry = await route.stop(intent, using: api, unavailableTargets: unavailable)
+            XCTAssertEqual(retry, .failed)
+            XCTAssertEqual(NativeDomainProtocol.state.requests.count, withdrawn ? 1 : 2, "\(status)")
+        }
+    }
+}
