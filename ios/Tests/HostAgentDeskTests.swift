@@ -75,6 +75,7 @@ final class HostAgentDeskTests: XCTestCase {
         XCTAssertEqual(HostAgentDesk.resolve(.busy, for: .pause, retried: true), .rollBackFailed)
         XCTAssertEqual(HostAgentDesk.resolve(.stopped, for: .pause, retried: false), .rollBackStopped)
         XCTAssertEqual(HostAgentDesk.resolve(.failed, for: .pause, retried: false), .rollBackFailed)
+        XCTAssertEqual(HostAgentDesk.resolve(.cancelled, for: .pause, retried: false), .rollBack)
     }
 
     func testARollBackUndoesOnlyWhatItsOwnControlMoved() {

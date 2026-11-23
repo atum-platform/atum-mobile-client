@@ -120,9 +120,9 @@ final class AgentDeskModel {
                 return
             case .busy:
                 do { try await Task.sleep(for: readRetryDelay) } catch { return }
-            case .failed:
-                // A refused home reads as none; a refused subfolder keeps the shown one.
-                if path == nil, ownPath == nil { ownView = nil }
+            case .cancelled, .failed:
+                // A refused home reads as none; a cancelled read keeps the shown listing.
+                if outcome == .failed, path == nil, ownPath == nil { ownView = nil }
                 ownTarget = ownPath
                 ownTask = nil
                 return

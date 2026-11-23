@@ -70,6 +70,8 @@ public struct AgentsRead: Sendable {
     private static let hostControlURL = URL(string: "https://api.atumplatform.com" + HostAgentDesk.controlPath)!
 
     typealias Authorization = @MainActor @Sendable (_ forceRefresh: Bool) async throws -> String
+    /// Revalidates the live desk context on the main actor before each POST.
+    public typealias DeskSendCheck = @MainActor @Sendable () -> Bool
     public typealias AuthenticationFailureObserver = @MainActor @Sendable (any Error) -> Void
     private let authorization: Authorization
     private let authenticationFailureObserver: AuthenticationFailureObserver
@@ -210,28 +212,29 @@ public struct AgentsRead: Sendable {
 
     /// One agent's native schedule through the Shell's host desk route
     /// (desktop `requestHostDesk`). Any status but a contract-exact 200 throws.
-    public func hostDeskSchedule(agent: NativeID) async throws -> HostAgentDesk.Schedule {
-        let data = try await hostDesk(agent: agent, read: .schedule)
+    public func hostDeskSchedule(agent: NativeID, canSend: DeskSendCheck? = nil) async throws -> HostAgentDesk.Schedule {
+        let data = try await hostDesk(agent: agent, read: .schedule, canSend: canSend)
         do { return try HostAgentDesk.schedule(data) }
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
     /// One folder of an agent's own files on its cloud computer: listing only.
     /// The Shell's read admission (429) throws `HostAgentDesk.ReadBusy`.
-    public func hostDeskFiles(agent: NativeID, path: String?) async throws -> HostAgentDesk.Files {
-        let data = try await hostDesk(agent: agent, read: .files(path: path))
+    public func hostDeskFiles(agent: NativeID, path: String?,
+                              canSend: DeskSendCheck? = nil) async throws -> HostAgentDesk.Files {
+        let data = try await hostDesk(agent: agent, read: .files(path: path), canSend: canSend)
         do { return try HostAgentDesk.files(data, for: path) }
         catch { throw NativeDomainClientFailure.invalidResponse }
     }
 
-    private func hostDesk(agent: NativeID, read: HostAgentDesk.Read) async throws -> Data {
+    private func hostDesk(agent: NativeID, read: HostAgentDesk.Read, canSend: DeskSendCheck?) async throws -> Data {
         let body: Data
         do { body = try HostAgentDesk.deskBody(agent: agent, read: read) }
         catch { throw NativeDomainClientFailure.invalidRequest }
         let response = try await performAuthorized(
             url: Self.hostDeskURL, body: body,
             extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion],
-            maximumResponseBodyBytes: HostAgentDesk.maximumDeskBytes)
+            maximumResponseBodyBytes: HostAgentDesk.maximumDeskBytes, canSend: canSend)
         if response.status == 429 { throw HostAgentDesk.ReadBusy() }
         guard response.status == 200 else {
             throw response.status >= 500 ? NativeDomainClientFailure.transportUnavailable
@@ -242,13 +245,14 @@ public struct AgentsRead: Sendable {
 
     /// Pause / Resume or one routine on or off (desktop `requestHostAgentControl`).
     /// A stopped runtime (409) and the shared cooldown (429) are their own outcomes.
-    public func hostAgentControl(agent: NativeID, _ control: HostAgentDesk.Control) async -> HostAgentDesk.ControlOutcome {
+    public func hostAgentControl(agent: NativeID, _ control: HostAgentDesk.Control,
+                                 canSend: DeskSendCheck? = nil) async -> HostAgentDesk.ControlOutcome {
         guard let body = try? control.body(agent: agent) else { return .failed }
         do {
             let response = try await performAuthorized(
                 url: Self.hostControlURL, body: body,
                 extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion],
-                maximumResponseBodyBytes: HostAgentDesk.maximumControlBytes)
+                maximumResponseBodyBytes: HostAgentDesk.maximumControlBytes, canSend: canSend)
             switch response.status {
             case 200:
                 guard let reply = try? HostAgentDesk.controlReply(response.body, for: control) else { return .failed }
@@ -257,6 +261,8 @@ public struct AgentsRead: Sendable {
             case 429: return .busy
             default: return .failed
             }
+        } catch NativeDomainClientFailure.cancelled {
+            return .cancelled
         } catch {
             return .failed
         }
@@ -1397,14 +1403,15 @@ public struct AgentsRead: Sendable {
     /// returning the raw response so a caller can answer a refused body
     /// itself (the assistant placement retries a 4xx with the empty body).
     private func performAuthorized(url: URL, body: Data, extraHeaders: [String: String] = [:],
-                                   maximumResponseBodyBytes: Int = 262_144) async throws -> NativeDomainHTTPResponse {
+                                   maximumResponseBodyBytes: Int = 262_144,
+                                   canSend: DeskSendCheck? = nil) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false)
         try requireActiveTask()
         let first = try await perform(url: url, token: firstToken, method: "POST", body: body,
                                       maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                      extraHeaders: extraHeaders)
+                                      extraHeaders: extraHeaders, canSend: canSend)
         try requireActiveTask()
         guard first.status == 401 else { return first }
 
@@ -1414,7 +1421,7 @@ public struct AgentsRead: Sendable {
         try requireActiveTask()
         let second = try await perform(url: url, token: refreshedToken, method: "POST", body: body,
                                        maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                       extraHeaders: extraHeaders)
+                                       extraHeaders: extraHeaders, canSend: canSend)
         try requireActiveTask()
         if second.status == 401 {
             authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused)
@@ -1493,7 +1500,8 @@ public struct AgentsRead: Sendable {
     private func perform(url: URL, token: String, method: String,
                          body: Data?, companyWire: CompanyWire? = nil, maximumRequestBodyBytes: Int,
                          maximumResponseBodyBytes: Int,
-                         extraHeaders: [String: String] = [:]) async throws -> NativeDomainHTTPResponse {
+                         extraHeaders: [String: String] = [:],
+                         canSend: DeskSendCheck? = nil) async throws -> NativeDomainHTTPResponse {
         guard isApprovedURL(url), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
               !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
               maximumRequestBodyBytes >= 0, (body?.count ?? 0) <= maximumRequestBodyBytes,
@@ -1550,7 +1558,14 @@ public struct AgentsRead: Sendable {
                                                   timeout: url.path == CloudScheduleStop.path ? 40 : 15,
                                                   maximumBodyBytes: maximumResponseBodyBytes)
         return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { operation.start($0) }
+            try await withCheckedThrowingContinuation { continuation in
+                // Keep the context check and URLSession start in one main-actor turn.
+                guard canSend?() != false else {
+                    continuation.resume(throwing: NativeDomainClientFailure.cancelled)
+                    return
+                }
+                operation.start(continuation)
+            }
         } onCancel: {
             operation.cancel()
         }

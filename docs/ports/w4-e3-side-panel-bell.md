@@ -140,6 +140,23 @@ Reviewer's wording for 4 was "suppress Now during a known wait". The phone inste
 ports desktop's Waiting block, because desktop renders it and the `waiting` key is
 in the pin. Working is still never shown during a wait.
 
+## Fix round r3 (review of `fe4a17f`)
+
+The schedule, file listing, and control POSTs recheck the desk's account, domain
+client, agent, and Hermes runtime after authorization. The main-actor check and
+URLSession task start happen synchronously, including on the retry after a 401.
+A stale read keeps the current desk display. A stale control clears its optimistic
+change without an alert or another schedule read.
+
+The package regression tests switch the room's agent while initial authorization
+and forced refresh are suspended. They assert that an initial stale Pause sends
+zero requests and a stale Resume retry sends only the original request. Both desk
+read routes are also tested with stale context.
+
+The filtered `HostAgentDeskTests`, `NativeDomainClientTests`, and
+`AgentDeskPolicyTests` passed all 122 tests. The Debug simulator
+`build-for-testing` also passed under the shared lock.
+
 ## Copy
 
 Every visible string comes from the pinned export through `design.text(key)`.

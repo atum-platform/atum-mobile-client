@@ -198,8 +198,8 @@ final class AgentDeskBellTests: XCTestCase {
         let refusedFiles = await actions.files?(nil)
         let refusedControl = await actions.control?(.pause)
         XCTAssertNil(refusedSchedule)
-        XCTAssertEqual(refusedFiles, .failed)
-        XCTAssertEqual(refusedControl, .failed)
+        XCTAssertEqual(refusedFiles, .cancelled)
+        XCTAssertEqual(refusedControl, .cancelled)
         XCTAssertEqual(host.scheduleReads, 0)
         XCTAssertEqual(host.fileReads, [])
         XCTAssertEqual(host.controls, [])
@@ -211,7 +211,7 @@ final class AgentDeskBellTests: XCTestCase {
         current = false
         host.gate?.resume()
         let dropped = await pending.value
-        XCTAssertEqual(dropped, .failed)
+        XCTAssertEqual(dropped, .cancelled)
         XCTAssertEqual(host.controls, [.pause])
     }
 }

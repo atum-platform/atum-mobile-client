@@ -223,6 +223,7 @@ public enum HostAgentDesk {
     public enum FilesOutcome: Equatable, Sendable {
         case listed(Files)
         case busy
+        case cancelled
         case failed
     }
 
@@ -304,6 +305,7 @@ public enum HostAgentDesk {
         case stopped
         /// 429: the shared cooldown.
         case busy
+        case cancelled
         case failed
     }
 
@@ -409,6 +411,8 @@ extension HostAgentDesk {
             return retried ? .rollBackFailed : .retryAfterCooldown
         case .stopped:
             return .rollBackStopped
+        case .cancelled:
+            return .rollBack
         case .failed:
             return .rollBackFailed
         }

@@ -3525,6 +3525,61 @@ extension NativeDomainClientTests {
         XCTAssertEqual(changed, .changed(1))
     }
 
+    func testHostAgentPauseDoesNotSendWhenTheAgentChangesDuringAuthorization() async throws {
+        let agent = try deskAgent
+        let replacement = try NativeID("01234567-89ab-4def-8123-456789abcdef")
+        var currentAgent = agent
+        let gate = AuthorizationGate()
+        let client = NativeDomainClient(testAuthorization: { _ in
+            await gate.token()
+        }, protocolClasses: [NativeDomainProtocol.self])
+
+        let pending = Task { await client.hostAgentControl(agent: agent, .pause, canSend: { currentAgent == agent }) }
+        await gate.waitUntilStarted()
+        currentAgent = replacement
+        gate.release("desk-token")
+
+        let outcome = await pending.value
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
+    }
+
+    func testHostAgentResumeDoesNotRetry401WhenTheAgentChangesDuringRefresh() async throws {
+        let agent = try deskAgent
+        let replacement = try NativeID("01234567-89ab-4def-8123-456789abcdef")
+        var currentAgent = agent
+        let gate = AuthorizationGate()
+        NativeDomainProtocol.state.handler = { _ in .init(status: 401) }
+        let client = NativeDomainClient(testAuthorization: { forceRefresh in
+            if forceRefresh { return await gate.token() }
+            return "first-desk-token"
+        }, protocolClasses: [NativeDomainProtocol.self])
+
+        let pending = Task { await client.hostAgentControl(agent: agent, .resume, canSend: { currentAgent == agent }) }
+        await gate.waitUntilStarted()
+        currentAgent = replacement
+        gate.release("refreshed-desk-token")
+
+        let outcome = await pending.value
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.map { $0.value(forHTTPHeaderField: "Authorization") },
+                       ["Bearer first-desk-token"])
+    }
+
+    func testHostDeskScheduleAndFilesDoNotSendWhenTheContextIsStale() async throws {
+        let agent = try deskAgent
+        let client = client(TestAuthorization(first: "desk-token"))
+        do {
+            _ = try await client.hostDeskSchedule(agent: agent, canSend: { false })
+            XCTFail("Stale context sent a schedule read")
+        } catch NativeDomainClientFailure.cancelled {}
+        do {
+            _ = try await client.hostDeskFiles(agent: agent, path: nil, canSend: { false })
+            XCTFail("Stale context sent a file read")
+        } catch NativeDomainClientFailure.cancelled {}
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
+    }
+
     func testHostDeskFilesNamesTheReadAdmissionBusy() async throws {
         // Platform migration 0471: a second files read within 10 s is 429, not a broken folder.
         NativeDomainProtocol.state.handler = { _ in .init(status: 429, chunks: [Data(#"{"error":"busy"}"#.utf8)]) }
