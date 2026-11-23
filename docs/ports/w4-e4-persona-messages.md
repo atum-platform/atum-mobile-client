@@ -188,7 +188,10 @@ are under `/Volumes/AtumTestFlight/w4-e4-verify/<round>/`.
   the keyboard appears.
 - r5: the merge UI test passed (rebuild plus that test only).
 - `python3 scripts/public_guard.py --base origin/main --head HEAD` exited 0.
-- r6 (review fixes): see the round notes below.
+- r6 (review fixes, `2115a0e`, `SKIP_APPTESTS=1`): `swift test --filter
+  AtumChatTests` passed 770/770. The Debug `build-for-testing` succeeded.
+  Both persona UI tests passed. The first two r6 attempts were lost when the
+  shared build volume detached and reattached; neither had reached a test.
 
 Not verified locally: VoiceOver reading of the hint (desktop marks it
 `role="status"`, and the phone shows it as static text), and the
