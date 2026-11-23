@@ -112,3 +112,17 @@ mapping boundary in `services/drive-ingress/src/provision.ts:210–219`.
 The platform fixture for that case should give the OIDC caller a stale
 published ID, return a different personal ID from Graph, and assert that root
 reads pass while the by-ID request is denied until the mapping is repaired.
+
+## Hidden "."-prefixed entries (owner device report, 23 Nov 2026)
+
+On the 23 Nov morning TestFlight build the owner saw files and folders whose names start
+with "." in Drive. Ordinary files listed correctly. Desktop never lists these:
+`apps/desktop/electron/matrix/drive.ts` drops every `.`-prefixed name from a
+listing, and `atum-consumer-files.ts` treats them as hidden. The phone now
+filters them in `DrivePage.init` (`ios/Sources/AtumNativeAPI/DriveModels.swift`),
+which covers network pages, pages cached by an older build (decoding goes
+through the same initialiser) and contract fixtures.
+`testPagesHideDotPrefixedEntriesIncludingCachedPages` covers a fresh page and a
+legacy cached page. Hidden entries still count toward the client's
+`listingLimit` while paging; a folder with thousands of hidden entries could be
+flagged truncated early. That is a follow-up if it ever matters.
