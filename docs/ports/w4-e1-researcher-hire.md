@@ -282,8 +282,8 @@ simulator `939B69F8`, one test worker). The script is
 | Debug simulator build (`build-for-testing`) of the merged head plus the fixes | fix1 | succeeded |
 | AtumMobileTests: `ListingHireStateTests` (16, 6 new) and `StoreCommercePresentationTests` (17) | fix1 | 33 tests, 0 failures |
 | UI: `ListingHireUITests`, en and vi × light and dark, with the new capacity walk | fix1 | passed (877 s) |
-| `swift test` (whole package) | fix2 | PENDING |
-| `python3 scripts/public_guard.py --base origin/main --head HEAD` | final | PENDING |
+| `swift test` (whole package) | fix2, at `80b042c` | 753 tests, 0 failures, including the new `testOnlyAPreChargeNameRefusalLetsTheHireRequestGo`, `testListingHireKeepsThePlatformsPlacement`, `testDuplicatesCompareThePlatformsNameKey` and `testAnAppsNameIsReserved` |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | final | exit 0 |
 
 Screenshots (24, run fix1):
 `/Volumes/AtumTestFlight/dd-w4-e1/shots-fix/ListingHireUITests.hire-{en,vi}-{light,dark}-{1-list,2-hiring,3-error,4-done,5-confirm,6-setting-up}.png`.
