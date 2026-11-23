@@ -1119,6 +1119,149 @@ import AtumChat
         ])
     }
 
+    /// The training-off confirmation goes to the desktop's Shell route with
+    /// the host-bridge contract header, the exact three-field body, and the
+    /// desktop's answers: 200 current is confirmed, 409 is stale, anything
+    /// else is unavailable. A 401 refreshes once and never confirms.
+    func testChatGPTTrainingUsesTheDesktopShellRouteAndExactBody() async throws {
+        let connection = "00000000-0000-4000-8000-0000000000c1"
+        let authorization = TestAuthorization(first: "p2-training-token", refreshed: "p2-training-fresh")
+        let value = client(authorization)
+        var answers: [NativeDomainProtocol.Reply] = []
+        var seen: [String] = []
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://api.atumplatform.com/api/connections/openai-codex/training-confirmation")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Atum-Host-Bridge-Contract"),
+                           "atum.s2.host-bridge/1.0.0")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            seen.append(request.httpMethod! + " " + (request.value(forHTTPHeaderField: "Authorization") ?? ""))
+            if request.httpMethod == "POST" {
+                let data = try! XCTUnwrap(self.body(of: request))
+                let body = try! XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
+                XCTAssertEqual(body, ["wordingVersion": "chatgpt-google-v1", "connectionId": connection,
+                                      "transferWordingVersion": "chatgpt-google-transfer-v1"])
+            } else {
+                XCTAssertNil(self.body(of: request))
+            }
+            return answers.removeFirst()
+        }
+        func projection(current: Bool, wording: String?, for answered: String? = nil,
+                        omitting missing: String? = nil) -> Data {
+            let none: Any = NSNull()
+            var object: [String: Any] = [
+                "current": current,
+                "wordingVersion": wording.map { $0 as Any } ?? none,
+                "connectionId": answered ?? connection,
+                "confirmedAt": current ? "2026-11-20T08:00:00.000Z" as Any : none,
+                "revision": current ? 3 as Any : none,
+            ]
+            if let missing { object.removeValue(forKey: missing) }
+            return try! JSONSerialization.data(withJSONObject: object)
+        }
+
+        answers = [.json(projection(current: false, wording: nil))]
+        let read = try await value.chatGPTTraining()
+        XCTAssertEqual(read, ChatGPTTrainingStatus(current: false, connectionID: connection, confirmedAt: nil))
+
+        answers = [.json(projection(current: true, wording: "chatgpt-google-v1"))]
+        guard case let .confirmed(status) = await value.confirmChatGPTTraining(connectionID: connection) else {
+            return XCTFail("a current 200 is the confirmation")
+        }
+        XCTAssertTrue(status.current)
+        XCTAssertNotNil(status.confirmedAt)
+        XCTAssertEqual(status.consent, ChatGPTTrainingConsent(connectionID: connection, revision: 3))
+
+        // A current 200 for another relay connection is not this press's confirmation.
+        answers = [.json(projection(current: true, wording: "chatgpt-google-v1",
+                                    for: "00000000-0000-4000-8000-0000000000c2"))]
+        let otherConnection = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(otherConnection, .unavailable)
+
+        // A current 200 missing any part of its record is not a confirmation.
+        for missing in ["connectionId", "confirmedAt", "revision"] {
+            answers = [.json(projection(current: true, wording: "chatgpt-google-v1", omitting: missing))]
+            let incomplete = await value.confirmChatGPTTraining(connectionID: connection)
+            XCTAssertEqual(incomplete, .unavailable, "current without \(missing)")
+        }
+
+        answers = [.init(status: 409, chunks: [Data(#"{"state":"refused"}"#.utf8)])]
+        let stale = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(stale, .stale)
+
+        // A 200 for another wording is not this build's confirmation.
+        answers = [.json(projection(current: true, wording: "chatgpt-google-v2"))]
+        let otherWording = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(otherWording, .unavailable)
+
+        answers = [.init(status: 503, chunks: [Data(#"{"state":"unavailable"}"#.utf8)])]
+        let down = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(down, .unavailable)
+
+        // One refresh after a 401, then the answer stands.
+        answers = [.init(status: 401, chunks: [Data(#"{"state":"refused"}"#.utf8)]),
+                   .init(status: 401, chunks: [Data(#"{"state":"refused"}"#.utf8)])]
+        let refused = await value.confirmChatGPTTraining(connectionID: connection)
+        XCTAssertEqual(refused, .unavailable)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+
+        // A failed read is never a confirmation: it throws.
+        answers = [.init(status: 503, chunks: [Data(#"{"state":"unavailable"}"#.utf8)])]
+        do {
+            _ = try await value.chatGPTTraining()
+            XCTFail("a 503 read must not return a status")
+        } catch {}
+
+        // A connection that is not a UUID never leaves the phone.
+        let before = seen.count
+        let malformed = await value.confirmChatGPTTraining(connectionID: "not-a-connection")
+        XCTAssertEqual(malformed, .unavailable)
+        XCTAssertEqual(seen.count, before)
+        XCTAssertEqual(seen.first, "GET Bearer p2-training-token")
+        XCTAssertEqual(seen.filter { $0 == "POST Bearer p2-training-fresh" }.count, 1)
+    }
+
+    func testRetiredChatGPTSelectionIsNotSentAfterAuthorizationRefresh() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let snapshot = try NativeAPI.decode(ManagedModelDestinationSnapshot.self, from: managedModelDestinationsBody())
+        let write = try ManagedModelSubscriptionWrite(
+            requestId: ModelWriteRequests<NativeID>.freshID(), snapshot: snapshot,
+            source: .chatGPTPlan, model: "gpt-6.1", effort: .medium
+        )
+        @MainActor final class Picker { var lifetime = ModelPickerLifetime() }
+        let picker = Picker()
+        let value = NativeDomainClient(testAuthorization: { forceRefresh in
+            if forceRefresh {
+                await Task.yield()
+                picker.lifetime.retire()
+            }
+            return forceRefresh ? "p2-refreshed" : "p2-original"
+        }, protocolClasses: [NativeDomainProtocol.self])
+        var sent: [String] = []
+        NativeDomainProtocol.state.handler = { request in
+            sent.append(request.httpMethod ?? "")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer p2-original")
+            return .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)])
+        }
+
+        let confirmation = picker.lifetime.beginSelection()
+        let result = await value.confirmChatGPTTraining(connectionID: "00000000-0000-4000-8000-0000000000c1") {
+            picker.lifetime.isCurrent(confirmation)
+        }
+        XCTAssertEqual(result, .unavailable)
+        XCTAssertFalse(picker.lifetime.isCurrent(confirmation))
+
+        let pick = picker.lifetime.beginSelection()
+        do {
+            _ = try await value.writeManagedModelSubscription(agentPrincipal: principal, value: write) {
+                picker.lifetime.isCurrent(pick)
+            }
+            XCTFail("A retired selection cannot replay its PUT")
+        } catch NativeDomainClientFailure.cancelled {}
+        XCTAssertFalse(picker.lifetime.isCurrent(pick))
+        XCTAssertEqual(sent, ["POST", "PUT"])
+    }
+
     func testAgentAvatarWriteBindsCanonicalTargetAndUsesBoundedImageBody() async throws {
         let target = try NativeID(agentPrincipal)
         let image = try AgentAvatarImage(type: .jpeg, data: Data([0xff, 0xd8, 0xff, 0xd9]))
@@ -3783,5 +3926,36 @@ extension NativeDomainClientTests {
         XCTAssertEqual(unavailable, [manual.target, scheduled.target])
         XCTAssertEqual(NativeDomainProtocol.state.requests.compactMap { $0.url?.path },
                        ["/api/matrix/v1/cloud/stop", "/api/host/stop", "/api/matrix/v1/cloud/stop", "/api/host/stop"])
+    }
+}
+
+extension NativeDomainClientTests {
+    /// Review r1: a transient 503 from the host Stop route is a refusal to
+    /// show and retry, not a definitive denial. Only 403 and 404 withdraw
+    /// the execution's Stop.
+    func testScheduledStop503StaysRetryableAndOnlyDenialsWithdrawIt() async throws {
+        let agent = try stopAgent()
+        let route = try XCTUnwrap(CloudAssistantTurnStop(agent: agent, roomID: stopRoomID, routeAvailable: true))
+        let api = client(TestAuthorization(first: "stop-fixture-token"))
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "transient"))
+        for (status, withdrawn) in [(503, false), (403, true), (404, true)] {
+            NativeDomainProtocol.state.reset()
+            NativeDomainProtocol.state.handler = { _ in .init(status: status) }
+            var state = AssistantTurnStop()
+            state.observe(.init(unanswered: nil, working: true, scheduled: execution))
+            let intent = try XCTUnwrap(state.beginStop(newRequestID: "scheduled-\(status)"))
+            var unavailable = Set<AssistantTurnStopIntent.Target>()
+            let result = await route.stop(intent, using: api, unavailableTargets: unavailable,
+                                          onRouteUnavailable: { unavailable.insert($0) })
+            XCTAssertEqual(result, .failed, "\(status)")
+            state.resolve(result, for: intent)
+            XCTAssertEqual(state.notice, .refused, "\(status): the refused band")
+            XCTAssertEqual(state.control, .stop(enabled: true), "\(status)")
+            XCTAssertEqual(unavailable.contains(intent.target), withdrawn, "\(status)")
+            // The retry reaches the route again only when nothing withdrew it.
+            let retry = await route.stop(intent, using: api, unavailableTargets: unavailable)
+            XCTAssertEqual(retry, .failed)
+            XCTAssertEqual(NativeDomainProtocol.state.requests.count, withdrawn ? 1 : 2, "\(status)")
+        }
     }
 }

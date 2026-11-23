@@ -2083,13 +2083,30 @@ final class LiveAppModel {
                     return await self?.readSubscriptionAccount()
                         ?? PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)
                 },
-                save: { [weak self] snapshot, source, model, effort, requestID in
+                save: { [weak self] snapshot, source, model, effort, requestID, consent, isSelectionCurrent in
+                    guard isSelectionCurrent() else { return .cancelled }
                     guard let self, current() else { return .refused(nil) }
                     return await self.saveAssistantModelSubscription(
                         roomID: roomID, snapshot: snapshot, source: source,
-                        model: model, effort: effort, requestID: requestID
+                        model: model, effort: effort, requestID: requestID, consent: consent,
+                        isSelectionCurrent: isSelectionCurrent
                     )
-                }
+                },
+                // Bound to the client and scope this picker opened with: a
+                // sign-out, account switch or another assistant never lends
+                // its answer to this pick.
+                training: ChatGPTTrainingActions(
+                    read: { [weak self] in
+                        guard let self, current() else { return nil }
+                        return await self.readChatGPTTraining(client: client, isCurrent: current)
+                    },
+                    confirm: { [weak self] connectionID, isSelectionCurrent in
+                        guard let self else { return .unavailable }
+                        return await self.confirmChatGPTTraining(client: client, connectionID: connectionID) {
+                            current() && isSelectionCurrent()
+                        }
+                    }
+                )
             )
         )
     }
@@ -2410,8 +2427,8 @@ final class LiveAppModel {
         }
         switch result {
         case let .saved(value): return .saved(value)
-        case let .refused(latest): return .conflict(latest)
-        case .failed: return .failed
+        case let .refused(latest), let .preconditionChanged(latest): return .conflict(latest)
+        case .failed, .cancelled: return .failed
         }
     }
 
@@ -2582,13 +2599,20 @@ final class LiveAppModel {
                                                model: String,
                                                requestID: NativeID) async
         -> AssistantModelDestinationSaveResult {
-        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot,
-                                             choice: .destination(destination, model: model), requestID: requestID) {
-            client, principal, fence, id in
+        let result = await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot,
+                                                          choice: .destination(destination, model: model),
+                                                          requestID: requestID) {
+            client, principal, fence, id, _ in
             let write = try ManagedModelDestinationWrite(
                 requestId: id, snapshot: fence, destination: destination, model: model
             )
             return try await client.writeManagedModelDestination(agentPrincipal: principal, value: write)
+        }
+        switch result {
+        case let .saved(value): return .saved(value)
+        case let .refused(latest), let .preconditionChanged(latest): return .refused(latest)
+        case .cancelled: return .cancelled
+        case .failed: return .refused(nil)
         }
     }
 
@@ -2604,44 +2628,101 @@ final class LiveAppModel {
         return value
     }
 
+    /// The account's ChatGPT-with-Google training-off confirmation, read from
+    /// the platform each time a ChatGPT pick asks, with the client and scope
+    /// the pick was made in. nil is "could not read", which the picker never
+    /// treats as confirmed.
+    private func readChatGPTTraining(client: NativeDomainClient,
+                                     isCurrent: () -> Bool) async -> ChatGPTTrainingStatus? {
+        guard isCurrent() else { return nil }
+        let status = try? await client.chatGPTTraining()
+        guard isCurrent() else { return nil }
+        return status
+    }
+
+    /// Sends the person's explicit confirmation for the connection the card
+    /// read. A sign-out, account switch or scope change mid-flight is "unavailable".
+    private func confirmChatGPTTraining(client: NativeDomainClient, connectionID: String,
+                                        isCurrent: @MainActor () -> Bool) async -> ChatGPTTrainingConfirmResult {
+        guard isCurrent() else { return .unavailable }
+        let result = await client.confirmChatGPTTraining(connectionID: connectionID, isCurrent: isCurrent)
+        guard isCurrent() else { return .unavailable }
+        return result
+    }
+
     /// The cloud destination switched to a subscription model (1.4 / 1.5),
-    /// with the same conflict readback as the Atum destination write.
+    /// with the same conflict readback as the Atum destination write. A
+    /// ChatGPT write carries the consent decision the gate or card read; it
+    /// is re-read before the automatic retry after a revision conflict and
+    /// after any refusal, and a changed decision returns to the card instead
+    /// of retrying. The PUT itself takes no consent precondition (platform
+    /// 0336 closed key set); the atomic server check is a platform follow-up
+    /// (`docs/ports/w4-e2-google-training-off.md`).
     private func saveAssistantModelSubscription(roomID: String,
                                                 snapshot: ManagedModelDestinationSnapshot,
                                                 source: ManagedModelDestinationSource,
                                                 model: String,
                                                 effort: ManagedModelEffort,
-                                                requestID: NativeID) async
+                                                requestID: NativeID,
+                                                consent: ChatGPTTrainingConsent?,
+                                                isSelectionCurrent: @escaping @MainActor () -> Bool) async
         -> AssistantModelDestinationSaveResult {
-        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot,
-                                             choice: .subscription(source, model: model, effort: effort),
-                                             requestID: requestID) { client, principal, fence, id in
+        var recheck: ChatGPTTrainingRecheck?
+        if source == .chatGPTPlan {
+            // Never a ChatGPT write without the decision it is made under.
+            guard let consent, let client = domainClient, let agent = agentForRoom(roomID) else {
+                return .refused(nil)
+            }
+            let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
+            recheck = ChatGPTTrainingRecheck(consent: consent) { [weak self] in
+                await self?.readChatGPTTraining(client: client, isCurrent: current)
+            }
+        }
+        let revalidate: (() async -> Bool)? = recheck.map { check in { await check.stillCurrent() } }
+        let result = await saveAssistantDestinationChoice(
+            roomID: roomID, snapshot: snapshot, choice: .subscription(source, model: model, effort: effort),
+            requestID: requestID, isSelectionCurrent: isSelectionCurrent, revalidate: revalidate
+        ) { client, principal, fence, id, isCurrent in
             let write = try ManagedModelSubscriptionWrite(
                 requestId: id, snapshot: fence, source: source, model: model, effort: effort
             )
-            return try await client.writeManagedModelSubscription(agentPrincipal: principal, value: write)
+            return try await client.writeManagedModelSubscription(agentPrincipal: principal, value: write,
+                                                                  isCurrent: isCurrent)
+        }
+        switch result {
+        case let .saved(value): return .saved(value)
+        case let .refused(latest): return .refused(latest)
+        case let .preconditionChanged(latest):
+            // Ask again only when the platform says the confirmation is not
+            // current; an unread or re-confirmed status is a plain refusal the
+            // person retries through the gate.
+            if let status = recheck?.latest, !status.current { return .consentRequired(status, latest: latest) }
+            return .refused(latest)
+        case .cancelled: return .cancelled
+        case .failed: return .refused(nil)
         }
     }
 
     private func saveAssistantDestinationChoice(
         roomID: String, snapshot: ManagedModelDestinationSnapshot, choice: ManagedModelPickerChoice,
-        requestID: NativeID, write: (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID) async throws
-            -> ManagedModelDestinationSnapshot
-    ) async -> AssistantModelDestinationSaveResult {
+        requestID: NativeID, isSelectionCurrent: @escaping @MainActor () -> Bool = { true },
+        revalidate: (() async -> Bool)? = nil,
+        write: @MainActor (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID,
+                           @MainActor () -> Bool) async throws -> ManagedModelDestinationSnapshot
+    ) async -> ManagedModelPickerState<ManagedModelDestinationSnapshot>.SaveResult {
         guard let client = domainClient, let agent = agentForRoom(roomID),
-              snapshot.agentPrincipal == agent.principal else { return .refused(nil) }
+              snapshot.agentPrincipal == agent.principal else { return .failed }
         let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         let result = await modelDestinationState(for: agent.principal).save(
             from: snapshot, choice: choice, requestID: requestID, refreshAfterSecondConflict: true,
-            isCurrent: current, fetch: { try await client.managedModelDestinations(agentPrincipal: agent.principal) }
+            isCurrent: current, fetch: { try await client.managedModelDestinations(agentPrincipal: agent.principal) },
+            isSelectionCurrent: isSelectionCurrent, revalidate: revalidate
         ) { fence, id in
-            try await write(client, agent.principal, fence, id)
+            try await write(client, agent.principal, fence, id) {
+                current() && isSelectionCurrent()
+            }
         }
-        switch result {
-        case let .saved(value): return .saved(value)
-        case let .refused(latest): return .refused(latest)
-        case .failed: return .refused(nil)
-        }
+        return result
     }
 
     private func saveAssistantAvatar(roomID: String,
