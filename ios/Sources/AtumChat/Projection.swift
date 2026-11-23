@@ -8,8 +8,9 @@ public struct ProjectionOptions: Equatable, Sendable {
     public var showsDayDividers: Bool
     public var showsReadMarker: Bool
     public var showsTimelineStart: Bool
-    /// B7 in S1: "Đã gửi" and "Đã xem" on my newest settled message
-    /// (`Delivery.marks(for:context:)`). Off: the S1a clock and warning only.
+    /// B7 in S1: "Đã xem" (the readers' faces) on each message of mine a
+    /// receipt names (`Delivery.marks(for:context:)`); no Sent tick (desktop
+    /// #89). Off: the S1a clock and warning only.
     public var marksSentAndSeen: Bool
     /// B16 in S1: the sender line only at the start of a run (5-minute gap,
     /// day boundary, divider; `Grouping`). Off: the S1a rule, a sender line
@@ -34,7 +35,7 @@ public struct ProjectionOptions: Equatable, Sendable {
     public static let s1a = ProjectionOptions(showsDayDividers: false, showsReadMarker: false,
                                               showsTimelineStart: false)
 
-    /// The first build (S1): every virtual item, Sent and Seen, runs, and the
+    /// The first build (S1): every virtual item, Seen, runs, and the
     /// 2-minute no-answer line in assistant rooms.
     public static let s1 = ProjectionOptions(showsDayDividers: true, showsReadMarker: true,
                                              showsTimelineStart: true, marksSentAndSeen: true,
@@ -59,7 +60,7 @@ public struct ChatRow: Identifiable, Equatable, Hashable, Sendable {
     /// newest message in my assistant's chat after two minutes with no
     /// answer, while no one is typing. A flag of its own, not a
     /// `DeliveryMark`, because it shows together with that message's
-    /// "Đã gửi" or "Đã xem".
+    /// time or "Đã xem".
     public var showsNoAnswer: Bool
     /// B16: run position (corner shape, spacing), the run time and the edit
     /// mark under this row (TL-4, TL-5). `.none` for rows that

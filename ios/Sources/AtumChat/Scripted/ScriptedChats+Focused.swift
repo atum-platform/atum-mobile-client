@@ -65,8 +65,9 @@ extension ScriptedChats {
 
     /// U4 and U4b. A send is accepted after 1.5 s, so U4's first check after
     /// the tap finds the clock even on a slow simulator; the remote copy
-    /// lands 0.15 s later, and Atum's receipt 2.5 s after that, so "Đã gửi"
-    /// shows from 1.5 s to about 4.15 s, then "Đã xem". The dots start at
+    /// lands 0.15 s later, and Atum's receipt 2.5 s after that, so the
+    /// settled, unread message (just its time, no Sent mark since desktop
+    /// #89) shows from 1.5 s to about 4.15 s, then "Đã xem". The dots start at
     /// about 5.65 s and the answer lands at about 7.65 s, after U4b's checks.
     static func chatSend(_ env: ScriptedEnvironment) -> ScriptedScript {
         let name = ScriptedScenario.chatSend.rawValue
@@ -87,7 +88,7 @@ extension ScriptedChats {
     }
 
     /// Atum in `chat.send`: the receipt, the dots and the answer wait long
-    /// enough for U4b to see "Đã gửi" before "Đã xem".
+    /// enough for U4b to see the settled, unread message before "Đã xem".
     static let sendReplies = ScriptedReplies(sender: Cast.atum, seenAfter: 2.5, typingAfter: 4, answerAfter: 6,
                                              bodies: atumReplies.bodies)
 

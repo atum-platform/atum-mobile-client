@@ -275,7 +275,7 @@ public struct ConversationCore: Sendable {
         let rows = projection.snapshot.rows
         if !retryingIDs.isEmpty {
             // The source's next state for a retried send ends its clock:
-            // sending, sent (then "Đã gửi"), failed again, or gone.
+            // sending, sent (then just its time), failed again, or gone.
             retryingIDs.subtract(projection.touchedItemIDs)
             let shown = Set(rows.lazy.map(\.id))
             retryingIDs.formIntersection(shown)

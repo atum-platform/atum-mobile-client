@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The quiet line under a bubble, as desktop draws it (`MatrixSendState`,
 /// `data-matrix-run-time` and the answer toolbar in `src/matrix/app.tsx`):
-/// "14:05 · đã sửa · ✓ Đã gửi" in one row.
+/// "14:05 · đã sửa" in one row, then the readers' faces once someone read it.
 /// - The clock under the last bubble of each run and under every answer of
 ///   my agent (TL-4, `RowGrouping.showsTime`); never in a team space's flat
 ///   runs, whose header carries it.
@@ -11,17 +11,19 @@ import SwiftUI
 ///   `RowGrouping.showsEdited`).
 /// - My delivery mark (B7, B8): a clock while it sends, "Chưa gửi được" with
 ///   a warning glyph when it failed (tapping it offers "Thử lại" and "Xóa"),
-///   a check and "Đã gửi" on my newest message once it settled, and the
-///   readers' faces under the message each receipt names.
+///   and the readers' faces under the message each receipt names. One read
+///   signal (desktop #89, owner 2026-11-19): a settled message nobody has
+///   read yet shows just its time, with no check and no "Đã gửi"; the faces
+///   are the only receipt, and the separator only joins what is drawn.
 /// - Copy, after the time, under the newest answer.
 /// The quiet "Chưa có câu trả lời." line is gone (owner real use, 10-17:
 /// uncertain-outcome lines go; Kit gap spec §3.2): the working line and the
 /// answer speak.
 ///
 /// The words are in the bubble's accessibility label; only the failed mark,
-/// the readers and Copy are their own (actionable) elements. B26's warning on
-/// a failed send is the composer's (`SendFailureWatch`), so it plays once
-/// whichever row fails.
+/// the readers ("Đã xem"/"Đã xem · N") and Copy are their own (actionable)
+/// elements. B26's warning on a failed send is the composer's
+/// (`SendFailureWatch`), so it plays once whichever row fails.
 struct DeliveryLine: View {
     let row: ChatRow
     let kind: RoomKind
@@ -111,16 +113,6 @@ struct DeliveryLine: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier(AccessibilityID.sendFailed)
-        case .sent:
-            // Desktop `send-state.tsx`: a small check, then "Đã gửi", muted.
-            HStack(spacing: 4) {
-                Image(theme.design.symbol("Check"))
-                    .font(.caption2)
-                Text(theme.copy.text(.sent))
-                    .font(.caption)
-            }
-            .foregroundStyle(theme.quiet(scheme))
-            .accessibilityHidden(true)
         case let .seen(readerCount):
             ReaderAvatarMarks(readers: readers, readerCount: readerCount, kind: kind, roomFace: roomFace,
                               members: members, scheme: scheme, theme: theme)
