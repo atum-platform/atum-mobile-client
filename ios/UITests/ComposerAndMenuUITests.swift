@@ -343,12 +343,12 @@ final class ComposerUITests: WS3UITestCase {
         let spoken = labels.first { $0.contains(text) } ?? ""
         XCTAssertTrue(spoken.contains(text), "literal text, no formatting: \(labels)")
         let sending = spoken.contains("Đang gửi")
-        let settled = !sending && !spoken.contains("Chưa gửi được")
+        let wentOut = !sending && !spoken.contains("Chưa gửi được")
         XCTAssertFalse(spoken.contains("Đã gửi"), "no Sent receipt (desktop #89): \(spoken)")
         if firstCheck < 1.5 {
             XCTAssertTrue(sending, "a clock before acceptance, \(firstCheck) s after the tap: \(spoken)")
         } else {
-            XCTAssertTrue(sending || settled,
+            XCTAssertTrue(sending || wentOut,
                           "send state did not advance monotonically after \(firstCheck) s: \(spoken)")
         }
         XCTAssertEqual(Self.text(of: field), "", "the draft cleared in the same frame")

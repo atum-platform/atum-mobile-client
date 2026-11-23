@@ -48,4 +48,6 @@ the read signal itself (faces only, no ticks) now matches.
 
 ## Verification
 
-Pending the shared heavy-build lock; recorded below when the run finishes.
+- Run 1: `swift test --package-path ios` passed 748/748. Debug
+  `build-for-testing` failed: in U4 a local `settled` flag shadowed the
+  `settled(_:_:)` helper. Renamed the flag; run 2 reruns the build and tests.
