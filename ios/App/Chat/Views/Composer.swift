@@ -1,4 +1,3 @@
-import Accessibility
 import AtumChat
 import AtumDesign
 import AtumNativeAPI
@@ -59,7 +58,6 @@ struct ChatComposer: View {
     @State private var photoSelection = [PhotosPickerItem]()
     @State private var attachSheetPresented = false
     @State private var dictation: ComposerDictation
-    @State private var turn = ComposerTurnModel()
 
     init(store: LiveConversationStore, design: LiveDesign, haptics: ChatHaptics,
          modelActions: AssistantModelActions?,
@@ -140,7 +138,6 @@ struct ChatComposer: View {
             AccessibilityNotification.Announcement(ComposerDictationCopy.refusal(design, refusal)).post()
         }
         .background { SendFailureHaptic(store: store, haptics: haptics) }
-        .background { TurnSignalWatch(store: store, turn: turn) }
         .chatHaptics(haptics)
         .photosPicker(
             isPresented: Binding(get: { mediaPresenter?.photoPickerPresented ?? false },
@@ -188,10 +185,13 @@ struct ChatComposer: View {
                         )
                     }
                     if showsMicButton { micButton }
-                    if showsSendButton {
-                        sendButton
-                    } else if showsStopButton {
+                    // Desktop gives Stop priority: while a reply works or
+                    // settles, a draft or attachment never hides Stop or
+                    // "Stopping…" (review r1). Send stays for idle and editing.
+                    if showsStopButton {
                         stopButton
+                    } else if showsSendButton {
+                        sendButton
                     }
                 }
                 // The circle appearing never changes this controls row's
@@ -209,9 +209,12 @@ struct ChatComposer: View {
         // it the pill's own outline.
         .contentShape(.accessibility, RoundedRectangle(cornerRadius: pillRadius))
         .accessibilityElement(children: .contain)
-        .accessibilityValue(turn.stop.isWorking ? ChatCopy.text(design, ChatCopy.Key.turnRunning) : "")
+        .accessibilityValue(turnStop.isWorking ? ChatCopy.text(design, ChatCopy.Key.turnRunning) : "")
         .accessibilityIdentifier(Self.pillID)
     }
+
+    /// The room's Stop state (`LiveConversationStore.turnStop`).
+    private var turnStop: AssistantTurnStop { store.turnStop.stop }
 
     private var pillRadius: Double { design.palette.radii["composerExpanded"] ?? 28 }
 
@@ -258,7 +261,7 @@ struct ChatComposer: View {
     /// answered for this turn: the glyph again, disabled. Desktop dims a
     /// disabled Stop to 30 %.
     @ViewBuilder private var stopButton: some View {
-        switch turn.stop.control {
+        switch turnStop.control {
         case .hidden:
             EmptyView()
         case let .stop(enabled):
@@ -339,56 +342,35 @@ struct ChatComposer: View {
         .transition(.opacity)
     }
 
-    /// Sends one stop for the turn shown. A second tap while it is out does
-    /// nothing; after a failure the retry re-sends the same request ID, so
-    /// the platform (idempotent on owner and request ID) never sees two.
+    /// Sends one stop for the turn shown, through the room's controller
+    /// (`store.turnStop`), which outlives this view. A second tap while it is
+    /// out does nothing, even after search rebuilt the composer; after a
+    /// failure the retry re-sends the same request ID, so the platform
+    /// (idempotent on owner and request ID) never sees two.
     private func stopTurn() {
-        guard showsStopButton, let turnStopActions,
-              let intent = turn.stop.beginStop(newRequestID: UUID().uuidString.lowercased()) else { return }
-        haptics.stopped()
-        announce(ChatCopy.text(design, ChatCopy.Key.turnStopping))
-        Task { @MainActor in
-            let result = await turnStopActions.stop(intent)
-            turn.stop.resolve(result, for: intent)
+        guard showsStopButton, let turnStopActions else { return }
+        let store = store
+        let haptics = haptics
+        let sent = store.turnStop.tap(newRequestID: UUID().uuidString.lowercased(),
+                                      send: turnStopActions.stop) { intent, result, accepted in
             if case let .schedule(execution) = intent.target, result == .completed || result == .stopped {
-                await (store as? LiveConversationStore)?.settleSchedule(execution)
+                Task { @MainActor in await store.settleSchedule(execution) }
             }
-            // Not stopped: Stop comes back and the refused band says so; the
-            // turn stays shown as in progress.
-            if result == .failed {
-                haptics.failed()
-                announce(ChatCopy.text(design, ChatCopy.Key.turnStopRefused))
-            }
-            if result == .stopped, case .schedule = intent.target {
-                announce(ChatCopy.text(design, ChatCopy.Key.scheduledStopped))
-            }
-            guard result == .stopRequested else { return }
-            if case .schedule = intent.target {
-                // Desktop re-offers an exact scheduled Stop after the delay.
-                do { try await Task.sleep(for: AssistantTurnStop.scheduledRetryDelay) } catch { return }
-                turn.stop.retryPendingSchedule(for: intent)
-            } else {
-                // Desktop settles a turn's unconfirmed Stop quietly.
-                do { try await Task.sleep(for: AssistantTurnStop.settleDelay) } catch { return }
-                turn.stop.settlePendingTurn(for: intent)
-            }
+            // Not stopped: Stop comes back and the refused band says so.
+            if accepted, result == .failed { haptics.failed() }
         }
-    }
-
-    /// Desktop's `role="status"`: the words are read once as they appear.
-    private func announce(_ text: String) {
-        AccessibilityNotification.Announcement(text).post()
+        if sent != nil { haptics.stopped() }
     }
 
     private var showsStopButton: Bool {
         guard let turnStopActions, store.editTarget == nil else { return false }
-        if let target = turn.stop.selection, turnStopActions.unavailableTargets.contains(target) { return false }
-        return turn.stop.control != .hidden
+        if let target = turnStop.selection, turnStopActions.unavailableTargets.contains(target) { return false }
+        return turnStop.control != .hidden
     }
 
     private var turnLine: String? {
         guard turnStopActions != nil else { return nil }
-        switch turn.stop.notice {
+        switch turnStop.notice {
         case .refused: return ChatCopy.text(design, ChatCopy.Key.turnStopRefused)
         case .scheduledStopped: return ChatCopy.text(design, ChatCopy.Key.scheduledStopped)
         case nil: return nil
@@ -845,28 +827,18 @@ struct AssistantTurnStopActions {
     }
 }
 
-/// The composer's turn state, observed on its own so the pill re-renders
-/// only when the phase changes, never on each snapshot.
-@MainActor
-@Observable
-final class ComposerTurnModel {
-    var stop = AssistantTurnStop()
-}
-
-/// Reads the transcript for my assistant's turn (`AssistantTurnSignal`),
-/// invisibly, as `SendFailureHaptic` does.
-private struct TurnSignalWatch: View {
-    let store: any ConversationStore
-    let turn: ComposerTurnModel
+/// Reads the transcript for my assistant's turn (`AssistantTurnSignal`)
+/// into the room's Stop controller, invisibly. The chat screen hosts it, so
+/// it keeps reading while search replaces the composer (review r1).
+struct TurnSignalWatch: View {
+    let store: LiveConversationStore
 
     var body: some View {
         Color.clear
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             .onChange(of: store.snapshot, initial: true) { _, snapshot in
-                var next = turn.stop
-                next.observe(AssistantTurnSignal.read(snapshot.rows, kind: store.kind))
-                if next != turn.stop { turn.stop = next }
+                store.turnStop.observe(AssistantTurnSignal.read(snapshot.rows, kind: store.kind))
             }
     }
 }

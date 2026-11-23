@@ -1015,10 +1015,18 @@ final class TurnStopUITests: WS3UITestCase {
         XCTAssertFalse(stop.isEnabled)
         XCTAssertFalse(element(app, "composer.turn").exists)
         keepEvidence("stop-4-requested", of: app)
+        // Review r1: a draft never hides Stop while the reply works or
+        // settles (desktop gives Stop priority).
+        field(app).typeText(" thêm")
+        XCTAssertTrue(eventually(5) { (self.field(app).value as? String)?.contains("thêm") == true })
+        XCTAssertEqual(stop.label, stopping, "Stopping… stays with a draft")
+        XCTAssertFalse(element(app, AccessibilityID.composerSend).exists, "Send waits for idle")
+        keepEvidence("stop-4b-requested-with-draft", of: app)
         // Desktop `MATRIX_STOP_SETTLE_MS`: after 15 s it settles quietly.
         XCTAssertTrue(eventually(20) { stop.label == "Dừng" }, "settled: \(stop.label)")
         XCTAssertFalse(stop.isEnabled, "settled Stop stays disabled")
         XCTAssertFalse(element(app, "composer.turn").exists, "settles without a word")
+        XCTAssertFalse(element(app, AccessibilityID.composerSend).exists, "a settled Stop keeps priority")
         XCTAssertEqual(stopRequests().count, 1)
         keepEvidence("stop-5-settled", of: app)
     }

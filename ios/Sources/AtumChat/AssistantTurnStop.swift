@@ -165,6 +165,10 @@ public struct AssistantTurnStop: Equatable, Sendable {
     /// after the run's marker clears, until another turn is named (desktop
     /// `useMatrixCloudStop().stopped`).
     public private(set) var scheduledStopConfirmed = false
+    /// The timeline cleared this scheduled run's marker while its Stop was
+    /// still in flight or pending. The exact attempt is kept so its receipt
+    /// still resolves; a new target replaces it.
+    public private(set) var scheduleMarkerCleared = false
 
     public static let scheduledRetryDelay: Duration = .seconds(15)
     /// Desktop `MATRIX_STOP_SETTLE_MS`: how long an unconfirmed Stop keeps
@@ -189,6 +193,13 @@ public struct AssistantTurnStop: Equatable, Sendable {
         if phase == .stopped, case .schedule = selection, !signal.hasScheduledWork, !signal.working {
             self = AssistantTurnStop()
             scheduledStopConfirmed = true
+            return
+        }
+        // Keep the exact in-flight scheduled attempt when its marker clears
+        // before the receipt: nothing else is named, so it is still the one
+        // this chat is waiting on (review r1). A new turn or run replaces it.
+        if selected == nil, !signal.hasScheduledWork, phase == .stopping, case .schedule = selection {
+            scheduleMarkerCleared = true
             return
         }
         guard let selected else {
@@ -231,8 +242,19 @@ public struct AssistantTurnStop: Equatable, Sendable {
 
     /// The platform answered a request. An answer for a turn that is no
     /// longer shown (the person moved on) changes nothing.
-    public mutating func resolve(_ result: AssistantTurnStopResult, for intent: AssistantTurnStopIntent) {
-        guard intent.target == selection, intent.requestID == requestID, phase == .stopping else { return }
+    /// Returns whether the answer was accepted (it names the attempt shown).
+    @discardableResult
+    public mutating func resolve(_ result: AssistantTurnStopResult, for intent: AssistantTurnStopIntent) -> Bool {
+        guard intent.target == selection, intent.requestID == requestID, phase == .stopping else { return false }
+        if scheduleMarkerCleared {
+            // The run already left the timeline: only a confirmed stop leaves
+            // a word ("Stopped."); anything else settles quietly, as desktop
+            // drops a status whose key is gone.
+            let confirmed = result == .stopped
+            self = AssistantTurnStop()
+            scheduledStopConfirmed = confirmed
+            return true
+        }
         switch result {
         case .stopped:
             phase = .stopped
@@ -243,6 +265,7 @@ public struct AssistantTurnStop: Equatable, Sendable {
         case .completed: phase = .finishing
         case .failed: phase = .failed
         }
+        return true
     }
 
     /// Desktop settles a turn's unconfirmed Stop after `settleDelay`: the
@@ -259,6 +282,11 @@ public struct AssistantTurnStop: Equatable, Sendable {
     public mutating func retryPendingSchedule(for intent: AssistantTurnStopIntent) {
         guard scheduledStopPending, phase == .stopping, intent.target == selection,
               intent.requestID == requestID else { return }
+        guard !scheduleMarkerCleared else {
+            // The run left the timeline while pending: nothing to re-offer.
+            self = AssistantTurnStop()
+            return
+        }
         scheduledStopPending = false
         phase = .working
     }

@@ -144,3 +144,43 @@ code:
 
 They have not all run together in one pass since the last fixes. The hosted UI
 shards rerun the class on the PR.
+
+## Fix round r2 (Codex review r1 on PR #69)
+
+1. **Search reset Stop and allowed a second request.** Search swapped the
+   composer out, and its `@State` went with it.
+   - The Stop state, the in-flight request and its timers now live in
+     `AtumChat.AssistantTurnStopController`. `LiveConversationStore.turnStop`
+     owns it, scoped to the room.
+   - The transcript watch (`TurnSignalWatch`) moved to `ChatScreen`.
+   - A rebuilt composer re-reads the same state, so a tap while a request is
+     out, or after it settled, sends nothing.
+2. **A late scheduled receipt.**
+   - When the timeline clears a run's marker while its Stop is in flight or
+     pending, `observe` now keeps that exact attempt
+     (`scheduleMarkerCleared`).
+   - A confirmed receipt then shows "Stopped." with no Stop. Any other receipt
+     settles quietly, and a pending retry is not re-offered.
+   - A new reply or run drops the attempt, so its receipt is ignored.
+   - `resolve` returns whether it accepted the receipt. VoiceOver hears only
+     accepted notice transitions, and only while `ChatScreen` is shown, since
+     `ChatScreen` sets `announce`. The raw receipt is never announced.
+3. **A draft hid Stop.** Stop now wins over Send whenever it is shown. Send is
+   kept for idle and editing.
+4. **A transient 503 hid scheduled Stop.** The host Stop route now withdraws an
+   execution's Stop only on 403 or 404. A 503 shows the refused band and offers
+   Stop again. The turn route's closed-error handling is unchanged.
+
+Tests:
+
+- `AssistantTurnStopControllerTests`:
+  - a rebuild during the request and after settling sends no second request
+    ID;
+  - a retry reuses the request ID;
+  - only accepted transitions are announced.
+- New `AssistantTurnStopTests` cases cover a late receipt with the marker
+  cleared, a newer target dropping the attempt, and no re-offer for a pending
+  stop.
+- `NativeDomainClientTests.testScheduledStop503StaysRetryableAndOnlyDenialsWithdrawIt`.
+- `TurnStopUITests.testStopRequestedSaysStoppingThenSettles` now checks that a
+  draft keeps "Stopping…" and that Send waits.
