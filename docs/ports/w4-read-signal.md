@@ -68,3 +68,37 @@ the read signal itself (faces only, no ticks) now matches.
 - Lane rule from 2026-11-23: no UI tests locally. The hosted PR shards run U4
   and the S1 matrix. Run 4 is the slim lane only: `swift test --filter
   "AtumChatTests|ChatCopyContractTests"` and Debug `build-for-testing`.
+
+## B13 context-menu investigation
+
+- Main at `2429554` received the first long press at test time 66.09 s,
+  before the scripted answer was due at 101.94 s. Its receipt arrived
+  about 0.84 s after the dismissal tap.
+- The failing local run on `9f305c0` missed the press at 96.64 s. The
+  answer was due at 103.73 s and its read receipt was logged at 106.27 s.
+  XCTest delivered the retry at 107.95 s, so dismissal found the event
+  already acknowledged.
+- The failing hosted shard observed the source start by test time 63.62 s
+  but delivered its first long press at 125.27 s, more than 21 s after the
+  answer was due. Its first menu existence check followed the press in
+  about 2.86 s, compared with 2.90 s on main.
+- A rerun of the same `9f305c0` build opened the menu on the first press and
+  passed. The answer's receipt arrived about 0.75 s after dismissal.
+
+The port changes delivery presentation. The press recognizer, menu
+presenter and transcript visibility gate are identical across the two
+revisions. The read policy still selects a settled event by its server
+event ID and the item's delivery state, with the same timer and receipt
+transport.
+
+B13 now releases Moon's answer from the Debug source after XCTest observes
+the menu. The test waits for the answer to appear in the store's projected
+transcript and keeps the overlay open for three more seconds. The original
+receipt assertions exercise the covered and dismissed states.
+
+The locked verification passed the package filter (764 AtumChat tests and
+4 copy contract tests), the Debug build-for-testing, and both B13 runs
+(36.687 s and 39.903 s). In each run the probe recorded the answer before
+dismissal and the next receipt after dismissal. The earlier comparison
+batch also passed all 8 S6 presentation tests and the 3 focused U4/U5
+composer tests.
