@@ -5,19 +5,22 @@ import XCTest
 /// walked on the scripted Home in English and Vietnamese, light and dark.
 /// `-AtumScriptedHire retry` fails the first hire so Retry is walked too;
 /// `paid` is the third+ assistant, whose price shows once and whose Hire
-/// waits for open checkout (none on the scripted host).
+/// waits for open checkout (none on the scripted host); `capacity` is a
+/// hire whose chat is still being set up, so the sheet doesn't say it's there.
 final class ListingHireUITests: TranscriptUITestCase {
     private struct Words {
-        let title, hiring, failed, hired, price: String
+        let title, hiring, failed, hired, price, settingUp: String
     }
 
     private static let words: [String: Words] = [
         "en": Words(title: "Researcher", hiring: "Hiring Researcher…",
                     failed: "Couldn't hire Researcher. Try again.",
-                    hired: "Researcher is in your chats.", price: "60,000 Protons/month"),
+                    hired: "Researcher is in your chats.", price: "60,000 Protons/month",
+                    settingUp: "Researcher is getting ready…"),
         "vi": Words(title: "Nhà nghiên cứu", hiring: "Đang thuê Nhà nghiên cứu…",
                     failed: "Chưa thuê được Nhà nghiên cứu. Hãy thử lại.",
-                    hired: "Nhà nghiên cứu đã có trong danh sách trò chuyện.", price: "60.000 Proton/tháng"),
+                    hired: "Nhà nghiên cứu đã có trong danh sách trò chuyện.", price: "60.000 Proton/tháng",
+                    settingUp: "Nhà nghiên cứu đang khởi động…"),
     ]
 
     @MainActor
@@ -110,6 +113,19 @@ final class ListingHireUITests: TranscriptUITestCase {
         element(app, "home.newAssistant.hire.back").tap()
         XCTAssertTrue(app.buttons.matching(identifier: "home.newAssistant.listing.hire").firstMatch
             .waitForExistence(timeout: 15), "Back did not return to the shelf")
+        app.terminate()
+
+        // Hired, but the platform placed it as `capacity`: no "in your chats"
+        // until its chat opens; Done still closes the sheet.
+        app = launch(mode: "capacity", language: language, dark: dark)
+        hire = openNewAssistant(app)
+        hire.tap()
+        waitFor(app, "home.newAssistant.hire.status", label: words.settingUp)
+        XCTAssertFalse(app.staticTexts[words.hired].exists, "a hire still setting up says it is in the chats")
+        keepScreenshot(prefix + "-6-setting-up", of: app)
+        element(app, "home.newAssistant.hire.done").tap()
+        XCTAssertTrue(app.buttons.matching(identifier: "home.create").firstMatch.waitForExistence(timeout: 20),
+                      "Done did not close the sheet")
         app.terminate()
     }
 }

@@ -36,7 +36,7 @@ struct ScriptedHomeHost: View {
     /// Rooms the scripted account has left since launch (Home search's
     /// eligibility drops their results).
     @State private var scriptedLeftRooms = Set<String>()
-    /// `-AtumScriptedHire <free|paid|retry|short>`: the open Researcher
+    /// `-AtumScriptedHire <free|paid|retry|short|capacity>`: the open Researcher
     /// listing on the New assistant sheet (desktop D9). Without it the sheet
     /// has no shelf, as for an account the platform offers none.
     @State private var listingHire = ListingHireFlow()
@@ -80,11 +80,12 @@ struct ScriptedHomeHost: View {
     }
 
     /// Answers a hire after a visible pause: `retry` fails the first try
-    /// (Retry then hires), `short` says the wallet is short, the rest hire.
+    /// (Retry then hires), `short` says the wallet is short, `capacity`
+    /// hires an assistant whose chat isn't open yet, the rest hire.
     @MainActor private static func readScriptedListings() async -> [OpenAgentListing] { scriptedListings }
 
     @MainActor private static func scriptedHire(_ listing: OpenAgentListing, _ name: String,
-                                                _ confirmed: Bool) async -> ListingHireResult {
+                                                _ confirmed: Bool, _ account: String) async -> ListingHireResult {
         scriptedHireAttempts += 1
         UITestProbe.append("hire \(listing.listingID) \(name) confirmed=\(confirmed) try=\(scriptedHireAttempts)",
                            to: "home-actions.txt")
@@ -93,6 +94,9 @@ struct ScriptedHomeHost: View {
         switch hireMode {
         case "retry" where scriptedHireAttempts == 1: return .refused(.retry)
         case "short": return .refused(.short)
+        case "capacity":
+            guard let id = try? NativeID("6f1c1d8e-3b5a-4c2e-9a7d-1e2f3a4b5c6d") else { return .refused(.retry) }
+            return .settingUp(assistantID: id)
         default: return .hired
         }
     }
@@ -179,7 +183,10 @@ struct ScriptedHomeHost: View {
                             },
                             listings: Self.hireMode == nil ? nil : Self.readScriptedListings,
                             hire: Self.hireMode == nil ? nil : Self.scriptedHire,
-                            hireFlow: Self.hireMode == nil ? nil : listingHire
+                            hireFlow: Self.hireMode == nil ? nil : listingHire,
+                            hireAccount: Self.hireMode == nil ? nil : "@scripted:atum.test",
+                            // `capacity`: the hired assistant's chat never opens here.
+                            chatReady: { _ in Self.hireMode != "capacity" }
                         ),
                         exitRoom: { roomID, action in
                             rows.removeAll { $0.id == roomID }

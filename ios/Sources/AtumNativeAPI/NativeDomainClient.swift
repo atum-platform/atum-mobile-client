@@ -852,15 +852,22 @@ public struct AgentsRead: Sendable {
     /// this a usable assistant until a definition, answering runtime and
     /// canonical Matrix conversation have their own authoritative success.
     public func createAgent(_ input: AgentCreateRequest) async throws -> AgentsResponse.Agent {
+        try await createAgentPlaced(input).agent
+    }
+
+    /// `createAgent` with the platform's `cloud_placement`, so a listing hire
+    /// can tell a placed assistant from one whose chat is still being set up.
+    public func createAgentPlaced(_ input: AgentCreateRequest) async throws -> AgentCreateResponse {
         let body: Data
         do { body = try JSONEncoder().encode(input) }
         catch { throw NativeDomainClientFailure.invalidRequest }
-        let agent = try await request(AgentsResponse.Agent.self, url: Self.agentsURL,
-                                      method: "POST", body: body,
-                                      acceptsAssistantNameRefusal: true)
+        let created = try await request(AgentCreateResponse.self, url: Self.agentsURL,
+                                        method: "POST", body: body,
+                                        acceptsAssistantNameRefusal: true)
+        let agent = created.agent
         guard !agent.isDefault, agent.status == .active, agent.matrixUser != nil
         else { throw NativeDomainClientFailure.invalidResponse }
-        return agent
+        return created
     }
 
     /// The open listings this person can hire (platform 0535), for the

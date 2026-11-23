@@ -3554,6 +3554,30 @@ extension NativeDomainClientTests {
         XCTAssertEqual(created.id.rawValue, agentID)
     }
 
+    /// Review finding 4: the hire's answer keeps `cloud_placement`, so a
+    /// `capacity` seat isn't shown as an open chat. An unknown placement is
+    /// absent, never a failed create (the seat is already charged).
+    func testListingHireKeepsThePlatformsPlacement() async throws {
+        func placed(_ placement: Any?) async throws -> AgentCreateResponse {
+            NativeDomainProtocol.state.handler = { _ in
+                var record = self.agentRecord(matrixUser: true)
+                if let placement { record["cloud_placement"] = placement }
+                return .json(try! JSONSerialization.data(withJSONObject: record))
+            }
+            return try await client(TestAuthorization(first: "hire-token")).createAgentPlaced(AgentCreateRequest(
+                requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+                listingId: "open/agents/researcher"))
+        }
+        let capacity = try await placed("capacity")
+        XCTAssertEqual(capacity.placement, .capacity)
+        XCTAssertEqual(capacity.agent.id.rawValue, agentID)
+        XCTAssertEqual(try await placed("pending_trust").placement, .pendingTrust)
+        XCTAssertEqual(try await placed("placed").placement, .placed)
+        XCTAssertNil(try await placed("somewhere_new").placement)
+        XCTAssertNil(try await placed(7).placement)
+        XCTAssertNil(try await placed(nil).placement)
+    }
+
     func testHireRefusalsMapAsDesktopsDo() async throws {
         func refusal(_ status: Int, _ body: String) async -> OpenAgentHireRefusal {
             NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(body.utf8)]) }
@@ -3575,16 +3599,45 @@ extension NativeDomainClientTests {
         let short = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_insufficient_protons","hire":{"price_protons":60000}}}"#)
         XCTAssertEqual(short, .short)
         XCTAssertTrue(short.keepsRequest)
-        let limit = await refusal(409, #"{"error":"matrix_409"}"#)
-        XCTAssertEqual(limit, .limit)
-        XCTAssertFalse(limit.keepsRequest)
-        let name = await refusal(422, #"{"error":"assistant_name_taken"}"#)
-        XCTAssertEqual(name, .name)
-        let account = await refusal(403, #"{"error":"matrix_403"}"#)
-        XCTAssertEqual(account, .account)
         let outage = await refusal(503, #"{"error":"matrix_503"}"#)
         XCTAssertEqual(outage, .retry)
         XCTAssertTrue(outage.keepsRequest)
+    }
+
+    /// Review finding 3: the platform charges the seat in
+    /// `matrix_agent_create_finish` and keeps provisioning after it, so any
+    /// later step's refusal may follow the charge. Only the name rules' own
+    /// 422 (raised in `matrix_agent_create_begin`, before any reservation or
+    /// charge) lets the request go; every other answer keeps its UUID, and
+    /// a bare 400 (`matrix_invalid`) is retried, not read as a name.
+    func testOnlyAPreChargeNameRefusalLetsTheHireRequestGo() async throws {
+        func refusal(_ status: Int, _ body: String) async -> OpenAgentHireRefusal {
+            NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(body.utf8)]) }
+            do {
+                _ = try await client(TestAuthorization(first: "hire-token")).createAgentPlaced(AgentCreateRequest(
+                    requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+                    listingId: "open/agents/researcher"))
+                XCTFail("hire accepted")
+                return .retry
+            } catch {
+                return OpenAgentHireRefusal.from(error)
+            }
+        }
+        let name = await refusal(422, #"{"error":"assistant_name_taken"}"#)
+        XCTAssertEqual(name, .name)
+        XCTAssertFalse(name.keepsRequest, "a pre-charge name refusal keeps a dead request")
+        let invalid = await refusal(400, #"{"error":"matrix_400"}"#)
+        XCTAssertEqual(invalid, .retry, "a bare 400 after provisioning began reads as a name refusal")
+        XCTAssertTrue(invalid.keepsRequest)
+        let limit = await refusal(409, #"{"error":"matrix_409"}"#)
+        XCTAssertEqual(limit, .limit)
+        XCTAssertTrue(limit.keepsRequest)
+        let account = await refusal(403, #"{"error":"matrix_403"}"#)
+        XCTAssertEqual(account, .account)
+        XCTAssertTrue(account.keepsRequest)
+        let missing = await refusal(404, #"{"error":"matrix_404"}"#)
+        XCTAssertEqual(missing, .account)
+        XCTAssertTrue(missing.keepsRequest)
     }
 }
 

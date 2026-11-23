@@ -93,7 +93,8 @@ struct AssistantNewSheet: View {
     var body: some View {
         Group {
             if let flow = actions.hireFlow, let hire = flow.hire {
-                ListingHireView(design: design, hire: hire, flow: flow) {
+                ListingHireView(design: design, hire: hire, flow: flow,
+                                chatReady: actions.chatReady ?? { _ in true }) {
                     flow.reset()
                     close()
                 }
@@ -267,15 +268,18 @@ struct AssistantNewSheet: View {
     }
 
     private var shelfDisabled: Bool {
-        actions.hireFlow == nil || actions.hire == nil || actions.pending || locked || phase == .starting
+        actions.hireFlow == nil || actions.hire == nil || actions.hireAccount == nil
+            || actions.pending || locked || phase == .starting
     }
 
     private func pick(_ listing: OpenAgentListing) {
-        guard !shelfDisabled, let flow = actions.hireFlow, let run = actions.hire else { return }
+        guard !shelfDisabled, let flow = actions.hireFlow, let run = actions.hire,
+              let account = actions.hireAccount else { return }
         nameFocused = false
         flow.pick(listing,
-                  name: ListingAssistantName.name(for: listing, locale: design.locale, others: actions.names),
-                  run: run)
+                  name: ListingAssistantName.name(for: listing, locale: design.locale,
+                                                  others: actions.names, apps: actions.appNames),
+                  account: account, run: run)
     }
 
     private var handleSection: some View {

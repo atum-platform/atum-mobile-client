@@ -44,6 +44,7 @@ the sheet to that one hire (`ListingHireView`):
 | ------- | ----------------------------------------------------------- | -------------------------------- |
 | confirm | the price once, "60,000 Protons/month", for a third+ assistant only | Hire, Back                |
 | hiring  | "Hiring Researcher…"                                        | Hire (disabled, spinner), Back (disabled) |
+| setting up | "Researcher is getting ready…", with a spinner, while the hired assistant's chat isn't open yet | Done (closes the sheet) |
 | done    | "Researcher is in your chats."                              | Done (closes the start-chat sheet) |
 | short   | "Not enough Protons. Top up to continue."                   | Top up (when checkout is open), Back |
 | failed  | "Couldn't hire Researcher. Try again." or the platform's final refusal (name, limit or account) | Retry (retryable only), Back |
@@ -54,10 +55,20 @@ the sheet to that one hire (`ListingHireView`):
   platform's price.
 - **Name:** the listing's title in the app language ("Nhà nghiên cứu" in
   Vietnamese), numbered when it would duplicate an existing assistant
-  ("Researcher 2"). It uses the same `AssistantNameCheck` as the form.
+  ("Researcher 2") or be an app's name. Duplicates compare the platform's name
+  key (`assistant_name_key`, desktop `assistantNameKey`), so "Re-searcher" or
+  "Researcher 🔎" counts, and accents still count ("Mãi" is not Mai). App names
+  are the catalog's (each app's name in every language, its bot's name and its
+  slug as words, desktop `appCatalogNames`). Like desktop, when every numbered
+  name is taken the hire falls back to the catalog name for the platform to judge.
 - **Leaving mid-hire:** the flow (`ListingHireFlow`) belongs to the app root, so a
   hire under way survives leaving the sheet, and reopening it shows the hire again.
   Any other state is let go when the sheet closes.
+- **Account change:** a hire belongs to the account it was picked under. When the
+  signed-in account changes (or signs out), the root drops the flow at once, even
+  mid-hire, and ignores its late answer, so a confirmation given under one account
+  never reaches another account's Retry. `hireListing` also refuses a hire whose
+  account isn't the one signed in, before it reads or sends anything.
 - **VoiceOver:** done, short and failed are announced.
 
 ### After the hire
@@ -70,15 +81,34 @@ seeded definition and skills stay. On success the model:
 1. reads `/agents` again;
 2. retries the new assistant's owner-room invite, including one that arrived
    before the roster knew the inviter;
-3. claims a handle in the background, as for a made assistant.
+3. claims a handle in the background, as for a made assistant;
+4. says done only when the platform placed it (`cloud_placement: placed`, or no
+   placement) and its chat is open here. A hire placed as `capacity` or
+   `pending_trust` comes back before its room exists: the sheet shows "getting
+   ready" and keeps the assistant ID, and turns to done when a joined room's
+   assistant is that one.
 
 Any failure in those steps is left to the assistant's card, as on desktop.
 
 **One hire, never two.** The request UUID, name and confirmation are stored per
-account and listing (`LiveListingHireStore`, `UserDefaults`, keyed by the
-account's fingerprint). A Retry, a confirmation or a relaunch resumes the same
-request. Only the platform's final answers clear it: success, name, limit and
-account. `hire_required`, `short` and transport failures keep it.
+account and listing (`LiveListingHireStore`, `UserDefaults`, keyed by the full
+SHA-256 of the account's Matrix ID, `atum.live.listingHire.v2.<digest>`). A Retry,
+a confirmation or a relaunch resumes the same request.
+
+The platform charges the seat in `matrix_agent_create_finish` (0314, idempotent
+on the request), after the reservation and the MAS identity, and keeps
+provisioning after that (definition seed, Hermes, owner snapshot). Any of those
+later steps can still answer 400 (`matrix_invalid`), 403, 404, 409 or 503. So only
+two answers clear the request: success, and the name rules' own 422 (an
+`assistant_name_*` code, raised by `matrix_agent_create_begin` before anything is
+reserved or charged). Every other answer keeps the UUID, and the next try resumes
+it under the same request. Limit and account refusals still show their final line
+with Back only; picking the listing again resumes the same request. A bare 400 is
+shown as the retryable failure, where desktop reads it as a name refusal (see
+"Phone-only rules").
+
+The earlier `v1` ledger (keyed by the 32-bit log fingerprint) only ever held
+requests from internal builds; it is not read.
 
 ### Phone-only rules
 
@@ -89,6 +119,21 @@ account. `hire_required`, `short` and transport failures keep it.
   available yet" (`mobilePhoneCopy.noPurchasesTitle`) instead of Hire. Top up
   appears only while checkout is open. When the pack sheet finishes, it returns
   to the confirm step at the same price, where desktop opens a browser.
+- **The gate is checked at the POST.** `hireListing` loads the stored request
+  first, and a request that carries a confirmation (given now, or stored with it
+  from an earlier try) goes out only while `applePurchases.checkoutOpen` is true
+  (`ListingHireRequestPlan`, `ListingHireGate.allowsRequest`). Otherwise nothing is
+  sent, no request is minted, and the sheet returns to the price with the closed
+  line. This covers Retry after checkout closed, and a shelf pick that restores a
+  stored confirmation. An unconfirmed request can't spend (the platform answers
+  `hire_required`), so it still goes out.
+- **No real quote, no Hire.** A required hire whose price isn't a positive whole
+  number (a zero or missing quote) is unavailable: no price line, the closed line,
+  and no Hire, until a valid price is read. `ListingHireFlow.confirm()` refuses it
+  too.
+- **A bare 400 is retried.** Desktop maps 400 or 422 to the name refusal. On the
+  phone only the 422 name codes are a name refusal; a bare 400 can follow the
+  charge, so it is the retryable failure under the same request.
 - **No economic math.** Only the seat price is shown, in whole Protons. There is
   no balance meter, paid/bonus split or rate.
 
@@ -106,9 +151,19 @@ account. `hire_required`, `short` and transport failures keep it.
 - `NativeErrorResponse.Details` also accepts `hire` and exposes
   `hirePriceProtons`. A malformed price is absent, and never turns the refusal
   into an invalid response.
-- `OpenAgentHireRefusal.from(_:)`: desktop's refusal map. `hire_required` maps to
-  confirm, `hire_insufficient_protons` to short, other 409s to limit, 400 or 422 to
-  name, 403 or 404 to account, and anything else to retry.
+- `OpenAgentHireRefusal.from(_:)`: desktop's refusal map, except a bare 400.
+  `hire_required` maps to confirm, `hire_insufficient_protons` to short, other
+  409s to limit, a 422 name code to name, 403 or 404 to account, and anything
+  else (a bare 400 included) to retry. `keepsRequest` is false only for name.
+- `AgentCreateResponse` and `AgentCloudPlacement` (new): `POST /agents`'s agent
+  with its `cloud_placement`. An unknown or malformed placement is absent and
+  never fails the create. `NativeDomainClient.createAgentPlaced(_:)` returns it;
+  `createAgent(_:)` is unchanged for its other callers.
+- `AtumChat.AssistantNameCheck`: `key(_:)` (the platform's duplicate key),
+  `fold(_:)` (its Latin skeleton) and `isCatalogName(_:apps:)`. `problem(_:others:)`
+  now compares duplicates by `key`, which the platform refuses too, and takes an
+  optional `apps` list. Desktop's word, role and pair rules for app names are not
+  ported; the platform still applies them, and its refusal shows as the name line.
 
 The smallest model seam outside turn state: `openAgentListings()`,
 `hireListing(_:name:hireConfirmed:)` and the private `adoptHiredAssistant`, next
@@ -120,11 +175,19 @@ code changed.
 All visible words come from the pinned export:
 `roster-create-copy.{readyToHire,hirePrice,hiring,hired,hireFailed,newAssistant}`,
 `mobile-copy.mobileScreensCopy.shell.{agentHireConfirm,agentHireShort,agentNameRefused,agentLimitRefused,agentAccountRefused}`,
-`desktop.common.{back,retry,done}` and `mobilePhoneCopy.noPurchasesTitle`.
+`desktop.common.{back,retry,done}`, `mobilePhoneCopy.noPurchasesTitle` and
+`launch-copy.gettingReady`.
 
 The price is formatted with `ProtonAmountFormat.price`: "60,000" in English and
 "60.000" in Vietnamese. Listing titles and summaries are catalog data from the
 platform, not app copy.
+
+**Pending key:** the "hired, chat still getting ready" line. Desktop has no such
+state (its sheet shows Done at once), so it exports no key. The phone uses the
+nearest exported line, `src.matrix.launch-copy.copies.gettingReady` ("%1$@ is
+getting ready…" / "%1$@ đang khởi động…"), behind `ListingHireCopy.settingUp`. A
+proposed desktop key is `roster-create-copy.hireSettingUp`; when it is exported,
+repin and swap the key.
 
 **Pending key:** `src.matrix.roster-create-copy.copies.makeYourOwn` ("Make your
 own" / "Tự tạo trợ lý") is not in the export. Desktop's PR says none of its six
@@ -183,3 +246,28 @@ Not verified here: a live hire. It needs a deployed catalog, and its first real
 hire needs the owner's go. Also unverified: VoiceOver announcements on a device,
 and the Top up → confirm path with open checkout, which is covered only by
 `ListingHireStateTests`.
+
+## Review fix round (23 Nov 2026)
+
+A read-only cross-family review of `952b5f8` found three blocking issues, two
+should-fixes and a nit. All six are fixed on this branch.
+
+| # | Finding | Fix | Test |
+| - | ------- | --- | ---- |
+| 1 | A paid Retry or a shelf pick could send a stored `hireConfirmed: true` after checkout closed, and a zero quote counted as free | `hireListing` builds its request with `ListingHireRequestPlan`: the stored confirmation is loaded first, and a confirmed request needs `applePurchases.checkoutOpen`. `ListingHireGate.allowsPaidHire` needs a positive price; `confirm()` refuses a zero quote | `ListingHireStateTests.testAConfirmedRequestNeverGoesOutWhileCheckoutIsClosed`, `testAClosedGateReturnsToThePriceAndAZeroQuoteCantBeConfirmed`, `testAPricedSeatFollowsTheStoreSpendGate` |
+| 2 | A root-owned flow from account A could Retry under account B with A's confirmation; the ledger was keyed by the 32-bit log fingerprint | The hire records its account; `AppRoot` calls `accountChanged(to:)` on every `listingHireAccount` change; late answers for another account are ignored; `hireListing` refuses a different account; the ledger key is the full SHA-256 (`v2`) | `testAnAccountChangeLetsTheHireGoSoItsConfirmationNeverReachesAnotherAccount`, `testTheLedgerKeyIsTheAccountsFullDigest` |
+| 3 | A provisioning 400 after the charge cleared the request UUID, so a later pick could buy a second seat | `OpenAgentHireRefusal`: only the 422 name refusal (before any charge) clears; a bare 400 is retried; limit and account keep the UUID. A request that fails to build keeps a stored UUID | `NativeDomainClientTests.testOnlyAPreChargeNameRefusalLetsTheHireRequestGo` |
+| 4 | Done showed before a `capacity` hire's room existed | `createAgentPlaced` keeps `cloud_placement`; the new `settingUp` phase shows "getting ready" until a joined room's assistant is the hired one | `NativeDomainClientTests.testListingHireKeepsThePlatformsPlacement`, `ListingHireStateTests.testAHireWhoseChatIsntOpenYetIsSettingUpUntilItOpens`, UI walk step 6 |
+| 5 | Numbering missed `Re-searcher` and app names | `AssistantNameCheck.key`, `fold`, `isCatalogName`; the sheet passes the catalog's app names | `testTheHiredNameStepsPastLookAlikesAndAppNames`, `AssistantNameCheckTests.testDuplicatesCompareThePlatformsNameKey`, `testAnAppsNameIsReserved` |
+| 6 | Nit: the `keepsRequest` comment | Rewritten with the platform's charge order | — |
+
+Also fixed while there: the lifecycle store's doc comment had been attached to
+`LiveListingHireStore`.
+
+Not changed: the make-your-own form still checks names without the catalog's app
+names (it now compares duplicates by the platform key). Desktop's form checks app
+names too; that is outside this fix round.
+
+### Fix round verification
+
+Pending: filled in from the locked run below.

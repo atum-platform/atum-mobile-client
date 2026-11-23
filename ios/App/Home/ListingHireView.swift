@@ -13,6 +13,10 @@ enum ListingHireCopy {
     static let hiring = roster + "hiring"
     static let hired = roster + "hired"
     static let failed = roster + "hireFailed"
+    /// Pending export: desktop has no "hired, chat still being set up" line
+    /// (its sheet shows Done at once). The nearest exported line stands in:
+    /// launch-copy `gettingReady`, "%1$@ is getting ready…".
+    static let settingUp = "src.matrix.launch-copy.copies.gettingReady"
     static let newAssistant = roster + "newAssistant"
     static let hire = shell + "agentHireConfirm"
     static let short = shell + "agentHireShort"
@@ -59,6 +63,8 @@ struct ListingHireView: View {
     let design: LiveDesign
     let hire: ListingHireState
     let flow: ListingHireFlow
+    /// Whether the hired assistant's chat is open on this phone yet.
+    var chatReady: (NativeID) -> Bool = { _ in true }
     let done: () -> Void
 
     @Environment(\.protonTopUp) private var topUp
@@ -80,9 +86,20 @@ struct ListingHireView: View {
         return nil
     }
 
-    /// A priced seat needs open checkout, as every Proton spend on the phone.
+    /// A priced seat needs a real price and open checkout, as every Proton
+    /// spend on the phone. The confirm step only ever shows a priced seat.
     private var hireAllowed: Bool {
-        ListingHireGate.allowsHire(priceProtons: price ?? 0, checkoutOpen: checkout == .open)
+        ListingHireGate.allowsPaidHire(priceProtons: price ?? 0, checkoutOpen: checkout == .open)
+    }
+
+    /// The setting-up phase's assistant, while its chat isn't open yet.
+    private var waitingFor: NativeID? {
+        if case let .settingUp(assistantID) = hire.phase { return assistantID }
+        return nil
+    }
+
+    private var waitedChatReady: Bool {
+        waitingFor.map(chatReady) ?? false
     }
 
     var body: some View {
@@ -116,6 +133,9 @@ struct ListingHireView: View {
         .onChange(of: hire.phase) { _, phase in
             if let spoken = announcement(phase) { AccessibilityNotification.Announcement(spoken).post() }
         }
+        .onChange(of: waitedChatReady, initial: true) { _, ready in
+            if ready { flow.chatAvailable() }
+        }
     }
 
     // MARK: The one line
@@ -123,12 +143,15 @@ struct ListingHireView: View {
     @ViewBuilder private var line: some View {
         switch hire.phase {
         case let .confirm(price):
-            Text(verbatim: copy(ListingHireCopy.price,
-                                [.text(ProtonAmountFormat.price(price * 1_000_000, design: design))]))
-                .font(.body.weight(.medium))
-                .foregroundStyle(atum.color(.ink, scheme: scheme))
-                .accessibilityIdentifier("home.newAssistant.hire.price")
-            if checkout == .closed && !hireAllowed {
+            if price > 0 {
+                Text(verbatim: copy(ListingHireCopy.price,
+                                    [.text(ProtonAmountFormat.price(price * 1_000_000, design: design))]))
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    .accessibilityIdentifier("home.newAssistant.hire.price")
+            }
+            // No real price yet reads as not available, whatever checkout says.
+            if !hireAllowed && (checkout == .closed || price <= 0) {
                 Text(copy(ListingHireCopy.purchasesClosed))
                     .font(.footnote)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -139,6 +162,14 @@ struct ListingHireView: View {
             Text(verbatim: copy(ListingHireCopy.hiring, [.text(hire.name)]))
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
                 .accessibilityIdentifier("home.newAssistant.hire.status")
+        case .settingUp:
+            HStack(spacing: 10) {
+                ProgressView().accessibilityHidden(true)
+                Text(verbatim: copy(ListingHireCopy.settingUp, [.text(hire.name)]))
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("home.newAssistant.hire.status")
+            }
         case .done:
             Text(verbatim: copy(ListingHireCopy.hired, [.text(hire.name)]))
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -170,6 +201,7 @@ struct ListingHireView: View {
     private func announcement(_ phase: ListingHirePhase) -> String? {
         switch phase {
         case .done: copy(ListingHireCopy.hired, [.text(hire.name)])
+        case .settingUp: copy(ListingHireCopy.settingUp, [.text(hire.name)])
         case .short: copy(ListingHireCopy.short)
         case let .failed(refusal): failureText(refusal)
         case .confirm, .hiring: nil
@@ -181,7 +213,7 @@ struct ListingHireView: View {
     private var actionBar: some View {
         VStack(spacing: 6) {
             switch hire.phase {
-            case .done:
+            case .done, .settingUp:
                 Button(action: done) { primaryLabel(copy(ListingHireCopy.done)) }
                     .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
                     .accessibilityIdentifier("home.newAssistant.hire.done")

@@ -1121,26 +1121,66 @@ final class LiveAppModel {
         }
     }
 
+    /// The signed-in account a listing hire is picked under (its Matrix ID),
+    /// or nil when signed out. A hire belongs to this account alone.
+    var listingHireAccount: String? { context?.runtime.ticket.session.userID }
+
+    /// The names the catalog's apps go by (desktop `appCatalogNames`): each
+    /// app's name in every language, its bot's name and its slug as words.
+    var appCatalogNames: [String] {
+        var names: [String] = []
+        for app in appsRead.value?.apps ?? [] {
+            let candidates: [String?] = app.name.values.values.map { Optional($0) }
+                + [app.bot?.displayName, app.app.replacingOccurrences(of: "-", with: " ")]
+            for name in candidates {
+                if let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty,
+                   !names.contains(name) { names.append(name) }
+            }
+        }
+        return names
+    }
+
+    /// Whether a hired assistant's chat is open here: a joined room whose
+    /// assistant is that one (the room the Home list opens for it).
+    func hiredAssistantChatReady(_ assistantID: NativeID) -> Bool {
+        guard let rooms = liveMatrix?.rooms else { return false }
+        return rooms.contains { agentForRoom($0.roomID)?.id == assistantID }
+    }
+
     /// Hires an open listing under `name` with `POST /agents` and its
     /// `listingId` (the route desktop's `hireAgent` uses). An unfinished hire
     /// of the same listing resumes under its stored request and name, so a
     /// Retry, a confirmation or a relaunch never hires twice; a confirmation
     /// given now carries over. The platform seeds the persona and skills and
     /// always places it in the cloud, so no definition write follows.
+    ///
+    /// `account` is the account the hire was picked under: anything else
+    /// signed in now is refused before any request is read or sent. A
+    /// confirmed request (confirmed now or stored with it) can spend, so it
+    /// goes out only while Apple checkout is open (REL-15).
     func hireListing(_ listing: OpenAgentListing, name: String,
-                     hireConfirmed: Bool) async -> ListingHireResult {
-        guard let client = domainClient, let current = context,
-              let session = liveMatrix, session.isReady else { return .refused(.retry) }
-        let store = LiveListingHireStore(matrixUserID: current.runtime.ticket.session.userID)
-        var pending: LiveListingHireStore.Pending
-        if let earlier = store.pending(listing.listingID) {
-            pending = earlier
-        } else {
-            guard let requestID = try? NativeID(UUID().uuidString.lowercased()) else { return .refused(.retry) }
-            pending = .init(requestID: requestID.rawValue, name: name, hireConfirmed: false)
+                     hireConfirmed: Bool, account: String) async -> ListingHireResult {
+        guard let current = context, current.runtime.ticket.session.userID == account else {
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "account_changed")
+            return .refused(.account)
         }
-        if hireConfirmed { pending.hireConfirmed = true }
-        store.save(pending, for: listing.listingID)
+        guard let client = domainClient, let session = liveMatrix, session.isReady else { return .refused(.retry) }
+        let store = LiveListingHireStore(matrixUserID: account)
+        let plan = ListingHireRequestPlan.make(
+            earlier: store.pending(listing.listingID), name: name, hireConfirmed: hireConfirmed,
+            checkoutOpen: applePurchases.checkoutOpen,
+            newRequestID: { (try? NativeID(UUID().uuidString.lowercased()))?.rawValue })
+        let pending: LiveListingHireStore.Pending
+        let fresh: Bool
+        switch plan {
+        case nil: return .refused(.retry)
+        case .checkoutClosed?:
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "checkout_closed")
+            return .refused(.hireRequired(priceProtons: nil))
+        case let .send(value, fresh: isFresh)?:
+            pending = value
+            fresh = isFresh
+        }
         let request: AgentCreateRequest
         do {
             request = try AgentCreateRequest(
@@ -1148,18 +1188,25 @@ final class LiveAppModel {
                 listingId: listing.listingID, hireConfirmed: pending.hireConfirmed,
                 disclosureVersion: assistantLifecycleCapability?.disclosureVersion)
         } catch {
-            store.clear(listing.listingID, requestID: pending.requestID)
-            return .refused(.name)
+            // Nothing was sent for a new request; a stored one may already
+            // have been charged, so it stays for the next try.
+            return fresh ? .refused(.name) : .refused(.retry)
         }
+        // Saved before the POST, so a lost answer resumes this request.
+        store.save(pending, for: listing.listingID)
         LiveFlowLog.creation(.assistant, outcome: "hire_begin")
         do {
-            let agent = try await client.createAgent(request)
+            let created = try await client.createAgentPlaced(request)
             store.clear(listing.listingID, requestID: pending.requestID)
-            LiveFlowLog.creation(.assistant, outcome: "hired")
-            if domainClient === client, liveMatrix === session {
-                await adoptHiredAssistant(agent, name: pending.name, client: client, session: session)
-            }
-            return .hired
+            LiveFlowLog.creation(.assistant, outcome: "hired", code: created.placement?.rawValue)
+            guard domainClient === client, liveMatrix === session,
+                  context?.runtime.ticket.session.userID == account else { return .hired }
+            await adoptHiredAssistant(created.agent, name: pending.name, client: client, session: session)
+            // `capacity` and `pending_trust` come back before the room exists:
+            // the sheet waits for the chat instead of saying it is there.
+            if created.placement == .placed || created.placement == nil,
+               hiredAssistantChatReady(created.agent.id) { return .hired }
+            return .settingUp(assistantID: created.agent.id)
         } catch {
             let refusal = OpenAgentHireRefusal.from(error)
             if !refusal.keepsRequest { store.clear(listing.listingID, requestID: pending.requestID) }
@@ -7241,15 +7288,13 @@ struct LiveHiddenRoomStore {
     }
 }
 
-/// One opaque lifecycle UUID per account. Names, instructions, room IDs and
-/// provider state remain authoritative on the platform and never enter
-/// defaults. The key is derived from the owner's Matrix ID, so two accounts on
-/// the same phone can never resume each other's setup.
 /// The listing hires still unfinished, per account and listing: the request
 /// UUID, the name it was sent under and whether its price was confirmed. A
-/// hire resumes under exactly these, so it is never made twice.
+/// hire resumes under exactly these, so it is never made twice. The key is
+/// the full SHA-256 of the account's Matrix ID (never the 32-bit log
+/// fingerprint), so two accounts can't share a ledger.
 struct LiveListingHireStore {
-    struct Pending: Codable, Equatable {
+    struct Pending: Codable, Equatable, Sendable {
         let requestID: String
         let name: String
         var hireConfirmed: Bool
@@ -7259,8 +7304,13 @@ struct LiveListingHireStore {
     private let defaults: UserDefaults
 
     init(matrixUserID: String, defaults: UserDefaults = .standard) {
-        key = "atum.live.listingHire.v1." + LiveFlowLog.fingerprint(matrixUserID)
+        key = Self.key(matrixUserID: matrixUserID)
         self.defaults = defaults
+    }
+
+    static func key(matrixUserID: String) -> String {
+        "atum.live.listingHire.v2." + SHA256.hash(data: Data(matrixUserID.utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     private var all: [String: Pending] {
@@ -7305,6 +7355,10 @@ extension OpenAgentHireRefusal {
     }
 }
 
+/// One opaque lifecycle UUID per account. Names, instructions, room IDs and
+/// provider state remain authoritative on the platform and never enter
+/// defaults. The key is derived from the owner's Matrix ID, so two accounts on
+/// the same phone can never resume each other's setup.
 struct LiveAssistantLifecycleStore {
     private let key: String
     private let defaults: UserDefaults

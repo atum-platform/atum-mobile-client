@@ -116,17 +116,29 @@ public struct OpenAgentCatalog: Decodable, Equatable, Sendable {
 }
 
 /// How the platform answered a listing hire (desktop `MatrixAgentRefusal`,
-/// `electron/matrix/main.ts` `createLifecycle().refusal`). Only `.retry`
-/// keeps the same request for another try; the others are final answers.
+/// `electron/matrix/main.ts` `createLifecycle().refusal`). `.hireRequired`,
+/// `.short` and `.retry` lead to another try under the same request; the
+/// others are shown as final answers.
+///
+/// The platform charges the seat in `matrix_agent_create_finish` (0314),
+/// after the reservation and the MAS identity, and keeps provisioning after
+/// that (definition seed, Hermes, owner snapshot). Any of those later steps
+/// can still answer 400, 403, 404, 409 or 503, so only the name rules' own
+/// refusal (422 with an `assistant_name_*` code, raised by
+/// `matrix_agent_create_begin` before anything is reserved or charged) ends
+/// the request. Every other answer keeps its UUID, and the next try resumes
+/// it: the charge is keyed by the request, so it is never made twice.
 public enum OpenAgentHireRefusal: Equatable, Sendable {
     /// Third or later assistant: confirm this price (whole Protons) first.
     case hireRequired(priceProtons: Int64?)
     /// The wallet can't cover the seat.
     case short
+    /// The platform's name rules refused the name, before any charge.
     case name
     case limit
     case account
-    /// Nothing final: a lost answer, an outage. The same request resumes.
+    /// Nothing final: a lost answer, an outage, or a refusal that can follow
+    /// the charge (a bare 400). The same request resumes.
     case retry
 
     public static func from(_ failure: Error) -> OpenAgentHireRefusal {
@@ -140,7 +152,10 @@ public enum OpenAgentHireRefusal: Equatable, Sendable {
                 return .hireRequired(priceProtons: http.response.details?.hirePriceProtons)
             case .conflict where reason == "hire_insufficient_protons": return .short
             case .conflict: return .limit
-            case .badRequest: return .name
+            // Desktop reads a 400 as a name refusal. Names are refused with
+            // 422 and their own code; a bare 400 (`matrix_invalid`) can come
+            // from a provisioning step after the seat was charged, so it is
+            // retried under the same request instead.
             case .denied, .notFound: return .account
             default: return .retry
             }
@@ -148,12 +163,47 @@ public enum OpenAgentHireRefusal: Equatable, Sendable {
         }
     }
 
-    /// Whether the request stays pending: a later Hire resumes it under the
-    /// same request ID, so a retry or a confirmation never hires twice.
+    /// Whether the request stays pending, so the next Hire, Retry or relaunch
+    /// resumes it under the same request ID. Only a refusal the platform makes
+    /// before it reserves or charges anything (the name rules) lets it go.
     public var keepsRequest: Bool {
         switch self {
-        case .hireRequired, .short, .retry: return true
-        case .name, .limit, .account: return false
+        case .name: return false
+        case .hireRequired, .short, .limit, .account, .retry: return true
         }
+    }
+}
+
+/// Where the platform placed a newly created assistant (`cloud_placement`,
+/// `apps/shell/src/lib/cloud-agent-create.ts`). Absent when the cloud did
+/// not apply. Only `placed` means it answers now; the others mean its chat
+/// is still being set up (`pending_trust`, `capacity`) or it was made
+/// Mac-run (`no_access`, `consent_mismatch`).
+public enum AgentCloudPlacement: String, Decodable, Equatable, Sendable {
+    case placed
+    case pendingTrust = "pending_trust"
+    case capacity
+    case noAccess = "no_access"
+    case consentMismatch = "consent_mismatch"
+}
+
+/// `POST /agents`'s answer: the agent, and where it was placed. An unknown
+/// or malformed placement is absent rather than failing the create, whose
+/// charge has already happened.
+public struct AgentCreateResponse: Decodable, Equatable, Sendable {
+    public let agent: AgentsResponse.Agent
+    public let placement: AgentCloudPlacement?
+
+    public init(agent: AgentsResponse.Agent, placement: AgentCloudPlacement?) {
+        self.agent = agent
+        self.placement = placement
+    }
+
+    private enum Key: String, CodingKey { case placement = "cloud_placement" }
+
+    public init(from decoder: Decoder) throws {
+        agent = try AgentsResponse.Agent(from: decoder)
+        let c = try decoder.container(keyedBy: Key.self)
+        placement = (try? c.decodeIfPresent(AgentCloudPlacement.self, forKey: .placement)) ?? nil
     }
 }

@@ -235,6 +235,11 @@ struct AppRoot: View {
             appliedAccountScopeGeneration = model.accountScopeGeneration
             router.resetAccountScope()
         }
+        // A listing hire belongs to the account it was picked under: a new
+        // (or no) account lets it go, mid-hire included.
+        .onChange(of: model.listingHireAccount, initial: true) { _, account in
+            listingHire.accountChanged(to: account)
+        }
     }
 
     private func beginSignIn() {
@@ -968,8 +973,11 @@ struct AppRoot: View {
                 checkHandle: model.newAssistantHandleCheck,
                 followUp: { model.assistantCreateFollowUp(roomID: $0) },
                 listings: { await model.openAgentListings() },
-                hire: { await model.hireListing($0, name: $1, hireConfirmed: $2) },
-                hireFlow: listingHire
+                hire: { await model.hireListing($0, name: $1, hireConfirmed: $2, account: $3) },
+                hireFlow: listingHire,
+                hireAccount: model.listingHireAccount,
+                appNames: model.appCatalogNames,
+                chatReady: { model.hiredAssistantChatReady($0) }
             ) : nil,
             founderDraft: founderDraftActions(dismissAccountOnSent: false),
             exitRoom: { model.exitRoom($0, $1) },
