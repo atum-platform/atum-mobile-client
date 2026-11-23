@@ -238,3 +238,9 @@ Hosted CI will run the broad UI shards on the PR.
 3. Repin for `pauseHint`, then drop `AgentDeskCopy.pendingKeys`.
 4. More bell sources: approvals, per-agent readiness on `/agents`, new sign-in.
 5. A live check of the host desk routes with a signed-in Hermes agent.
+
+## Merge with main `c49c6e0` (#70 training-off), 23 Nov
+
+- `NativeDomainClient` conflicted in three places with #70's `isCurrent` dispatch guard. Both guards are kept: `perform` refuses unless the desk's `canSend` and #70's `isCurrent` both pass, on every dispatch including the 401 replay. The two desk paths stay in `isApprovedURL`.
+- The desk and #70's ChatGPT training route send the same `X-Atum-Host-Bridge-Contract` header. The desk's header rule rejected it on every non-desk path, so the training confirmation was refused (`testChatGPTTrainingUsesTheDesktopShellRouteAndExactBody`, `testRetiredChatGPTSelectionIsNotSentAfterAuthorizationRefresh`). The desk rule now governs only the desk's two paths; the header on any other path still falls through and is refused unless its own rule admits it.
+- Verified under the lock: full `swift test` 772/0; Debug build-for-testing exit 0.

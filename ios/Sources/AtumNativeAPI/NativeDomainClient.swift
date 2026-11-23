@@ -1588,9 +1588,11 @@ public struct AgentsRead: Sendable {
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
                   }
-                  if name == HostAgentDesk.bridgeHeader {
+                  // The host bridge header is shared with the ChatGPT training route,
+                  // so the desk rule governs only the desk's own two paths.
+                  if name == HostAgentDesk.bridgeHeader,
+                     url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path {
                       return value == HostAgentDesk.bridgeVersion && method == "POST"
-                          && (url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path)
                   }
                   if name == AppPanelContract.negotiationHeader {
                       return value == AppPanelContract.profile && method == "GET"
