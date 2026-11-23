@@ -50,6 +50,19 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testScheduledRelayUsagePreservesDesktopCopy() throws {
+        let copy = try AtumCopy()
+        let key = "src.matrix.mobile-copy.mobileScreensCopy.relay.usageScheduled"
+        XCTAssertEqual(copy.parameterKinds(key), ["number"])
+        for locale in copy.locales {
+            let suffix = locale == "vi" ? "lượt chạy theo lịch" : "scheduled runs"
+            for runs: Int64 in [0, 1, 3] {
+                XCTAssertEqual(try copy.text(key, locale: locale, arguments: [.number(runs)]),
+                               "\(runs) \(suffix)", "\(locale), \(runs)")
+            }
+        }
+    }
+
     func testTypedArgumentsAndMissingLocaleFailInsteadOfEnglishFallback() throws {
         let copy = try AtumCopy()
         XCTAssertThrowsError(try copy.text("desktop.atum.agents.photoUploading", locale: "vi", arguments: [.text("42")]))
