@@ -23,17 +23,25 @@ public struct CloudAssistantTurnStop: Equatable, Sendable {
                                 using client: NativeDomainClient,
                                 onRouteUnavailable: @MainActor () -> Void = {}) async -> AssistantTurnStopResult {
         do {
-            let request = try CloudTurnStop.Request(
-                requestId: NativeID(intent.requestID), agentPrincipal: agentPrincipal,
-                roomId: roomID, eventId: MatrixEventID(intent.eventID)
-            )
-            switch try await client.cloudStop(request).state {
-            case .stopped: return .stopped
-            case .stopRequested: return .stopRequested
-            case .completed: return .completed
+            switch intent.target {
+            case let .schedule(execution):
+                // The authenticated host route checks the owned Hermes
+                // runtime and matches the native execution before interrupting.
+                return try await client.cloudScheduleStop(CloudScheduleStop.Request(
+                    agent: agentPrincipal, execution: execution))
+            case let .turn(eventID):
+                let request = try CloudTurnStop.Request(
+                    requestId: NativeID(intent.requestID), agentPrincipal: agentPrincipal,
+                    roomId: roomID, eventId: MatrixEventID(eventID)
+                )
+                switch try await client.cloudStop(request).state {
+                case .stopped: return .stopped
+                case .stopRequested: return .stopRequested
+                case .completed: return .completed
+                }
             }
         } catch let failure as NativeDomainClientFailure {
-            if case let .http(http) = failure,
+            if case .turn = intent.target, case let .http(http) = failure,
                [.denied, .notFound, .unavailable].contains(http.response.error) {
                 onRouteUnavailable()
             }

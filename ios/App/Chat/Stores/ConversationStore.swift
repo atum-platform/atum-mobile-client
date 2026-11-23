@@ -17,7 +17,7 @@ import UIKit
 struct ConversationRoomInfo: Sendable {
     let roomID: String
     let title: String
-    let context: RoomContext
+    var context: RoomContext
     /// Server-authored names for agents and catalog bots (sender labels).
     let knownNames: [String: String]
     /// Catalog bot identities remain explicit even in a group room, where
@@ -372,6 +372,13 @@ final class LiveConversationStore: ConversationStore {
         core.updateContext(updated.context)
         typingChanged(typingNames)
         return true
+    }
+
+    func updateChannelThreadBinding(_ binding: CompanyTurnBinding?) -> Bool {
+        guard let rootID = info.threadRootID, case .channel = info.context.companyTurnScope else { return false }
+        var updated = info
+        updated.context.companyTurnScope = .channel(threadRoot: rootID, binding: binding)
+        return updateRoomInfo(updated)
     }
 
     // MARK: Protocol

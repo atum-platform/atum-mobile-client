@@ -210,14 +210,15 @@ final class WorkingLineParityTests: XCTestCase {
         XCTAssertGreaterThan(checked, 0)
     }
 
-    func testReadingActivityRemainsPublisherWordingBesideTheInterimReply() throws {
+    func testReadingDescriptorWithBlankBodySurvivesBesideTheInterimReply() throws {
         let env = ScriptedEnvironment(reference: F.at(100))
         let script = try XCTUnwrap(ScriptedScenarios.selection(named: "chat.timeline-reading", environment: env)?.chat)
         let rows = ScriptedScenarios.rows(script, after: 9, environment: env, options: .s1)
         XCTAssertEqual(rows.last?.id, Projection.typingRowID)
-        XCTAssertEqual(rows.last?.item.body, "Đang đọc…")
+        XCTAssertEqual(rows.last?.item.body, "")
+        XCTAssertEqual(rows.last?.item.progress?.presentation, .toolActivity(.read))
         XCTAssertTrue(rows.dropLast().last?.item.interim == true)
-        XCTAssertFalse(rows.contains { $0.item.kind == .notice && $0.item.body == "Đang đọc…" })
+        XCTAssertFalse(rows.contains { $0.id == "chat.timeline-reading.working" })
     }
 
 }

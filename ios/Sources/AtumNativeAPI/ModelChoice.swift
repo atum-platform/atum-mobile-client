@@ -1,5 +1,103 @@
 import Foundation
 
+/// A model write rejected before applying the choice because its fence moved.
+enum ManagedModelFenceConflict: String, Decodable, Error {
+    case revision = "revision_conflict"
+    case policy = "policy_changed"
+}
+
+struct ManagedModelFenceConflictResponse: Decodable {
+    let reason: ManagedModelFenceConflict
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Field.self)
+        try c.closed(["error", "details", "revision", "policyDigest"])
+        guard try c.value("error", as: NativeErrorResponse.Code.self) == .conflict,
+              let details = try c.value("details", as: NativeErrorResponse.Details.self).reason,
+              let reason = ManagedModelFenceConflict(rawValue: details) else {
+            throw ContractViolation.invalidValue
+        }
+        if c.contains(Field("revision")) { _ = try c.integer("revision") }
+        if c.contains(Field("policyDigest")) {
+            _ = try c.string("policyDigest", minimum: 64, maximum: 64, pattern: "[a-f0-9]{64}")
+        }
+        self.reason = reason
+    }
+}
+
+/// One agent's offer or destination snapshot in the current account session.
+/// The write generation fences reads even when the revision alone cannot tell
+/// which response observed the current policy.
+@MainActor public final class ManagedModelPickerState<Snapshot: Equatable & Sendable> {
+    public enum SaveResult {
+        case saved(Snapshot)
+        case refused(Snapshot?)
+        case failed
+    }
+
+    private let revision: KeyPath<Snapshot, Int64>
+    private var held: Snapshot?
+    private var adoptedWrites = 0
+    private var latestIntent = 0
+
+    public init(revision: KeyPath<Snapshot, Int64>) {
+        self.revision = revision
+    }
+
+    public func read(isCurrent: () -> Bool, fetch: () async throws -> Snapshot) async throws -> Snapshot {
+        guard isCurrent(), !Task.isCancelled else { throw NativeDomainClientFailure.cancelled }
+        let writesAtStart = adoptedWrites
+        let result: Result<Snapshot, Error>
+        do { result = .success(try await fetch()) }
+        catch { result = .failure(error) }
+        guard isCurrent(), !Task.isCancelled else { throw NativeDomainClientFailure.cancelled }
+        if adoptedWrites != writesAtStart, let held { return held }
+        let snapshot = try result.get()
+        if let held, snapshot[keyPath: revision] < held[keyPath: revision] { return held }
+        held = snapshot
+        return snapshot
+    }
+
+    public func save(from snapshot: Snapshot, requestID: NativeID, refreshAfterSecondConflict: Bool,
+                     isCurrent: () -> Bool, fetch: () async throws -> Snapshot,
+                     write: (Snapshot, NativeID) async throws -> Snapshot) async -> SaveResult {
+        latestIntent += 1
+        let intent = latestIntent
+        func current() -> Bool { isCurrent() && !Task.isCancelled && latestIntent == intent }
+
+        var fence = held ?? snapshot
+        var id = fence == snapshot ? requestID : ModelWriteRequests<NativeID>.freshID()
+        var refreshed: Snapshot?
+        for attempt in 0..<2 {
+            guard current() else { return .failed }
+            do {
+                let saved = try await write(fence, id)
+                guard current() else { return .failed }
+                if let held, saved[keyPath: revision] < held[keyPath: revision] { return .saved(held) }
+                adoptedWrites += 1
+                held = saved
+                return .saved(saved)
+            } catch is ManagedModelFenceConflict {
+                guard current() else { return .failed }
+                if attempt == 1 && !refreshAfterSecondConflict { return .refused(refreshed) }
+                guard let latest = try? await read(isCurrent: current, fetch: fetch), current() else {
+                    return current() ? .refused(refreshed) : .failed
+                }
+                refreshed = latest
+                fence = latest
+                // A changed fence makes this a new request under the platform's idempotency contract.
+                id = ModelWriteRequests<NativeID>.freshID()
+            } catch {
+                guard current() else { return .failed }
+                if case NativeDomainClientFailure.http = error { return .refused(refreshed) }
+                if error is ContractViolation { return .refused(refreshed) }
+                return .failed
+            }
+        }
+        return .refused(refreshed)
+    }
+}
+
 public enum ManagedModelEffort: String, Codable, CaseIterable, Sendable {
     case low, medium, high
 }

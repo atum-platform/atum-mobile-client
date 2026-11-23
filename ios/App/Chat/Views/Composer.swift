@@ -292,6 +292,10 @@ struct ChatComposer: View {
             // Not stopped: Stop comes back and the warning says so; the
             // turn stays shown as in progress.
             if result == .failed { haptics.failed() }
+            if result == .stopRequested, case .schedule = intent.target {
+                do { try await Task.sleep(for: AssistantTurnStop.scheduledRetryDelay) } catch { return }
+                turn.stop.retryPendingSchedule(for: intent)
+            }
         }
     }
 

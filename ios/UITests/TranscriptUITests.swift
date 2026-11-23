@@ -381,8 +381,8 @@ final class TranscriptUITests: TranscriptUITestCase {
         keepScreenshot("working-line-step-card", of: app)
     }
 
-    /// Owner's desktop reference: one orbit + the publisher's current reading
-    /// phrase, below the agent's interim reply, in both system appearances.
+    /// The pinned reading phrase on a descriptor-only line, below the
+    /// agent's interim reply, in both system appearances.
     @MainActor
     func testReadingFooterMatchesDesktopInLightAndDark() {
         defer { requestRunner("appearance light") }

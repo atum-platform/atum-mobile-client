@@ -6,6 +6,35 @@ import UserNotifications
 import XCTest
 
 final class S2StateTests: XCTestCase {
+    func testRosterPreviewSkipsOnlyConfirmedClearedWorkingLines() {
+        let agent = "@assistant:atum.test"
+        let answer = LiveLatestEventPreview(text: "Here is the plan", content: .text("Here is the plan"),
+                                            senderID: agent, senderName: "Atum", timestamp: 1)
+        let first = LiveLatestEventPreview(content: .redacted, senderID: agent, timestamp: 2)
+        let latest = LiveLatestEventPreview(content: .redacted, senderID: agent, timestamp: 3)
+        let turnEnded = #"{"unsigned":{"redacted_because":{"sender":"@assistant:atum.test","content":{"reason":"Turn ended"}}}}"#
+        let anotherSender = turnEnded.replacingOccurrences(of: agent, with: "@other:atum.test")
+        let manual = turnEnded.replacingOccurrences(of: "Turn ended", with: "Mistake")
+        let previousAnswer = LiveLatestEventPreview.Candidate(preview: answer, redactedJSON: nil)
+        let firstClear = LiveLatestEventPreview.Candidate(preview: first, redactedJSON: turnEnded)
+        let lastClear = LiveLatestEventPreview.Candidate(preview: latest, redactedJSON: turnEnded)
+
+        let restored = latest.replacingClearedWorkingLine(in: [previousAnswer, firstClear, lastClear])
+        XCTAssertEqual(restored.content, answer.content)
+        XCTAssertEqual(restored.senderName, answer.senderName)
+        XCTAssertEqual(restored.timestamp, answer.timestamp)
+        XCTAssertEqual(latest.replacingClearedWorkingLine(in: [lastClear]).content, .none)
+
+        for json in [manual, anotherSender, nil] {
+            let deleted = LiveLatestEventPreview.Candidate(preview: latest, redactedJSON: json)
+            XCTAssertEqual(latest.replacingClearedWorkingLine(in: [previousAnswer, deleted]).content, .redacted)
+        }
+        XCTAssertEqual(latest.replacingClearedWorkingLine(in: [previousAnswer, firstClear]).content, .redacted)
+        let previousDeletion = LiveLatestEventPreview.Candidate(preview: first, redactedJSON: manual)
+        XCTAssertEqual(latest.replacingClearedWorkingLine(in: [previousAnswer, previousDeletion, lastClear]).content,
+                       .redacted)
+    }
+
     private enum CompanyStubFailure: Error { case unavailable }
 
     @MainActor
