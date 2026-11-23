@@ -55,7 +55,8 @@ public struct RoomContext: Equatable, Sendable {
     public var workingLineSenderID: String?
 
     public var transientAgentUserIDs: Set<String> {
-        knownAgentUserIDs ?? (kind == .appBot ? [] : agentUserIDs)
+        if let binding = activeCompanyBinding { return [binding.agentUserID] }
+        return knownAgentUserIDs ?? (kind == .appBot ? [] : agentUserIDs)
     }
 
     /// The platform's company-private CoS view binds this room to this account
@@ -63,6 +64,34 @@ public struct RoomContext: Equatable, Sendable {
     /// Staff greeting's pill and board link projected (desktop proves the same
     /// room from its `io.atum.company_private_cos` state).
     public var isCompanyPrivateCos: Bool
+    /// A channel's room timeline is unbound, even when the company agent
+    /// has joined. The selected thread and fresh binding enable its footer.
+    public enum CompanyTurnScope: Equatable, Sendable {
+        case channel(threadRoot: String?, binding: CompanyTurnBinding?)
+        case privateCos(binding: CompanyTurnBinding?)
+    }
+
+    public var companyTurnScope: CompanyTurnScope?
+
+    var companyView: Bool { companyTurnScope != nil || isCompanyPrivateCos }
+
+    var companyThreadRoot: String? {
+        if case let .channel(root, _) = companyTurnScope { return root }
+        return nil
+    }
+
+    var activeCompanyBinding: CompanyTurnBinding? {
+        switch companyTurnScope {
+        case let .channel(root?, binding?):
+            guard !root.isEmpty, case .channel = binding.audience else { return nil }
+            return binding
+        case let .privateCos(binding?):
+            guard isCompanyPrivateCos, case .privateCos = binding.audience else { return nil }
+            return binding
+        default:
+            return nil
+        }
+    }
 
     public init(kind: RoomKind, ownUserID: String, agentUserIDs: Set<String> = [],
                 isCompanyPrivateCos: Bool = false, knownAgentUserIDs: Set<String>? = nil,

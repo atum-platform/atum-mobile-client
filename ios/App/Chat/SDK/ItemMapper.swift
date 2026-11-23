@@ -100,14 +100,15 @@ final class ItemMapper {
         let sender = event.sender
         let sentEventID: String? = if case let .sent(eventId)? = event.localSendState { eventId } else { nil }
         let ref = ChatEventRef(event.eventOrTransactionId)
-        // agent-turns/1.4 markers come from the SDK's latest full event JSON
-        // (including edits); AtumTurnMarkers unwraps content/m.new_content. Parse them only for this room's agents, so a
-        // stranger cannot make a notice look transient or an interim.
+        // Parse only this room's agents. The SDK's latest full event JSON
+        // is the original until edited. Only edits need the debug info,
+        // which also serializes the full timeline item.
         let markers = room.context.transientAgentUserIDs.contains(sender) && (kind == .notice || kind == .message) &&
             !hiddenPlaintext
-            ? AtumTurnMarkers.parse(json: event.lazyProvider.latestJson())
+            ? AtumTurnMarkers.parse(json: event.lazyProvider.latestJson(),
+                                    originalJSON: content.isEdited ? event.lazyProvider.debugInfo().originalJson : nil)
             : AtumTurnMarkers()
-        let item = ChatItem(
+        var item = ChatItem(
             // §2.3 rule 2, the one place a row's ID is chosen; the rule is
             // `DisplayIdentityTable` (AtumChat, tested).
             id: identities.id(uniqueID: uniqueID, ref: ref, sentEventID: sentEventID),
@@ -133,13 +134,12 @@ final class ItemMapper {
             appBotMeta: appBotMeta(event, kind: kind),
             botAPI: botAPIMessage(event, kind: kind),
             senderAvatarURI: ChatItem.senderAvatarURI(event.senderProfile),
-            interim: markers.interim,
-            progress: markers.progress,
             privateCosGreeting: hiddenPlaintext || kind != .message ? nil
                 : privateCosGreeting(event.content, body: content.body, sender: sender),
             redactedAsEndedTurn: kind == .placeholder(.redacted) && ClearedWorkingLine.matches(
                 json: event.lazyProvider.debugInfo().originalJson, originalSender: sender)
         )
+        markers.apply(to: &item)
         return MappedItem(item: item, uniqueID: uniqueID,
                           replyDetails: hiddenPlaintext ? nil : replyDetails(event.content),
                           isTokenParked: Self.isTokenParked(event.localSendState),

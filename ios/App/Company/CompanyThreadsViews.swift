@@ -310,14 +310,22 @@ struct CompanyThreadDetail: View {
     private var copy: CompanyThreadsCopy { CompanyThreadsCopy(design: design) }
     private var draftKey: String { roomID + "#" + rootID }
 
-    /// The session the thread's timeline lives on: a renewal replaces it.
+    /// Reattach on session renewal. For channel threads, a membership or
+    /// directory change also invalidates the latest company-agent proof.
     private struct SessionKey: Equatable {
         let session: ObjectIdentifier?
         let ready: Bool
+        let claim: CompanyRoomClaim?
+        let membership: CompanyTurnMembershipKey?
     }
 
+    @State private var turnLease = CompanyTurnProofLease()
+
     private var sessionKey: SessionKey {
-        SessionKey(session: model.liveMatrix.map { ObjectIdentifier($0) }, ready: model.liveMatrix?.isReady == true)
+        let claim = model.companyWorkspace.claim(roomID: roomID)
+        return SessionKey(session: model.liveMatrix.map { ObjectIdentifier($0) },
+                          ready: model.liveMatrix?.isReady == true, claim: claim,
+                          membership: claim == nil ? nil : model.companyTurnMembershipKey(roomID: roomID))
     }
 
     var body: some View {
@@ -389,19 +397,58 @@ struct CompanyThreadDetail: View {
 
     /// Builds the thread's store once, then (re)attaches it to each ready session.
     private func attach() async {
+        guard !Task.isCancelled else { return }
+        let key = sessionKey
+        let generation = turnLease.reset()
         if store == nil {
             store = model.companyThreadStore(roomID: roomID, rootID: rootID,
                                              draft: coordinator.drafts[draftKey] ?? "")
         }
         guard let store else { return }
+        _ = store.updateChannelThreadBinding(nil)
         guard let session = model.liveMatrix, session.isReady, let room = try? session.room(id: roomID) else {
             store.detach()
             return
         }
-        await store.attach(room: room)
+        func attachCurrent() {
+            Task { @MainActor in
+                guard self.store === store, turnLease.isCurrent(generation), sessionKey == key else { return }
+                await store.attach(room: room)
+            }
+        }
+        func updateBinding(_ binding: CompanyTurnBinding?) {
+            guard self.store === store, turnLease.isCurrent(generation),
+                  store.updateChannelThreadBinding(binding) else { return }
+            attachCurrent()
+        }
+
+        attachCurrent()
+        guard let claim = key.claim, key.membership != nil else { return }
+        defer {
+            if turnLease.isCurrent(generation) {
+                turnLease.clearDeadline()
+                updateBinding(nil)
+            }
+        }
+        while !Task.isCancelled, sessionKey == key {
+            let started = ContinuousClock.now
+            let binding = await model.readCompanyChannelTurnBinding(claim, session: session, ownUserID: store.ownUserID)
+            guard !Task.isCancelled, self.store === store, turnLease.isCurrent(generation), sessionKey == key
+            else { return }
+            let nextRefresh = started.advanced(by: CompanyTurnProofLease.refreshInterval)
+            if let binding, ContinuousClock.now < nextRefresh,
+               turnLease.arm(from: started, onExpiry: { updateBinding(nil) }) {
+                updateBinding(binding)
+            } else {
+                turnLease.clearDeadline()
+                updateBinding(nil)
+            }
+            do { try await Task.sleep(until: nextRefresh, clock: .continuous) } catch { return }
+        }
     }
 
     private func close() {
+        turnLease.reset()
         guard let store else { return }
         coordinator.drafts[draftKey] = store.draft
         store.close()

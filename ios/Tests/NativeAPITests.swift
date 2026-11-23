@@ -73,6 +73,35 @@ final class NativeAPITests: XCTestCase {
         XCTAssertEqual(try NativeAPI.decode(WalletResponse.self, from: held).balances.available, wallet.balances.available)
     }
 
+    func testWalletLiveProjectionIsPairedAndKeepsLedgerAvailable() throws {
+        func wallet(spendable: Any?, unbilled: Any?) throws -> WalletResponse {
+            let data = try edited("wallet.response.json") {
+                $0["spendableMicroProtons"] = spendable
+                $0["unbilledMicroProtons"] = unbilled
+            }
+            return try NativeAPI.decode(WalletResponse.self, from: data)
+        }
+
+        let live = try wallet(spendable: 20_000_000, unbilled: 5_000_000)
+        XCTAssertEqual(live.displayMicroProtons, 20_000_000)
+        XCTAssertEqual(live.balances.available, 25_000_000)
+        XCTAssertEqual(try wallet(spendable: 0, unbilled: 30_000_000).displayMicroProtons, 0)
+        XCTAssertEqual(try wallet(spendable: nil, unbilled: nil).displayMicroProtons, 25_000_000)
+        let unavailable = try wallet(spendable: NSNull(), unbilled: NSNull())
+        XCTAssertEqual(unavailable.displayMicroProtons, 25_000_000)
+        XCTAssertNil(unavailable.spendableMicroProtons)
+        XCTAssertNil(unavailable.unbilledMicroProtons)
+
+        XCTAssertThrowsError(try wallet(spendable: nil, unbilled: NSNull()))
+        XCTAssertThrowsError(try wallet(spendable: NSNull(), unbilled: nil))
+        XCTAssertThrowsError(try wallet(spendable: 25_000_000, unbilled: NSNull()))
+        XCTAssertThrowsError(try wallet(spendable: NSNull(), unbilled: 0))
+        XCTAssertThrowsError(try wallet(spendable: 25_000_000, unbilled: 1))
+        XCTAssertThrowsError(try wallet(spendable: 0, unbilled: NativeAPI.maximumInteger + 1))
+        XCTAssertThrowsError(try wallet(spendable: -1, unbilled: 25_000_001))
+        XCTAssertThrowsError(try wallet(spendable: true, unbilled: 25_000_000))
+    }
+
     func testHistoryPreservesSignedAmountsCursorAndRequiredNulls() throws {
         let page = try fixtures().decode(WalletHistoryResponse.self, "wallet-history.response.json")
         XCTAssertLessThan(try XCTUnwrap(page.entries.first).amount, 0)

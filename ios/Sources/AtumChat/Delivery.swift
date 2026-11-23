@@ -223,10 +223,10 @@ public enum Delivery {
     /// after it.
     private static func unanswered(_ items: [ChatItem], context: RoomContext) -> ChatItem? {
         guard context.kind == .assistant,
-              let newest = items.lastIndex(where: { $0.isOwn && isMessageLike($0.kind) }),
+              let newest = items.lastIndex(where: { $0.isOwn && $0.threadRoot == nil && isMessageLike($0.kind) }),
               isSettledOwnMessage(items[newest]) else { return nil }
         let answered = items[(newest + 1)...].contains { item in
-            guard !item.isOwn, item.kind.isEventContent, !item.interim else { return false }
+            guard !item.isOwn, item.threadRoot == nil, item.kind.isEventContent, !item.interim else { return false }
             switch item.kind {
             case .notice, .roomState: return false
             default: return true

@@ -3,6 +3,20 @@ import AtumDesign
 import XCTest
 
 final class ChatCopyContractTests: XCTestCase {
+    func testStructuredTurnStatusKeysResolveInEveryPinnedLocale() throws {
+        let copy = try AtumCopy()
+        let statuses = ChatProgressPresentation.Activity.allCases.map(ChatProgressPresentation.toolActivity)
+            + [.heartbeat(minutes: 1), .heartbeat(minutes: 4), .approvalWait]
+        for locale in copy.locales {
+            for status in statuses {
+                let args: [AtumCopy.Argument] = status.minutes.map { [.number(Int64($0))] } ?? []
+                let value = try copy.text(status.exportKey, locale: locale, arguments: args)
+                XCTAssertFalse(value.isEmpty)
+                if let minutes = status.minutes { XCTAssertTrue(value.contains(String(minutes))) }
+            }
+        }
+    }
+
     func testEveryChatKeyResolvesInEveryPinnedLocaleWithItsArguments() throws {
         let copy = try AtumCopy()
         for locale in ["en", "vi", "ja", "zh", "zh-Hant"] {
