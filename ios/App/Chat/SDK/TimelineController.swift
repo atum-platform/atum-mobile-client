@@ -67,7 +67,10 @@ actor TimelinePipeline {
             throw error
         }
         echoAliases = batch.echoAliases.isEmpty ? echoAliases : batch.echoAliases
-        absorb(touched)
+        let acceptedCompanyItems: [String: ChatItem] = Dictionary(uniqueKeysWithValues: projected.snapshot.rows.compactMap {
+            $0.item.companyTurn != nil && $0.item.interim ? ($0.id, $0.item) : nil
+        })
+        absorb(touched.map { acceptedCompanyItems[$0.id] ?? $0 })
         if ProbeLog.isEnabled, touched.contains(where: \.isLocalEcho) {
             ProbeLog.mark(.timelineBatch, id: LiveFlowLog.fingerprint(roomID),
                           fields: ["ops": ChatDiff.probeShape(batch.diffs), "before": String(before),
@@ -87,7 +90,16 @@ actor TimelinePipeline {
         return publication(projector.project(now: now))
     }
 
-    /// The clock moved past a no-answer deadline (B10).
+    func suppressSchedules(_ executions: Set<ChatScheduleExecution>) {
+        projector.settledSchedules.formUnion(executions)
+    }
+
+    func settleSchedule(_ execution: ChatScheduleExecution, now: Date) -> TimelinePublication {
+        projector.settledSchedules.insert(execution)
+        return publication(projector.project(now: now))
+    }
+
+    /// The clock moved past a transcript deadline.
     func tick(now: Date) -> TimelinePublication {
         publication(projector.project(now: now))
     }
@@ -201,7 +213,8 @@ final class TimelineController {
     }
 
     /// Starts the source and consumes its outputs in order.
-    func start() async {
+    func start(settledSchedules: Set<ChatScheduleExecution> = []) async {
+        if !settledSchedules.isEmpty { await pipeline.suppressSchedules(settledSchedules) }
         guard !isClosed, consumer == nil else { return }
         let outputs = source.outputs
         consumer = Task { [weak self, pipeline, clock] in
@@ -268,6 +281,12 @@ final class TimelineController {
 
     func setTyping(_ names: [String]) async {
         let publication = await pipeline.setTyping(names, now: clock())
+        guard !isClosed else { return }
+        onPublication?(publication)
+    }
+
+    func settleSchedule(_ execution: ChatScheduleExecution) async {
+        let publication = await pipeline.settleSchedule(execution, now: clock())
         guard !isClosed else { return }
         onPublication?(publication)
     }

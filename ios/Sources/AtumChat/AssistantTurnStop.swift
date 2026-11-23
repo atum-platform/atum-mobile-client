@@ -101,7 +101,7 @@ public enum AssistantTurnStopResult: Equatable, Sendable {
 /// One stop request: the turn's question and the idempotency key it is sent
 /// with. A retry of the same turn sends the same key.
 public struct AssistantTurnStopIntent: Equatable, Sendable {
-    public enum Target: Equatable, Sendable {
+    public enum Target: Hashable, Sendable {
         case turn(eventID: String)
         case schedule(ChatScheduleExecution)
     }
@@ -171,6 +171,8 @@ public struct AssistantTurnStop: Equatable, Sendable {
         let selected = signal.hasScheduledWork
             ? signal.scheduled.map(AssistantTurnStopIntent.Target.schedule)
             : signal.unanswered.map { AssistantTurnStopIntent.Target.turn(eventID: $0) }
+        // Preserve an acknowledged interruption after its footer clears.
+        if phase == .stopped, case .schedule = selection, !signal.hasScheduledWork, !signal.working { return }
         guard let selected else {
             self = AssistantTurnStop()
             // The composer can show an unavailable Stop while the exact
