@@ -64,4 +64,7 @@ the read signal itself (faces only, no ticks) now matches.
   `row.latest` race (the Seen wait began about 9 s after the send). U4b now
   scopes to the sent bubble in the transcript. The matrix passed in vi-light
   and en-light. Both dark cells failed at the existing 3 s keyboard wait,
-  before the send. That wait is now 10 s. Run 4 reruns U4 and the dark cells.
+  before the send. That wait is now 10 s.
+- Lane rule from 2026-11-23: no UI tests locally. The hosted PR shards run U4
+  and the S1 matrix. Run 4 is the slim lane only: `swift test --filter
+  "AtumChatTests|ChatCopyContractTests"` and Debug `build-for-testing`.
