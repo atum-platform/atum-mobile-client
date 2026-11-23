@@ -49,9 +49,13 @@ public enum AssistantPersonaPolicy {
     public static func parse(_ soul: String, inherited: Bool = false,
                              primary: Bool = false) -> AssistantPersona {
         let ns = soul as NSString
+        // Only headings outside fenced code are structure: a literal
+        // `## Who you are` in an example block stays part of its field.
+        let fences = fencedRanges(soul)
         let starts: [(location: Int, title: String)] = h2Regex
             .matches(in: soul, range: NSRange(location: 0, length: ns.length))
             .filter { $0.range(at: 1).location == NSNotFound }
+            .filter { match in !fences.contains { NSLocationInRange(match.range.location, $0) } }
             .map { ($0.range.location, ns.substring(with: $0.range(at: 2)).trimmed) }
         let head = starts.first.map { ns.substring(to: $0.location) } ?? soul
         let sections = starts.enumerated().map { index, start in
@@ -120,8 +124,10 @@ public enum AssistantPersonaPolicy {
             let heading = parsed.heading != nil ? "# \(name)" : nil
             let head = [heading, parsed.nameLine].compactMap { $0 }.joined(separator: "\n\n")
             var sections = ""
+            var seenWho = false
             for item in parsed.sections {
-                if item.title == whoTitle {
+                if item.title == whoTitle, !seenWho {
+                    seenWho = true
                     if who == sectionBody(item) {
                         sections += item.raw
                     } else if !who.isEmpty {
@@ -151,10 +157,14 @@ public enum AssistantPersonaPolicy {
             if !mainChanged && !whoChanged { return original }
             if !mainChanged { return renderCustomWho(parsed, who: who) }
             var soul = renderCustomMain(parsed, instructions: markFieldHeadings(main, customMain: true))
+            let whoSections = parsed.sections.filter { $0.title == whoTitle }
             if whoChanged {
-                return who.isEmpty ? soul : appendSection(soul, section(whoTitle, who))
+                if !who.isEmpty { soul = appendSection(soul, section(whoTitle, who)) }
+                // A second `Who you are` section is not shown; keep it as written.
+                for item in whoSections.dropFirst() { soul = appendSection(soul, item.raw) }
+                return soul
             }
-            for item in parsed.sections where item.title == whoTitle {
+            for item in whoSections {
                 soul = appendSection(soul, item.raw)
             }
             return soul
@@ -168,7 +178,11 @@ public enum AssistantPersonaPolicy {
         var seen = Set<String>()
         for item in parsed.sections {
             if let value = values[item.title] {
-                guard seen.insert(item.title).inserted else { continue }
+                // A repeated section is not a field; keep it as written.
+                guard seen.insert(item.title).inserted else {
+                    parts.append(item.raw)
+                    continue
+                }
                 if value == sectionBody(item) { parts.append(item.raw) }
                 else if !value.isEmpty { parts.append(section(item.title, value) + separator(item.raw)) }
             } else {
@@ -198,8 +212,12 @@ public enum AssistantPersonaPolicy {
     /// read normalizes newlines.
     public static func exceedsContextBudget(_ soul: String,
                                             limit: Int = contextFileMaxChars) -> Bool {
-        guard soul.utf16.count > limit else { return false }
-        let normalized = soul.trimmed
+        // Hermes reads SOUL.md as utf-8-sig, so a leading BOM is not counted.
+        var scalars = Substring(soul).unicodeScalars
+        if scalars.first == "\u{FEFF}" { scalars.removeFirst() }
+        let text = String(scalars)
+        guard text.utf16.count > limit else { return false }
+        let normalized = text.trimmed
             .replacingOccurrences(of: "\r\n?", with: "\n", options: .regularExpression)
         return normalized.unicodeScalars.count > limit
     }
@@ -212,6 +230,41 @@ public enum AssistantPersonaPolicy {
         pattern: #"^(?:(<!-- atum:persona-heading -->)(?:\r?\n<!-- atum:persona-heading -->)*\r?\n)?## ([^\r\n]+)"#,
         options: [.anchorsMatchLines]
     )
+
+    /// The UTF-16 ranges of fenced code blocks (CommonMark: a line of three
+    /// or more backticks or tildes, indented at most three spaces, closed by
+    /// a line of the same character at least as long; an unclosed fence runs
+    /// to the end).
+    static func fencedRanges(_ text: String) -> [NSRange] {
+        let ns = text as NSString
+        var ranges = [NSRange]()
+        var open: (start: Int, char: Character, count: Int)?
+        var location = 0
+        while location < ns.length {
+            let line = ns.lineRange(for: NSRange(location: location, length: 0))
+            let content = ns.substring(with: line)
+            let indent = content.prefix(while: { $0 == " " }).count
+            let rest = content.dropFirst(indent)
+            if indent <= 3, let char = rest.first, char == "`" || char == "~" {
+                let count = rest.prefix(while: { $0 == char }).count
+                let tail = rest.dropFirst(count)
+                if let fence = open {
+                    if char == fence.char, count >= fence.count, tail.allSatisfy(\.isWhitespace) {
+                        ranges.append(NSRange(location: fence.start,
+                                              length: line.location + line.length - fence.start))
+                        open = nil
+                    }
+                } else if count >= 3, !(char == "`" && tail.contains("`")) {
+                    open = (line.location, char, count)
+                }
+            }
+            location = line.location + line.length
+        }
+        if let fence = open {
+            ranges.append(NSRange(location: fence.start, length: ns.length - fence.start))
+        }
+        return ranges
+    }
 
     private static let headingRegex = try! NSRegularExpression(
         pattern: #"^# (.+)$"#, options: [.anchorsMatchLines]
@@ -328,7 +381,11 @@ public enum AssistantPersonaPolicy {
                 soul += item.raw
                 continue
             }
-            if found { continue }
+            // A second `Who you are` section is not shown; keep it as written.
+            if found {
+                soul += item.raw
+                continue
+            }
             found = true
             if who == sectionBody(item) {
                 soul += item.raw

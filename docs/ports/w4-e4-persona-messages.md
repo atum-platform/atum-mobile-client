@@ -74,6 +74,43 @@ card's footnote. The phone cannot read the Hermes JSON, so the constant is
 mirrored in `contextFileMaxChars`. The effective limit can vary by model or
 profile, and desktop uses the same default.
 
+### Review fixes (Codex review of `6894b2e`)
+
+- **A newer draft survives an earlier save.** Each persona save remembers
+  the draft it sent. When that save is confirmed (or the latest already
+  says it), `AssistantCardEdit.settle(_:submitted:)` always advances the
+  field's confirmed baseline, even while the field is focused, and keeps a
+  draft typed after the save started. That draft is written by the queued
+  save (or the next blur) on the new baseline, not mistaken for another
+  device's edit.
+- **Fenced code is not structure.** `parse` only treats `## ` headings
+  outside fenced code blocks (CommonMark backtick/tilde fences, see
+  `fencedRanges`) as section boundaries. A literal `## Who you are` in an
+  example stays in the main field and survives a Personality edit with its
+  closing fence. Desktop's parser still has this bug. When the phone writes
+  the main field, it still marks template titles inside fences, so desktop
+  does not split them either.
+- **Repeated sections are kept.** Only the first `Who you are` (and, for
+  the template, `What you do`) section is the field. Later sections with
+  the same title are not shown and are written back exactly as they were,
+  whichever field is edited. Before this fix the renderer dropped them.
+- **Failures stay with their field.** The note band is
+  `AssistantCardSaveBand` (AtumChat). A failure belongs to its field until
+  that field is retried, settles, or is discarded (keyboard Undo, or
+  nothing left to write). A save of another field does not clear it. With
+  several failures the band shows the latest, and Retry targets it. The
+  earlier one returns once that settles.
+- **BOM.** The length hint drops a leading U+FEFF before counting, as
+  Hermes reads `SOUL.md` as `utf-8-sig` (`agent/prompt_builder.py`).
+
+### Known gap (matches desktop)
+
+The persona shape guard in `AssistantPersonaMerge.prepare` only checks the
+main field's id: an edit to `what` or `instructions` is a conflict when the
+latest persona's main field is the other one. A Personality (`who`) edit is
+rendered into whatever shape the latest persona has. This is the same as
+desktop's guard and is left that way on purpose.
+
 ## Copy
 
 Both keys are in the vendored wave 4 export (`ios/Vendor/AtumDesign`, pin
@@ -106,7 +143,9 @@ against desktop `copy.ts`.
   personality, an added personality that survives replacing the main field),
   the three heading round-trip cases from PR #95, the marker shape, the four
   merge outcomes, and the length boundary (code points, CRLF, surrogate
-  pairs, trimming).
+  pairs, trimming, a leading BOM). The review fixes add a fenced-example
+  round trip, CommonMark fence ranges, repeated `Who you are` sections
+  (custom and template), the newer-draft settle, and the per-field band.
 - `AssistantCardPolicyTests`: a custom persona gets `.instructions` and
   `.personality` on both roles.
 - `AssistantRoutineStateTests` (AppTests): both keys are in the pin with
@@ -149,6 +188,7 @@ are under `/Volumes/AtumTestFlight/w4-e4-verify/<round>/`.
   the keyboard appears.
 - r5: the merge UI test passed (rebuild plus that test only).
 - `python3 scripts/public_guard.py --base origin/main --head HEAD` exited 0.
+- r6 (review fixes): see the round notes below.
 
 Not verified locally: VoiceOver reading of the hint (desktop marks it
 `role="status"`, and the phone shows it as static text), and the

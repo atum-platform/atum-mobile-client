@@ -97,8 +97,9 @@ struct AssistantCard: View {
     @FocusState private var focused: Field?
     @State private var queued: [Field] = []
     @State private var writing = false
-    @State private var note: Note?
-    @State private var retryField: Field?
+    /// The note band; each failure stays tied to its field until that edit
+    /// is retried, resolved or discarded.
+    @State private var saveBand = AssistantCardSaveBand<Field, Note>()
     @State private var conflict: AgentDefinitionSnapshot?
     @State private var modelSnapshot: ManagedModelSnapshot?
     @State private var modelPresented = false
@@ -332,7 +333,7 @@ struct AssistantCard: View {
                     .foregroundStyle(atum.color(.soft, scheme: scheme))
                     .multilineTextAlignment(.center)
             }
-            if note == .saved {
+            if saveBand.note == .saved {
                 Label(copy.text(.saved), image: atum.symbol(.checkCircle))
                     .font(.footnote)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -448,7 +449,7 @@ struct AssistantCard: View {
     // MARK: Persona
 
     @ViewBuilder private var band: some View {
-        switch note {
+        switch saveBand.note {
         case .failed:
             noteBand(text: copy.text(.saveFailed), retry: true,
                      identifier: "assistant.card.save-failed")
@@ -475,7 +476,7 @@ struct AssistantCard: View {
             Spacer(minLength: 8)
             if retry {
                 Button(copy.text(.retry)) {
-                    if let field = retryField { enqueue(field) }
+                    if let field = saveBand.retryField { enqueue(field) }
                 }
                 .font(.footnote.weight(.semibold))
             }
@@ -961,6 +962,7 @@ struct AssistantCard: View {
     }
 
     private func revert(_ field: Field) {
+        saveBand.discard(field)
         switch field {
         case .name: nameEdit.revert()
         case .what: whatEdit.revert()
@@ -1001,39 +1003,36 @@ struct AssistantCard: View {
     @MainActor private func saveName(_ base: AgentDefinitionSnapshot) async {
         guard let rename = definition?.rename else {
             if nameEdit.isDirty { nameEdit.revert() }
+            saveBand.discard(.name)
             return
         }
         guard let value = nameEdit.pendingSave() else {
             if nameEdit.isDirty { nameEdit.revert() }
+            saveBand.discard(.name)
             return
         }
+        saveBand.begin(.name)
         guard value.unicodeScalars.count <= 40 else {
-            note = .refused(copy.text(.problemsTooLong))
-            retryField = .name
+            saveBand.failed(.name, note: .refused(copy.text(.problemsTooLong)))
             return
         }
-        note = nil
-        retryField = nil
         let result = await rename(base, value)
         switch result {
         case let .renamed(value):
             conflict = nil
             snapshot = value
             nameEdit.accept(value.assistant.displayName)
-            note = .saved
+            saveBand.settled(.name, note: .saved)
         case let .refused(reason):
-            note = .refused(refusal(reason, name: value))
-            retryField = .name
+            saveBand.failed(.name, note: .refused(refusal(reason, name: value)))
         case let .conflict(latest):
             conflict = latest
             if let latest, let soul = latest.definition?.soul {
                 persona = AssistantPersonaPolicy.parse(soul, primary: identity.isPrimary)
             }
-            note = .changedElsewhere
-            retryField = .name
+            saveBand.failed(.name, note: .changedElsewhere)
         case .failed:
-            note = .failed
-            retryField = .name
+            saveBand.failed(.name, note: .failed)
         }
     }
 
@@ -1045,10 +1044,13 @@ struct AssistantCard: View {
     @MainActor private func savePersona(_ field: Field, base: AgentDefinitionSnapshot) async {
         guard let definition, let personaField = field.persona else { return }
         let edit = self.edit(personaField)
-        guard let after = edit.pendingSave() else { return }
+        guard let after = edit.pendingSave() else {
+            // Nothing left to write here (resolved or discarded).
+            saveBand.discard(field)
+            return
+        }
         let before = edit.saved
-        note = nil
-        retryField = nil
+        saveBand.begin(field)
         var base = base
         var conflicts = 0
         while true {
@@ -1059,32 +1061,31 @@ struct AssistantCard: View {
             )
             switch outcome {
             case .unchanged:
-                confirm(base, settling: personaField)
+                confirm(base, settling: personaField, submitted: after)
+                saveBand.settled(field, note: nil)
                 return
             case .elsewhere:
                 confirm(base, settling: personaField)
-                note = .personaConflict
+                saveBand.settled(field, note: .personaConflict)
                 return
             case let .write(soul):
                 // Desktop: after a second revision conflict the write is a failure.
                 guard conflicts < 2 else {
-                    note = .failed
-                    retryField = field
+                    saveBand.failed(field, note: .failed)
                     return
                 }
                 value.soul = soul
                 switch await definition.save(base, value) {
                 case let .saved(saved):
-                    confirm(saved, settling: personaField)
-                    note = .saved
+                    confirm(saved, settling: personaField, submitted: after)
+                    saveBand.settled(field, note: .saved)
                     return
                 case let .conflict(latest?):
                     confirm(latest, settling: nil)
                     base = latest
                     conflicts += 1
                 case .conflict(nil), .failed:
-                    note = .failed
-                    retryField = field
+                    saveBand.failed(field, note: .failed)
                     return
                 }
             }
@@ -1103,8 +1104,12 @@ struct AssistantCard: View {
     /// takes the latest value even though it was being edited (it was just
     /// saved, or it changed elsewhere); every other field takes it only when
     /// the person has nothing pending there, so their other edits are kept.
+    /// With `submitted` (the draft that save sent), the settled field's
+    /// baseline advances even while it is focused, and a draft typed after
+    /// that save started is kept for the next write.
     @MainActor private func confirm(_ value: AgentDefinitionSnapshot,
-                                    settling settled: AssistantPersonaField?) {
+                                    settling settled: AssistantPersonaField?,
+                                    submitted: String? = nil) {
         snapshot = value
         conflict = nil
         let parsed = AssistantPersonaPolicy.parse(value.definition?.soul ?? "",
@@ -1113,6 +1118,14 @@ struct AssistantCard: View {
         for field in AssistantPersonaField.allCases {
             let latest = AssistantPersonaMerge.value(parsed, field)
             let current = edit(field)
+            if field == settled, let submitted {
+                switch field {
+                case .what: whatEdit.settle(latest, submitted: submitted)
+                case .who: whoEdit.settle(latest, submitted: submitted)
+                case .instructions: instructionsEdit.settle(latest, submitted: submitted)
+                }
+                continue
+            }
             let settles = field == settled
                 || (settled.map { AssistantPersonaMerge.visibleField(parsed, $0) } == field)
             guard settles || !current.isDirty, focused != Field(field) else { continue }

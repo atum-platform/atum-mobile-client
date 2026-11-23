@@ -136,7 +136,137 @@ final class AssistantPersonaMergeTests: XCTestCase {
         XCTAssertEqual(soul, "# Sample Agent\n\nBe brief.\n\n## Who you are\n\nCalm.\n\n")
     }
 
+    // MARK: Review fixes (fences, repeated sections, queued saves)
+
+    private let fencedExample =
+        "# Sample Agent\n\nYou write personas for others. For example:\n\n```markdown\n## Who you are\n\nA cheerful guide.\n```\n\nKeep examples short.\n"
+
+    func testAHeadingInsideAFenceIsNotASection() {
+        let parsed = AssistantPersonaPolicy.parse(fencedExample)
+        XCTAssertEqual(parsed.kind, .custom)
+        XCTAssertEqual(parsed.who, "")
+        XCTAssertEqual(parsed.instructions,
+                       "You write personas for others. For example:\n\n```markdown\n## Who you are\n\nA cheerful guide.\n```\n\nKeep examples short.")
+        XCTAssertEqual(AssistantPersonaPolicy.render(parsed, name: "Sample Agent"), fencedExample)
+        // Editing the personality keeps the example and its closing fence.
+        let next = AssistantPersonaPolicy.render(parsed, name: "Sample Agent", who: "Calm.")
+        XCTAssertEqual(next, fencedExample + "\n## Who you are\n\nCalm.")
+        let reread = AssistantPersonaPolicy.parse(next)
+        XCTAssertEqual(reread.who, "Calm.")
+        XCTAssertEqual(reread.instructions, parsed.instructions)
+        // Editing the main field round-trips the fenced example inside it.
+        let main = reread.instructions + "\n\nOne more rule."
+        let rewritten = AssistantPersonaPolicy.render(reread, name: "Sample Agent", instructions: main)
+        let again = AssistantPersonaPolicy.parse(rewritten)
+        XCTAssertEqual(again.instructions, main)
+        XCTAssertEqual(again.who, "Calm.")
+    }
+
+    func testFenceRangesFollowCommonMark() {
+        let text = "a\n~~~~\n## x\n~~~\n## y\n~~~~\n## z\n```\n## open"
+        let ns = text as NSString
+        let ranges = AssistantPersonaPolicy.fencedRanges(text)
+        func fenced(_ needle: String) -> Bool {
+            let at = ns.range(of: needle).location
+            return ranges.contains { NSLocationInRange(at, $0) }
+        }
+        XCTAssertTrue(fenced("## x"))
+        XCTAssertTrue(fenced("## y")) // a shorter closer does not close
+        XCTAssertFalse(fenced("## z"))
+        XCTAssertTrue(fenced("## open")) // unclosed runs to the end
+    }
+
+    private let twoPersonalities =
+        "# Sample Agent\n\nYou help with mail.\n\n## Who you are\n\nWarm.\n\n## Notes\n\nNo Fridays.\n\n## Who you are\n\nA second, older personality.\n"
+
+    func testASecondPersonalitySectionSurvivesEitherEdit() {
+        let parsed = AssistantPersonaPolicy.parse(twoPersonalities)
+        XCTAssertEqual(parsed.kind, .custom)
+        XCTAssertEqual(parsed.who, "Warm.")
+        let who = AssistantPersonaPolicy.render(parsed, name: "Sample Agent", who: "Calm.")
+        XCTAssertEqual(who, twoPersonalities.replacingOccurrences(of: "Warm.", with: "Calm."))
+        let cleared = AssistantPersonaPolicy.render(parsed, name: "Sample Agent", who: "")
+        XCTAssertTrue(cleared.contains("## Who you are\n\nA second, older personality.\n"))
+        XCTAssertFalse(cleared.contains("Warm."))
+        for changedWho in [nil, "Calm."] as [String?] {
+            let main = AssistantPersonaPolicy.render(parsed, name: "Sample Agent", who: changedWho,
+                                                     instructions: "Be brief.")
+            XCTAssertTrue(main.contains("## Who you are\n\nA second, older personality.\n"), main)
+            XCTAssertTrue(main.contains("## Who you are\n\n\(changedWho ?? "Warm.")"), main)
+            XCTAssertEqual(AssistantPersonaPolicy.parse(main).instructions, "Be brief.")
+        }
+    }
+
+    func testARepeatedTemplateSectionIsKeptOnEdit() {
+        let soul = template + "\n\n## Who you are\n\nExtra."
+        let next = AssistantPersonaPolicy.render(AssistantPersonaPolicy.parse(soul), name: "Lan",
+                                                 who: "Vui vẻ.")
+        XCTAssertEqual(next, soul.replacingOccurrences(of: "Điềm tĩnh.", with: "Vui vẻ."))
+    }
+
+    func testAnEarlierSaveKeepsANewerDraftAndAdvancesTheBaseline() {
+        // Purpose A → B is sent; the person types C before B is confirmed.
+        var edit = AssistantCardEdit(saved: "A")
+        edit.draft = "B"
+        let submitted = edit.pendingSave()!
+        edit.draft = "C"
+        edit.settle("B", submitted: submitted)
+        XCTAssertEqual(edit.saved, "B")
+        XCTAssertEqual(edit.draft, "C")
+        XCTAssertEqual(edit.pendingSave(), "C")
+        // The queued write merges C on B, not as another device's edit.
+        guard case .write = AssistantPersonaMerge.prepare(
+            field: .what, before: edit.saved, after: "C",
+            soul: template.replacingOccurrences(of: "Lo lịch họp.", with: "B"),
+            name: "Lan", primary: false) else { return XCTFail() }
+        // With no newer draft the field simply takes the confirmed value.
+        var settled = AssistantCardEdit(saved: "A")
+        settled.draft = " B "
+        settled.settle("B", submitted: "B")
+        XCTAssertEqual(settled.draft, "B")
+        XCTAssertFalse(settled.isDirty)
+    }
+
+    func testAQueuedSaveDoesNotClearAnotherFieldsFailure() {
+        var band = AssistantCardSaveBand<String, String>()
+        band.begin("what")
+        band.failed("what", note: "failed")
+        band.begin("who")
+        XCTAssertEqual(band.note, "failed")
+        XCTAssertEqual(band.retryField, "what")
+        band.settled("who", note: "saved")
+        XCTAssertEqual(band.note, "failed")
+        XCTAssertEqual(band.retryField, "what")
+        // Retrying it clears it; its success then shows.
+        band.begin("what")
+        XCTAssertNil(band.note)
+        band.settled("what", note: "saved")
+        XCTAssertEqual(band.note, "saved")
+        XCTAssertNil(band.retryField)
+        // A discarded edit leaves nothing to retry.
+        band.failed("who", note: "failed")
+        band.discard("who")
+        XCTAssertNil(band.retryField)
+        XCTAssertNil(band.note)
+        // Two failures: Retry targets the latest, then the earlier one returns.
+        band.failed("what", note: "failed")
+        band.failed("name", note: "refused")
+        XCTAssertEqual(band.retryField, "name")
+        band.begin("name")
+        band.settled("name", note: "saved")
+        XCTAssertEqual(band.retryField, "what")
+        XCTAssertEqual(band.note, "failed")
+    }
+
     // MARK: Length hint
+
+    func testALeadingBOMIsNotCounted() {
+        let limit = AssistantPersonaPolicy.contextFileMaxChars
+        XCTAssertFalse(AssistantPersonaPolicy.exceedsContextBudget("\u{FEFF}" + String(repeating: "a", count: limit)))
+        XCTAssertTrue(AssistantPersonaPolicy.exceedsContextBudget("\u{FEFF}" + String(repeating: "a", count: limit + 1)))
+        // Only a leading BOM is the file's encoding mark.
+        XCTAssertTrue(AssistantPersonaPolicy.exceedsContextBudget(String(repeating: "a", count: limit) + "\u{FEFF}"))
+    }
 
     func testTheLengthHintCountsCodePointsAfterNormalizingNewlines() {
         let limit = AssistantPersonaPolicy.contextFileMaxChars
