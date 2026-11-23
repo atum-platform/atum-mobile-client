@@ -185,7 +185,7 @@ or `ChatPanelUITests` rerun was needed.
 
 Every visible string comes from the pinned export through `design.text(key)`.
 Nothing is hard-coded, the vendored export and `atum-design.lock` are unchanged,
-and one key is pending (below). Keys used:
+and no key is pending any more (below). Keys used:
 `shared.matrix-agent-desk-copy.matrixAgentDeskCopy.{desk, working, waiting, minutes,
 steerHint, queueHint, files, sentHere, save, saveShort, more, less, onItsComputer,
 back, controls, notifications, moreControls, routines, paused, nextRun,
@@ -196,9 +196,7 @@ locale.
 
 ### Pending keys
 
-| Key | Desktop words (en) | Phone until a repin |
-|---|---|---|
-| `shared.matrix-agent-desk-copy.matrixAgentDeskCopy.pauseHint` | "Still answers you. Starts nothing on its own." | This is the accessibility hint on the Pause switch. The phone shows no hint until the pin carries the key (`AgentDeskCopy.pendingText` reads the export first). No nearer exported key says this, so no words were invented. `AgentDeskBellTests` fails once the key is exported, as a reminder to drop the guard. |
+None. `pauseHint` was pending (the accessibility hint on the Pause switch, en "Still answers you. Starts nothing on its own."). The wave 4c repin (#76, desktop `899cffde`) exported it, so `AgentDeskBellTests` failed as designed on the hosted AppTests job for `b5c70da`. The hint now reads the pin directly, and `pauseHint` is checked in every locale with the other desk keys. Locally: Debug build plus `AgentDeskBellTests` 8/8 (24 Nov, under the lock).
 
 ## Verification
 
@@ -235,7 +233,7 @@ Hosted CI will run the broad UI shards on the PR.
 
 1. Watch on the working line, opening the panel on `.agentDesk` (persona/turn lane).
 2. Stop on the desk (Stop lane).
-3. Repin for `pauseHint`, then drop `AgentDeskCopy.pendingKeys`.
+3. ~~Repin for `pauseHint`, then drop `AgentDeskCopy.pendingKeys`.~~ Done (#76 repin; pending guard removed).
 4. More bell sources: approvals, per-agent readiness on `/agents`, new sign-in.
 5. A live check of the host desk routes with a signed-in Hermes agent.
 

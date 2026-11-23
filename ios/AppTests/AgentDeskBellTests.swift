@@ -10,7 +10,7 @@ final class AgentDeskBellTests: XCTestCase {
     private let deskKeys = ["desk", "working", "waiting", "minutes", "steerHint", "queueHint", "files", "sentHere",
                             "save", "saveShort", "more", "less", "onItsComputer", "back", "controls",
                             "notifications", "moreControls", "routines", "paused", "nextRun", "allSettings",
-                            "pause", "controlFailed", "computerOff"]
+                            "pause", "pauseHint", "controlFailed", "computerOff"]
 
     private func arguments(_ name: String) -> [AtumCopy.Argument] {
         switch name {
@@ -29,10 +29,6 @@ final class AgentDeskBellTests: XCTestCase {
                 let value = try pin.text(key, locale: locale, arguments: arguments(name))
                 XCTAssertFalse(value.isEmpty, "\(key) \(locale)")
             }
-        }
-        // Pending: when a repin carries it, move it into `deskKeys` and drop the guard.
-        for name in AgentDeskCopy.pendingKeys {
-            XCTAssertFalse(pin.contains(AgentDeskCopy.key(name)), "\(name) is exported now: stop treating it as pending")
         }
         XCTAssertEqual(try pin.text(AgentDeskCopy.key("minutes"), locale: "en", arguments: [.number(4)]), "4 min")
         XCTAssertEqual(try pin.text(AgentDeskCopy.key("desk"), locale: "vi", arguments: [.text("Luna")]),

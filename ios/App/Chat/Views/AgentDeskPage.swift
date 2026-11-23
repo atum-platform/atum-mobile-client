@@ -37,13 +37,6 @@ enum AgentDeskCopy {
         design.text(key(name), arguments: arguments)
     }
 
-    /// PENDING-COPY: `pauseHint` is not in the pinned export (desktop added it in #51
-    /// after the pin). Until a repin carries it, Pause has no hint; no words are invented.
-    static let pendingKeys: Set<String> = ["pauseHint"]
-
-    @MainActor static func pendingText(_ design: LiveDesign, _ name: String) -> String? {
-        design.copy.contains(key(name)) ? design.text(key(name)) : nil
-    }
 }
 
 /// The agent's own page in its 1:1 chat's side panel: Now only while it works,
@@ -230,7 +223,7 @@ struct AgentDeskPage: View {
                               isOn: Binding(get: { HostAgentDesk.isPaused(model.jobs) },
                                             set: { on in model.run(on ? .pause : .resume) }))
                         .disabled(model.controlPending)
-                        .accessibilityHint(AgentDeskCopy.pendingText(design, "pauseHint") ?? "")
+                        .accessibilityHint(AgentDeskCopy.text(design, "pauseHint"))
                     AgentDeskDivider()
                 }
                 toggleRow(glyph: .bell, title: copy("notifications"), id: "desk.notifications",
