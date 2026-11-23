@@ -219,6 +219,8 @@ struct ChatInfoActions {
     var companyChannel: CompanyChannelActions?
     /// An app chat's declared pages (AS-11, `AppPanelPagesSection`); nil hides them.
     var appPanel: AppPanelActions?
+    /// The agent's own page in its 1:1 chat (W4-E3, desktop #51); nil hides it.
+    var agentDesk: AgentDeskActions?
     /// HC-7: Rename a person or group chat (desktop conversation menu).
     var rename: ChatRenameActions?
     /// Members' verified @handles, on the line under each name (desktop

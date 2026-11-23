@@ -103,6 +103,7 @@ public enum ScriptedScenarios {
         case .chatBubbles: return chat(ScriptedChats.chatBubbles(env))
         case .chatBubblesGroup: return chat(ScriptedChats.chatBubblesGroup(env))
         case .chatBubblesLive: return chat(ScriptedChats.chatBubblesLive(env))
+        case .chatAgentDesk: return chat(ScriptedChats.chatAgentDesk(env))
         }
     }
 

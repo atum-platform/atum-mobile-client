@@ -2549,6 +2549,14 @@ final class LiveAppModel {
         } catch { return .failed }
     }
 
+    /// W4-E3 read-only seam for the agent's desk (`Chat/AgentDeskLive.swift`):
+    /// the signed-in domain client and the roster agent of this room, if any.
+    func agentDeskContext(roomID: String) -> (client: NativeDomainClient, agent: AgentsResponse.Agent)? {
+        guard let client = domainClient, case .signedIn = stage,
+              let agent = agentForRoom(roomID), agent.canOpenChat else { return nil }
+        return (client, agent)
+    }
+
     private func agentForRoom(_ roomID: String) -> AgentsResponse.Agent? {
         guard let room = liveMatrix?.rooms.first(where: { $0.roomID == roomID }),
               !ConversationTypeGuard.excludedFromBotAndAgent(roomType: room.roomType) else { return nil }

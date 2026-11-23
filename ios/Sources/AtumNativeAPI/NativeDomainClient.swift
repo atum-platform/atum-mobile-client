@@ -61,6 +61,9 @@ public struct AgentsRead: Sendable {
     private static let chatGPTRelayURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/chatgpt-relay")!
     private static let providerConnectionsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/provider-connections")!
     private static let driveAccountURL = DriveContract.accountURL
+    /// The Shell's host routes for an agent's desk (W4-E3, desktop #51).
+    private static let hostDeskURL = URL(string: "https://api.atumplatform.com" + HostAgentDesk.deskPath)!
+    private static let hostControlURL = URL(string: "https://api.atumplatform.com" + HostAgentDesk.controlPath)!
 
     typealias Authorization = @MainActor @Sendable (_ forceRefresh: Bool) async throws -> String
     public typealias AuthenticationFailureObserver = @MainActor @Sendable (any Error) -> Void
@@ -199,6 +202,56 @@ public struct AgentsRead: Sendable {
         )
         do { return try CloudTurnStop.response(response.body, for: input) }
         catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    /// One agent's native schedule through the Shell's host desk route
+    /// (desktop `requestHostDesk`). Any status but a contract-exact 200 throws.
+    public func hostDeskSchedule(agent: NativeID) async throws -> HostAgentDesk.Schedule {
+        let data = try await hostDesk(agent: agent, read: .schedule)
+        do { return try HostAgentDesk.schedule(data) }
+        catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    /// One folder of an agent's own files on its cloud computer: listing only.
+    public func hostDeskFiles(agent: NativeID, path: String?) async throws -> HostAgentDesk.Files {
+        let data = try await hostDesk(agent: agent, read: .files(path: path))
+        do { return try HostAgentDesk.files(data, for: path) }
+        catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    private func hostDesk(agent: NativeID, read: HostAgentDesk.Read) async throws -> Data {
+        let body: Data
+        do { body = try HostAgentDesk.deskBody(agent: agent, read: read) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let response = try await performAuthorized(
+            url: Self.hostDeskURL, body: body,
+            extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion])
+        guard response.status == 200 else {
+            throw response.status >= 500 ? NativeDomainClientFailure.transportUnavailable
+                : NativeDomainClientFailure.invalidResponse
+        }
+        return response.body
+    }
+
+    /// Pause / Resume or one routine on or off (desktop `requestHostAgentControl`).
+    /// A stopped runtime (409) and the shared cooldown (429) are their own outcomes.
+    public func hostAgentControl(agent: NativeID, _ control: HostAgentDesk.Control) async -> HostAgentDesk.ControlOutcome {
+        guard let body = try? control.body(agent: agent) else { return .failed }
+        do {
+            let response = try await performAuthorized(
+                url: Self.hostControlURL, body: body,
+                extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion])
+            switch response.status {
+            case 200:
+                guard let reply = try? HostAgentDesk.controlReply(response.body, for: control) else { return .failed }
+                return .changed(reply.changed)
+            case 409: return .stopped
+            case 429: return .busy
+            default: return .failed
+            }
+        } catch {
+            return .failed
+        }
     }
 
     /// First sign-in: the platform creates this account's default assistant and
@@ -1426,6 +1479,10 @@ public struct AgentsRead: Sendable {
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
                   }
+                  if name == HostAgentDesk.bridgeHeader {
+                      return value == HostAgentDesk.bridgeVersion && method == "POST"
+                          && (url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path)
+                  }
                   if name == AppPanelContract.negotiationHeader {
                       return value == AppPanelContract.profile && method == "GET"
                           && isAppPath(url.path) && url.path.hasSuffix("/manifest")
@@ -1526,6 +1583,7 @@ public struct AgentsRead: Sendable {
     private func isApprovedURL(_ url: URL) -> Bool {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
+        if url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path { return url.query == nil }
         guard url.path.hasPrefix(Self.baseURL.path + "/") else { return false }
         let phoneRoot = Self.baseURL.path + "/device-services"
         let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
