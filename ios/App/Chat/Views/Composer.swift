@@ -322,6 +322,10 @@ struct ChatComposer: View {
         .padding(.vertical, 12)
         .padding(.leading, 14)
         .padding(.trailing, 12)
+        // At the largest sizes an uncapped band filled half the screen and
+        // pushed the pill's controls under the keyboard; it stops growing at
+        // the first accessibility size, still well above body.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .modifier(LiveGlass(design: design, radius: Double(design.kit.radius(.lg))))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(line)

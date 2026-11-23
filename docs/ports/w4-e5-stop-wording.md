@@ -85,8 +85,9 @@ to the view state:
   - working → Stopping… → stopped;
   - stop_requested → Stopping… → settled after 15 s;
   - refused band → retry;
-  - dark appearance;
-  - AX XXXL text size;
+  - dark appearance: Stopping… and the refused band;
+  - AX XXXL text size: the Stopping… capsule fits on screen, and the band,
+    capped at `accessibility1`, leaves the field above the keyboard;
   - no route, no Stop.
 - `ask()` now taps the composer until it has keyboard focus. This fixes the
   #64 flake.
@@ -108,4 +109,15 @@ to the view state:
       polled focus checks used up their limits after a single tap.
     - `ask()` now taps, then waits up to 20 s for the keyboard with XCTest's own
       expectation, and retries the tap up to three times.
-- **Retry run** (`verify-retry.sh`): only the failing test and the new tests.
+- **Run 4** (`verify-retry.sh`): only the failing test and the new tests.
+  - Focus held in every test. `testStopRequestedSaysStoppingThenSettles`
+    passed.
+  - Three tests failed because they waited for the transient Stopping… label.
+    The scripted route answers `stopped` or `failed` in 0.4 s, which is shorter
+    than one element query on a loaded simulator.
+  - Change: those tests now check only states that last: `stop_requested`
+    keeps Stopping… for 15 s, and `failed` keeps the band.
+  - The largest-size screenshot also showed that the uncapped refused band
+    filled half the screen and pushed the pill's controls under the keyboard.
+    The band's text now stops growing at `accessibility1`.
+- **Run 5:** reruns only the three failing tests.
