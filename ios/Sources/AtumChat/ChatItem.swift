@@ -122,6 +122,7 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
     /// The `io.atum.progress` marker on a working-line notice (agent-turns/1.4
     /// A7/A8). Nil for every other row.
     public var progress: ChatProgress?
+    public var companyTurn: CompanyTurnMarker? = nil
     /// The Chief of Staff greeting's pill and titled board link, parsed only
     /// in this account's company-private CoS room (desktop
     /// `privateCosAgentPill` / `privateCosBoardLink`). Nil everywhere else.
@@ -358,14 +359,19 @@ public struct ChatProgress: Equatable, Hashable, Sendable {
     }
 
     public var phase: Phase
-    /// `kind` and `revision` are carried for tests and future presentation;
-    /// the transient rule reads `phase` only.
     public var kind: String?
     public var revision: Int?
+    public var presentation: ChatProgressPresentation?
+    /// A cron line can be live while its exact execution is unavailable.
+    public var isScheduled = false
+    public var schedule: ChatScheduleExecution?
+    var scheduledRevisedAt: Date?
 
-    public init(phase: Phase, kind: String? = nil, revision: Int? = nil) {
+    public init(phase: Phase, kind: String? = nil, revision: Int? = nil,
+                presentation: ChatProgressPresentation? = nil) {
         self.phase = phase
         self.kind = kind
         self.revision = revision
+        self.presentation = presentation
     }
 }

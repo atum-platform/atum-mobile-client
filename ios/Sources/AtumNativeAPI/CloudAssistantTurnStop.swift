@@ -8,8 +8,8 @@ public struct CloudAssistantTurnStop: Equatable, Sendable {
     public let agentPrincipal: NativeID
     public let roomID: MatrixRoomID
 
-    /// `routeAvailable` requires authenticated native-domain access and no
-    /// known route/admission refusal. Typing and model choice are not authority.
+    /// `routeAvailable` requires authenticated native-domain access and
+    /// an active roster binding. Source refusals are checked at dispatch.
     public init?(agent: AgentsResponse.Agent?, roomID: String, routeAvailable: Bool) {
         guard routeAvailable, let agent, agent.canOpenChat, agent.answering == .cloud,
               let roomID = try? MatrixRoomID(roomID) else { return nil }
@@ -21,21 +21,34 @@ public struct CloudAssistantTurnStop: Equatable, Sendable {
     /// missing route, transport failure or malformed reply never claims a stop.
     @MainActor public func stop(_ intent: AssistantTurnStopIntent,
                                 using client: NativeDomainClient,
-                                onRouteUnavailable: @MainActor () -> Void = {}) async -> AssistantTurnStopResult {
+                                unavailableTargets: Set<AssistantTurnStopIntent.Target> = [],
+                                onRouteUnavailable: @MainActor (AssistantTurnStopIntent.Target) -> Void = { _ in })
+        async -> AssistantTurnStopResult {
+        guard !unavailableTargets.contains(intent.target) else { return .failed }
         do {
-            let request = try CloudTurnStop.Request(
-                requestId: NativeID(intent.requestID), agentPrincipal: agentPrincipal,
-                roomId: roomID, eventId: MatrixEventID(intent.eventID)
-            )
-            switch try await client.cloudStop(request).state {
-            case .stopped: return .stopped
-            case .stopRequested: return .stopRequested
-            case .completed: return .completed
+            switch intent.target {
+            case let .schedule(execution):
+                // The authenticated host route checks the owned Hermes
+                // runtime and matches the native execution before interrupting.
+                return try await client.cloudScheduleStop(CloudScheduleStop.Request(
+                    agent: agentPrincipal, execution: execution), onRouteUnavailable: {
+                        onRouteUnavailable(intent.target)
+                    })
+            case let .turn(eventID):
+                let request = try CloudTurnStop.Request(
+                    requestId: NativeID(intent.requestID), agentPrincipal: agentPrincipal,
+                    roomId: roomID, eventId: MatrixEventID(eventID)
+                )
+                switch try await client.cloudStop(request).state {
+                case .stopped: return .stopped
+                case .stopRequested: return .stopRequested
+                case .completed: return .completed
+                }
             }
         } catch let failure as NativeDomainClientFailure {
-            if case let .http(http) = failure,
+            if case .turn = intent.target, case let .http(http) = failure,
                [.denied, .notFound, .unavailable].contains(http.response.error) {
-                onRouteUnavailable()
+                onRouteUnavailable(intent.target)
             }
             return .failed
         } catch { return .failed }

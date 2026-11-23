@@ -9,6 +9,10 @@ import Foundation
 /// pure, dependency-free, and the same rules. The app layer only renders what
 /// this returns.
 public enum TransientLines {
+    private struct SenderThread: Hashable {
+        let sender: String
+        let root: String?
+    }
     /// The fixed "waiting/waited for your Mac" status lines older builds
     /// posted as ordinary notices (no marker). They are working text, so they
     /// are transient too.
@@ -33,6 +37,13 @@ public enum TransientLines {
         return item.isProgressLine || retiredWaitLines.contains(item.body.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    /// Keep abandoned cron notices for at most three quiet heartbeats,
+    /// matching the desktop company-progress display timeout.
+    static func scheduleExpiry(_ item: ChatItem) -> Date? {
+        guard let progress = item.progress, progress.isScheduled else { return nil }
+        return (progress.scheduledRevisedAt ?? item.timestamp).addingTimeInterval(540.001)
+    }
+
     /// What the chat shows of `items`, in timeline order:
     /// - an agent's redacted message shows nothing, not a "deleted" tombstone
     ///   (the agent removes only its own working lines and a duplicated
@@ -43,8 +54,9 @@ public enum TransientLines {
     ///   says `settled`, or the same agent posted a later message that is
     ///   neither a working line nor an interim remark (the answer, an outcome
     ///   notice). A line that is still the newest thing the agent said stays.
-    public static func visibleItems(_ items: [ChatItem], agents: Set<String>) -> [ChatItem] {
-        var ended = Set<String>()
+    public static func visibleItems(_ items: [ChatItem], agents: Set<String>, now: Date? = nil,
+                                    settledSchedules: Set<ChatScheduleExecution> = []) -> [ChatItem] {
+        var ended = Set<SenderThread>()
         var kept: [ChatItem] = []
         kept.reserveCapacity(items.count)
         for item in items.reversed() {
@@ -60,12 +72,18 @@ public enum TransientLines {
             if item.isRedacted {
                 continue
             }
+            let lane = SenderThread(sender: item.sender, root: item.threadRoot)
             if isTransientLine(item, agents: agents) {
-                if item.progress?.phase == .settled || ended.contains(item.sender) {
+                if let execution = item.progress?.schedule, settledSchedules.contains(execution) { continue }
+                if let now, let expiry = scheduleExpiry(item), now >= expiry { continue }
+                // Exact company and cron progress lines settle independently
+                // of ordinary messages, including another execution's result.
+                let exact = item.companyTurn != nil || item.progress?.schedule != nil
+                if item.progress?.phase == .settled || (!exact && ended.contains(lane)) {
                     continue
                 }
             } else if !item.interim && !isPending(item) && !isFailed(item) && !isUndecryptable(item) {
-                ended.insert(item.sender)
+                ended.insert(lane)
             }
             kept.append(item)
         }

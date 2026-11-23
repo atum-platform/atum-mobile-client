@@ -2,12 +2,74 @@ import AtumChat
 import AtumNativeAPI
 import Foundation
 
+/// The room-list membership change signal. Admission itself uses the
+/// synchronized joined members, since the room list contains only heroes.
+struct CompanyTurnMembershipKey: Equatable {
+    let session: ObjectIdentifier
+    let memberCount: UInt64
+    let heroes: Set<String>
+}
+
+/// The joined-member proof has its own clock. Neither a blocked refresh nor
+/// a blocked timeline attach can postpone withdrawal.
+@MainActor
+final class CompanyTurnProofLease {
+    static let refreshInterval: Duration = .seconds(30)
+
+    private let lifetime: Duration
+    private var generation: UInt64 = 0
+    private var deadline: ContinuousClock.Instant?
+    private var expiryTask: Task<Void, Never>?
+
+    init(lifetime: Duration = .seconds(60)) {
+        self.lifetime = lifetime
+    }
+
+    var isLive: Bool { deadline.map { ContinuousClock.now < $0 } ?? false }
+
+    @discardableResult
+    func reset() -> UInt64 {
+        generation &+= 1
+        clearDeadline()
+        return generation
+    }
+
+    func isCurrent(_ generation: UInt64) -> Bool { self.generation == generation }
+
+    func clearDeadline() {
+        expiryTask?.cancel()
+        expiryTask = nil
+        deadline = nil
+    }
+
+    func arm(from readStarted: ContinuousClock.Instant, onExpiry: @escaping @MainActor () -> Void) -> Bool {
+        clearDeadline()
+        let deadline = readStarted.advanced(by: lifetime)
+        guard ContinuousClock.now < deadline else { return false }
+        self.deadline = deadline
+        expiryTask = Task { [weak self] in
+            do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.clearDeadline()
+            onExpiry()
+        }
+        return true
+    }
+}
+
 // TS-6b: the thread rows Team Space and a channel's thread panel show, read
 // through the live Matrix session and fenced to the platform's company
 // directory, plus the follow / read writes and the thread's own chat store.
 // `LiveAppModel` itself only had `conversationInfo` opened up for this.
 
 extension LiveAppModel {
+    func companyTurnMembershipKey(roomID: String) -> CompanyTurnMembershipKey? {
+        guard let liveMatrix, liveMatrix.isReady,
+              let room = liveMatrix.rooms.first(where: { $0.roomID == roomID }) else { return nil }
+        return CompanyTurnMembershipKey(session: ObjectIdentifier(liveMatrix), memberCount: room.memberCount,
+                                        heroes: Set(room.memberUserIDs))
+    }
+
     /// The rooms whose threads Team Space lists: the company's channels and
     /// conversations (desktop `companyChannel ?? companyConversation`), joined
     /// on this session. Never "You", the Chief of Staff or a personal room.
@@ -105,6 +167,9 @@ extension LiveAppModel {
               var info = conversationInfo(roomID: roomID, title: companyThreadPlace(roomID: roomID) ?? "",
                                           ownUserID: own) else { return nil }
         info.threadRootID = rootID
+        if case .channel = info.context.companyTurnScope {
+            info.context.companyTurnScope = .channel(threadRoot: rootID, binding: nil)
+        }
         let store = LiveConversationStore(info: info, draft: draft, history: .onScroll)
         store.onMessageSent = { LiveReporting.shared.messageSent() }
         let roster = companyWorkspace.mentionRoster(roomID: roomID)

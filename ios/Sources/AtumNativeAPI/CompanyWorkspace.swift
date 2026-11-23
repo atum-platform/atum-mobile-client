@@ -1,5 +1,32 @@
 import Foundation
 
+/// Identity from the read-only Company AI view used by channel transcripts.
+public struct CompanyChannelAgent: Decodable, Sendable {
+    let companyID: NativeID
+    public let principal: NativeID
+    public let userID: String
+
+    public init(from decoder: Decoder) throws {
+        let view = try decoder.container(keyedBy: Field.self)
+        try view.closed(["schemaVersion", "companyId", "agent", "enabled", "revision", "state", "canManage"])
+        let state: String = try view.value("state")
+        guard try view.integer("schemaVersion") == 1,
+              ["preparing", "ready", "paused", "attention"].contains(state) else {
+            throw ContractViolation.invalidValue
+        }
+        let _: Bool = try view.value("enabled")
+        let _: Bool = try view.value("canManage")
+        _ = try view.integer("revision", minimum: 1)
+        companyID = try view.value("companyId")
+        let agent = try view.nestedContainer(keyedBy: Field.self, forKey: Field("agent"))
+        try agent.closed(["principal", "userId", "displayName"])
+        let displayName: String = try agent.value("displayName")
+        guard displayName == "Chief of Staff" else { throw ContractViolation.invalidValue }
+        principal = try agent.value("principal")
+        userID = try agent.string("userId", minimum: 4, maximum: 512, pattern: "@[!-9;-~]{1,255}:[!-~]{1,255}")
+    }
+}
+
 // The `atum.company-workspace/1.1` wire (B19 S4). Everything here is a
 // display-safe value or a refusal: no transport, no persistence and no
 // authority. The 1.1 shapes are closed; a v1 answer is reported as `v1` and

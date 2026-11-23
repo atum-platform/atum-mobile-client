@@ -935,8 +935,20 @@ final class TurnStopUITests: WS3UITestCase {
 
     @MainActor
     private func ask(_ app: XCUIApplication) {
-        field(app).tap()
-        field(app).typeText("Tóm tắt giúp mình")
+        let composer = app.textFields[AccessibilityID.composerField]
+        guard eventually(15, { composer.exists && composer.isHittable }) else {
+            return XCTFail("The composer field did not become hittable")
+        }
+        let focus = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<3 {
+            if focus.evaluate(with: composer) { break }
+            composer.tap()
+            if eventually(8, { focus.evaluate(with: composer) }) { break }
+        }
+        guard focus.evaluate(with: composer) else {
+            return XCTFail("The composer field did not take keyboard focus")
+        }
+        composer.typeText("Tóm tắt giúp mình")
         element(app, AccessibilityID.composerSend).tap()
     }
 
