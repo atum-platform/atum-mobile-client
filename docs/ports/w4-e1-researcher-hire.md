@@ -142,4 +142,44 @@ does the same.
 
 ## Verification
 
-VERIFICATION_PLACEHOLDER
+Every heavy step ran under the shared lock
+(`lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`) with `-j 2` / `-jobs 2`.
+Derived data was in `/Volumes/AtumTestFlight/dd-w4-e1`. The simulator was one
+iPhone 17 (`939B69F8`), shut down at the end of each run. Scripts:
+`/Volumes/AtumTestFlight/dd-w4-e1/verify.sh` (full) and `verify-ui.sh` (build and
+the new UI test). Following the coordinator's 23 Nov lock rule (slim runs,
+behind the W4-AB fix round), later runs repeated only the build and the failing
+or new test.
+
+| Check | Run | Result |
+| ----- | --- | ------ |
+| `swift test` (whole package) | 1 | 735 tests, 0 failures. New `NativeDomainClientTests`: open catalog read and row dropping, non-list body, create body (a plain body is unchanged), the listing hire POST, and the refusal map |
+| Debug simulator build (`build-for-testing`) | 1 | failed: a Swift 6 Sendable error in `ScriptedHomeHost` (a ternary closure), fixed with static function references |
+| Debug simulator build | 2–5 | succeeded |
+| AtumMobileTests: `ListingHireStateTests` (10, new) and `StoreCommercePresentationTests` (17) | 2 | 27 tests, 0 failures |
+| UI: `ListingHireUITests` | 2 | not reached: the run hit the 2 h background ceiling (mostly lock wait) on a heavily loaded simulator |
+| UI: `ListingHireUITests` | 3 | failed. The name field took focus on appear, and the keyboard scrolled the shelf out of sight. **Product fix:** the name field now takes focus only when there is nothing to hire |
+| UI: `ListingHireUITests` | 4 | passed (454 s) |
+| UI: `ListingHireUITests`, after making Retry and Done full width | 5 | passed (527 s) |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | final | exit 0 |
+
+The UI walk covers en and vi, each in light and dark (`-atum.appearance`). In
+each, the free seat goes list → hiring → error → Retry → done → Done closes, and
+the priced seat goes price → closed-checkout line, no Hire → Back to the shelf.
+The two `AssistantsWave3UITests` (create-sheet regression) were in run 2's
+selection. One passed before the ceiling; they are left to the hosted shards
+under the slim rule.
+
+Evidence, outside the repo:
+
+- Screenshots: `/Volumes/AtumTestFlight/dd-w4-e1/shots/hire-{en,vi}-{light,dark}-{1-list,2-hiring,3-error,4-done,5-confirm}.png`
+  (20, from run 5).
+- Result bundles: `/Volumes/AtumTestFlight/dd-w4-e1/ui-hire-5.xcresult`,
+  `ui-hire-4.xcresult`, `app-tests-2.xcresult` and `debug-build-*.xcresult`.
+  Logs: `swift-test-1.log`, `app-tests-2.log` and `ui-hire-*.log`.
+- `Build/Intermediates.noindex` was deleted after the runs.
+
+Not verified here: a live hire. It needs a deployed catalog, and its first real
+hire needs the owner's go. Also unverified: VoiceOver announcements on a device,
+and the Top up → confirm path with open checkout, which is covered only by
+`ListingHireStateTests`.

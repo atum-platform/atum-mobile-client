@@ -182,7 +182,7 @@ struct ListingHireView: View {
         VStack(spacing: 6) {
             switch hire.phase {
             case .done:
-                Button(copy(ListingHireCopy.done), action: done)
+                Button(action: done) { primaryLabel(copy(ListingHireCopy.done)) }
                     .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
                     .accessibilityIdentifier("home.newAssistant.hire.done")
             case .short:
@@ -192,7 +192,7 @@ struct ListingHireView: View {
                 }
                 backButton
             case .failed(nil):
-                Button(copy(ListingHireCopy.retry)) { flow.retry() }
+                Button { flow.retry() } label: { primaryLabel(copy(ListingHireCopy.retry)) }
                     .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
                     .accessibilityIdentifier("home.newAssistant.hire.retry")
                 backButton
@@ -222,6 +222,11 @@ struct ListingHireView: View {
         .overlay(alignment: .top) {
             Rectangle().fill(atum.color(.frame, scheme: scheme)).frame(height: 0.5)
         }
+    }
+
+    /// Full width, as the sheet's own primary action.
+    private func primaryLabel(_ text: String) -> some View {
+        Text(verbatim: text).frame(maxWidth: .infinity, minHeight: 44)
     }
 
     private var backButton: some View {

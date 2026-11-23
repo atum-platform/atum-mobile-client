@@ -101,8 +101,14 @@ struct AssistantNewSheet: View {
                 form
             }
         }
-        // Read each time the sheet opens; none (or a failed read) hides the shelf.
-        .task { listings = await actions.listings?() ?? [] }
+        // Read each time the sheet opens; none (or a failed read) hides the
+        // shelf. The name field takes focus only when there is nothing to
+        // hire: the keyboard would scroll the shelf out of sight.
+        .task {
+            guard let read = actions.listings else { return }
+            listings = await read()
+            if listings.isEmpty, !actions.pending, actions.hireFlow?.hire == nil { nameFocused = true }
+        }
         .onDisappear { actions.hireFlow?.sheetClosed() }
     }
 
@@ -204,7 +210,7 @@ struct AssistantNewSheet: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { primaryButton }
         .onAppear {
-            if actions.pending { phase = .starting } else { nameFocused = true }
+            if actions.pending { phase = .starting } else if actions.listings == nil { nameFocused = true }
         }
         .onChange(of: name) { _, _ in
             nameProblem = nil
