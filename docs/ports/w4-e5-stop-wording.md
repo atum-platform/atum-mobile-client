@@ -86,7 +86,8 @@ to the view state:
   - stop_requested → Stopping… → settled after 15 s;
   - refused band → retry;
   - dark appearance: Stopping… and the refused band;
-  - AX XXXL text size: the Stopping… capsule fits on screen, and the band,
+  - AX XXXL text size: the Stopping… capsule, capped at `xxxLarge` with the
+    Large Content Viewer, fits on screen, and the band,
     capped at `accessibility1`, leaves the field above the keyboard;
   - no route, no Stop.
 - `ask()` now taps the composer until it has keyboard focus. This fixes the
@@ -121,3 +122,9 @@ to the view state:
     filled half the screen and pushed the pill's controls under the keyboard.
     The band's text now stops growing at `accessibility1`.
 - **Run 5:** reruns only the three failing tests.
+  - Passed: dark, and working → stopped.
+  - Failed: at AX XXXL the Stopping… capsule was 305 pt wide and ran past the
+    402 pt screen edge.
+  - Change: like other bar controls, the capsule stops growing at `xxxLarge`
+    and shows the Large Content Viewer on a long press.
+- **Run 6:** reruns only `testStoppingFitsAtTheLargestTextSize`.

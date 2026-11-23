@@ -294,6 +294,12 @@ struct ChatComposer: View {
                     .contentShape(Rectangle().inset(by: -(Self.target - Self.circle) / 2))
             }
             .buttonStyle(.plain)
+            // A bar control: uncapped, the label ran 305 pt wide off a 402 pt
+            // screen at AX XXXL (run 5). It stops at xxxLarge like the other
+            // composer controls, and a long press shows it full size.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .accessibilityShowsLargeContentViewer { Text(stopping) }
+            .layoutPriority(1)
             .disabled(true)
             .opacity(Self.disabledStopOpacity)
             // Desktop `aria-label` and its `role="status"` text: VoiceOver
