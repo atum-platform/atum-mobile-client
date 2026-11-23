@@ -3,8 +3,7 @@
 // PENDING-COPY: none of these keys is in the pinned design export yet (listed in
 // docs/ports/w3-team-space.md). Each key is the proposed export key; `TeamSpaceCopy` reads the
 // export first, so the next repin replaces a value with no wording change. Templates use {0}, {1}
-// for the desktop function's arguments; `.one`/`.other` are the desktop function called with 1 and
-// with any other count. Never hand-edit a value.
+// for the desktop function's arguments. Never hand-edit a value.
 
 enum TeamSpaceWave3PendingCopy {
     static let tables: [String: [String: String]] = [
@@ -84,20 +83,6 @@ enum TeamSpaceWave3PendingCopy {
             "ja": "招待",
             "zh": "邀请",
             "zh-Hant": "邀請",
-        ],
-        "shared.matrix-team-space-copy.copy.channelMemberCount.one": [
-            "en": "1 member",
-            "vi": "1 thành viên",
-            "ja": "メンバー 1 人",
-            "zh": "1 名成员",
-            "zh-Hant": "1 位成員",
-        ],
-        "shared.matrix-team-space-copy.copy.channelMemberCount.other": [
-            "en": "{0} members",
-            "vi": "{0} thành viên",
-            "ja": "メンバー {0} 人",
-            "zh": "{0} 名成员",
-            "zh-Hant": "{0} 位成員",
         ],
         "shared.matrix-team-space-copy.copy.channelNameLabel": [
             "en": "Name",
@@ -183,20 +168,6 @@ enum TeamSpaceWave3PendingCopy {
             "zh": "任何拿到此链接的人都能以成员身份加入。",
             "zh-Hant": "任何拿到此連結的人都能以成員身分加入。",
         ],
-        "shared.matrix-team-space-copy.copy.inviteLinkCapacity.one": [
-            "en": "One person can use it.",
-            "vi": "Tối đa 1 người dùng được.",
-            "ja": "1 人まで使えます。",
-            "zh": "最多 1 人使用。",
-            "zh-Hant": "最多 1 人使用。",
-        ],
-        "shared.matrix-team-space-copy.copy.inviteLinkCapacity.other": [
-            "en": "Up to {0} people can use it.",
-            "vi": "Tối đa {0} người dùng được.",
-            "ja": "{0} 人まで使えます。",
-            "zh": "最多 {0} 人使用。",
-            "zh-Hant": "最多 {0} 人使用。",
-        ],
         "shared.matrix-team-space-copy.copy.inviteLinkCopied": [
             "en": "Link copied",
             "vi": "Đã sao chép liên kết",
@@ -217,34 +188,6 @@ enum TeamSpaceWave3PendingCopy {
             "ja": "リンクを作成しています…",
             "zh": "正在创建链接…",
             "zh-Hant": "正在建立連結…",
-        ],
-        "shared.matrix-team-space-copy.copy.inviteLinkDuration.one": [
-            "en": "Works for 1 day.",
-            "vi": "Dùng được trong 1 ngày.",
-            "ja": "1 日間使えます。",
-            "zh": "有效 1 天。",
-            "zh-Hant": "有效 1 天。",
-        ],
-        "shared.matrix-team-space-copy.copy.inviteLinkDuration.other": [
-            "en": "Works for {0} days.",
-            "vi": "Dùng được trong {0} ngày.",
-            "ja": "{0} 日間使えます。",
-            "zh": "有效 {0} 天。",
-            "zh-Hant": "有效 {0} 天。",
-        ],
-        "shared.matrix-team-space-copy.copy.inviteLinkExpires.one": [
-            "en": "expires in 1 day",
-            "vi": "hết hạn sau 1 ngày",
-            "ja": "あと 1 日で期限切れ",
-            "zh": "1 天后过期",
-            "zh-Hant": "1 天後到期",
-        ],
-        "shared.matrix-team-space-copy.copy.inviteLinkExpires.other": [
-            "en": "expires in {0} days",
-            "vi": "hết hạn sau {0} ngày",
-            "ja": "あと {0} 日で期限切れ",
-            "zh": "{0} 天后过期",
-            "zh-Hant": "{0} 天後到期",
         ],
         "shared.matrix-team-space-copy.copy.inviteLinkReplayed": [
             "en": "This link was created, but it can only be shown once. Revoke it and create a new one.",
