@@ -127,4 +127,20 @@ to the view state:
     402 pt screen edge.
   - Change: like other bar controls, the capsule stops growing at `xxxLarge`
     and shows the Large Content Viewer on a long press.
-- **Run 6:** reruns only `testStoppingFitsAtTheLargestTextSize`.
+- **Run 6:** reruns only `testStoppingFitsAtTheLargestTextSize`. It passed.
+  - At AX XXXL the capsule reads "Đang dừng…" in full, on screen.
+  - The refused band wraps to three lines and leaves the field and controls
+    above the keyboard.
+  - The model chip shortens to "Ngu…" so the capsule fits. Its own
+    accessibility label is unchanged.
+
+Every test in `TurnStopUITests` has now passed at least once on the current
+code:
+
+- run 3: refused and retry, no route;
+- run 4: stop requested then settled;
+- run 5: dark, working then stopped;
+- run 6: largest text size.
+
+They have not all run together in one pass since the last fixes. The hosted UI
+shards rerun the class on the PR.
