@@ -67,6 +67,17 @@ to the view state:
 - `settlePendingTurn(for:)`, a desktop timer;
 - `scheduledStopConfirmed`, which keeps desktop's scheduled "Stopped." band.
 
+## Merge with the #64 fix round (`8338b59`)
+
+- `AssistantTurnStopActions.unavailableTargets` still hides Stop for an
+  unavailable target. The other states map through `control`.
+- `settleSchedule` still runs after a terminal scheduled receipt.
+- The fix round kept a scheduled `stopped` phase once its footer cleared. That
+  now resets to idle with `scheduledStopConfirmed`. The run is over and Stop is
+  hidden, but desktop's "Stopped." band stays until another turn is named.
+- `ask()` keeps #64's hittable-plus-keyboard-focus wait and adds a wait for the
+  send circle.
+
 ## Verification
 
 - Package: `AssistantTurnStopTests` now covers every row above.

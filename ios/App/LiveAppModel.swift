@@ -161,6 +161,7 @@ final class LiveAppModel {
     @ObservationIgnored private var localMediaDrafts = [String: ConversationLocalMediaDraft]()
     @ObservationIgnored private var conversationMembersTask: Task<Void, Never>?
     @ObservationIgnored private var privateCosTurnProof: (PrivateCosTurnKey, CompanyTurnBinding)?
+    @ObservationIgnored private let privateCosTurnLease = CompanyTurnProofLease()
     private var conversationOpenedRoom: LiveProductRoom?
     @ObservationIgnored private var isRefreshingDomainOnForeground = false
     /// The app's copy language (`LiveDesign.locale`), set by the root view:
@@ -282,9 +283,9 @@ final class LiveAppModel {
     /// by the next sign-in.
     private var assistantPlacementTask: Task<Void, Never>?
     private var assistantLifecycleCapability: AgentLifecycleCapability?
-    /// A refused cloud Stop is not offered again until product facts refresh.
-    /// Transport loss remains retryable with the state machine's same UUID.
-    private var assistantTurnStopUnavailable = Set<NativeID>()
+    /// A refused source stays unavailable until product facts refresh.
+    /// A transport failure remains retryable with the original request UUID.
+    private var assistantTurnStopUnavailable = [NativeID: Set<AssistantTurnStopIntent.Target>]()
     private var assistantLifecycleStore: LiveAssistantLifecycleStore?
     @ObservationIgnored private var assistantLifecycleTask: Task<Void, Never>?
     /// Identifies an interactive begin/resume across suspension points. The
@@ -1936,24 +1937,28 @@ final class LiveAppModel {
               liveMatrix?.isReady == true, agentsRead.condition == .fresh,
               let agent = agentForRoom(roomID) else { return nil }
         return CloudAssistantTurnStop(agent: agent, roomID: roomID,
-                                      routeAvailable: domainClient != nil
-                                          && !assistantTurnStopUnavailable.contains(agent.principal))
+                                      routeAvailable: domainClient != nil)
     }
 
     func assistantTurnStopActions(roomID: String) -> AssistantTurnStopActions? {
         guard let store = conversation, let client = domainClient,
               let route = assistantTurnStopRoute(roomID: roomID) else { return nil }
         let generation = assistantLifecycleGeneration
-        return AssistantTurnStopActions { [weak self, weak store] intent in
+        let unavailableTargets = assistantTurnStopUnavailable[route.agentPrincipal] ?? []
+        return AssistantTurnStopActions(unavailableTargets: unavailableTargets) { [weak self, weak store] intent in
             guard let self, let store, self.conversation === store, self.domainClient === client,
                   self.assistantLifecycleGeneration == generation,
                   self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
-            var unavailable = false
-            let result = await route.stop(intent, using: client, onRouteUnavailable: { unavailable = true })
+            var unavailableTarget: AssistantTurnStopIntent.Target?
+            let result = await route.stop(intent, using: client,
+                                          unavailableTargets: self.assistantTurnStopUnavailable[route.agentPrincipal] ?? [],
+                                          onRouteUnavailable: { unavailableTarget = $0 })
             guard self.conversation === store, self.domainClient === client,
                   self.assistantLifecycleGeneration == generation,
                   self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
-            if unavailable { self.assistantTurnStopUnavailable.insert(route.agentPrincipal) }
+            if let unavailableTarget {
+                self.assistantTurnStopUnavailable[route.agentPrincipal, default: []].insert(unavailableTarget)
+            }
             return result
         }
     }
@@ -2193,7 +2198,8 @@ final class LiveAppModel {
               snapshot.agentPrincipal == agent.principal else { return .failed }
         let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         let result = await modelOfferState(for: agent.principal).save(
-            from: snapshot, requestID: requestID, refreshAfterSecondConflict: false,
+            from: snapshot, choice: .offer(model: model, effort: effort), requestID: requestID,
+            refreshAfterSecondConflict: false,
             isCurrent: current, fetch: { try await client.managedModels(agentPrincipal: agent.principal) }
         ) { fence, id in
             let write = try ManagedModelWrite(requestId: id, snapshot: fence, model: model, effort: effort)
@@ -2373,7 +2379,8 @@ final class LiveAppModel {
                                                model: String,
                                                requestID: NativeID) async
         -> AssistantModelDestinationSaveResult {
-        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot, requestID: requestID) {
+        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot,
+                                             choice: .destination(destination, model: model), requestID: requestID) {
             client, principal, fence, id in
             let write = try ManagedModelDestinationWrite(
                 requestId: id, snapshot: fence, destination: destination, model: model
@@ -2403,8 +2410,9 @@ final class LiveAppModel {
                                                 effort: ManagedModelEffort,
                                                 requestID: NativeID) async
         -> AssistantModelDestinationSaveResult {
-        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot, requestID: requestID) {
-            client, principal, fence, id in
+        await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot,
+                                             choice: .subscription(source, model: model, effort: effort),
+                                             requestID: requestID) { client, principal, fence, id in
             let write = try ManagedModelSubscriptionWrite(
                 requestId: id, snapshot: fence, source: source, model: model, effort: effort
             )
@@ -2413,15 +2421,15 @@ final class LiveAppModel {
     }
 
     private func saveAssistantDestinationChoice(
-        roomID: String, snapshot: ManagedModelDestinationSnapshot, requestID: NativeID,
-        write: (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID) async throws
+        roomID: String, snapshot: ManagedModelDestinationSnapshot, choice: ManagedModelPickerChoice,
+        requestID: NativeID, write: (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID) async throws
             -> ManagedModelDestinationSnapshot
     ) async -> AssistantModelDestinationSaveResult {
         guard let client = domainClient, let agent = agentForRoom(roomID),
               snapshot.agentPrincipal == agent.principal else { return .refused(nil) }
         let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         let result = await modelDestinationState(for: agent.principal).save(
-            from: snapshot, requestID: requestID, refreshAfterSecondConflict: true,
+            from: snapshot, choice: choice, requestID: requestID, refreshAfterSecondConflict: true,
             isCurrent: current, fetch: { try await client.managedModelDestinations(agentPrincipal: agent.principal) }
         ) { fence, id in
             try await write(client, agent.principal, fence, id)
@@ -3494,6 +3502,7 @@ final class LiveAppModel {
         conversationMembersTask?.cancel()
         conversationMembersTask = nil
         conversationMembers = []
+        privateCosTurnLease.reset()
         privateCosTurnProof = nil
         if let conversation {
             conversation.close()
@@ -3686,7 +3695,7 @@ final class LiveAppModel {
         if case .privateCos = companyWorkspace.roomClassification(roomID) {
             context.isCompanyPrivateCos = true
             let binding = privateCosTurnProof.flatMap { key, binding in
-                key == privateCosTurnKey(roomID: roomID) ? binding : nil
+                privateCosTurnLease.isLive && key == privateCosTurnKey(roomID: roomID) ? binding : nil
             }
             context.companyTurnScope = .privateCos(binding: binding)
         }
@@ -3718,29 +3727,43 @@ final class LiveAppModel {
 
     func refreshPrivateCosTurnPresentation(roomID: String) async {
         guard !Task.isCancelled, conversation?.roomID == roomID else { return }
-        let key = privateCosTurnKey(roomID: roomID)
-        if privateCosTurnProof?.0 != key {
-            privateCosTurnProof = nil
-            refreshConversationIdentity()
+        let generation = privateCosTurnLease.reset()
+        privateCosTurnProof = nil
+        refreshConversationIdentity()
+        guard let key = privateCosTurnKey(roomID: roomID), let session = liveMatrix,
+              let ownUserID = conversation?.ownUserID else { return }
+        defer {
+            if privateCosTurnLease.isCurrent(generation) {
+                privateCosTurnLease.reset()
+                privateCosTurnProof = nil
+                refreshConversationIdentity()
+            }
         }
-        guard let key, let session = liveMatrix, let ownUserID = conversation?.ownUserID else { return }
-        while !Task.isCancelled {
+        while !Task.isCancelled, privateCosTurnKey(roomID: roomID) == key {
+            let started = ContinuousClock.now
             let members = await session.members(roomID: roomID)
-            guard !Task.isCancelled, privateCosTurnKey(roomID: roomID) == key else { return }
+            guard !Task.isCancelled, privateCosTurnLease.isCurrent(generation),
+                  privateCosTurnKey(roomID: roomID) == key else { return }
             let pair = key.binding.scope.pair
             let joined = Set(members?.map(\.userID) ?? [])
-            if ownUserID != key.binding.agentUserId,
-               joined == [ownUserID, key.binding.agentUserId] {
+            let nextRefresh = started.advanced(by: CompanyTurnProofLease.refreshInterval)
+            if ContinuousClock.now < nextRefresh, ownUserID != key.binding.agentUserId,
+               joined == [ownUserID, key.binding.agentUserId],
+               privateCosTurnLease.arm(from: started, onExpiry: { [weak self] in
+                   self?.privateCosTurnProof = nil
+                   self?.refreshConversationIdentity()
+               }) {
                 privateCosTurnProof = (key, CompanyTurnBinding(
                     companyID: pair.companyPrincipal.rawValue, agentPrincipal: key.binding.agentPrincipal.rawValue,
                     agentUserID: key.binding.agentUserId, roomID: roomID,
                     audience: .privateCos(memberPrincipal: pair.memberPrincipal.rawValue,
                                           membershipIncarnation: pair.membershipIncarnation.rawValue)))
             } else {
+                privateCosTurnLease.clearDeadline()
                 privateCosTurnProof = nil
             }
             refreshConversationIdentity()
-            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            do { try await Task.sleep(until: nextRefresh, clock: .continuous) } catch { return }
         }
     }
 

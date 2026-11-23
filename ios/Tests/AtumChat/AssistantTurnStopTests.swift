@@ -286,6 +286,50 @@ extension AssistantTurnSignalTests {
         XCTAssertEqual(AtumTurnMarkers.parse(json: native), AtumTurnMarkers.parse(json: final))
     }
 
+    func testTerminalScheduleReceiptUnmasksCurrentTypedTurnBeforeRedaction() throws {
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "finished"))
+        var scheduled = working("cron", replyTo: "$unrelated")
+        scheduled.timestamp = F.at(0)
+        scheduled.progress?.isScheduled = true
+        scheduled.progress?.schedule = execution
+        var projector = TimelineProjector(generation: 1, context: F.assistantRoom())
+        projector.typingNames = ["Atum"]
+        var stop = AssistantTurnStop()
+        let before = try projector.apply([.append([scheduled, F.mine("question")])], now: F.at(1))
+        stop.observe(AssistantTurnSignal.read(before.snapshot.rows, kind: .assistant))
+        let intent = try XCTUnwrap(stop.beginStop(newRequestID: "schedule"))
+        XCTAssertEqual(intent.target, .schedule(execution))
+
+        stop.resolve(.completed, for: intent)
+        projector.settledSchedules.insert(execution)
+        let after = projector.project(now: F.at(1))
+        stop.observe(AssistantTurnSignal.read(after.snapshot.rows, kind: .assistant))
+        XCTAssertEqual(stop.selection, .turn(eventID: "$question"))
+        XCTAssertTrue(stop.offersStop)
+        XCTAssertEqual(projector.buffer.items.first?.progress?.schedule, execution)
+
+        let next = try XCTUnwrap(ChatScheduleExecution(job: execution.job, execution: "next"))
+        scheduled.progress?.schedule = next
+        let differentRun = try projector.apply([.set(index: 0, item: scheduled)], now: F.at(1))
+        XCTAssertEqual(AssistantTurnSignal.read(differentRun.snapshot.rows, kind: .assistant).scheduled, next)
+    }
+
+    func testAbandonedScheduleExpiresWithoutAnotherTimelineEvent() throws {
+        var scheduled = working("cron", replyTo: "$unrelated")
+        scheduled.timestamp = F.at(0)
+        scheduled.progress?.isScheduled = true
+        scheduled.progress?.schedule = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "abandoned"))
+        scheduled.progress?.scheduledRevisedAt = F.at(3)
+        var projector = TimelineProjector(generation: 1, context: F.assistantRoom())
+        let live = try projector.apply([.append([scheduled])], now: F.at(10))
+        let expiry = try XCTUnwrap(live.nextNoAnswerChange)
+        XCTAssertEqual(expiry, F.at(12).addingTimeInterval(0.001))
+        XCTAssertTrue(AssistantTurnSignal.read(live.snapshot.rows, kind: .assistant).hasScheduledWork)
+        let expired = projector.project(now: expiry)
+        XCTAssertEqual(AssistantTurnSignal.read(expired.snapshot.rows, kind: .assistant), .idle)
+        XCTAssertNil(expired.nextNoAnswerChange)
+    }
+
     func testExactScheduleFooterOutlivesAnotherExecutionsAnswer() throws {
         var scheduled = working("cron", replyTo: "$unrelated")
         scheduled.progress?.isScheduled = true

@@ -935,17 +935,19 @@ final class TurnStopUITests: WS3UITestCase {
 
     @MainActor
     private func ask(_ app: XCUIApplication) {
-        let composer = field(app)
-        XCTAssertTrue(composer.waitForExistence(timeout: 8), "no composer field")
-        // A loaded simulator can drop the first tap or be slow to hand the
-        // field the keyboard (the #64 flake): tap again until it has focus,
-        // and type only then.
-        var focused = false
-        for _ in 0..<4 where !focused {
-            composer.tap()
-            focused = eventually(6) { (composer.value(forKey: "hasKeyboardFocus") as? Bool) == true }
+        let composer = app.textFields[AccessibilityID.composerField]
+        guard eventually(15, { composer.exists && composer.isHittable }) else {
+            return XCTFail("The composer field did not become hittable")
         }
-        XCTAssertTrue(focused, "the composer field did not take focus")
+        let focus = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<3 {
+            if focus.evaluate(with: composer) { break }
+            composer.tap()
+            if eventually(8, { focus.evaluate(with: composer) }) { break }
+        }
+        guard focus.evaluate(with: composer) else {
+            return XCTFail("The composer field did not take keyboard focus")
+        }
         composer.typeText("Tóm tắt giúp mình")
         let send = element(app, AccessibilityID.composerSend)
         XCTAssertTrue(send.waitForExistence(timeout: 5), "no send circle")

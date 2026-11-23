@@ -365,6 +365,7 @@ public struct ChatProgress: Equatable, Hashable, Sendable {
     /// A cron line can be live while its exact execution is unavailable.
     public var isScheduled = false
     public var schedule: ChatScheduleExecution?
+    var scheduledRevisedAt: Date?
 
     public init(phase: Phase, kind: String? = nil, revision: Int? = nil,
                 presentation: ChatProgressPresentation? = nil) {

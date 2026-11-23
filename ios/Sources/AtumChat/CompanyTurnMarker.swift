@@ -169,14 +169,24 @@ struct CompanyTurnMemory: Sendable {
         projected.reserveCapacity(items.count)
         for var item in items {
             if let binding,
-               let prior = accepted[item.id], binding.admits(prior, threadRoot: context.companyThreadRoot),
-               let known = prior.companyTurn {
+               let prior = accepted[item.id], item.sender == prior.sender, item.isOwn == prior.isOwn,
+               binding.admits(prior, threadRoot: context.companyThreadRoot), let known = prior.companyTurn {
                 if item.isRedacted {
                     if prior.isProgressLine { ended.insert(known.identity) }
                 } else if item.companyTurn.map({
                     $0.identity != known.identity || $0.trigger != known.trigger || $0.revision <= known.revision
                 }) ?? item.isEdited {
-                    item = prior
+                    // Keep the accepted content and its relations. The SDK
+                    // may still have new reactions, receipts or profile data.
+                    item.kind = prior.kind
+                    item.body = prior.body
+                    item.isEdited = prior.isEdited
+                    item.replyTo = prior.replyTo
+                    item.threadRoot = prior.threadRoot
+                    item.resultFor = prior.resultFor
+                    item.companyTurn = known
+                    item.progress = prior.progress
+                    item.interim = prior.interim
                 }
             }
             if let binding, binding.admits(item, threadRoot: context.companyThreadRoot), let marker = item.companyTurn {
