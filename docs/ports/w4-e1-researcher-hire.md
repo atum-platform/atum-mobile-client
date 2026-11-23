@@ -354,3 +354,17 @@ touched package tests and the Debug app build locally. UI tests run on the hoste
 PR shards. Script: `/Volumes/AtumTestFlight/dd-w4-e1/fix-verify-r3.sh`, run
 detached under the shared lock. Output: `run-r3.out`, `swift-test-r3.log`, and
 `debug-build-r3.{log,xcresult}`.
+
+| Check | Run | Result |
+| ----- | --- | ------ |
+| `swift test --filter 'NativeDomainClientTests\|AssistantNameCheckTests'` | r3, at `0387607` | exit 1: the new `testAHireDispatchGateIsRecheckedBeforeEachSend` gave its 401 an empty body, which the transport reads as `invalidResponse`. Fixed in the test (a `matrix_401` body); no product change |
+| Debug app build (`build-for-testing`, which also compiles AppTests and UITests) | r3, at `0387607` | exit 0 |
+| `swift test`, same filter, with the test fix | r3b | exit 0: 106 tests (102 + 4), 0 failures |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | final | exit 0 |
+
+Not run locally, under the lane rule: `ListingHireStateTests`, the other
+AtumMobileTests, and `ListingHireUITests`. They compile in the Debug build, and
+they run on the hosted PR shards. Also not verified: a live hire (it needs the
+owner's go), the dispatch gate against a real slow refresh, and a real file
+system that refuses a write. The last two are covered by unit tests only.
+`Build/Intermediates.noindex` was deleted after the runs.

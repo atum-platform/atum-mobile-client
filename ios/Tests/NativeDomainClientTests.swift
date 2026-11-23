@@ -3656,7 +3656,8 @@ extension NativeDomainClientTests {
             listingId: "open/agents/researcher", hireConfirmed: true)
         let created = try JSONSerialization.data(withJSONObject: agentRecord(matrixUser: true))
         NativeDomainProtocol.state.handler = { request in
-            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old" ? .init(status: 401) : .json(created)
+            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old"
+                ? .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)]) : .json(created)
         }
 
         var asked = 0
@@ -3685,7 +3686,8 @@ extension NativeDomainClientTests {
 
         NativeDomainProtocol.state.reset()
         NativeDomainProtocol.state.handler = { request in
-            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old" ? .init(status: 401) : .json(created)
+            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old"
+                ? .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)]) : .json(created)
         }
         asked = 0
         let placed = try await client(TestAuthorization(first: "hire-old", refreshed: "hire-new"))
