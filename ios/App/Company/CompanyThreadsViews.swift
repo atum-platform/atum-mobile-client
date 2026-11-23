@@ -319,6 +319,8 @@ struct CompanyThreadDetail: View {
         let membership: CompanyTurnMembershipKey?
     }
 
+    @State private var turnLease = CompanyTurnProofLease()
+
     private var sessionKey: SessionKey {
         let claim = model.companyWorkspace.claim(roomID: roomID)
         return SessionKey(session: model.liveMatrix.map { ObjectIdentifier($0) },
@@ -397,6 +399,7 @@ struct CompanyThreadDetail: View {
     private func attach() async {
         guard !Task.isCancelled else { return }
         let key = sessionKey
+        let generation = turnLease.reset()
         if store == nil {
             store = model.companyThreadStore(roomID: roomID, rootID: rootID,
                                              draft: coordinator.drafts[draftKey] ?? "")
@@ -407,34 +410,45 @@ struct CompanyThreadDetail: View {
             store.detach()
             return
         }
-        await store.attach(room: room)
-        guard let claim = key.claim, key.membership != nil else { return }
-        var expires: ContinuousClock.Instant?
-        while !Task.isCancelled, sessionKey == key {
-            let started = ContinuousClock.now
-            // A slow refresh cannot extend the lifetime of a previous proof.
-            let expiry = expires.map { deadline in
-                Task { @MainActor in
-                    do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
-                    guard !Task.isCancelled, self.store === store, sessionKey == key,
-                          store.updateChannelThreadBinding(nil) else { return }
-                    await store.attach(room: room)
-                }
-            }
-            let binding = await model.readCompanyChannelTurnBinding(claim, session: session, ownUserID: store.ownUserID)
-            expiry?.cancel()
-            guard !Task.isCancelled, self.store === store, sessionKey == key else { return }
-            let fresh = ContinuousClock.now - started < .seconds(30) ? binding : nil
-            expires = fresh == nil ? nil : started.advanced(by: .seconds(60))
-            if store.updateChannelThreadBinding(fresh) {
+        func attachCurrent() {
+            Task { @MainActor in
+                guard self.store === store, turnLease.isCurrent(generation), sessionKey == key else { return }
                 await store.attach(room: room)
             }
-            do { try await Task.sleep(until: started.advanced(by: .seconds(30)), clock: .continuous) }
-            catch { return }
+        }
+        func updateBinding(_ binding: CompanyTurnBinding?) {
+            guard self.store === store, turnLease.isCurrent(generation),
+                  store.updateChannelThreadBinding(binding) else { return }
+            attachCurrent()
+        }
+
+        attachCurrent()
+        guard let claim = key.claim, key.membership != nil else { return }
+        defer {
+            if turnLease.isCurrent(generation) {
+                turnLease.clearDeadline()
+                updateBinding(nil)
+            }
+        }
+        while !Task.isCancelled, sessionKey == key {
+            let started = ContinuousClock.now
+            let binding = await model.readCompanyChannelTurnBinding(claim, session: session, ownUserID: store.ownUserID)
+            guard !Task.isCancelled, self.store === store, turnLease.isCurrent(generation), sessionKey == key
+            else { return }
+            let nextRefresh = started.advanced(by: CompanyTurnProofLease.refreshInterval)
+            if let binding, ContinuousClock.now < nextRefresh,
+               turnLease.arm(from: started, onExpiry: { updateBinding(nil) }) {
+                updateBinding(binding)
+            } else {
+                turnLease.clearDeadline()
+                updateBinding(nil)
+            }
+            do { try await Task.sleep(until: nextRefresh, clock: .continuous) } catch { return }
         }
     }
 
     private func close() {
+        turnLease.reset()
         guard let store else { return }
         coordinator.drafts[draftKey] = store.draft
         store.close()

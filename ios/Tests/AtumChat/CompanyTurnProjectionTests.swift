@@ -161,6 +161,26 @@ final class CompanyTurnProjectionTests: XCTestCase {
         XCTAssertNil(try item("first", edit, original: original).companyTurn)
     }
 
+    func testSameRevisionCompanyInterimKeepsAcceptedContentAndTakesIncomingMetadata() throws {
+        let accepted = try item("interim", wire(interim: true))
+        var projector = TimelineProjector(generation: 1, context: context())
+        _ = try projector.apply([.append([accepted])], now: F.at(0))
+
+        var incoming = accepted
+        incoming.body = "A same-revision replacement"
+        incoming.reactions = [ChatReaction(key: "👍", senderIDs: [F.me])]
+        incoming.receiptUserIDs = [F.other]
+        incoming.senderName = "Updated name"
+        let projected = try projector.apply([.set(index: 0, item: incoming)], now: F.at(0))
+        let row = try XCTUnwrap(projected.snapshot.rows.first?.item)
+        XCTAssertEqual(row.body, accepted.body)
+        XCTAssertEqual(row.companyTurn, accepted.companyTurn)
+        XCTAssertTrue(row.interim)
+        XCTAssertEqual(row.reactions, incoming.reactions)
+        XCTAssertEqual(row.receiptUserIDs, incoming.receiptUserIDs)
+        XCTAssertEqual(row.senderName, incoming.senderName)
+    }
+
     func testCompanyFooterExpiresOnTheProjectionClockAndARevisionCanReviveIt() throws {
         var projector = TimelineProjector(generation: 1, context: context())
         let first = try item("first", wire())

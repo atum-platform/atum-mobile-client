@@ -630,6 +630,13 @@ final class LiveConversationStore: ConversationStore {
         await install(controller, generation: generation)
     }
 
+    func settleSchedule(_ execution: ChatScheduleExecution) async {
+        guard !isClosed, settledSchedules.insert(execution).inserted else { return }
+        await controller?.settleSchedule(execution)
+    }
+
+    private var settledSchedules = Set<ChatScheduleExecution>()
+
     private func install(_ controller: TimelineController, generation: UInt64) async {
         guard generation == self.generation, !isClosed else {
             controller.close()
@@ -645,7 +652,7 @@ final class LiveConversationStore: ConversationStore {
         // handled as attached; sends held meanwhile go out now.
         run(core.attached(now: clock()))
         sync()
-        await controller.start()
+        await controller.start(settledSchedules: settledSchedules)
         guard generation == self.generation, !isClosed else { return }
         if !core.typingNames.isEmpty { await controller.setTyping(core.typingNames) }
     }

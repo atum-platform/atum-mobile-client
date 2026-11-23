@@ -25,6 +25,13 @@ struct ManagedModelFenceConflictResponse: Decodable {
     }
 }
 
+/// The selection sent by a picker, independent of its current revision and policy fence.
+public enum ManagedModelPickerChoice: Equatable, Sendable {
+    case offer(model: String, effort: ManagedModelEffort)
+    case destination(ManagedModelDestinationID, model: String)
+    case subscription(ManagedModelDestinationSource, model: String, effort: ManagedModelEffort)
+}
+
 /// One agent's offer or destination snapshot in the current account session.
 /// The write generation fences reads even when the revision alone cannot tell
 /// which response observed the current policy.
@@ -39,6 +46,7 @@ struct ManagedModelFenceConflictResponse: Decodable {
     private var held: Snapshot?
     private var adoptedWrites = 0
     private var latestIntent = 0
+    private var pending: (choice: ManagedModelPickerChoice, fence: Snapshot, id: NativeID)?
 
     public init(revision: KeyPath<Snapshot, Int64>) {
         self.revision = revision
@@ -58,27 +66,36 @@ struct ManagedModelFenceConflictResponse: Decodable {
         return snapshot
     }
 
-    public func save(from snapshot: Snapshot, requestID: NativeID, refreshAfterSecondConflict: Bool,
-                     isCurrent: () -> Bool, fetch: () async throws -> Snapshot,
+    public func save(from snapshot: Snapshot, choice: ManagedModelPickerChoice, requestID: NativeID,
+                     refreshAfterSecondConflict: Bool, isCurrent: () -> Bool, fetch: () async throws -> Snapshot,
                      write: (Snapshot, NativeID) async throws -> Snapshot) async -> SaveResult {
+        guard isCurrent(), !Task.isCancelled else { return .failed }
         latestIntent += 1
         let intent = latestIntent
         func current() -> Bool { isCurrent() && !Task.isCancelled && latestIntent == intent }
 
-        var fence = held ?? snapshot
-        var id = fence == snapshot ? requestID : ModelWriteRequests<NativeID>.freshID()
+        let retry = pending.flatMap { $0.choice == choice ? $0 : nil }
+        var fence = retry?.fence ?? held ?? snapshot
+        var id = retry?.id ?? (fence == snapshot && pending == nil
+            ? requestID : ModelWriteRequests<NativeID>.freshID())
+        pending = nil
         var refreshed: Snapshot?
         for attempt in 0..<2 {
             guard current() else { return .failed }
+            // Keep the actual in-flight write available for an identical
+            // retry even if it loses its response or its view goes away.
+            pending = (choice, fence, id)
             do {
                 let saved = try await write(fence, id)
                 guard current() else { return .failed }
+                pending = nil
                 if let held, saved[keyPath: revision] < held[keyPath: revision] { return .saved(held) }
                 adoptedWrites += 1
                 held = saved
                 return .saved(saved)
             } catch is ManagedModelFenceConflict {
                 guard current() else { return .failed }
+                pending = nil
                 if attempt == 1 && !refreshAfterSecondConflict { return .refused(refreshed) }
                 guard let latest = try? await read(isCurrent: current, fetch: fetch), current() else {
                     return current() ? .refused(refreshed) : .failed
@@ -89,8 +106,14 @@ struct ManagedModelFenceConflictResponse: Decodable {
                 id = ModelWriteRequests<NativeID>.freshID()
             } catch {
                 guard current() else { return .failed }
-                if case NativeDomainClientFailure.http = error { return .refused(refreshed) }
-                if error is ContractViolation { return .refused(refreshed) }
+                if case NativeDomainClientFailure.http = error {
+                    pending = nil
+                    return .refused(refreshed)
+                }
+                if error is ContractViolation {
+                    pending = nil
+                    return .refused(refreshed)
+                }
                 return .failed
             }
         }
