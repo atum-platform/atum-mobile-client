@@ -83,32 +83,49 @@ seeded definition and skills stay. On success the model:
    before the roster knew the inviter;
 3. claims a handle in the background, as for a made assistant;
 4. says done only when the platform placed it (`cloud_placement: placed`, or no
-   placement) and its chat is open here. A hire placed as `capacity` or
-   `pending_trust` comes back before its room exists: the sheet shows "getting
-   ready" and keeps the assistant ID, and turns to done when a joined room's
-   assistant is that one.
+   placement) and Home's own roster projection (`LiveRosterRows.rows`, checked by
+   `ListingHireChat.opens`) has a joined, openable row for that assistant. A hire
+   placed as `capacity` or `pending_trust` comes back before its room exists, and
+   Home suppresses some rooms (duplicate plain rooms, hidden or quarantined ones):
+   the sheet shows "getting ready", keeps the assistant ID, and turns to done only
+   when that row appears. A hire whose client or Matrix session was replaced
+   mid-POST also waits there.
 
 Any failure in those steps is left to the assistant's card, as on desktop.
 
-**One hire, never two.** The request UUID, name and confirmation are stored per
-account and listing (`LiveListingHireStore`, `UserDefaults`, keyed by the full
-SHA-256 of the account's Matrix ID, `atum.live.listingHire.v2.<digest>`). A Retry,
-a confirmation or a relaunch resumes the same request.
+**One hire, never two.** The request UUID, name, confirmation and (after
+success) the assistant ID are stored per account and listing in
+`LiveListingHireStore`. It follows the Store journal (`StoreFileJournal`,
+`ios/Sources/AtumNativeAPI/StoreAcquisition.swift`): one atomic file per account
+under Application Support `ListingHires/<sha256 of the Matrix ID>.json`, with the
+same file protection. A missing file is an empty ledger. An unreadable one is
+unknown, not empty: the hire mints and sends nothing (retryable failure). The
+request is written before the POST, and a failed write sends nothing. A Retry, a
+confirmation or a relaunch resumes the same request.
 
 The platform charges the seat in `matrix_agent_create_finish` (0314, idempotent
 on the request), after the reservation and the MAS identity, and keeps
 provisioning after that (definition seed, Hermes, owner snapshot). Any of those
-later steps can still answer 400 (`matrix_invalid`), 403, 404, 409 or 503. So only
-two answers clear the request: success, and the name rules' own 422 (an
-`assistant_name_*` code, raised by `matrix_agent_create_begin` before anything is
-reserved or charged). Every other answer keeps the UUID, and the next try resumes
-it under the same request. Limit and account refusals still show their final line
-with Back only; picking the listing again resumes the same request. A bare 400 is
-shown as the retryable failure, where desktop reads it as a name refusal (see
+later steps can still answer 400 (`matrix_invalid`), 403, 404, 409 or 503. A name
+refusal doesn't prove the request was never charged either:
+`matrix_agent_create_begin` (0192) checks the name before it looks the request
+up. So a request that was sent is never dropped on a refusal. A name refusal
+marks it `nameRefused`, and the next pick sends the same UUID under the name it is
+picked with then. If the platform never stored the request, that is a new create
+under the new name. If it did, a changed name is `matrix_conflict` (limit, Back
+only), never a second charge. Limit and account refusals show their final line
+with Back only, and picking the listing again resumes the same request. A bare 400
+is shown as the retryable failure, where desktop reads it as a name refusal (see
 "Phone-only rules").
 
-The earlier `v1` ledger (keyed by the 32-bit log fingerprint) only ever held
-requests from internal builds; it is not read.
+After success the entry stays, now naming its assistant, until Home opens that
+assistant's chat. A later pick of the listing in that window sends nothing and
+shows "getting ready" for the same assistant. Once Home has the openable row, the
+entry is cleared, and a later pick is a new hire (with the price step again for a
+third+ assistant).
+
+The earlier `UserDefaults` ledgers (`v1`, keyed by the 32-bit log fingerprint,
+and `v2`) only ever held requests from unreleased builds; they are not read.
 
 ### Phone-only rules
 
@@ -123,14 +140,26 @@ requests from internal builds; it is not read.
   first, and a request that carries a confirmation (given now, or stored with it
   from an earlier try) goes out only while `applePurchases.checkoutOpen` is true
   (`ListingHireRequestPlan`, `ListingHireGate.allowsRequest`). Otherwise nothing is
-  sent, no request is minted, and the sheet returns to the price with the closed
-  line. This covers Retry after checkout closed, and a shelf pick that restores a
-  stored confirmation. An unconfirmed request can't spend (the platform answers
-  `hire_required`), so it still goes out.
+  sent, no request is minted, and the sheet returns to the price it showed with
+  the closed line. This covers Retry after checkout closed, and a shelf pick that
+  restores a stored confirmation. An unconfirmed request can't spend (the
+  platform answers `hire_required`), so it still goes out.
+- **And again at each send.** The token read, and the forced refresh before a
+  401 resend, can take a while. `createAgentPlaced(_:dispatchGate:)` asks a gate
+  right before each send inside `NativeDomainClient`'s transport: the same
+  client, the same signed-in account, and open checkout for a confirmed request.
+  When it says no, nothing goes out (`NativeDispatchBlocked`) and the stored
+  request stays as it was.
 - **No real quote, no Hire.** A required hire whose price isn't a positive whole
   number (a zero or missing quote) is unavailable: no price line, the closed line,
   and no Hire, until a valid price is read. `ListingHireFlow.confirm()` refuses it
-  too.
+  too. A `hire_required` with no usable price is the retryable failure. Its Retry
+  sends the unconfirmed request again, which can't spend and brings a fresh
+  quote. The catalog's price is never substituted for a quote the platform
+  didn't give.
+- **A name nothing accepts.** The hired name is the listing's title, numbered
+  past taken names and app names, and then the catalog name. Each one is checked.
+  When none passes, the sheet shows the name line with Back and sends nothing.
 - **A bare 400 is retried.** Desktop maps 400 or 422 to the name refusal. On the
   phone only the 422 name codes are a name refusal; a bare 400 can follow the
   charge, so it is the retryable failure under the same request.
@@ -154,7 +183,8 @@ requests from internal builds; it is not read.
 - `OpenAgentHireRefusal.from(_:)`: desktop's refusal map, except a bare 400.
   `hire_required` maps to confirm, `hire_insufficient_protons` to short, other
   409s to limit, a 422 name code to name, 403 or 404 to account, and anything
-  else (a bare 400 included) to retry. `keepsRequest` is false only for name.
+  else (a bare 400 included) to retry. No refusal drops a sent request;
+  `letsNameChange` is true only for name.
 - `AgentCreateResponse` and `AgentCloudPlacement` (new): `POST /agents`'s agent
   with its `cloud_placement`. An unknown or malformed placement is absent and
   never fails the create. `NativeDomainClient.createAgentPlaced(_:)` returns it;
@@ -295,3 +325,32 @@ Not verified here: a live hire (it needs the owner's go), the account-change pat
 on a device (covered by `ListingHireStateTests` only), the capacity → done
 transition with a real room arriving (the scripted host never opens the room), and
 Top up → confirm with open checkout.
+
+## Review fix round r3 (23 Nov 2026)
+
+A read-only cross-family review of `e7f8487` held the branch on three money
+blockers and three should-fixes. All six are fixed on this branch. Each fix
+reuses an existing pattern: the Store journal, `NativeDomainClient`'s transport,
+and Home's roster projection.
+
+| # | Finding | Fix | Test |
+| - | ------- | --- | ---- |
+| 1 | Checkout could close (or the account change) between `hireListing`'s check and the send, while the token was read or force-refreshed before a 401 resend | `NativeDispatchGate`, asked inside `NativeDomainClient.response(...)` right before the first send and right before the 401 resend (`createAgentPlaced(_:dispatchGate:)`). `hireListing`'s gate needs the same client, the same account, and open checkout for a confirmed request. When it says no, nothing is sent (`NativeDispatchBlocked`), the stored request stays, and the sheet returns to its price | `NativeDomainClientTests.testAHireDispatchGateIsRecheckedBeforeEachSend` |
+| 2 | The `UserDefaults` ledger had no fallible write before the send, read an unreadable ledger as empty, and dropped the entry as soon as the POST succeeded | `LiveListingHireStore` is now a file journal on the `StoreFileJournal` pattern (atomic, protected, throwing). An unreadable ledger refuses without minting; a failed write sends nothing; a successful hire records its assistant ID and stays until Home opens that chat, and a pick in that window sends nothing | `ListingHireStateTests.testTheRequestLedgerKeepsOneRequestPerListingUntilItsOwnAnswerClearsIt`, `testAnUnreadableOrUnwritableLedgerRefusesInsteadOfReadingEmpty`, `testTheLedgerKeyIsTheAccountsFullDigest` |
+| 3 | A 422 name refusal dropped a request that may already have been charged (0192 checks the name before looking the request up) | No refusal drops a sent request. `keepsRequest` is replaced by `letsNameChange` (name only): the entry is marked `nameRefused`, and the next pick sends the same UUID under the name it is picked with | `NativeDomainClientTests.testNoRefusalLetsASentHireRequestGoAndOnlyANameRefusalRenames`, `ListingHireStateTests.testANameRefusalKeepsTheRequestAndTheNextTryRenamesIt` |
+| 4 | Done could show with no openable chat: a replaced session returned `.hired` unchecked, and the readiness check accepted rooms Home suppresses | A replaced client or session returns `settingUp`. Readiness is `ListingHireChat.opens` over Home's `productRooms()`: an openable, joined, unquarantined row for that assistant | `ListingHireStateTests.testTheHireIsDoneOnlyWhenHomeOpensItsAssistantsChat` |
+| 5 | `hire_required` without a usable price, and the local closed-checkout answer, fell back to the catalog price | A new `ListingHireResult.checkoutClosed` returns to the quote this hire showed (`ListingHireState.quote`; with none shown, "not available" and no Hire). A `hire_required` with no positive price is a retry, whose unconfirmed request fetches a fresh quote | `ListingHireStateTests.testAClosedCheckoutKeepsTheShownQuoteAndAMissingQuoteNeverEnablesHire`, `testAClosedGateReturnsToThePriceAndAZeroQuoteCantBeConfirmed` |
+| 6 | The fallback name skipped the checker | `ListingAssistantName.name` checks the catalog name too and returns nil when nothing passes; the sheet then shows the name line (`ListingHireFlow.refuseName`) and sends nothing | `testAListingWithNoValidNameShowsTheNameLineAndSendsNothing`, `testTheHiredNameStepsPastLookAlikesAndAppNames` |
+
+Scope kept narrow: the hire step still has no name editor. After a name
+refusal the person changes the name the way they would today, by renaming the
+other assistant or app it clashes with, and the next pick sends the same
+request under the new name.
+
+### r3 verification
+
+The new lane rule (owner go, 23 Nov) allows only `swift test --filter` for the
+touched package tests and the Debug app build locally. UI tests run on the hosted
+PR shards. Script: `/Volumes/AtumTestFlight/dd-w4-e1/fix-verify-r3.sh`, run
+detached under the shared lock. Output: `run-r3.out`, `swift-test-r3.log`, and
+`debug-build-r3.{log,xcresult}`.

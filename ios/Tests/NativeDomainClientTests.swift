@@ -3597,24 +3597,25 @@ extension NativeDomainClientTests {
         }
         let required = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_required","hire":{"price_protons":60000,"price_micro_protons":60000000000}}}"#)
         XCTAssertEqual(required, .hireRequired(priceProtons: 60_000))
-        XCTAssertTrue(required.keepsRequest)
+        XCTAssertFalse(required.letsNameChange)
         let malformedPrice = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_required","hire":{"price_protons":"lots"}}}"#)
         XCTAssertEqual(malformedPrice, .hireRequired(priceProtons: nil))
         let short = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_insufficient_protons","hire":{"price_protons":60000}}}"#)
         XCTAssertEqual(short, .short)
-        XCTAssertTrue(short.keepsRequest)
+        XCTAssertFalse(short.letsNameChange)
         let outage = await refusal(503, #"{"error":"matrix_503"}"#)
         XCTAssertEqual(outage, .retry)
-        XCTAssertTrue(outage.keepsRequest)
+        XCTAssertFalse(outage.letsNameChange)
+        // A blocked dispatch sent nothing; the request is retried as stored.
+        XCTAssertEqual(OpenAgentHireRefusal.from(NativeDispatchBlocked()), .retry)
     }
 
-    /// Review finding 3: the platform charges the seat in
-    /// `matrix_agent_create_finish` and keeps provisioning after it, so any
-    /// later step's refusal may follow the charge. Only the name rules' own
-    /// 422 (raised in `matrix_agent_create_begin`, before any reservation or
-    /// charge) lets the request go; every other answer keeps its UUID, and
-    /// a bare 400 (`matrix_invalid`) is retried, not read as a name.
-    func testOnlyAPreChargeNameRefusalLetsTheHireRequestGo() async throws {
+    /// Review r2 finding 3: the platform checks the name before it looks a
+    /// request up (0192 `matrix_agent_create_begin`), so a 422 doesn't prove
+    /// the UUID was never charged. No refusal lets a sent request go; only
+    /// a name refusal lets the next try change the name, and a bare 400
+    /// (`matrix_invalid`) is retried, not read as a name.
+    func testNoRefusalLetsASentHireRequestGoAndOnlyANameRefusalRenames() async throws {
         func refusal(_ status: Int, _ body: String) async -> OpenAgentHireRefusal {
             NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(body.utf8)]) }
             do {
@@ -3629,19 +3630,71 @@ extension NativeDomainClientTests {
         }
         let name = await refusal(422, #"{"error":"assistant_name_taken"}"#)
         XCTAssertEqual(name, .name)
-        XCTAssertFalse(name.keepsRequest, "a pre-charge name refusal keeps a dead request")
+        XCTAssertTrue(name.letsNameChange)
         let invalid = await refusal(400, #"{"error":"matrix_400"}"#)
         XCTAssertEqual(invalid, .retry, "a bare 400 after provisioning began reads as a name refusal")
-        XCTAssertTrue(invalid.keepsRequest)
+        XCTAssertFalse(invalid.letsNameChange)
         let limit = await refusal(409, #"{"error":"matrix_409"}"#)
         XCTAssertEqual(limit, .limit)
-        XCTAssertTrue(limit.keepsRequest)
+        XCTAssertFalse(limit.letsNameChange)
         let account = await refusal(403, #"{"error":"matrix_403"}"#)
         XCTAssertEqual(account, .account)
-        XCTAssertTrue(account.keepsRequest)
+        XCTAssertFalse(account.letsNameChange)
         let missing = await refusal(404, #"{"error":"matrix_404"}"#)
         XCTAssertEqual(missing, .account)
-        XCTAssertTrue(missing.keepsRequest)
+        XCTAssertFalse(missing.letsNameChange)
+    }
+
+    /// Review r2 finding 1: checkout can close (or the account change) while
+    /// the token is read or force-refreshed. The gate is asked right before
+    /// each send: closed before the first, nothing is sent; open for the
+    /// first, which answers 401, and closed after the refresh, the resend
+    /// never goes out. Open throughout, the 401 resend goes as before.
+    func testAHireDispatchGateIsRecheckedBeforeEachSend() async throws {
+        let request = try AgentCreateRequest(
+            requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+            listingId: "open/agents/researcher", hireConfirmed: true)
+        let created = try JSONSerialization.data(withJSONObject: agentRecord(matrixUser: true))
+        NativeDomainProtocol.state.handler = { request in
+            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old" ? .init(status: 401) : .json(created)
+        }
+
+        var asked = 0
+        do {
+            _ = try await client(TestAuthorization(first: "hire-old", refreshed: "hire-new"))
+                .createAgentPlaced(request, dispatchGate: { asked += 1; return false })
+            XCTFail("a blocked hire was sent")
+        } catch {
+            XCTAssertEqual(error as? NativeDispatchBlocked, NativeDispatchBlocked())
+        }
+        XCTAssertEqual(asked, 1)
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty, "nothing goes out when the gate is closed")
+
+        asked = 0
+        let authorization = TestAuthorization(first: "hire-old", refreshed: "hire-new")
+        do {
+            _ = try await client(authorization)
+                .createAgentPlaced(request, dispatchGate: { asked += 1; return asked == 1 })
+            XCTFail("the resend went out after the gate closed")
+        } catch {
+            XCTAssertEqual(error as? NativeDispatchBlocked, NativeDispatchBlocked())
+        }
+        XCTAssertEqual(asked, 2)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1, "only the first send went out")
+
+        NativeDomainProtocol.state.reset()
+        NativeDomainProtocol.state.handler = { request in
+            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old" ? .init(status: 401) : .json(created)
+        }
+        asked = 0
+        let placed = try await client(TestAuthorization(first: "hire-old", refreshed: "hire-new"))
+            .createAgentPlaced(request, dispatchGate: { asked += 1; return true })
+        XCTAssertEqual(placed.agent.id.rawValue, agentID)
+        XCTAssertEqual(asked, 2)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
+        let bodies = NativeDomainProtocol.state.requests.map { self.body(of: $0) }
+        XCTAssertEqual(bodies[0], bodies[1], "the resend is the same request")
     }
 }
 

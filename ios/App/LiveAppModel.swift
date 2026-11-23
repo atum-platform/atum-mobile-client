@@ -1140,11 +1140,14 @@ final class LiveAppModel {
         return names
     }
 
-    /// Whether a hired assistant's chat is open here: a joined room whose
-    /// assistant is that one (the room the Home list opens for it).
+    /// Whether a hired assistant's chat opens from Home: the roster's own
+    /// projection (`productRooms`, `LiveRosterRows.rows`) has an openable,
+    /// joined row for that assistant, the same test a pushed room uses
+    /// (`canOpenPushedRoom`). A room Home suppresses (a duplicate plain room,
+    /// a hidden or quarantined one) or the "getting ready" row doesn't count.
     func hiredAssistantChatReady(_ assistantID: NativeID) -> Bool {
-        guard let rooms = liveMatrix?.rooms else { return false }
-        return rooms.contains { agentForRoom($0.roomID)?.id == assistantID }
+        ListingHireChat.opens(assistantID, in: productRooms(),
+                              quarantined: { companyWorkspace.isQuarantinedConversation($0) })
     }
 
     /// Hires an open listing under `name` with `POST /agents` and its
@@ -1157,7 +1160,15 @@ final class LiveAppModel {
     /// `account` is the account the hire was picked under: anything else
     /// signed in now is refused before any request is read or sent. A
     /// confirmed request (confirmed now or stored with it) can spend, so it
-    /// goes out only while Apple checkout is open (REL-15).
+    /// goes out only while Apple checkout is open (REL-15), checked here and
+    /// again inside the transport right before each send.
+    ///
+    /// The request ledger follows the Store journal (`StoreFileJournal`): an
+    /// unreadable ledger mints nothing and sends nothing, the request is
+    /// written before the POST (a failed write sends nothing), and a sent
+    /// request stays until Home opens its assistant's chat. A hire that
+    /// succeeded records its assistant there, so a later pick waits for that
+    /// chat instead of buying another seat.
     func hireListing(_ listing: OpenAgentListing, name: String,
                      hireConfirmed: Bool, account: String) async -> ListingHireResult {
         guard let current = context, current.runtime.ticket.session.userID == account else {
@@ -1166,8 +1177,24 @@ final class LiveAppModel {
         }
         guard let client = domainClient, let session = liveMatrix, session.isReady else { return .refused(.retry) }
         let store = LiveListingHireStore(matrixUserID: account)
+        var earlier: LiveListingHireStore.Pending?
+        do { earlier = try store.pending(listing.listingID) } catch {
+            // Unknown, not empty: a request may be in there.
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "ledger_unreadable")
+            return .refused(.retry)
+        }
+        if let stored = earlier, let hired = stored.assistantID.flatMap({ try? NativeID($0) }) {
+            // That hire succeeded. Until Home opens its chat, this pick is
+            // still that hire; once it does, this pick is a new one.
+            guard hiredAssistantChatReady(hired) else { return .settingUp(assistantID: hired) }
+            do { try store.clear(listing.listingID, requestID: stored.requestID) } catch {
+                LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "ledger_unwritable")
+                return .refused(.retry)
+            }
+            earlier = nil
+        }
         let plan = ListingHireRequestPlan.make(
-            earlier: store.pending(listing.listingID), name: name, hireConfirmed: hireConfirmed,
+            earlier: earlier, name: name, hireConfirmed: hireConfirmed,
             checkoutOpen: applePurchases.checkoutOpen,
             newRequestID: { (try? NativeID(UUID().uuidString.lowercased()))?.rawValue })
         let pending: LiveListingHireStore.Pending
@@ -1176,7 +1203,7 @@ final class LiveAppModel {
         case nil: return .refused(.retry)
         case .checkoutClosed?:
             LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "checkout_closed")
-            return .refused(.hireRequired(priceProtons: nil))
+            return .checkoutClosed
         case let .send(value, fresh: isFresh)?:
             pending = value
             fresh = isFresh
@@ -1192,27 +1219,67 @@ final class LiveAppModel {
             // have been charged, so it stays for the next try.
             return fresh ? .refused(.name) : .refused(.retry)
         }
-        // Saved before the POST, so a lost answer resumes this request.
-        store.save(pending, for: listing.listingID)
+        // Written before the POST, so a lost answer or a relaunch resumes
+        // this request. A write that fails sends nothing.
+        do { try store.save(pending, for: listing.listingID) } catch {
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "ledger_unwritable")
+            return .refused(.retry)
+        }
+        // Asked right before each send (the first and the resend after a 401
+        // refresh): the same client and account, and open checkout for a
+        // request that can spend. When it says no, nothing goes out and the
+        // request stays as stored.
+        let confirmed = pending.hireConfirmed
+        let gate: NativeDispatchGate = { [weak self] in
+            guard let self else { return false }
+            return self.domainClient === client
+                && self.context?.runtime.ticket.session.userID == account
+                && ListingHireGate.allowsRequest(confirmed: confirmed,
+                                                 checkoutOpen: self.applePurchases.checkoutOpen)
+        }
         LiveFlowLog.creation(.assistant, outcome: "hire_begin")
+        let created: AgentCreateResponse
         do {
-            let created = try await client.createAgentPlaced(request)
-            store.clear(listing.listingID, requestID: pending.requestID)
-            LiveFlowLog.creation(.assistant, outcome: "hired", code: created.placement?.rawValue)
-            guard domainClient === client, liveMatrix === session,
-                  context?.runtime.ticket.session.userID == account else { return .hired }
-            await adoptHiredAssistant(created.agent, name: pending.name, client: client, session: session)
-            // `capacity` and `pending_trust` come back before the room exists:
-            // the sheet waits for the chat instead of saying it is there.
-            if created.placement == .placed || created.placement == nil,
-               hiredAssistantChatReady(created.agent.id) { return .hired }
-            return .settingUp(assistantID: created.agent.id)
+            created = try await client.createAgentPlaced(request, dispatchGate: gate)
+        } catch is NativeDispatchBlocked {
+            let sameAccount = domainClient === client && context?.runtime.ticket.session.userID == account
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused",
+                                 code: sameAccount ? "checkout_closed" : "account_changed")
+            return sameAccount ? .checkoutClosed : .refused(.retry)
         } catch {
             let refusal = OpenAgentHireRefusal.from(error)
-            if !refusal.keepsRequest { store.clear(listing.listingID, requestID: pending.requestID) }
+            // The request was sent, so it stays (it may have been charged).
+            // A name refusal lets the next try carry another name under it.
+            if refusal.letsNameChange {
+                var renamable = pending
+                renamable.nameRefused = true
+                try? store.save(renamable, for: listing.listingID)
+            }
             LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: refusal.logCode)
             return .refused(refusal)
         }
+        // The seat is bought: the request stays, now naming its assistant,
+        // until Home opens that assistant's chat. If this write fails the
+        // stored request still resolves to the same hire on its next send.
+        var hiredEntry = pending
+        hiredEntry.assistantID = created.agent.id.rawValue
+        try? store.save(hiredEntry, for: listing.listingID)
+        LiveFlowLog.creation(.assistant, outcome: "hired", code: created.placement?.rawValue)
+        guard domainClient === client, liveMatrix === session,
+              context?.runtime.ticket.session.userID == account else {
+            // Replaced mid-POST: nothing here has adopted it yet.
+            return .settingUp(assistantID: created.agent.id)
+        }
+        await adoptHiredAssistant(created.agent, name: pending.name, client: client, session: session)
+        // `capacity` and `pending_trust` come back before the room exists,
+        // and Home may not list a room it has yet: the sheet waits for an
+        // openable Home row instead of saying the chat is there.
+        if created.placement == .placed || created.placement == nil,
+           hiredAssistantChatReady(created.agent.id) {
+            try? store.clear(listing.listingID, requestID: pending.requestID)
+            return .hired
+        }
+        return .settingUp(assistantID: created.agent.id)
     }
 
     /// The hired assistant joins the roster as a made one does: `/agents` is
@@ -7289,55 +7356,79 @@ struct LiveHiddenRoomStore {
 }
 
 /// The listing hires still unfinished, per account and listing: the request
-/// UUID, the name it was sent under and whether its price was confirmed. A
-/// hire resumes under exactly these, so it is never made twice. The key is
-/// the full SHA-256 of the account's Matrix ID (never the 32-bit log
-/// fingerprint), so two accounts can't share a ledger.
+/// UUID, the name it was sent under, whether its price was confirmed, and,
+/// once the POST succeeded, the assistant it made. A hire resumes under
+/// exactly these, so it is never made twice.
+///
+/// It follows the Store journal (`StoreFileJournal`,
+/// `Sources/AtumNativeAPI/StoreAcquisition.swift`): one atomic, protected
+/// file per account, named by the full SHA-256 of its Matrix ID (never the
+/// 32-bit log fingerprint), so two accounts can't share a ledger. A missing
+/// file is empty; an unreadable one throws, and the caller then mints and
+/// sends nothing. Every write throws on failure. Sign-out never deletes it.
 struct LiveListingHireStore {
     struct Pending: Codable, Equatable, Sendable {
         let requestID: String
-        let name: String
+        var name: String
         var hireConfirmed: Bool
+        /// The platform refused `name`: the next try sends this request
+        /// under the name it is picked with then.
+        var nameRefused: Bool = false
+        /// Set once the POST succeeded: the hire is made, and only waits for
+        /// Home to open its chat.
+        var assistantID: String? = nil
     }
 
-    private let key: String
-    private let defaults: UserDefaults
+    private let file: URL
 
-    init(matrixUserID: String, defaults: UserDefaults = .standard) {
-        key = Self.key(matrixUserID: matrixUserID)
-        self.defaults = defaults
+    init(matrixUserID: String, directory: URL = Self.defaultDirectory) {
+        file = directory.appendingPathComponent(Self.fileName(matrixUserID: matrixUserID))
     }
 
-    static func key(matrixUserID: String) -> String {
-        "atum.live.listingHire.v2." + SHA256.hash(data: Data(matrixUserID.utf8))
-            .map { String(format: "%02x", $0) }.joined()
+    static var defaultDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ListingHires", isDirectory: true)
     }
 
-    private var all: [String: Pending] {
-        guard let data = defaults.data(forKey: key),
-              let value = try? JSONDecoder().decode([String: Pending].self, from: data) else { return [:] }
+    static func fileName(matrixUserID: String) -> String {
+        SHA256.hash(data: Data(matrixUserID.utf8)).map { String(format: "%02x", $0) }.joined() + ".json"
+    }
+
+    private func all() throws -> [String: Pending] {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
+        let data = try Data(contentsOf: file)
+        guard data.count <= 262_144 else { throw ContractViolation.invalidValue }
+        let value = try JSONDecoder().decode([String: Pending].self, from: data)
+        guard value.count <= 64 else { throw ContractViolation.invalidValue }
         return value
     }
 
-    private func write(_ value: [String: Pending]) {
-        if value.isEmpty { defaults.removeObject(forKey: key); return }
-        defaults.set(try? JSONEncoder().encode(value), forKey: key)
+    private func write(_ value: [String: Pending]) throws {
+        guard value.count <= 64 else { throw ContractViolation.invalidValue }
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(value)
+        #if os(iOS)
+        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        #else
+        try data.write(to: file, options: .atomic)
+        #endif
     }
 
-    func pending(_ listingID: String) -> Pending? { all[listingID] }
+    func pending(_ listingID: String) throws -> Pending? { try all()[listingID] }
 
-    func save(_ pending: Pending, for listingID: String) {
-        var value = all
+    func save(_ pending: Pending, for listingID: String) throws {
+        var value = try all()
         value[listingID] = pending
-        write(value)
+        try write(value)
     }
 
     /// Clears only the request it observed, as the lifecycle store does.
-    func clear(_ listingID: String, requestID: String) {
-        var value = all
+    func clear(_ listingID: String, requestID: String) throws {
+        var value = try all()
         guard value[listingID]?.requestID == requestID else { return }
         value[listingID] = nil
-        write(value)
+        try write(value)
     }
 }
 

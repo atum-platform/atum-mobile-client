@@ -28,6 +28,17 @@ public enum NativeDomainClientFailure: Error, Equatable, Sendable, CustomStringC
 
 /// One roster read plus the optional A38 acknowledgement. The ack echoes the
 /// zone this caller sent or is absent; it is never another owner's value.
+/// Rechecked right before a write's bytes go out, at the first send and at
+/// the resend after a 401 refresh: a token read or a forced refresh can take
+/// long enough for the caller's preconditions (open checkout, the signed-in
+/// account, the live client) to change. `false` sends nothing.
+public typealias NativeDispatchGate = @MainActor () -> Bool
+
+/// A dispatch gate said no: nothing was sent for this attempt.
+public struct NativeDispatchBlocked: Error, Equatable, Sendable {
+    public init() {}
+}
+
 public struct AgentsRead: Sendable {
     public let response: AgentsResponse
     public let timeZoneAck: String?
@@ -857,13 +868,20 @@ public struct AgentsRead: Sendable {
 
     /// `createAgent` with the platform's `cloud_placement`, so a listing hire
     /// can tell a placed assistant from one whose chat is still being set up.
-    public func createAgentPlaced(_ input: AgentCreateRequest) async throws -> AgentCreateResponse {
+    ///
+    /// `dispatchGate` is asked right before each send (the first, and the
+    /// resend after a 401 refresh); when it says no, nothing goes out and
+    /// `NativeDispatchBlocked` is thrown, so a paid hire never leaves after
+    /// its checkout closed or its account changed mid-authorization.
+    public func createAgentPlaced(_ input: AgentCreateRequest,
+                                  dispatchGate: NativeDispatchGate? = nil) async throws -> AgentCreateResponse {
         let body: Data
         do { body = try JSONEncoder().encode(input) }
         catch { throw NativeDomainClientFailure.invalidRequest }
         let created = try await request(AgentCreateResponse.self, url: Self.agentsURL,
                                         method: "POST", body: body,
-                                        acceptsAssistantNameRefusal: true)
+                                        acceptsAssistantNameRefusal: true,
+                                        dispatchGate: dispatchGate)
         let agent = created.agent
         guard !agent.isDefault, agent.status == .active, agent.matrixUser != nil
         else { throw NativeDomainClientFailure.invalidResponse }
@@ -1264,12 +1282,14 @@ public struct AgentsRead: Sendable {
                                        acceptsAssistantNameRefusal: Bool,
                                        maximumRequestBodyBytes: Int = 262_144,
                                        maximumResponseBodyBytes: Int = 262_144,
-                                       acceptedStatuses: Set<Int> = [200]) async throws -> T {
+                                       acceptedStatuses: Set<Int> = [200],
+                                       dispatchGate: NativeDispatchGate? = nil) async throws -> T {
         try await requestWithHeaders(type, url: url, method: method, body: body,
                                      acceptsAssistantNameRefusal: acceptsAssistantNameRefusal,
                                      maximumRequestBodyBytes: maximumRequestBodyBytes,
                                      maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                     acceptedStatuses: acceptedStatuses).value
+                                     acceptedStatuses: acceptedStatuses,
+                                     dispatchGate: dispatchGate).value
     }
 
     private func requestWithHeaders<T: Decodable>(_ type: T.Type, url: URL, method: String, body: Data?,
@@ -1277,7 +1297,8 @@ public struct AgentsRead: Sendable {
                                                   maximumRequestBodyBytes: Int = 262_144,
                                                   maximumResponseBodyBytes: Int = 262_144,
                                                   extraHeaders: [String: String] = [:],
-                                                  acceptedStatuses: Set<Int> = [200])
+                                                  acceptedStatuses: Set<Int> = [200],
+                                                  dispatchGate: NativeDispatchGate? = nil)
         async throws -> (value: T, headers: [String: String]) {
         let response = try await response(url: url, method: method, body: body,
                                           acceptsAssistantNameRefusal: acceptsAssistantNameRefusal,
@@ -1285,7 +1306,8 @@ public struct AgentsRead: Sendable {
                                           maximumRequestBodyBytes: maximumRequestBodyBytes,
                                           maximumResponseBodyBytes: maximumResponseBodyBytes,
                                           extraHeaders: extraHeaders,
-                                          acceptedStatuses: acceptedStatuses)
+                                          acceptedStatuses: acceptedStatuses,
+                                          dispatchGate: dispatchGate)
         return (try decode(type, data: response.body), response.headers)
     }
 
@@ -1308,12 +1330,14 @@ public struct AgentsRead: Sendable {
                           maximumResponseBodyBytes: Int,
                           extraHeaders: [String: String] = [:],
                           acceptedStatuses: Set<Int> = [200],
-                          reportsAuthenticationFailure: Bool = true) async throws -> NativeDomainHTTPResponse {
+                          reportsAuthenticationFailure: Bool = true,
+                          dispatchGate: NativeDispatchGate? = nil) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false,
                                              reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
+        if let dispatchGate, !dispatchGate() { throw NativeDispatchBlocked() }
         let first = try await perform(url: url, token: firstToken, method: method, body: body,
                                       companyWire: companyWire,
                                       maximumRequestBodyBytes: maximumRequestBodyBytes,
@@ -1333,6 +1357,7 @@ public struct AgentsRead: Sendable {
         let refreshedToken = try await authorize(forceRefresh: true,
                                                  reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
+        if let dispatchGate, !dispatchGate() { throw NativeDispatchBlocked() }
         let second = try await perform(url: url, token: refreshedToken, method: method, body: body,
                                        companyWire: companyWire,
                                        maximumRequestBodyBytes: maximumRequestBodyBytes,

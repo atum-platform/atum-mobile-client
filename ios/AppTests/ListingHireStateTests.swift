@@ -182,8 +182,7 @@ import XCTest
     /// Finding 1: the gate's refusal returns to the price, and a price that
     /// isn't positive can never be confirmed.
     func testAClosedGateReturnsToThePriceAndAZeroQuoteCantBeConfirmed() async throws {
-        XCTAssertEqual(ListingHireFlow.phase(after: .refused(.hireRequired(priceProtons: nil)), listing: try listing()),
-                       .confirm(priceProtons: 60_000))
+        XCTAssertEqual(ListingHireFlow.phase(after: .checkoutClosed, quote: 60_000), .confirm(priceProtons: 60_000))
         let flow = ListingHireFlow()
         let runs = Runs([])
         flow.pick(try listing(paid: true, price: 0), name: "Researcher", account: Self.owner, run: runs.run)
@@ -230,13 +229,13 @@ import XCTest
     /// Finding 2: the ledger is keyed by the account's full digest, never
     /// the 32-bit log fingerprint.
     func testTheLedgerKeyIsTheAccountsFullDigest() {
-        let key = LiveListingHireStore.key(matrixUserID: Self.owner)
-        XCTAssertTrue(key.hasPrefix("atum.live.listingHire.v2."))
-        let digest = String(key.dropFirst("atum.live.listingHire.v2.".count))
+        let name = LiveListingHireStore.fileName(matrixUserID: Self.owner)
+        XCTAssertTrue(name.hasSuffix(".json"))
+        let digest = String(name.dropLast(".json".count))
         XCTAssertEqual(digest.count, 64)
         XCTAssertTrue(digest.allSatisfy(\.isHexDigit))
         XCTAssertNotEqual(digest, LiveFlowLog.fingerprint(Self.owner))
-        XCTAssertNotEqual(key, LiveListingHireStore.key(matrixUserID: "@other:atum.test"))
+        XCTAssertNotEqual(name, LiveListingHireStore.fileName(matrixUserID: "@other:atum.test"))
     }
 
     /// Finding 4: a hire placed as `capacity` waits for its chat instead of
@@ -272,33 +271,167 @@ import XCTest
         // Accents count: another Vietnamese name is not a duplicate.
         XCTAssertEqual(ListingAssistantName.name(for: researcher, locale: "vi", others: ["Nha nghien cuu"]),
                        "Nhà nghiên cứu")
-        // An app's name is never a hired assistant's: desktop falls back to
-        // the catalog name for the platform to judge.
-        XCTAssertEqual(ListingAssistantName.name(for: researcher, locale: "en", others: [],
-                                                 apps: ["Research er"]), "Researcher")
+        // An app's name is never a hired assistant's, the catalog name
+        // included: nothing valid is nil, and nothing is sent (r2 finding 6).
+        XCTAssertNil(ListingAssistantName.name(for: researcher, locale: "en", others: [],
+                                               apps: ["Research er"]))
         XCTAssertEqual(ListingAssistantName.name(for: researcher, locale: "vi", others: [],
                                                  apps: ["Researcher"]), "Nhà nghiên cứu")
     }
 
+    private func ledgerDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ListingHireStateTests-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
     func testTheRequestLedgerKeepsOneRequestPerListingUntilItsOwnAnswerClearsIt() throws {
-        let suite = "ListingHireStateTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = LiveListingHireStore(matrixUserID: "@owner:atum.test", defaults: defaults)
+        let directory = try ledgerDirectory()
+        let store = LiveListingHireStore(matrixUserID: Self.owner, directory: directory)
         let id = "open/agents/researcher"
-        XCTAssertNil(store.pending(id))
-        store.save(.init(requestID: "00000000-0000-4000-8000-000000000001", name: "Researcher",
-                         hireConfirmed: false), for: id)
-        var pending = try XCTUnwrap(store.pending(id))
+        XCTAssertNil(try store.pending(id), "no file is an empty ledger")
+        try store.save(.init(requestID: "00000000-0000-4000-8000-000000000001", name: "Researcher",
+                             hireConfirmed: false), for: id)
+        var pending = try XCTUnwrap(try store.pending(id))
         pending.hireConfirmed = true
-        store.save(pending, for: id)
+        pending.assistantID = "6f1c1d8e-3b5a-4c2e-9a7d-1e2f3a4b5c6d"
+        try store.save(pending, for: id)
+        // It survives a relaunch (a new store on the same file).
+        XCTAssertEqual(try LiveListingHireStore(matrixUserID: Self.owner, directory: directory).pending(id), pending)
         // Another account never sees it.
-        XCTAssertNil(LiveListingHireStore(matrixUserID: "@other:atum.test", defaults: defaults).pending(id))
+        XCTAssertNil(try LiveListingHireStore(matrixUserID: "@other:atum.test", directory: directory).pending(id))
         // Only the request it observed is cleared.
-        store.clear(id, requestID: "00000000-0000-4000-8000-000000000002")
-        XCTAssertEqual(store.pending(id)?.hireConfirmed, true)
-        store.clear(id, requestID: pending.requestID)
-        XCTAssertNil(store.pending(id))
+        try store.clear(id, requestID: "00000000-0000-4000-8000-000000000002")
+        XCTAssertEqual(try store.pending(id)?.hireConfirmed, true)
+        try store.clear(id, requestID: pending.requestID)
+        XCTAssertNil(try store.pending(id))
+    }
+
+    /// Review r2 finding 2: an unreadable ledger is unknown, never empty, and
+    /// a write that fails is reported, so the model mints and sends nothing.
+    func testAnUnreadableOrUnwritableLedgerRefusesInsteadOfReadingEmpty() throws {
+        let directory = try ledgerDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent(LiveListingHireStore.fileName(matrixUserID: Self.owner))
+        try Data("not json".utf8).write(to: file)
+        let store = LiveListingHireStore(matrixUserID: Self.owner, directory: directory)
+        XCTAssertThrowsError(try store.pending("open/agents/researcher"))
+        XCTAssertThrowsError(try store.save(.init(requestID: "00000000-0000-4000-8000-000000000001",
+                                                  name: "Researcher", hireConfirmed: false),
+                                            for: "open/agents/researcher"),
+                             "a save over an unreadable ledger would drop its requests")
+        XCTAssertEqual(try Data(contentsOf: file), Data("not json".utf8), "the unreadable ledger was overwritten")
+
+        // A ledger path that can't be written (a file where its folder goes).
+        let blocked = try ledgerDirectory()
+        try Data().write(to: blocked)
+        XCTAssertThrowsError(try LiveListingHireStore(matrixUserID: Self.owner, directory: blocked)
+            .save(.init(requestID: "00000000-0000-4000-8000-000000000001", name: "Researcher",
+                        hireConfirmed: false), for: "open/agents/researcher"))
+    }
+
+    /// Review r2 finding 3: a name refusal keeps the request. The next try
+    /// sends the same UUID under the name picked then; any other stored
+    /// request keeps its own name (the platform refuses a changed one).
+    func testANameRefusalKeepsTheRequestAndTheNextTryRenamesIt() {
+        var stored = LiveListingHireStore.Pending(requestID: "00000000-0000-4000-8000-000000000001",
+                                                  name: "Researcher", hireConfirmed: true)
+        var minted = 0
+        let mint: () -> String? = { minted += 1; return nil }
+        XCTAssertEqual(ListingHireRequestPlan.make(earlier: stored, name: "Researcher 2", hireConfirmed: false,
+                                                   checkoutOpen: true, newRequestID: mint),
+                       .send(stored, fresh: false))
+        stored.nameRefused = true
+        XCTAssertEqual(ListingHireRequestPlan.make(earlier: stored, name: "Researcher 2", hireConfirmed: false,
+                                                   checkoutOpen: true, newRequestID: mint),
+                       .send(.init(requestID: stored.requestID, name: "Researcher 2", hireConfirmed: true),
+                             fresh: false))
+        XCTAssertEqual(minted, 0, "a refused name minted a new request")
+    }
+
+    /// Review r2 finding 5: a closed checkout returns to the price this hire
+    /// showed (the platform's quote, not the catalog's), and a `hire_required`
+    /// with no usable price never enables Hire: it is a retry, whose
+    /// unconfirmed request fetches a fresh quote.
+    func testAClosedCheckoutKeepsTheShownQuoteAndAMissingQuoteNeverEnablesHire() async throws {
+        let flow = ListingHireFlow()
+        let runs = Runs([.refused(.hireRequired(priceProtons: 61_000)), .checkoutClosed,
+                         .refused(.hireRequired(priceProtons: nil)), .refused(.hireRequired(priceProtons: 0)),
+                         .refused(.hireRequired(priceProtons: 62_000))])
+        flow.pick(try listing(), name: "Researcher", account: Self.owner, run: runs.run)
+        await settle(flow)
+        XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 61_000))
+        flow.confirm()
+        await settle(flow)
+        XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 61_000), "the catalog's 60,000 replaced the quote")
+
+        let unquoted = ListingHireFlow()
+        unquoted.pick(try listing(), name: "Researcher", account: Self.owner, run: runs.run)
+        await settle(unquoted)
+        XCTAssertEqual(unquoted.hire?.phase, .failed(nil))
+        unquoted.confirm()
+        unquoted.retry()
+        await settle(unquoted)
+        XCTAssertEqual(unquoted.hire?.phase, .failed(nil), "a zero quote is not a price")
+        unquoted.retry()
+        await settle(unquoted)
+        XCTAssertEqual(unquoted.hire?.phase, .confirm(priceProtons: 62_000))
+        XCTAssertEqual(runs.calls.map(\.confirmed), [false, true, false, false, false],
+                       "a hire was confirmed without a usable quote")
+
+        // No quote shown at all (a stored confirmation): not available, no Hire.
+        XCTAssertEqual(ListingHireFlow.phase(after: .checkoutClosed, quote: nil), .confirm(priceProtons: 0))
+        XCTAssertFalse(ListingHireGate.allowsPaidHire(priceProtons: 0, checkoutOpen: true))
+    }
+
+    /// Review r2 finding 6: no valid name, the name line, nothing sent.
+    func testAListingWithNoValidNameShowsTheNameLineAndSendsNothing() throws {
+        let researcher = try listing()
+        XCTAssertNil(ListingAssistantName.name(for: researcher, locale: "en", others: [], apps: ["Researcher"]))
+        let flow = ListingHireFlow()
+        flow.refuseName(researcher, shownAs: researcher.title(locale: "en"), account: Self.owner)
+        XCTAssertEqual(flow.hire?.phase, .failed(.name))
+        XCTAssertEqual(flow.hire?.name, "Researcher")
+        flow.retry()
+        flow.confirm()
+        XCTAssertEqual(flow.hire?.phase, .failed(.name))
+        flow.reset()
+        XCTAssertNil(flow.hire)
+    }
+
+    /// Review r2 finding 4: Done needs a Home row that opens the hired
+    /// assistant's chat. No room yet, or duplicate plain rooms Home won't
+    /// choose between, is the waiting row, which can't open.
+    func testTheHireIsDoneOnlyWhenHomeOpensItsAssistantsChat() throws {
+        let assistant = try NativeID("6f1c1d8e-3b5a-4c2e-9a7d-1e2f3a4b5c6d")
+        let bot = "@agent-researcher:atum.test"
+        let agents = try NativeAPI.decode(AgentsResponse.self, from: JSONSerialization.data(withJSONObject: [[
+            "id": assistant.rawValue, "identity_id": NSNull(), "display_name": "Researcher",
+            "slug": NSNull(), "avatar": "", "avatar_url": NSNull(), "is_default": false,
+            "lifecycle_revision": 1, "identity_revision": 1, "definition_revision": 1,
+            "status": "active", "principal": assistant.rawValue, "matrixUser": bot,
+        ] as [String: Any]])).agents
+        func room(_ id: String) -> LiveMatrixRoomRow {
+            LiveMatrixRoomRow(
+                roomID: id, displayName: id, avatarURL: nil, latestText: nil, latestPreviewContent: .none,
+                latestSenderID: bot, latestSenderName: nil, latestIsOwn: false, latestIsNotice: false,
+                latestSendState: .sent, latestTimestamp: 1_000, unreadCount: 0, notificationCount: 0,
+                highlightCount: 0, isMarkedUnread: false, isFavourite: false, isMuted: false, isDirect: true,
+                memberUserIDs: [bot], memberCount: 2, roomType: nil, isEncrypted: false)
+        }
+        func rows(_ rooms: [LiveMatrixRoomRow]) -> [LiveProductRoom] {
+            LiveRosterRows.rows(.init(agents: agents, apps: [], rooms: rooms, invites: [], pointers: [:],
+                                      hiddenRooms: MobileHiddenRoomLedger(), locale: "en")).rows
+        }
+        XCTAssertFalse(ListingHireChat.opens(assistant, in: rows([])), "no room yet")
+        XCTAssertTrue(ListingHireChat.opens(assistant, in: rows([room("!one:atum.test")])))
+        XCTAssertFalse(ListingHireChat.opens(assistant, in: rows([room("!one:atum.test"), room("!two:atum.test")])),
+                       "duplicate plain rooms are suppressed by Home")
+        XCTAssertFalse(ListingHireChat.opens(assistant, in: rows([room("!one:atum.test")]),
+                                             quarantined: { $0 == "!one:atum.test" }))
+        XCTAssertFalse(ListingHireChat.opens(try NativeID("00000000-0000-4000-8000-000000000009"),
+                                             in: rows([room("!one:atum.test")])))
     }
 
     func testEveryHireWordIsInThePinnedExportInBothLanguages() throws {

@@ -123,17 +123,19 @@ public struct OpenAgentCatalog: Decodable, Equatable, Sendable {
 /// The platform charges the seat in `matrix_agent_create_finish` (0314),
 /// after the reservation and the MAS identity, and keeps provisioning after
 /// that (definition seed, Hermes, owner snapshot). Any of those later steps
-/// can still answer 400, 403, 404, 409 or 503, so only the name rules' own
-/// refusal (422 with an `assistant_name_*` code, raised by
-/// `matrix_agent_create_begin` before anything is reserved or charged) ends
-/// the request. Every other answer keeps its UUID, and the next try resumes
-/// it: the charge is keyed by the request, so it is never made twice.
+/// can still answer 400, 403, 404, 409 or 503. A name refusal doesn't prove
+/// the request was never charged either: `matrix_agent_create_begin` (0192)
+/// checks the name before it looks the request up, so a replay of a charged
+/// request can be refused for its name too. So no refusal ends a request
+/// that was sent: its UUID stays until the hire succeeds, and the next try
+/// resumes it. The charge is keyed by the request, so it is never made twice.
 public enum OpenAgentHireRefusal: Equatable, Sendable {
     /// Third or later assistant: confirm this price (whole Protons) first.
     case hireRequired(priceProtons: Int64?)
     /// The wallet can't cover the seat.
     case short
-    /// The platform's name rules refused the name, before any charge.
+    /// The platform's name rules refused the name. The request stays; the
+    /// next try may carry a different name under the same UUID.
     case name
     case limit
     case account
@@ -163,15 +165,12 @@ public enum OpenAgentHireRefusal: Equatable, Sendable {
         }
     }
 
-    /// Whether the request stays pending, so the next Hire, Retry or relaunch
-    /// resumes it under the same request ID. Only a refusal the platform makes
-    /// before it reserves or charges anything (the name rules) lets it go.
-    public var keepsRequest: Bool {
-        switch self {
-        case .name: return false
-        case .hireRequired, .short, .limit, .account, .retry: return true
-        }
-    }
+    /// Whether the next try may send a different name under the same
+    /// request. Only a name refusal does: the platform keeps a stored
+    /// request's name (0192 answers a changed one `matrix_conflict`), and a
+    /// request it never stored (begin refused the name before inserting it)
+    /// starts over under the new name. No refusal lets the request go.
+    public var letsNameChange: Bool { self == .name }
 }
 
 /// Where the platform placed a newly created assistant (`cloud_placement`,

@@ -18,6 +18,10 @@ enum ListingHireResult: Equatable, Sendable {
     /// yet: the platform placed it as `capacity` or `pending_trust`, or its
     /// room hasn't reached this phone. The sheet waits for the chat.
     case settingUp(assistantID: NativeID)
+    /// Nothing went out: the hire carries a confirmation (it can spend) and
+    /// Apple checkout was closed, at the start or right before the send.
+    /// The sheet returns to the price it showed, never a substitute.
+    case checkoutClosed
     case refused(OpenAgentHireRefusal)
 }
 
@@ -59,6 +63,10 @@ struct ListingHireState: Equatable, Sendable {
     let account: String
     var phase: ListingHirePhase
     var hireConfirmed: Bool
+    /// The last usable seat price shown for this hire (the catalog's, or the
+    /// platform's `hire_required` quote), whole Protons. Nil until one is
+    /// read; a hire is never confirmed against anything else.
+    var quote: Int64? = nil
 }
 
 /// One hire at a time: the phase it is in, and the moves between phases.
@@ -86,8 +94,20 @@ struct ListingHireState: Equatable, Sendable {
         hire = ListingHireState(
             listing: listing, name: name, account: account,
             phase: listing.hireRequired ? .confirm(priceProtons: listing.seatPriceProtons) : .hiring,
-            hireConfirmed: false)
+            hireConfirmed: false,
+            quote: listing.hireRequired && listing.seatPriceProtons > 0 ? listing.seatPriceProtons : nil)
         if !listing.hireRequired { start(confirmed: false) }
+    }
+
+    /// The person chose a listing whose every name (its title, numbered, and
+    /// the catalog name) is already refused here: the name line, with Back,
+    /// and nothing is sent (`ListingAssistantName.name` is nil).
+    func refuseName(_ listing: OpenAgentListing, shownAs title: String, account: String) {
+        guard !isHiring else { return }
+        generation += 1
+        run = nil
+        hire = ListingHireState(listing: listing, name: title, account: account,
+                                phase: .failed(.name), hireConfirmed: false)
     }
 
     /// Hire at the shown price. A price that isn't positive (a quote that
@@ -153,23 +173,46 @@ struct ListingHireState: Equatable, Sendable {
         Task { @MainActor [weak self] in
             let result = await run(target.listing, target.name, target.hireConfirmed, target.account)
             guard let self, self.generation == token, self.hire?.account == target.account else { return }
-            self.hire?.phase = Self.phase(after: result, listing: target.listing)
+            let phase = Self.phase(after: result, quote: self.hire?.quote)
+            if case let .confirm(price) = phase, price > 0 { self.hire?.quote = price }
+            self.hire?.phase = phase
         }
     }
 
-    static func phase(after result: ListingHireResult, listing: OpenAgentListing) -> ListingHirePhase {
+    /// `quote` is the price this hire last showed. A closed checkout goes
+    /// back to it (none reads as "not available", with no Hire); a
+    /// `hire_required` with no usable price is a retry, whose unconfirmed
+    /// request can't spend and fetches a fresh quote. The catalog's price is
+    /// never substituted for a quote the platform didn't give.
+    static func phase(after result: ListingHireResult, quote: Int64?) -> ListingHirePhase {
         switch result {
         case .hired: .done
         case let .settingUp(assistantID): .settingUp(assistantID: assistantID)
+        case .checkoutClosed: .confirm(priceProtons: quote ?? 0)
         case let .refused(refusal):
             switch refusal {
-            case let .hireRequired(price): .confirm(priceProtons: price ?? listing.seatPriceProtons)
-            case .short: .short(priceProtons: listing.seatPriceProtons)
+            case let .hireRequired(price?) where price > 0: .confirm(priceProtons: price)
+            case .hireRequired: .failed(nil)
+            case .short: .short(priceProtons: quote ?? 0)
             case .name: .failed(.name)
             case .limit: .failed(.limit)
             case .account: .failed(.account)
             case .retry: .failed(nil)
             }
+        }
+    }
+}
+
+/// Whether a hired assistant's chat opens from Home: Home's own roster
+/// projection (`LiveRosterRows.rows`) has a joined, openable row for it. Its
+/// "getting ready" row (no room yet, or duplicate plain rooms Home won't
+/// choose between) can't open, and a hidden room has no row at all.
+enum ListingHireChat {
+    static func opens(_ assistantID: NativeID, in rows: [LiveProductRoom],
+                      quarantined: (String) -> Bool = { _ in false }) -> Bool {
+        rows.contains { row in
+            row.assistant?.id == assistantID.rawValue && row.canOpen && !row.isInvitation
+                && !quarantined(row.id)
         }
     }
 }
@@ -193,6 +236,11 @@ enum ListingHireRequestPlan: Equatable {
         }
         if var pending = earlier {
             pending.hireConfirmed = confirmed
+            // Refused for its name: the same request, under today's name.
+            if pending.nameRefused {
+                pending.name = name
+                pending.nameRefused = false
+            }
             return .send(pending, fresh: false)
         }
         guard let requestID = newRequestID() else { return nil }
@@ -205,17 +253,20 @@ enum ListingHireRequestPlan: Equatable {
 /// that name, so the hire is never refused for it (desktop
 /// `listingAssistantName`). Duplicates compare the platform's name key, so
 /// "Re-searcher" or "Researcher 🔎" also counts. The person can rename it
-/// later in conversation.
+/// later in conversation. The catalog name is the last candidate and is
+/// checked too; nil means none passes, and the sheet shows the name line
+/// without sending anything.
 enum ListingAssistantName {
     static func name(for listing: OpenAgentListing, locale: String, others: [String],
-                     apps: [String] = []) -> String {
+                     apps: [String] = []) -> String? {
         let base = AssistantNameCheck.normalized(listing.title(locale: locale))
-        for candidate in [base] + (2...9).map({ "\(base) \($0)" }) {
+        let catalog = AssistantNameCheck.normalized(listing.displayName)
+        for candidate in [base] + (2...9).map({ "\(base) \($0)" }) + [catalog] {
             if AssistantNameCheck.problem(candidate, others: others, apps: apps) == nil {
                 return AssistantNameCheck.normalized(candidate)
             }
         }
-        return listing.displayName
+        return nil
     }
 }
 

@@ -276,10 +276,14 @@ struct AssistantNewSheet: View {
         guard !shelfDisabled, let flow = actions.hireFlow, let run = actions.hire,
               let account = actions.hireAccount else { return }
         nameFocused = false
-        flow.pick(listing,
-                  name: ListingAssistantName.name(for: listing, locale: design.locale,
-                                                  others: actions.names, apps: actions.appNames),
-                  account: account, run: run)
+        guard let name = ListingAssistantName.name(for: listing, locale: design.locale,
+                                                   others: actions.names, apps: actions.appNames) else {
+            // Every name this listing could take is refused here: say so,
+            // and send nothing.
+            flow.refuseName(listing, shownAs: listing.title(locale: design.locale), account: account)
+            return
+        }
+        flow.pick(listing, name: name, account: account, run: run)
     }
 
     private var handleSection: some View {
