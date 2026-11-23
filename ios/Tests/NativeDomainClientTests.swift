@@ -3559,11 +3559,10 @@ extension NativeDomainClientTests {
     /// absent, never a failed create (the seat is already charged).
     func testListingHireKeepsThePlatformsPlacement() async throws {
         func placed(_ placement: Any?) async throws -> AgentCreateResponse {
-            NativeDomainProtocol.state.handler = { _ in
-                var record = self.agentRecord(matrixUser: true)
-                if let placement { record["cloud_placement"] = placement }
-                return .json(try! JSONSerialization.data(withJSONObject: record))
-            }
+            var record = agentRecord(matrixUser: true)
+            if let placement { record["cloud_placement"] = placement }
+            let data = try JSONSerialization.data(withJSONObject: record)
+            NativeDomainProtocol.state.handler = { _ in .json(data) }
             return try await client(TestAuthorization(first: "hire-token")).createAgentPlaced(AgentCreateRequest(
                 requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
                 listingId: "open/agents/researcher"))
@@ -3571,11 +3570,16 @@ extension NativeDomainClientTests {
         let capacity = try await placed("capacity")
         XCTAssertEqual(capacity.placement, .capacity)
         XCTAssertEqual(capacity.agent.id.rawValue, agentID)
-        XCTAssertEqual(try await placed("pending_trust").placement, .pendingTrust)
-        XCTAssertEqual(try await placed("placed").placement, .placed)
-        XCTAssertNil(try await placed("somewhere_new").placement)
-        XCTAssertNil(try await placed(7).placement)
-        XCTAssertNil(try await placed(nil).placement)
+        let pendingTrust = try await placed("pending_trust")
+        XCTAssertEqual(pendingTrust.placement, .pendingTrust)
+        let placedNow = try await placed("placed")
+        XCTAssertEqual(placedNow.placement, .placed)
+        let unknown = try await placed("somewhere_new")
+        XCTAssertNil(unknown.placement)
+        let malformed = try await placed(7)
+        XCTAssertNil(malformed.placement)
+        let absent = try await placed(nil)
+        XCTAssertNil(absent.placement)
     }
 
     func testHireRefusalsMapAsDesktopsDo() async throws {

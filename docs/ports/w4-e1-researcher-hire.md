@@ -270,4 +270,28 @@ names too; that is outside this fix round.
 
 ### Fix round verification
 
-Pending: filled in from the locked run below.
+Each run went through the shared lock, from this worktree, with the same settings
+as above (`-jobs 2`, derived data in `/Volumes/AtumTestFlight/dd-w4-e1`, SPM clones
+in `/Volumes/AtumTestFlight/spm` with `-disableAutomaticPackageResolution`, one
+simulator `939B69F8`, one test worker). The script is
+`/Volumes/AtumTestFlight/dd-w4-e1/fix-verify.sh` (`all`, `swift` or `noui`).
+
+| Check | Run | Result |
+| ----- | --- | ------ |
+| `swift test` (whole package) | fix1, at `3f77fb7` | failed to compile: the new placement test used `try await` inside `XCTAssert` autoclosures. Fixed by binding each answer first |
+| Debug simulator build (`build-for-testing`) of the merged head plus the fixes | fix1 | succeeded |
+| AtumMobileTests: `ListingHireStateTests` (16, 6 new) and `StoreCommercePresentationTests` (17) | fix1 | 33 tests, 0 failures |
+| UI: `ListingHireUITests`, en and vi × light and dark, with the new capacity walk | fix1 | passed (877 s) |
+| `swift test` (whole package) | fix2 | PENDING |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | final | PENDING |
+
+Screenshots (24, run fix1):
+`/Volumes/AtumTestFlight/dd-w4-e1/shots-fix/ListingHireUITests.hire-{en,vi}-{light,dark}-{1-list,2-hiring,3-error,4-done,5-confirm,6-setting-up}.png`.
+`6-setting-up` is the new state: "Researcher is getting ready…" / "Nhà nghiên cứu
+đang khởi động…" with a spinner and Done. Logs and result bundles:
+`swift-test-fix{1,2}.log`, `debug-build-fix1.*`, `app-tests-fix1.*`, `ui-hire-fix1.*`.
+
+Not verified here: a live hire (it needs the owner's go), the account-change path
+on a device (covered by `ListingHireStateTests` only), the capacity → done
+transition with a real room arriving (the scripted host never opens the room), and
+Top up → confirm with open checkout.
