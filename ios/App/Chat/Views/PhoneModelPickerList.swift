@@ -187,7 +187,7 @@ struct PhoneModelPickerList: View {
                 .buttonStyle(.atumSecondary)
                 .accessibilityLabel(AccountConnectionsWords.text(AccountConnectionsCopy.sheetTitle(plan),
                                                                  design: design))
-                .accessibilityIdentifier("phone.model.plan." + plan.rawValue + ".connect")
+                .accessibilityIdentifier("phone.model.plan." + plan.pickerID + ".connect")
                 // At accessibility sizes Connect goes under the words, as in Settings.
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
@@ -210,7 +210,7 @@ struct PhoneModelPickerList: View {
                 .frame(minHeight: 52)
                 .listRowBackground(atum.color(.cell, scheme: scheme))
                 .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("phone.model.plan." + plan.rawValue)
+                .accessibilityIdentifier("phone.model.plan." + plan.pickerID)
             }
         }
     }
@@ -406,21 +406,23 @@ struct PhoneModelPickerList: View {
     /// new level, through the same fenced save a model pick uses.
     private func thinkingSection(_ thinking: PhoneModelPickerProjection.Thinking) -> some View {
         let shown = savingEffort ?? thinking.current
-        let level = Binding<ManagedModelEffort>(get: { shown }, set: { selectEffort($0) })
+        let level = Binding<ManagedModelEffort?>(get: { shown }, set: { if let value = $0 { selectEffort(value) } })
         return Section {
             VStack(alignment: .leading, spacing: 8) {
                 Picker(copy.text(.effort), selection: level) {
                     ForEach(thinking.levels, id: \.self) { each in
-                        Text(verbatim: copy.effortName(each)).tag(each)
+                        Text(verbatim: copy.effortName(each)).tag(Optional(each))
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .disabled(savingRowID != nil || savingEffort != nil)
                 .accessibilityIdentifier("phone.model.thinking")
-                Text(verbatim: copy.effortHelp(shown))
-                    .font(.footnote)
-                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                if let shown, let help = copy.effortHelp(shown) {
+                    Text(verbatim: help)
+                        .font(.footnote)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                }
                 if shown == .high {
                     Text(verbatim: copy.text(.effortProtons))
                         .font(.footnote)

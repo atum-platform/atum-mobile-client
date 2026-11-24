@@ -12,12 +12,9 @@ public enum PhoneModelPickerProjection {
             case `default`
         }
 
-        /// Why a subscription's model is listed but cannot be chosen now, in
-        /// the desktop's two states for a cloud assistant (`model-picker.tsx`):
-        /// a ChatGPT plan no owner Mac relays to the cloud yet
-        /// (`chatgptInWork`), and an OpenCode Go connection that was
-        /// disconnected (`modelsSignedOut`).
+        /// Why a subscription's model is listed but cannot be chosen now.
         public enum Unavailable: Equatable, Sendable {
+            case loading
             case notReady
             case signedOut
         }
@@ -118,7 +115,7 @@ public enum PhoneModelPickerProjection {
     public static func cloud(_ snapshot: ManagedModelSnapshot) -> [Row] {
         let offers = Dictionary(uniqueKeysWithValues: snapshot.models.map { ($0.alias, $0) })
         return lineupRows { alias in
-            let ready = offers[alias]?.eligibility == .ready
+            let ready = offers[alias]?.eligibility == .ready && offers[alias]?.selectionEffort != nil
             return (selected: snapshot.choice.model == alias, selectable: ready,
                     badges: ready && alias == ManagedModelLineup.defaultAlias ? [.default] : [])
         }
@@ -201,7 +198,8 @@ public enum PhoneModelPickerProjection {
             model.eligibility == .ready
                 && ManagedModelLineup.servedAliases.contains(model.alias) ? model.alias : nil
         })
-        let eligible = fromOffer.union(cloudEligibleAliases ?? [])
+        let unknownEfforts = (offer?.models ?? []).filter { $0.selectionEffort == nil }.map(\.alias)
+        let eligible = fromOffer.union(cloudEligibleAliases ?? []).subtracting(unknownEfforts)
         let fallback: Set<String> = eligible.isEmpty && offer == nil
             ? [ManagedModelLineup.defaultAlias] : []
         return self.destination(destination, destination: destinationID,
@@ -227,7 +225,8 @@ public enum PhoneModelPickerProjection {
     /// choice stays read-only.
     public static func subscriptions(_ snapshot: ManagedModelDestinationSnapshot,
                                      destination: ManagedModelDestinationID,
-                                     account: PhoneSubscriptionAccount? = nil) -> [Row] {
+                                     account: PhoneSubscriptionAccount? = nil,
+                                     loading: Bool = false) -> [Row] {
         let saved = snapshot.choices.first { $0.destination == destination && $0.source.isSubscription }
         guard destination.isCloud else { return saved.map { [savedRow($0, unavailable: nil)] } ?? [] }
 
@@ -235,9 +234,10 @@ public enum PhoneModelPickerProjection {
                     _ models: [SubscriptionModelDescriptor]) -> [Row] {
             models.map { model in
                 let current = saved?.source == source && saved?.model == model.id
+                let effort = model.writeEffort
                 return Row(favoriteID: nil, source: source, model: model.id,
-                           displayName: model.displayName, selected: current, selectable: !current,
-                           isSubscription: true, subscriptionEffort: model.writeEffort)
+                           displayName: model.displayName, selected: current, selectable: !current && effort != nil,
+                           isSubscription: true, subscriptionEffort: effort)
             }
         }
 
@@ -246,7 +246,7 @@ public enum PhoneModelPickerProjection {
         switch account?.chatGPT?.state {
         case .enabled?: rows += served(.chatGPTPlan, account?.chatGPT?.models ?? [])
         case .disabled?: rows += savedPlan.map { [savedRow($0, unavailable: .notReady)] } ?? []
-        case nil: rows += savedPlan.map { [savedRow($0, unavailable: nil)] } ?? []
+        case nil: rows += savedPlan.map { [savedRow($0, unavailable: loading ? .loading : nil)] } ?? []
         }
         let savedGo = saved?.source == .opencodeGo ? saved : nil
         switch account?.openCodeGo?.state {
@@ -261,7 +261,7 @@ public enum PhoneModelPickerProjection {
     /// only while nothing says it stopped working, and never choosable.
     private static func savedRow(_ choice: ManagedModelDestinationChoice, unavailable: Row.Unavailable?) -> Row {
         Row(favoriteID: nil, source: choice.source, model: choice.model, displayName: choice.model,
-            selected: unavailable == nil, selectable: false, isSubscription: true,
+            selected: unavailable == nil || unavailable == .loading, selectable: false, isSubscription: true,
             unavailable: unavailable)
     }
 
@@ -321,24 +321,23 @@ public enum PhoneModelPickerProjection {
     public struct Thinking: Equatable, Sendable {
         public let model: String
         public let levels: [ManagedModelEffort]
-        public let current: ManagedModelEffort
+        public let current: ManagedModelEffort?
 
-        public init(model: String, levels: [ManagedModelEffort], current: ManagedModelEffort) {
+        public init(model: String, levels: [ManagedModelEffort], current: ManagedModelEffort?) {
             self.model = model
             self.levels = levels
             self.current = current
         }
     }
 
-    /// Nothing is offered for a model that cannot be written now (not eligible)
-    /// or that accepts one level only: a control with one choice is not a control.
+    /// Show recognized levels the model can accept. A single option remains
+    /// actionable when a future effort is currently selected.
     public static func thinking(_ snapshot: ManagedModelSnapshot) -> Thinking? {
         guard let offer = snapshot.models.first(where: { $0.alias == snapshot.choice.model }),
               offer.eligibility == .ready else { return nil }
-        let levels = ManagedModelEffort.allCases.filter { offer.efforts.contains($0) }
-        guard levels.count > 1 else { return nil }
-        return Thinking(model: offer.alias, levels: levels,
-                        current: snapshot.choice.effort ?? offer.defaultEffort)
+        let levels = offer.efforts
+        guard !levels.isEmpty, levels.count > 1 || snapshot.currentEffort == nil else { return nil }
+        return Thinking(model: offer.alias, levels: levels, current: snapshot.currentEffort)
     }
 
     /// The write boundary for a thinking change, as `canSelectAtumModel` is for a

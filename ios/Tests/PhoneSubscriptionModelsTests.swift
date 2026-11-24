@@ -106,6 +106,16 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         XCTAssertEqual(relayStatus.models.map(\.writeEffort), [.medium, .high, .low])
     }
 
+    func testFutureEffortsKeepTheCatalogAndTheKnownWritableModels() throws {
+        let relayStatus = try decode(ChatGPTRelayStatus.self, relay(enabled: true, models: [
+            model("a", "A", efforts: ["future", "extra_high", "maximum", "low"], defaultEffort: "future"),
+            model("b", "B", efforts: ["future"], defaultEffort: "medium"),
+        ]))
+        XCTAssertEqual(relayStatus.models[0].efforts, [.xhigh, .max, .low])
+        XCTAssertEqual(relayStatus.models[0].writeEffort, .low)
+        XCTAssertNil(relayStatus.models[1].writeEffort)
+    }
+
     // MARK: The write
 
     func testAPlanPickIs15AndAnOpencodePickIs14OnTheCloud() throws {
@@ -129,6 +139,8 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         }
         XCTAssertThrowsError(try ManagedModelSubscriptionWrite(requestId: id, snapshot: saved, source: .atum,
                                                                model: "nguyet-thuc", effort: .medium))
+        XCTAssertThrowsError(try ManagedModelSubscriptionWrite(requestId: id, snapshot: saved, source: .chatGPTPlan,
+                                                               model: "gpt-6.1", effort: .max))
     }
 
     // MARK: The picker rows
@@ -194,6 +206,15 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
             XCTAssertFalse(rows[0].selectable)
             XCTAssertNil(rows[0].unavailable)
         }
+    }
+
+    func testASavedPlanShowsLoadingOnlyWhileItsStatusIsBeingRead() throws {
+        let saved = try snapshot(cloudChoice: ["destination": "cloud", "source": "chatgpt_plan",
+                                               "model": "gpt-6.1", "effort": "medium"])
+        let rows = PhoneModelPickerProjection.subscriptions(saved, destination: cloud, loading: true)
+        XCTAssertEqual(rows.map(\.unavailable), [.loading])
+        XCTAssertEqual(rows.map(\.selectable), [false])
+        XCTAssertTrue(rows[0].selected)
     }
 
     func testAMacDestinationsPlanStaysReadOnly() throws {

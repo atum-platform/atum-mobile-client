@@ -1107,7 +1107,7 @@ import AtumChat
         let snapshot = try await value.managedModelDestinations(agentPrincipal: principal)
         let write = try ManagedModelSubscriptionWrite(requestId: requestID, snapshot: snapshot,
                                                       source: .chatGPTPlan, model: "gpt-6.1",
-                                                      effort: relay.models[0].writeEffort)
+                                                      effort: XCTUnwrap(relay.models[0].writeEffort))
         let saved = try await value.writeManagedModelSubscription(agentPrincipal: principal, value: write)
         XCTAssertEqual(saved.revision, 4)
         XCTAssertEqual(saved.choice(for: try ManagedModelDestinationID("cloud"))?.source, .chatGPTPlan)

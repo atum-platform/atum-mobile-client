@@ -10,7 +10,6 @@ enum PhonePickerCopyKey: String, CaseIterable {
     case changesCloudAssistant = "src.matrix.model-picker-copy.COPY.changesCloudAssistant"
     case changesConversation = "src.matrix.model-picker-copy.COPY.changesConversation"
     case clearSearch = "src.matrix.model-picker-copy.COPY.clearSearch"
-    case chatgptInWork = "src.matrix.model-picker-copy.COPY.chatgptInWork"
     case cloud = "src.matrix.model-picker-copy.COPY.cloud"
     case current = "src.matrix.model-picker-copy.COPY.current"
     case effort = "src.matrix.model-picker-copy.COPY.effort"
@@ -20,6 +19,7 @@ enum PhonePickerCopyKey: String, CaseIterable {
     case keyAccount = "src.matrix.model-picker-copy.COPY.keyAccount"
     case modelList = "src.matrix.model-picker-copy.COPY.modelList"
     case modelsFailed = "src.matrix.model-picker-copy.COPY.modelsFailed"
+    case modelsLoading = "src.matrix.model-picker-copy.COPY.modelsLoading"
     case modelsRetry = "src.matrix.model-picker-copy.COPY.modelsRetry"
     case modelsSignedOut = "src.matrix.model-picker-copy.COPY.modelsSignedOut"
     case modelsUnavailable = "src.matrix.model-picker-copy.COPY.modelsUnavailable"
@@ -48,6 +48,11 @@ enum PhonePickerCopyKey: String, CaseIterable {
     case taglineHard = "src.matrix.model-picker-copy.COPY.taglineHard"
     case taglineFlagship = "src.matrix.model-picker-copy.COPY.taglineFlagship"
     case subscriptions = "src.matrix.model-picker-copy.COPY.subscriptions"
+    // W4-C6 exports the remaining levels from model-picker-labels.json.
+    case effortNone = "src.matrix.model-picker-copy.COPY.efforts.none"
+    case effortMinimal = "src.matrix.model-picker-copy.COPY.efforts.minimal"
+    case effortXhigh = "src.matrix.model-picker-copy.COPY.efforts.xhigh"
+    case effortMax = "src.matrix.model-picker-copy.COPY.efforts.max"
 }
 
 enum PhoneModelPickerStateCopyKey: String, CaseIterable {
@@ -74,8 +79,10 @@ struct PhoneModelPickerCopy {
     /// Desktop's words for a subscription model the cloud cannot run now.
     func unavailable(_ reason: PhoneModelPickerProjection.Row.Unavailable) -> String {
         switch reason {
+        case .loading:
+            text(.modelsLoading)
         case .notReady:
-            text(.chatgptInWork)
+            text(.modelsUnavailable)
         case .signedOut:
             text(.modelsSignedOut)
         }
@@ -90,14 +97,22 @@ struct PhoneModelPickerCopy {
         }
     }
 
-    /// "Quick", "Balanced", "Thorough": the level's name.
+    /// The same Thinking labels used by the desktop picker.
     func effortName(_ level: ManagedModelEffort) -> String {
-        design.text("src.matrix.model-picker-copy.COPY.efforts." + level.rawValue)
+        switch level {
+        case .none: text(.effortNone)
+        case .minimal: text(.effortMinimal)
+        case .xhigh: text(.effortXhigh)
+        case .max: text(.effortMax)
+        case .low, .medium, .high:
+            design.text("src.matrix.model-picker-copy.COPY.efforts." + level.rawValue)
+        }
     }
 
-    /// One line on what the level does.
-    func effortHelp(_ level: ManagedModelEffort) -> String {
-        design.text("src.matrix.model-picker-copy.COPY.effortHelp." + level.rawValue)
+    /// The desktop exports help for the three Atum levels.
+    func effortHelp(_ level: ManagedModelEffort) -> String? {
+        let key = "src.matrix.model-picker-copy.COPY.effortHelp." + level.rawValue
+        return design.copy.contains(key) ? design.text(key) : nil
     }
 }
 
@@ -110,6 +125,7 @@ enum PhoneModelPickerPendingCopy {
     static let keys: [PhonePickerCopyKey] = [
         .allConnections, .badgeDefault, .defaultsAndFavorites, .favoritesOnly, .filter, .filterWith,
         .taglineEveryday, .taglineHard, .taglineFlagship, .subscriptions,
+        .effortNone, .effortMinimal, .effortXhigh, .effortMax,
     ]
 
     private static let tables: [String: [PhonePickerCopyKey: String]] = [
@@ -124,6 +140,10 @@ enum PhoneModelPickerPendingCopy {
             .taglineHard: "Good for hard tasks",
             .taglineFlagship: "The most powerful model",
             .subscriptions: "Subscriptions",
+            .effortNone: "Off",
+            .effortMinimal: "Instant",
+            .effortXhigh: "Extra thorough",
+            .effortMax: "Maximum",
         ],
         "vi": [
             .allConnections: "Mọi kết nối",
@@ -136,6 +156,10 @@ enum PhoneModelPickerPendingCopy {
             .taglineHard: "Phù hợp với tác vụ khó khăn",
             .taglineFlagship: "Mô hình quyền năng nhất",
             .subscriptions: "Gói đăng ký",
+            .effortNone: "Tắt",
+            .effortMinimal: "Tức thì",
+            .effortXhigh: "Rất kỹ",
+            .effortMax: "Tối đa",
         ],
         "ja": [
             .allConnections: "すべての接続",
@@ -148,6 +172,10 @@ enum PhoneModelPickerPendingCopy {
             .taglineHard: "難しいタスクに適しています",
             .taglineFlagship: "最も強力なモデル",
             .subscriptions: "サブスクリプション",
+            .effortNone: "オフ",
+            .effortMinimal: "即答",
+            .effortXhigh: "さらにじっくり",
+            .effortMax: "最大",
         ],
         "zh": [
             .allConnections: "所有连接",
@@ -160,6 +188,10 @@ enum PhoneModelPickerPendingCopy {
             .taglineHard: "适合困难任务",
             .taglineFlagship: "最强大的模型",
             .subscriptions: "订阅",
+            .effortNone: "关闭",
+            .effortMinimal: "即时",
+            .effortXhigh: "更深入",
+            .effortMax: "最大",
         ],
         "zh-Hant": [
             .allConnections: "所有連接",
@@ -172,6 +204,10 @@ enum PhoneModelPickerPendingCopy {
             .taglineHard: "適合困難任務",
             .taglineFlagship: "最強大的模型",
             .subscriptions: "訂閱",
+            .effortNone: "關閉",
+            .effortMinimal: "即時",
+            .effortXhigh: "更深入",
+            .effortMax: "最大",
         ],
     ]
 

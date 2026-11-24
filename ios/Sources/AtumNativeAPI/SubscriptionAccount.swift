@@ -35,7 +35,8 @@ public struct SubscriptionModelDescriptor: Decodable, Equatable, Sendable {
     public let id: String
     public let displayName: String
     public let efforts: [ManagedModelEffort]
-    public let defaultEffort: ManagedModelEffort
+    public let defaultEffort: ManagedModelEffort?
+    private let usesDefaultOnly: Bool
     public let contextBudget: Int64
     public let outputBudget: Int64
 
@@ -44,21 +45,28 @@ public struct SubscriptionModelDescriptor: Decodable, Equatable, Sendable {
         try c.closed(["id", "displayName", "efforts", "defaultEffort", "contextBudget", "outputBudget"])
         id = try c.string("id", minimum: 1, maximum: 200, pattern: "[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
         displayName = try c.string("displayName", minimum: 1, maximum: 120)
-        efforts = try c.value("efforts")
-        guard efforts.count <= 3, Set(efforts).count == efforts.count else {
+        let ids: [String] = try c.value("efforts")
+        guard Set(ids).count == ids.count else {
             throw ContractViolation.invalidValue
         }
-        defaultEffort = try c.value("defaultEffort")
+        var seen = Set<ManagedModelEffort>()
+        efforts = ids.compactMap(ManagedModelEffort.init(wireID:)).filter { seen.insert($0).inserted }
+        usesDefaultOnly = ids.isEmpty
+        defaultEffort = try ManagedModelEffort(wireID: c.value("defaultEffort"))
         contextBudget = try c.integer("contextBudget", minimum: 1)
         outputBudget = try c.integer("outputBudget", minimum: 1)
     }
 
     /// The level a pick writes: the model's default when it accepts it (or
     /// lists no levels, where the server accepts only its default), else the
-    /// first level it lists. The platform refuses any other level
-    /// (`0336_chatgpt_relay.sql`, `effort_unavailable`).
-    public var writeEffort: ManagedModelEffort {
-        efforts.isEmpty || efforts.contains(defaultEffort) ? defaultEffort : efforts[0]
+    /// first listed level the destination write profile accepts.
+    public var writeEffort: ManagedModelEffort? {
+        if let defaultEffort,
+           defaultEffort.isCloudSubscriptionWriteEffort,
+           usesDefaultOnly || efforts.contains(defaultEffort) {
+            return defaultEffort
+        }
+        return efforts.first(where: \.isCloudSubscriptionWriteEffort)
     }
 }
 

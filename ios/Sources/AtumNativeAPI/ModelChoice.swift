@@ -149,7 +149,30 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
 }
 
 public enum ManagedModelEffort: String, Codable, CaseIterable, Sendable {
-    case low, medium, high
+    case none, minimal, low, medium, high, xhigh, max
+
+    init?(wireID: String) {
+        switch wireID {
+        case "off": self = .none
+        case "extra-high", "extra_high": self = .xhigh
+        case "maximum": self = .max
+        default: self.init(rawValue: wireID)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let id = try decoder.singleValueContainer().decode(String.self)
+        guard let effort = Self(wireID: id) else { throw ContractViolation.invalidValue }
+        self = effort
+    }
+
+    /// The 1.4 and 1.5 cloud subscription write contracts predate the wider vocabulary.
+    var isCloudSubscriptionWriteEffort: Bool {
+        switch self {
+        case .low, .medium, .high: true
+        default: false
+        }
+    }
 }
 
 /// The two live Atum aliases and the announced third row are product names,
@@ -243,8 +266,11 @@ public enum ManagedModelEligibility: Decodable, Equatable, Sendable {
 
 public struct ManagedModelOffer: Decodable, Equatable, Identifiable, Sendable {
     public let alias, displayName: String
+    private let effortIDs: [String]
+    fileprivate let defaultEffortID: String
     public let efforts: [ManagedModelEffort]
-    public let defaultEffort: ManagedModelEffort
+    public var defaultEffort: ManagedModelEffort? { ManagedModelEffort(wireID: defaultEffortID) }
+    public var selectionEffort: ManagedModelEffort? { defaultEffort ?? efforts.first }
     public let eligibility: ManagedModelEligibility
     public var id: String { alias }
 
@@ -259,12 +285,17 @@ public struct ManagedModelOffer: Decodable, Equatable, Identifiable, Sendable {
                          pattern: "[A-Za-z0-9][A-Za-z0-9._/-]*")
         _ = try c.integer("contextBudget", minimum: 1)
         _ = try c.integer("outputBudget", minimum: 1)
-        efforts = try c.value("efforts")
-        guard (1...3).contains(efforts.count), Set(efforts).count == efforts.count else {
+        let ids: [String] = try c.value("efforts")
+        guard !ids.isEmpty, Set(ids).count == ids.count else {
             throw ContractViolation.invalidValue
         }
-        defaultEffort = try c.value("defaultEffort")
-        guard efforts.contains(defaultEffort) else { throw ContractViolation.invariant }
+        effortIDs = ids
+        let knownEfforts = Set(ids.compactMap(ManagedModelEffort.init(wireID:)))
+        efforts = ManagedModelEffort.allCases.filter(knownEfforts.contains)
+        defaultEffortID = try c.value("defaultEffort")
+        if let level = ManagedModelEffort(wireID: defaultEffortID), !knownEfforts.contains(level) {
+            throw ContractViolation.invariant
+        }
         _ = try c.value("cost", as: ManagedModelCost.self)
         eligibility = try c.value("eligibility")
         let modalities: [String] = try c.value("inputModalities")
@@ -272,6 +303,12 @@ public struct ManagedModelOffer: Decodable, Equatable, Identifiable, Sendable {
               modalities.contains("text"),
               Set(modalities).isSubset(of: ["text", "image", "video", "file", "audio"]),
               try c.value("supportsTools", as: Bool.self) else { throw ContractViolation.invalidValue }
+    }
+
+    /// Labels group aliases, while a write uses the token the model advertised.
+    fileprivate func effortID(for effort: ManagedModelEffort) -> String? {
+        effortIDs.first { $0 == effort.rawValue }
+            ?? effortIDs.first { ManagedModelEffort(wireID: $0) == effort }
     }
 }
 
@@ -289,12 +326,17 @@ private struct ManagedModelCost: Decodable {
 
 public struct ManagedModelChoice: Codable, Equatable, Sendable {
     public let model: String
-    public let effort: ManagedModelEffort?
+    fileprivate let effortID: String?
+    public var effort: ManagedModelEffort? { effortID.flatMap(ManagedModelEffort.init(wireID:)) }
 
     public init(model: String, effort: ManagedModelEffort?) throws {
+        try self.init(model: model, effortID: effort?.rawValue)
+    }
+
+    fileprivate init(model: String, effortID: String?) throws {
         self.model = try checkedString(model, minimum: 1, maximum: 40,
                                        pattern: "[a-z0-9][a-z0-9-]*")
-        self.effort = effort
+        self.effortID = effortID
     }
 
     public init(from decoder: Decoder) throws {
@@ -302,7 +344,7 @@ public struct ManagedModelChoice: Codable, Equatable, Sendable {
         try c.closed(["v", "source", "model", "effort"])
         guard try c.value("v", as: Int.self) == 2,
               try c.value("source", as: String.self) == "atum" else { throw ContractViolation.invalidValue }
-        try self.init(model: c.value("model"), effort: c.optional("effort"))
+        try self.init(model: c.value("model"), effortID: c.optional("effort"))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -310,7 +352,7 @@ public struct ManagedModelChoice: Codable, Equatable, Sendable {
         try c.encode(2, forKey: Field("v"))
         try c.encode("atum", forKey: Field("source"))
         try c.encode(model, forKey: Field("model"))
-        if let effort { try c.encode(effort, forKey: Field("effort")) }
+        try c.encodeIfPresent(effortID, forKey: Field("effort"))
     }
 }
 
@@ -322,6 +364,7 @@ public struct ManagedModelSnapshot: Decodable, Equatable, Sendable {
     public let policyVersion, policyDigest: String
     public let choice: ManagedModelChoice
     public let models: [ManagedModelOffer]
+    public let currentEffort: ManagedModelEffort?
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
@@ -339,12 +382,16 @@ public struct ManagedModelSnapshot: Decodable, Equatable, Sendable {
         policyDigest = try c.string("policyDigest", minimum: 64, maximum: 64, pattern: "[a-f0-9]{64}")
         choice = try c.value("choice")
         models = try c.value("models")
+        let selectedModel = choice.model
         guard (1...16).contains(models.count), Set(models.map(\.alias)).count == models.count,
-              let selected = models.first(where: { $0.alias == choice.model }) else {
+              let selected = models.first(where: { $0.alias == selectedModel }) else {
             throw ContractViolation.invariant
         }
-        let effectiveEffort = choice.effort ?? selected.defaultEffort
-        guard selected.efforts.contains(effectiveEffort) else { throw ContractViolation.invariant }
+        let effectiveEffort = ManagedModelEffort(wireID: choice.effortID ?? selected.defaultEffortID)
+        if let effectiveEffort, !selected.efforts.contains(effectiveEffort) {
+            throw ContractViolation.invariant
+        }
+        currentEffort = effectiveEffort
         let runtimes: [ManagedCloudRuntime] = try c.value("runtimes")
         guard runtimes.count == 1 else { throw ContractViolation.invalidValue }
         let grant: ManagedModelGrant = try c.value("grant")
@@ -352,7 +399,8 @@ public struct ManagedModelSnapshot: Decodable, Equatable, Sendable {
         switch (grant, selected.eligibility) {
         case let (.active(alias, model, effort, _, context, output, maxTurn), .ready):
             let expectedAlias = source == .default ? "default" : selected.alias
-            guard alias == expectedAlias, model == selected.alias, effort == effectiveEffort,
+            guard alias == expectedAlias, model == selected.alias,
+                  effort == nil || effectiveEffort == nil || effort == effectiveEffort,
                   context > 0, output > 0, maxTurn > 0 else { throw ContractViolation.invariant }
         case let (.unavailable(reason, _), .unavailable(expected)):
             guard reason == expected else { throw ContractViolation.invariant }
@@ -370,7 +418,7 @@ private struct ManagedCloudRuntime: Decodable {
 }
 
 private enum ManagedModelGrant: Decodable {
-    case active(alias: String, model: String, effort: ManagedModelEffort,
+    case active(alias: String, model: String, effort: ManagedModelEffort?,
                 digest: String, context: Int64, output: Int64, maxTurn: Int64)
     case unavailable(ManagedModelEligibilityReason, digest: String)
 
@@ -390,7 +438,7 @@ private enum ManagedModelGrant: Decodable {
             self = .active(
                 alias: try c.string("alias", minimum: 1, maximum: 40),
                 model: try c.string("model", minimum: 1, maximum: 40),
-                effort: try c.value("effort"),
+                effort: try ManagedModelEffort(wireID: c.value("effort")),
                 digest: try c.string("policyDigest", minimum: 64, maximum: 64, pattern: "[a-f0-9]{64}"),
                 context: try c.integer("contextBudget", minimum: 1),
                 output: try c.integer("outputBudget", minimum: 1),
@@ -415,13 +463,13 @@ public struct ManagedModelWrite: Encodable, Equatable, Sendable {
     public init(requestId: NativeID, snapshot: ManagedModelSnapshot,
                 model: String, effort: ManagedModelEffort) throws {
         guard let offer = snapshot.models.first(where: { $0.alias == model }),
-              offer.eligibility == .ready, offer.efforts.contains(effort) else {
+              offer.eligibility == .ready, let effortID = offer.effortID(for: effort) else {
             throw ContractViolation.invalidValue
         }
         self.requestId = requestId
         expectedRevision = snapshot.revision
         policyDigest = snapshot.policyDigest
-        choice = try ManagedModelChoice(model: model, effort: effort)
+        choice = try ManagedModelChoice(model: model, effortID: effortID)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -529,33 +577,21 @@ public struct ManagedModelDestinationChoice: Codable, Equatable, Sendable {
         case .atum:
             self.model = try checkedString(model, minimum: 1, maximum: 40,
                                            pattern: "[a-z0-9][a-z0-9-]*")
-            guard ManagedModelEffort(rawValue: effort) != nil else {
-                throw ContractViolation.invalidValue
-            }
         case .opencodeGo:
             // 1.4 widens only the cloud destination to the account-wide
             // subscription; a Mac may not name it.
             guard destination.isCloud else { throw ContractViolation.invariant }
             self.model = try checkedString(model, minimum: 1, maximum: 200,
                                            pattern: "[A-Za-z0-9][A-Za-z0-9._/-]*")
-            guard ManagedProductEffort(rawValue: effort) != nil else {
-                throw ContractViolation.invalidValue
-            }
         case .chatGPTPlan:
             // model-choice/1.5 adds the account's ChatGPT relay to the cloud.
             // The same source remains valid for a Mac's local subscription.
             self.model = try checkedString(model, minimum: 1, maximum: 200,
                                            pattern: "[A-Za-z0-9][A-Za-z0-9._/-]*")
-            guard ManagedProductEffort(rawValue: effort) != nil else {
-                throw ContractViolation.invalidValue
-            }
         case .ownKey:
             guard !destination.isCloud else { throw ContractViolation.invariant }
             self.model = try checkedString(model, minimum: 1, maximum: 200,
                                            pattern: "[A-Za-z0-9][A-Za-z0-9._/-]*")
-            guard ManagedProductEffort(rawValue: effort) != nil else {
-                throw ContractViolation.invalidValue
-            }
         }
         self.effort = effort
     }
@@ -579,7 +615,7 @@ public struct ManagedModelDestinationChoice: Codable, Equatable, Sendable {
 
     public var managedEffort: ManagedModelEffort? {
         guard source == .atum else { return nil }
-        return ManagedModelEffort(rawValue: effort)
+        return ManagedModelEffort(wireID: effort)
     }
 }
 
@@ -611,7 +647,8 @@ private struct CompatibleManagedModelDestinationChoice: Decodable {
 public struct ManagedModelDestinationSnapshot: Decodable, Equatable, Sendable {
     public struct Recommendation: Decodable, Equatable, Sendable {
         public let model: String
-        public let effort: ManagedModelEffort
+        fileprivate let effortID: String
+        public var effort: ManagedModelEffort? { ManagedModelEffort(wireID: effortID) }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
@@ -621,7 +658,7 @@ public struct ManagedModelDestinationSnapshot: Decodable, Equatable, Sendable {
             }
             model = try c.string("model", minimum: 1, maximum: 40,
                                  pattern: "[a-z0-9][a-z0-9-]*")
-            effort = try c.value("effort")
+            effortID = try c.value("effort")
         }
     }
 
@@ -741,15 +778,16 @@ public struct ManagedModelDestinationWrite: Encodable, Equatable, Sendable {
                 snapshot: ManagedModelDestinationSnapshot,
                 destination: ManagedModelDestinationID,
                 model: String) throws {
-        let current = snapshot.choice(for: destination)
-        let effort = current?.source == .atum && current?.model == model
-            ? current?.managedEffort ?? snapshot.recommended.effort
-            : snapshot.recommended.effort
+        let currentEffort = snapshot.choice(for: destination).flatMap { choice in
+            choice.model == model && choice.managedEffort != nil ? choice.effort : nil
+        }
+        let recommendedEffort = snapshot.recommended.effort == nil ? nil : snapshot.recommended.effortID
+        guard let effortID = currentEffort ?? recommendedEffort else { throw ContractViolation.invalidValue }
         self.requestId = requestId
         expectedRevision = snapshot.revision
         policyDigest = snapshot.policyDigest
         choice = try ManagedModelDestinationChoice(
-            destination: destination, source: .atum, model: model, effort: effort.rawValue
+            destination: destination, source: .atum, model: model, effort: effortID
         )
     }
 
@@ -773,7 +811,7 @@ public struct ManagedModelDestinationWrite: Encodable, Equatable, Sendable {
 /// is written as `atum.model-choice/1.4`; a ChatGPT plan, which the cloud
 /// reaches through an owner Mac's relay, as `atum.model-choice/1.5` (the
 /// platform refuses it under any other profile: `relay_profile_required`).
-/// The level is Atum's three-level vocabulary, as the cloud row requires.
+/// Destination writes use the product effort vocabulary accepted by these profiles.
 public struct ManagedModelSubscriptionWrite: Encodable, Equatable, Sendable {
     public let requestId: NativeID
     public let expectedRevision: Int64
@@ -786,6 +824,7 @@ public struct ManagedModelSubscriptionWrite: Encodable, Equatable, Sendable {
                 model: String,
                 effort: ManagedModelEffort) throws {
         guard source == .chatGPTPlan || source == .opencodeGo else { throw ContractViolation.invariant }
+        guard effort.isCloudSubscriptionWriteEffort else { throw ContractViolation.invalidValue }
         self.requestId = requestId
         expectedRevision = snapshot.revision
         policyDigest = snapshot.policyDigest

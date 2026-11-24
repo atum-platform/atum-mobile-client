@@ -37,6 +37,10 @@ PENDING = {
     "src.matrix.model-picker-copy.COPY.taglineEveryday",
     "src.matrix.model-picker-copy.COPY.taglineHard",
     "src.matrix.model-picker-copy.COPY.taglineFlagship",
+    "src.matrix.model-picker-copy.COPY.efforts.none",
+    "src.matrix.model-picker-copy.COPY.efforts.minimal",
+    "src.matrix.model-picker-copy.COPY.efforts.xhigh",
+    "src.matrix.model-picker-copy.COPY.efforts.max",
 
     # App panel pages
     "src.matrix.app-bots.panel.panelCopy.failed",

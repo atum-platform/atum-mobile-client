@@ -144,7 +144,7 @@ final class AccountConnectionsPickerUITests: WS3UITestCase {
         chip.tap()
         XCTAssertTrue(element(app, "composer.model.close").waitForExistence(timeout: 5), "the model sheet did not open")
 
-        let claude = element(app, "phone.model.plan.claude")
+        let claude = element(app, "phone.model.plan.claude-plan")
         var scrolls = 0
         while !(claude.exists && claude.isHittable), scrolls < 8 {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
@@ -154,10 +154,10 @@ final class AccountConnectionsPickerUITests: WS3UITestCase {
         XCTAssertTrue(claude.exists, "no Connect entry for Claude")
         XCTAssertTrue(labelContains(claude, "Use your Claude plan").exists)
         XCTAssertTrue(element(app, "phone.model.plan.antigravity").exists)
-        XCTAssertFalse(element(app, "phone.model.plan.codex").exists, "ChatGPT is connected: nothing to connect")
+        XCTAssertFalse(element(app, "phone.model.plan.openai-codex").exists, "ChatGPT is connected: nothing to connect")
         keepEvidence("picker-connect-en", of: app)
 
-        let connect = app.buttons["phone.model.plan.claude.connect"]
+        let connect = app.buttons["phone.model.plan.claude-plan.connect"]
         XCTAssertEqual(connect.label, "Connect Claude")
         connect.tap()
         let title = element(app, "connections.sheet.title")

@@ -239,7 +239,7 @@ public enum AgentHomeModelRows {
                              selected: AgentHomeModelChoice?) -> [PhoneModelPickerProjection.Row] {
         snapshot.models.compactMap { offer in
             guard ManagedModelLineup.servedAliases.contains(offer.alias) else { return nil }
-            let ready = offer.eligibility == .ready
+            let ready = cloudChoice(for: offer) != nil
             return PhoneModelPickerProjection.Row(
                 favoriteID: offer.alias,
                 source: .atum,
@@ -252,6 +252,17 @@ public enum AgentHomeModelRows {
                 connectionLabel: AgentHomeConnectionLabel.atum.rawValue
             )
         }
+    }
+
+    public static func cloudChoice(for offer: ManagedModelOffer) -> AgentHomeModelChoice? {
+        guard offer.eligibility == .ready else { return nil }
+        let efforts = [offer.defaultEffort].compactMap { $0 } + offer.efforts
+        return efforts.lazy.compactMap { level -> AgentHomeModelChoice? in
+            guard let effort = AgentHomeModelEffort(rawValue: level.rawValue) else { return nil }
+            return try? AgentHomeModelChoice(home: .cloud, source: .atum,
+                                             connectionRef: AgentHomeContract.managedConnectionRef,
+                                             model: offer.alias, effort: effort)
+        }.first
     }
 }
 

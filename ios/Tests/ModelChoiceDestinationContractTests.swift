@@ -107,6 +107,24 @@ final class ModelChoiceDestinationContractTests: XCTestCase {
         ), "1.4 keeps ChatGPT-plan and own-key Mac choices; OpenCode Go is account-wide and cloud-only")
     }
 
+    func testFutureDestinationEffortDoesNotHideTheSavedModel() throws {
+        let bytes = try fixture("destination.snapshot")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        var recommended = try XCTUnwrap(object["recommended"] as? [String: Any])
+        recommended["effort"] = "maximum"
+        object["recommended"] = recommended
+        var choices = try XCTUnwrap(object["choices"] as? [[String: Any]])
+        choices[0]["effort"] = "future"
+        object["choices"] = choices
+
+        let snapshot = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                            from: JSONSerialization.data(withJSONObject: object))
+        let saved = try XCTUnwrap(snapshot.choice(for: ManagedModelDestinationID("cloud")))
+        XCTAssertEqual(saved.model, choices[0]["model"] as? String)
+        XCTAssertNil(saved.managedEffort)
+        XCTAssertEqual(snapshot.recommended.effort, .max)
+    }
+
     func testDestinationWriteMatchesFrozenRequestShapeAndNeverCarriesSecrets() throws {
         let bytes = try fixture("destination.snapshot")
         var raw = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])

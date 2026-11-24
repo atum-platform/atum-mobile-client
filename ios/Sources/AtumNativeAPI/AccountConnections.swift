@@ -31,6 +31,25 @@ public enum AccountConnectionsReadMode: Sendable, Equatable {
 public enum AccountPlan: String, CaseIterable, Sendable, Hashable, Decodable {
     case codex, claude, antigravity
 
+    init?(registryID: String) {
+        self.init(rawValue: registryID == "claude-plan" ? "claude" : registryID)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let id = try decoder.singleValueContainer().decode(String.self)
+        guard let plan = Self(registryID: id) else { throw ContractViolation.invalidValue }
+        self = plan
+    }
+
+    /// Desktop's picker provider ID. Work relay operations use the plan's raw value.
+    public var pickerID: String {
+        switch self {
+        case .codex: "openai-codex"
+        case .claude: "claude-plan"
+        case .antigravity: "antigravity"
+        }
+    }
+
     /// The maker's product name, the same in every language
     /// (`ACCOUNT_PLAN_NAMES`, never translated, hard-coded on desktop too).
     public var productName: String {
@@ -104,7 +123,7 @@ public struct AccountConnection: Equatable, Sendable, Decodable {
         case plan, apiKey, integration, tools, app
     }
 
-    /// `codex`, `claude`, `antigravity`, `opencode_go`, `google`, `owner_chats`,
+    /// `codex`, `claude` (also `claude-plan`), `antigravity`, `opencode_go`, `google`, `owner_chats`,
     /// `drive`, `home_hub:<name>` or `app:<slug>`; always equal to its provider.
     public let id: String
     public let kind: Kind
@@ -120,7 +139,7 @@ public struct AccountConnection: Equatable, Sendable, Decodable {
         self.id = id
         self.kind = kind
         self.status = status
-        self.plan = kind == .plan ? AccountPlan(rawValue: id) : nil
+        self.plan = kind == .plan ? AccountPlan(registryID: id) : nil
         self.devices = devices
         self.models = models
     }
@@ -128,19 +147,21 @@ public struct AccountConnection: Equatable, Sendable, Decodable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
         id = try c.value("id")
-        guard try c.value("provider", as: String.self) == id else { throw ContractViolation.invariant }
+        let provider: String = try c.value("provider")
         kind = try c.value("kind")
         status = try c.value("status")
         _ = try c.value("reach", as: Reach.self)
         if kind == .plan {
             try c.closed(["id", "kind", "provider", "custody", "status", "devices", "models", "reach"])
-            guard let plan = AccountPlan(rawValue: id), try c.value("custody", as: String.self) == "device"
+            guard let plan = AccountPlan(registryID: id), try c.value("custody", as: String.self) == "device"
             else { throw ContractViolation.invalidValue }
+            guard AccountPlan(registryID: provider) == plan else { throw ContractViolation.invariant }
             self.plan = plan
             devices = try c.value("devices")
             models = try c.value("models")
         } else {
             try c.closed(["id", "kind", "provider", "custody", "status", "models", "reach"])
+            guard provider == id else { throw ContractViolation.invariant }
             guard Self.isCloudID(id), try c.value("custody", as: String.self) == "cloud"
             else { throw ContractViolation.invalidValue }
             plan = nil

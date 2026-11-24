@@ -254,6 +254,46 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertEqual(thinking.current, .low, "the offer's default; nothing was saved")
     }
 
+    func testThinkingReadsAllDesktopLevelsAndIgnoresFutureLevels() throws {
+        let snapshot = try readySnapshot(effort: "maximum", efforts: [
+            "off", "minimal", "low", "medium", "high", "extra-high", "extra_high", "max", "future"
+        ])
+        let thinking = try XCTUnwrap(PhoneModelPickerProjection.thinking(snapshot))
+        XCTAssertEqual(thinking.levels, [.none, .minimal, .low, .medium, .high, .xhigh, .max])
+        XCTAssertEqual(thinking.current, .max)
+        XCTAssertTrue(PhoneModelPickerProjection.canChangeThinking(to: .none, snapshot: snapshot))
+
+        let write = try ManagedModelWrite(requestId: try NativeID(UUID().uuidString.lowercased()),
+                                          snapshot: snapshot, model: "nguyet-thuc", effort: .xhigh)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? [String: Any])
+        XCTAssertEqual((body["choice"] as? [String: Any])?["effort"] as? String, "extra-high")
+    }
+
+    func testAFutureSavedLevelIsNotMarkedAsTheDefault() throws {
+        let snapshot = try readySnapshot(effort: "future", efforts: ["future", "medium"])
+        let thinking = try XCTUnwrap(PhoneModelPickerProjection.thinking(snapshot))
+        XCTAssertEqual(thinking.levels, [.medium])
+        XCTAssertNil(thinking.current)
+        XCTAssertTrue(PhoneModelPickerProjection.canChangeThinking(to: .medium, snapshot: snapshot))
+
+        let unknownDefault = try readySnapshot(effort: nil, efforts: ["future", "high"])
+        XCTAssertNil(unknownDefault.currentEffort)
+        XCTAssertEqual(unknownDefault.models[0].selectionEffort, .high)
+
+        let onlyFuture = try readySnapshot(effort: nil, efforts: ["future"])
+        XCTAssertNil(PhoneModelPickerProjection.thinking(onlyFuture))
+        XCTAssertFalse(PhoneModelPickerProjection.cloud(onlyFuture)[0].selectable)
+    }
+
+    func testAssistantHomeUsesOnlyLevelsItsCloudWriteAccepts() throws {
+        let snapshot = try readySnapshot(effort: nil, efforts: ["xhigh", "max", "high"])
+        XCTAssertTrue(AgentHomeModelRows.cloud(snapshot, selected: nil)[0].selectable)
+        XCTAssertEqual(AgentHomeModelRows.cloudChoice(for: snapshot.models[0])?.effort, .high)
+
+        let unsupported = try readySnapshot(effort: nil, efforts: ["xhigh", "max", "future"])
+        XCTAssertFalse(AgentHomeModelRows.cloud(unsupported, selected: nil)[0].selectable)
+    }
+
     func testThereIsNoThinkingControlForOneLevelOrAModelThatCannotBeWritten() throws {
         XCTAssertNil(PhoneModelPickerProjection.thinking(try readySnapshot(efforts: ["medium"])),
                      "a control with one choice is not a control")
