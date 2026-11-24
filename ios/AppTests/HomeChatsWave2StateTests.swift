@@ -134,8 +134,15 @@ final class ConversationStopStateTests: XCTestCase {
         try await waitUntil { reopened.snapshot.generation > 0 }
         XCTAssertFalse(reopened.canPresentTurnStop)
         XCTAssertEqual(reopened.turnStop.stop.phase, .stopping)
+        let unreadable = ChatItem(id: "$question", kind: .placeholder(.undecryptable),
+                                  sender: owner, isOwn: true, eventOrTransactionId: .event("$question"))
+        await open(reopened, with: [unreadable])
+        try await waitUntil { reopened.snapshot.rows.contains { $0.item.kind == .placeholder(.undecryptable) } }
+        XCTAssertEqual(reopened.turnStop.stop.control, .hidden)
         await open(reopened, with: workingTurn("$question"))
-        try await waitUntil { reopened.snapshot.rows.contains { $0.item.eventID == "$question" } }
+        try await waitUntil {
+            reopened.snapshot.rows.contains { $0.item.eventID == "$question" && $0.item.kind == .message }
+        }
         XCTAssertTrue(reopened.canPresentTurnStop)
         XCTAssertNil(reopened.turnStop.tap(newRequestID: "duplicate", send: send))
 
@@ -161,6 +168,14 @@ final class ConversationStopStateTests: XCTestCase {
     }
 
     func testPublishedNewerReplyRejectsAnOlderScheduledReceiptWithoutAView() async throws {
+        try await assertNewerReplySuppressesScheduledReceipt(finished: false)
+    }
+
+    func testPublishedFinishedReplyRejectsAnOlderScheduledReceiptWithoutAView() async throws {
+        try await assertNewerReplySuppressesScheduledReceipt(finished: true)
+    }
+
+    private func assertNewerReplySuppressesScheduledReceipt(finished: Bool) async throws {
         let execution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run"))
         let controller = AssistantTurnStopController()
         let store = makeStore(controller)
@@ -168,10 +183,13 @@ final class ConversationStopStateTests: XCTestCase {
         var progress = ChatProgress(phase: .working)
         progress.isScheduled = true
         progress.schedule = execution
+        let now = Date()
         let marker = ChatItem(id: "$schedule", kind: .notice, sender: agent,
-                              timestamp: Date(), eventOrTransactionId: .event("$schedule"),
+                              timestamp: now, eventOrTransactionId: .event("$schedule"),
                               progress: progress)
-        await open(store, with: [marker])
+        let oldReply = ChatItem(id: "$previous", kind: .message, sender: agent,
+                                timestamp: now.addingTimeInterval(-10), eventOrTransactionId: .event("$previous"))
+        await open(store, with: [oldReply, marker])
         try await waitUntil { store.snapshot.rows.last?.item.progress?.schedule == execution }
         XCTAssertEqual(controller.stop.selection, .schedule(execution))
 
@@ -183,14 +201,29 @@ final class ConversationStopStateTests: XCTestCase {
             for await receipt in receipts { return receipt }
             return .failed
         }))
-        await open(store, with: workingTurn("$newer"))
-        try await waitUntil { store.snapshot.rows.contains { $0.item.eventID == "$newer" } }
-        XCTAssertEqual(controller.stop.selection, .turn(eventID: "$newer"))
+        let nextItems: [ChatItem]
+        let latestID: String
+        let selection: AssistantTurnStopIntent.Target?
+        if finished {
+            let answer = ChatItem(id: "$finished", kind: .message, sender: agent,
+                                  timestamp: now.addingTimeInterval(2), eventOrTransactionId: .event("$finished"),
+                                  body: "Answer", replyTo: "$newer")
+            nextItems = [oldReply, question("$newer"), answer]
+            latestID = "$finished"
+            selection = nil
+        } else {
+            nextItems = [oldReply] + workingTurn("$newer")
+            latestID = "$newer"
+            selection = .turn(eventID: "$newer")
+        }
+        await open(store, with: nextItems)
+        try await waitUntil { store.snapshot.rows.contains { $0.item.eventID == latestID } }
+        XCTAssertEqual(controller.stop.selection, selection)
         reply.yield(.stopped)
         await pending.value
         XCTAssertEqual(announcements, [.stopping])
         XCTAssertNil(controller.stop.notice)
-        XCTAssertEqual(controller.stop.selection, .turn(eventID: "$newer"))
+        XCTAssertEqual(controller.stop.selection, selection)
     }
 
     private func makeStore(_ controller: AssistantTurnStopController) -> LiveConversationStore {
@@ -209,11 +242,15 @@ final class ConversationStopStateTests: XCTestCase {
 
     private func workingTurn(_ eventID: String) -> [ChatItem] {
         [
-            ChatItem(id: eventID, kind: .message, sender: owner, isOwn: true,
-                     eventOrTransactionId: .event(eventID), body: "Question"),
+            question(eventID),
             ChatItem(id: "$progress", kind: .notice, sender: agent,
                      replyTo: eventID, progress: ChatProgress(phase: .working)),
         ]
+    }
+
+    private func question(_ eventID: String) -> ChatItem {
+        ChatItem(id: eventID, kind: .message, sender: owner, isOwn: true,
+                 eventOrTransactionId: .event(eventID), body: "Question")
     }
 
     private func waitUntil(file: StaticString = #filePath, line: UInt = #line,

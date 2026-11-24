@@ -56,7 +56,7 @@ public final class AssistantTurnStopController {
             if accepted, let after = self.stop.notice, after != before {
                 self.announce?(after == .refused ? .refused : .scheduledStopped)
             }
-            guard accepted, result == .stopRequested, self.stop.phase == .stopping else { return }
+            guard result == .stopRequested else { return }
             if case .schedule = intent.target {
                 // Desktop re-offers an exact scheduled Stop after the delay.
                 do { try await self.sleep(AssistantTurnStop.scheduledRetryDelay) } catch { return }

@@ -31,3 +31,23 @@ After the remount, the final locked run passed the package checks (38 tests,
 exit 0), Debug build-for-testing (exit 0), and both
 `ConversationStopStateTests` cases (exit 0). UI suites were outside this
 local verification.
+
+## Review follow-up
+
+- Stop retains the request ID, receipt state, and timer for each exact
+  target independently of the composer selection. Decryption can restore a
+  turn with its original attempt, and a scheduled retry keeps its request
+  ID when the marker briefly gives way to an older question.
+- The transcript signal includes the latest finished reply. A new reply
+  suppresses a late confirmation for the old schedule even when there is no
+  live target. The schedule marker's event time distinguishes replies
+  loaded from older history.
+
+The package regressions cover a hidden scheduled attempt, receipt and timer
+updates while a turn is hidden, and older reply history. The app regressions
+cover an undecryptable question on reopen and a newer reply that has already
+finished before the old receipt arrives.
+
+The review follow-up passed all 78 filtered package tests (exit 0), the
+Debug build-for-testing (exit 0), and all three
+`ConversationStopStateTests` cases (exit 0) in one locked run.
