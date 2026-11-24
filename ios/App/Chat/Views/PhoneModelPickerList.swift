@@ -338,7 +338,7 @@ struct PhoneModelPickerList: View {
     @ViewBuilder
     private func nameLine(_ row: Row) -> some View {
         let words = row.badges.map(badgeWord)
-        let named = HStack(alignment: .firstTextBaseline, spacing: 6) {
+        let named = HStack(alignment: .firstTextBaseline, spacing: 6) { // design-lint: allow: desktop #119 puts the check 6 pt after the name
             name(row)
             if row.selected, savingRowID != row.stableID { check }
         }
