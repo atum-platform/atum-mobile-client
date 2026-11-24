@@ -118,7 +118,9 @@ final class ChatSearchTests: XCTestCase {
     @MainActor
     func testRoutedSearchMatchesTheEventIDEvenWhenTheTextIsIdentical() async {
         var loaded = [F.text("new", from: F.agent, "launch")]
-        let result = await ChatHistorySearch.find(eventID: "$old", rows: { self.rows(loaded) }, loadPage: {
+        let result = await ChatHistorySearch.find(eventID: "$old", snapshot: {
+            Snapshot(rows: self.rows(loaded), change: .inPlace, generation: 1)
+        }, loadPage: {
             loaded.insert(F.text("old", from: F.agent, "launch", threadRoot: "$thread"), at: 0)
             return .loaded(hasMore: true)
         })
@@ -130,7 +132,9 @@ final class ChatSearchTests: XCTestCase {
     func testRoutedSearchContinuesOnTheReplacementTimeline() async {
         var loaded = [F.text("new", from: F.agent, "launch")]
         var calls = 0
-        let result = await ChatHistorySearch.find(eventID: "$old", rows: { self.rows(loaded) }, loadPage: {
+        let result = await ChatHistorySearch.find(eventID: "$old", snapshot: {
+            Snapshot(rows: self.rows(loaded), change: .inPlace, generation: calls == 0 ? 1 : 2)
+        }, loadPage: {
             calls += 1
             if calls == 1 {
                 loaded = [F.text("replacement", from: F.agent, "launch")]
@@ -145,9 +149,144 @@ final class ChatSearchTests: XCTestCase {
     }
 
     @MainActor
+    func testRoutedSearchIgnoresAReplyPublishedByTheReplacedTimeline() async {
+        let recent = F.text("recent", from: F.agent, "launch")
+        let oldReply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var newReply = oldReply
+        newReply.id = "replacement-reply"
+        var snapshot = Snapshot(rows: rows([recent]), change: .reset, generation: 1)
+        var calls = 0
+        var focused = [String]()
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot }, loadPage: {
+            calls += 1
+            switch calls {
+            case 1:
+                // The old page published just before the binding refresh cancelled it.
+                snapshot.rows = self.rows([oldReply, recent])
+                return .timelineReplaced
+            case 2:
+                XCTAssertTrue(focused.isEmpty, "the retained old row cannot consume the route")
+                snapshot = Snapshot(rows: self.rows([recent]), change: .reset, generation: 2)
+                return .loaded(hasMore: true)
+            default:
+                snapshot.rows = self.rows([newReply, recent])
+                return .loaded(hasMore: true)
+            }
+        }, placeMatch: {
+            focused.append($0.rowID)
+            return true
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 3)
+        XCTAssertEqual(focused, [newReply.id])
+    }
+
+    @MainActor
+    func testRoutedSearchWaitsForTheNewBindingWhenTheFirstProjectionArrivesDuringTheOldPage() async {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let binding = CompanyTurnBinding(companyID: "company", agentPrincipal: "agent", agentUserID: F.agent,
+                                         roomID: "!channel:example.test", audience: .channel(id: "channel"))
+        var context = RoomContext(kind: .group, ownUserID: F.me)
+        context.companyTurnScope = .channel(threadRoot: "$thread", binding: nil)
+        var core = ConversationCore(context: context)
+        _ = core.attached(now: now)
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+
+        var calls = 0
+        var focused: String?
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { core.snapshot }, loadPage: {
+            calls += 1
+            let projection = ProjectedTimeline(snapshot: Snapshot(rows: self.rows([reply]), change: .reset,
+                                                                  generation: UInt64(calls)),
+                                               nextNoAnswerChange: nil, sequence: 1)
+            if calls == 1 {
+                _ = core.receive(projection, now: now)
+                core.detached()
+                context.companyTurnScope = .channel(threadRoot: "$thread", binding: binding)
+                core.updateContext(context)
+                XCTAssertEqual(core.snapshot.rows.map(\.id), [reply.id], "the old row stays visible")
+                return .timelineReplaced
+            }
+            XCTAssertNil(focused)
+            _ = core.attached(now: now)
+            _ = core.receive(projection, now: now)
+            return .loaded(hasMore: true)
+        }, placeMatch: {
+            focused = $0.rowID
+            return true
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2)
+        XCTAssertEqual(focused, reply.id)
+    }
+
+    @MainActor
+    func testRoutedSearchIgnoresEndOfHistoryWhenBindingChangesDuringTheGracePeriod() async {
+        let recent = F.text("recent", from: F.agent, "launch")
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var snapshot = Snapshot(rows: rows([recent]), change: .reset, generation: 1)
+        var timelineGeneration: UInt64 = 1
+        var calls = 0
+        var refresh: Task<Void, Never>?
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot },
+                                                  timelineGeneration: { timelineGeneration }, loadPage: {
+            calls += 1
+            if calls == 1 {
+                // Reattach after the old final page returns and the walk yields.
+                refresh = Task { @MainActor in
+                    timelineGeneration = 2
+                }
+                return .loaded(hasMore: false)
+            }
+            XCTAssertEqual(timelineGeneration, 2)
+            XCTAssertEqual(snapshot.generation, 1, "the replacement need not have projected yet")
+            snapshot = Snapshot(rows: self.rows([reply, recent]), change: .reset, generation: 2)
+            return .loaded(hasMore: true)
+        })
+        await refresh?.value
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2)
+        XCTAssertEqual(calls, 2)
+    }
+
+    @MainActor
+    func testRoutedSearchResumesWhenTheReplyDisappearsBeforePlacement() async {
+        let recent = F.text("recent", from: F.agent, "launch")
+        let oldReply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var newReply = oldReply
+        newReply.id = "replacement-reply"
+        var snapshot = Snapshot(rows: rows([recent]), change: .reset, generation: 1)
+        var calls = 0
+        var attempted = [String]()
+        var selectedEvent: String? = "$reply"
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot }, loadPage: {
+            calls += 1
+            XCTAssertEqual(selectedEvent, "$reply", "discovery and a failed placement leave the route pending")
+            snapshot.rows = self.rows([calls == 1 ? oldReply : newReply, recent])
+            return .loaded(hasMore: true)
+        }, placeMatch: { match in
+            attempted.append(match.rowID)
+            XCTAssertEqual(selectedEvent, match.eventID)
+            if match.rowID == oldReply.id {
+                // The view sees the row, then loses it before layout places it.
+                XCTAssertTrue(match.isCurrent(in: snapshot))
+                await Task.yield()
+                snapshot = Snapshot(rows: self.rows([recent]), change: .reset, generation: 2)
+            }
+            guard match.isCurrent(in: snapshot) else { return false }
+            selectedEvent = nil
+            return true
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2, "placement retry shares the original walk's page count")
+        XCTAssertEqual(attempted, [oldReply.id, newReply.id])
+        XCTAssertNil(selectedEvent)
+    }
+
+    @MainActor
     func testTimelineReplacementDoesNotResetTheRoutedSearchBudget() async {
         var calls = 0
-        let result = await ChatHistorySearch.find(eventID: "$missing", rows: { [] }, loadPage: {
+        let result = await ChatHistorySearch.find(eventID: "$missing", snapshot: { .empty }, loadPage: {
             calls += 1
             return calls.isMultiple(of: 2) ? .timelineReplaced : .loaded(hasMore: true)
         })

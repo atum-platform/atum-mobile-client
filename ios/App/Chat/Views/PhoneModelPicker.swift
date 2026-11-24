@@ -1,7 +1,6 @@
 import AtumChat
 import AtumDesign
 import AtumNativeAPI
-import Observation
 import SwiftUI
 
 /// The cloud's subscription models: the account status the desktop reads for a
@@ -23,40 +22,6 @@ struct AssistantSubscriptionActions {
     /// to that account session; it never rotates the grant. Nil: the sheet
     /// does not follow the read.
     var makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
-}
-
-/// Orders subscription reads and Connect sheet landings for one picker.
-/// A newer read (or retirement) drops an older read whole. A landing only
-/// supersedes the registry: the read's ChatGPT and OpenCode Go statuses come
-/// from independent endpoints and still apply, so a plan disconnected
-/// elsewhere stops being offered even if a sheet landed meanwhile.
-@MainActor @Observable
-final class PhoneModelPickerAccount {
-    private(set) var value: PhoneSubscriptionAccount?
-    @ObservationIgnored private var readGeneration = 0
-    @ObservationIgnored private var registryGeneration = 0
-
-    func reload(_ read: @MainActor () async -> PhoneSubscriptionAccount) async {
-        readGeneration += 1
-        let mine = readGeneration
-        let registryMine = registryGeneration
-        let answer = await read()
-        guard !Task.isCancelled, mine == readGeneration else { return }
-        let registry = registryMine == registryGeneration ? answer.accountConnections : value?.accountConnections
-        value = PhoneSubscriptionAccount(chatGPT: answer.chatGPT, openCodeGo: answer.openCodeGo,
-                                         accountConnections: registry)
-    }
-
-    func landed(_ registry: AccountConnections) {
-        registryGeneration += 1
-        value = PhoneSubscriptionAccount(chatGPT: value?.chatGPT, openCodeGo: value?.openCodeGo,
-                                         accountConnections: registry)
-    }
-
-    func retire() {
-        readGeneration += 1
-        registryGeneration += 1
-    }
 }
 
 /// One subscription pick, for an idempotent retry of the same write.
@@ -150,7 +115,8 @@ struct PhoneConversationModelPicker: View {
             selectedAtumModel: pickedAtumModel
         )
         let subscriptions = destination.map {
-            PhoneModelPickerProjection.subscriptions($0, destination: cloudDestination, account: account)
+            PhoneModelPickerProjection.subscriptions($0, destination: cloudDestination, account: account,
+                                                     loading: accountState.loading)
         }?.map { pickedAtumModel == nil ? $0 : $0.selecting(false) } ?? []
         return atum + subscriptions
     }
@@ -225,9 +191,6 @@ struct PhoneConversationModelPicker: View {
         let defaults: AssistantModelDestinationLoadResult? =
             if let destinations { await destinations.read() } else { nil }
         guard !Task.isCancelled, lifetime.isCurrentLoad(token) else { return }
-        if let read = destinations?.subscriptions?.read { await accountState.reload(read) }
-        guard !Task.isCancelled, lifetime.isCurrentLoad(token) else { return }
-
         var anyValue = false
         if let offer {
             switch offer {
@@ -250,6 +213,7 @@ struct PhoneConversationModelPicker: View {
             unavailable = offer?.isUnavailable == true || defaults?.isUnavailable == true
             loadFailed = !unavailable
         }
+        if let read = destinations?.subscriptions?.read { await accountState.reload(read) }
     }
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
@@ -258,9 +222,9 @@ struct PhoneConversationModelPicker: View {
         guard savingRowID == nil, savingEffort == nil, row.source == .atum,
               row.selectable, !row.selected else { return }
         if let snapshot, let offer = snapshot.models.first(where: { $0.alias == model }) {
-            guard offer.eligibility == .ready else { return }
+            guard offer.eligibility == .ready, let effort = offer.selectionEffort else { return }
             savingRowID = row.stableID
-            save(snapshot, model: model, effort: offer.defaultEffort)
+            save(snapshot, model: model, effort: effort)
             return
         }
         guard destinations != nil, let destination else { return }
@@ -307,7 +271,7 @@ struct PhoneConversationModelPicker: View {
     }
 
     /// The 1.3/1.4 fallback write, used only when no 1.1 offer could be read.
-    /// The destination write keeps the server's recommendation effort.
+    /// The destination write uses a route-compatible effort from the snapshot.
     private func saveDestination(_ snapshot: ManagedModelDestinationSnapshot, model: String) {
         guard let destinations else { return }
         saveFailed = false
@@ -340,7 +304,7 @@ struct PhoneConversationModelPicker: View {
         guard savingRowID == nil, savingEffort == nil, let destination,
               destinations?.subscriptions?.save != nil,
               PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: destination, account: account) != nil else { return }
+                  row, snapshot: destination, account: account, loading: accountState.loading) != nil else { return }
         let selection = lifetime.beginSelection()
         guard row.source == .chatGPTPlan else {
             return writeSubscription(row, consent: nil, selection: selection)
@@ -393,7 +357,7 @@ struct PhoneConversationModelPicker: View {
         guard lifetime.isCurrent(selection), let destination, let save = destinations?.subscriptions?.save,
               row.source != .chatGPTPlan || consent != nil,
               let effort = PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: destination, account: account) else {
+                  row, snapshot: destination, account: account, loading: accountState.loading) else {
             savingRowID = nil
             saveFailed = true
             return
@@ -605,7 +569,7 @@ private struct PhoneDestinationModelPicker: View {
         )
         guard destination.isCloud else { return atum }
         return atum + PhoneModelPickerProjection.subscriptions(value.snapshot, destination: destination,
-                                                               account: account)
+                                                               account: account, loading: accountState.loading)
     }
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
@@ -650,7 +614,7 @@ private struct PhoneDestinationModelPicker: View {
     private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
         guard savingRowID == nil, destination.isCloud, actions.subscriptions?.save != nil,
               PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: value.snapshot, account: account) != nil else { return }
+                  row, snapshot: value.snapshot, account: account, loading: accountState.loading) != nil else { return }
         let selection = lifetime.beginSelection()
         guard row.source == .chatGPTPlan else {
             return writeSubscription(row, consent: nil, selection: selection)
@@ -697,7 +661,7 @@ private struct PhoneDestinationModelPicker: View {
         guard lifetime.isCurrent(selection), destination.isCloud, let save = actions.subscriptions?.save,
               row.source != .chatGPTPlan || consent != nil,
               let effort = PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: value.snapshot, account: account) else {
+                  row, snapshot: value.snapshot, account: account, loading: accountState.loading) else {
             savingRowID = nil
             saveFailed = true
             return
