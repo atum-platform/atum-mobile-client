@@ -236,7 +236,8 @@ struct CompanyBoardControls: View {
             if viewer != nil {
                 Toggle(isOn: Binding(get: { preference.mineOn(viewer: viewer) },
                                      set: { _ in preference = preference.togglingMine(viewer: viewer) })) {
-                    Text(verbatim: copy.mine)
+                    // The segmented control's size, so Mine reads as part of the same bar.
+                    Text(verbatim: copy.mine).font(.subheadline)
                 }
                 // On the Toggle itself: after the styles, the screen's identifier won.
                 .accessibilityIdentifier("company.board.mine")

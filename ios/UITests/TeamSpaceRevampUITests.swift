@@ -32,12 +32,15 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
     ]
 
     @MainActor
-    private func launch(language: String) -> XCUIApplication {
+    private func launch(language: String, dark: Bool) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
             + ["-AtumDebugTeamSpace", "-AppleLanguages", "(\(language))",
                "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
-               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL",
+               // The app's own appearance setting: the simulator's appearance alone left the
+               // first dark captures light.
+               "-atum.appearance", dark ? "dark" : "light"]
             + probeArguments
         app.launch()
         XCTAssertTrue(element(app, "teamSpace.screen").waitForExistence(timeout: 15), "no Workplace")
@@ -53,7 +56,7 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
                 XCUIDevice.shared.appearance = appearance
                 let tag = "\(language)-\(appearance == .dark ? "dark" : "light")"
                 let expected = try XCTUnwrap(words[language])
-                let app = launch(language: language)
+                let app = launch(language: language, dark: appearance == .dark)
                 checkChannelRetry(app, expected: expected, tag: tag)
                 checkBoardViews(app, expected: expected, tag: tag)
                 checkHeaderSearch(app, expected: expected, tag: tag)

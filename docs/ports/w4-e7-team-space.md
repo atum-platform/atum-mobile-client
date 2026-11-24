@@ -167,3 +167,4 @@ under `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, with derived data in
 5. UI walk scrolls the failed line on screen (the row under #design is lazily made on a 6.1" screen), and finds the page and view segments by identifier.
 6. UI walk checks the board's unavailable words, since `ContentUnavailableView` does not expose its identifier.
 7. Mine keeps its own identifier (set on the Toggle before its styles); the walk finds Mine, No matches and the Search sheet by what a person sees.
+8. UI walk sets the app's own appearance (`-atum.appearance`), so the dark captures are dark; Mine uses the segmented control's text size.
