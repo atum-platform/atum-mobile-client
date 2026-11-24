@@ -527,6 +527,176 @@ import XCTest
         XCTAssertTrue(c.transactionOutcomes.values.contains(where: \.isCredited))
     }
 
+    func testVerifiedRefundReplacesCreditWhileOriginalWalletRefreshIsBlocked() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        var finishes = 0; var refreshes = 0
+        var blockedRefresh: CheckedContinuation<Void, Never>?
+        var originalRefreshReturned = false
+        let original = transaction { finishes += 1 }
+        let refund = transaction(isRevoked: true) { finishes += 1 }
+        store.result = .verified(original)
+        let c = await make(store, api, refresh: {
+            refreshes += 1
+            if refreshes == 1 {
+                await withCheckedContinuation { blockedRefresh = $0 }
+                originalRefreshReturned = true
+            }
+        })
+        defer { c.bind(accountID: nil, api: nil) }
+        await c.purchase(id)
+        await settled { blockedRefresh != nil }
+        let refresh = try XCTUnwrap(blockedRefresh)
+        XCTAssertNil(c.transactionOutcomes[original.id])
+        XCTAssertEqual(finishes, 1)
+
+        store.continuation?.yield(refund)
+        await settled { c.transactionOutcomes[original.id]?.state == .revoked && refreshes == 2 }
+        XCTAssertEqual(c.purchaseState(for: id), .revoked)
+        XCTAssertFalse(c.transactionOutcomes.values.contains(where: \.isCredited))
+
+        refresh.resume()
+        await settled { originalRefreshReturned }
+        store.queue = [original, refund]
+        await c.replayUnfinished()
+        await Task.yield()
+        XCTAssertEqual(c.transactionOutcomes[original.id]?.state, .revoked)
+        XCTAssertEqual(c.purchaseState(for: id), .revoked)
+        XCTAssertFalse(c.transactionOutcomes.values.contains(where: \.isCredited))
+        XCTAssertEqual(api.posts, 1); XCTAssertEqual(finishes, 1); XCTAssertEqual(refreshes, 2)
+    }
+
+    func testVerifiedRefundRemovesSettledCreditAndOriginalReplayCannotRestoreIt() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        var finishes = 0; var refreshes = 0
+        let original = transaction { finishes += 1 }
+        let refund = transaction(isRevoked: true) { finishes += 1 }
+        store.result = .verified(original)
+        let c = await make(store, api, refresh: { refreshes += 1 })
+        defer { c.bind(accountID: nil, api: nil) }
+        await c.purchase(id)
+        await settled { c.transactionOutcomes[original.id]?.isCredited == true }
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+
+        store.continuation?.yield(refund)
+        await settled { c.transactionOutcomes[original.id]?.state == .revoked && refreshes == 2 }
+        store.queue = [original, refund]
+        await c.replayUnfinished()
+        await Task.yield()
+        XCTAssertEqual(c.transactionOutcomes[original.id]?.state, .revoked)
+        XCTAssertEqual(c.purchaseState(for: id), .revoked)
+        XCTAssertFalse(c.transactionOutcomes.values.contains(where: \.isCredited))
+        XCTAssertEqual(api.posts, 1); XCTAssertEqual(finishes, 1); XCTAssertEqual(refreshes, 2)
+    }
+
+    func testVerifiedRefundDuringSubmissionPreventsLaterCreditFeedback() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        api.blockPost = true
+        var finishes = 0
+        let original = transaction { finishes += 1 }
+        store.result = .verified(original)
+        let c = await make(store, api)
+        defer { c.bind(accountID: nil, api: nil) }
+        await c.purchase(id)
+        await settled { api.blocked != nil }
+
+        store.queue = [transaction(isRevoked: true) { finishes += 1 }]
+        await c.replayUnfinished()
+        api.blocked?.resume(returning: try api.reply()); api.blocked = nil
+        await settled { c.transactionOutcomes[original.id] != nil }
+        XCTAssertEqual(c.purchaseState(for: id), .revoked)
+        XCTAssertFalse(c.transactionOutcomes.values.contains(where: \.isCredited))
+        XCTAssertEqual(api.posts, 1); XCTAssertEqual(finishes, 1)
+    }
+
+    func testBuyStaysDisabledWhileNewerSamePackSubmissionIsUnresolved() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        let otherPack = "com.atum.mobile.protons.500k"
+        api.replies = [try api.reply(transactionID: "101", state: .credited),
+                       try api.reply(transactionID: "103", state: .creditedToOtherAccount)]
+        var blockedRefresh: CheckedContinuation<Void, Never>?
+        store.result = .verified(transaction(id: "101") {})
+        let c = await make(store, api, refresh: {
+            await withCheckedContinuation { blockedRefresh = $0 }
+        })
+        defer { c.bind(accountID: nil, api: nil) }
+        await c.purchase(id)
+        await settled { blockedRefresh != nil }
+        let refresh = try XCTUnwrap(blockedRefresh)
+
+        api.blockPost = true
+        store.continuation?.yield(transaction(id: "102") {})
+        await settled { api.blocked != nil }
+        api.blockPost = false
+        XCTAssertEqual(c.purchaseState(for: id), .retrying)
+        refresh.resume()
+        await settled { c.transactionOutcomes["101"] != nil }
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+
+        store.continuation?.yield(transaction(id: "103", productID: otherPack) {})
+        await settled { c.transactionOutcomes["103"] != nil }
+        XCTAssertEqual(c.state, .otherAccount)
+        XCTAssertFalse(c.canPurchase)
+        store.result = .cancelled
+        await c.purchase(otherPack)
+        XCTAssertEqual(store.purchaseCalls, 1)
+
+        api.blocked?.resume(returning: try api.reply(transactionID: "102", state: .needsSupport))
+        api.blocked = nil
+        await settled { c.transactionOutcomes["102"] != nil }
+        XCTAssertTrue(c.canPurchase)
+        await c.purchase(otherPack)
+        XCTAssertEqual(store.purchaseCalls, 2)
+    }
+
+    func testDismissalAndReopenLetInFlightRefundAppearAfterCreditRowIsCleared() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        api.replies = [try api.reply(transactionID: "101", state: .revoked),
+                       try api.reply(transactionID: "102", state: .credited)]
+        var refreshes = 0
+        var blockedRefresh: CheckedContinuation<Void, Never>?
+        let c = await make(store, api, refresh: {
+            refreshes += 1
+            if refreshes == 1 { await withCheckedContinuation { blockedRefresh = $0 } }
+        })
+        defer { c.bind(accountID: nil, api: nil) }
+        store.continuation?.yield(transaction(id: "101") {})
+        await settled { blockedRefresh != nil }
+        let refresh = try XCTUnwrap(blockedRefresh)
+        store.continuation?.yield(transaction(id: "102") {})
+        await settled { c.purchaseState(for: self.id) == .succeeded }
+
+        c.clearSettledOutcomes() // Dismissal.
+        c.clearSettledOutcomes() // Reopen.
+        XCTAssertEqual(c.purchaseState(for: id), .idle)
+        XCTAssertTrue(c.transactionOutcomes.isEmpty)
+
+        refresh.resume()
+        await settled { c.transactionOutcomes["101"]?.state == .revoked }
+        XCTAssertEqual(c.purchaseState(for: id), .revoked)
+        XCTAssertFalse(c.transactionOutcomes.values.contains(where: \.isCredited))
+    }
+
+    func testClearingSettledOutcomesPrunesSupersededSupportIDs() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        let otherPack = "com.atum.mobile.protons.500k"
+        api.replies = [try api.reply(transactionID: "101", state: .needsSupport),
+                       try api.reply(transactionID: "102", state: .needsSupport),
+                       try api.reply(transactionID: "103", state: .needsSupport)]
+        let c = await make(store, api)
+        defer { c.bind(accountID: nil, api: nil) }
+        store.continuation?.yield(transaction(id: "101") {})
+        await settled { c.purchaseState(for: self.id) == .needsSupport("101") }
+        store.continuation?.yield(transaction(id: "102") {})
+        await settled { c.purchaseState(for: self.id) == .needsSupport("102") }
+        store.continuation?.yield(transaction(id: "103", productID: otherPack) {})
+        await settled { c.purchaseState(for: otherPack) == .needsSupport("103") }
+
+        c.clearSettledOutcomes()
+        XCTAssertEqual(Set(c.transactionOutcomes.keys), ["102", "103"])
+        XCTAssertEqual(c.purchaseState(for: id), .needsSupport("102"))
+        XCTAssertEqual(c.purchaseState(for: otherPack), .needsSupport("103"))
+    }
+
     private func settleInterleavedRestore(first: AppleTransactionResponse.State,
                                           then second: AppleTransactionResponse.State,
                                           productID: String) async throws -> ApplePurchaseCoordinator {
@@ -644,9 +814,10 @@ import XCTest
     private func transaction(id transactionID: String = "2000000123456789",
                              productID: String? = nil,
                              environment: ApplePurchaseEnvironment = .sandbox,
+                             isRevoked: Bool = false,
                              _ finish: @escaping @MainActor @Sendable () async -> Void) -> AppleVerifiedTransaction {
         .init(id: transactionID, productID: productID ?? id, environment: environment, accountToken: nil,
-              signedTransaction: "synthetic.payload.signature", finish: finish)
+              signedTransaction: "synthetic.payload.signature", isRevoked: isRevoked, finish: finish)
     }
 }
 

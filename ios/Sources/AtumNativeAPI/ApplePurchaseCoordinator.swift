@@ -11,14 +11,16 @@ public struct AppleVerifiedTransaction: Sendable, CustomStringConvertible, Custo
     public let id, productID: String
     public let environment: ApplePurchaseEnvironment?
     public let accountToken: UUID?
+    let isRevoked: Bool
     let signedTransaction: String
     let finish: @MainActor @Sendable () async -> Void
     public var description: String { "AppleVerifiedTransaction(id: \(id))" }
     public var debugDescription: String { description }
     public init(id: String, productID: String, environment: ApplePurchaseEnvironment?, accountToken: UUID?,
-                signedTransaction: String, finish: @escaping @MainActor @Sendable () async -> Void) {
+                signedTransaction: String, isRevoked: Bool = false, finish: @escaping @MainActor @Sendable () async -> Void) {
         self.id = id; self.productID = productID; self.environment = environment
         self.accountToken = accountToken; self.signedTransaction = signedTransaction; self.finish = finish
+        self.isRevoked = isRevoked
     }
 }
 
@@ -57,7 +59,7 @@ public extension ApplePurchaseStore {
     @Published public private(set) var products: [AppleStoreProduct] = []
     public var canPurchase: Bool {
         guard checkoutOpen, let acceptedEnvironment, deviceEnvironment == acceptedEnvironment, !products.isEmpty,
-              !purchaseStates.values.contains(where: { [.purchasing, .pending, .retrying].contains($0) })
+              !purchaseInProgress, pendingProductID == nil, unresolvedTransactions.isEmpty
         else { return false }
         switch state {
         case .ready, .cancelled, .succeeded, .needsSupport, .otherAccount, .revoked: return true
@@ -85,7 +87,13 @@ public extension ApplePurchaseStore {
     private var rowAcknowledgements: [String: Int] = [:]
     private var listener: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
+    @Published private var purchaseInProgress = false
+    private var pendingProductID: String?
+    private var unresolvedTransactions = Set<String>()
     private var submissions: [String: Task<Void, Never>] = [:]
+    // Track credits for this account after the sheet drops their feedback.
+    private var acknowledgedCredits = Set<String>()
+    private var unresolvedRefunds = Set<String>()
     private var finished = Set<String>()
 
     /// `environment` is retained for source compatibility with build-origin callers.
@@ -115,6 +123,8 @@ public extension ApplePurchaseStore {
     public func bind(accountID: String?, api: (any ApplePurchasesAPI)?) {
         generation = UUID(); loadTask?.cancel()
         submissions.values.forEach { $0.cancel() }; submissions.removeAll()
+        purchaseInProgress = false; pendingProductID = nil; unresolvedTransactions.removeAll()
+        acknowledgedCredits.removeAll(); unresolvedRefunds.removeAll()
         let switchedAccount = self.accountID != accountID
         self.accountID = accountID; self.api = api
         acceptedEnvironment = nil
@@ -169,6 +179,8 @@ public extension ApplePurchaseStore {
         guard canPurchase, products.contains(where: { $0.id == id }), let api, let accountID,
               let environment = acceptedEnvironment else { return }
         let scope = generation
+        purchaseInProgress = true
+        defer { if generation == scope { purchaseInProgress = false } }
         state = .purchasing; purchaseStates[id] = .purchasing
         do {
             let key = accountID + ":" + environment.rawValue
@@ -193,7 +205,9 @@ public extension ApplePurchaseStore {
                     return
                 }
                 enqueue(transaction)
-            case .pending: state = .pending; purchaseStates[id] = .pending
+            case .pending:
+                pendingProductID = id
+                state = .pending; purchaseStates[id] = .pending
             case .cancelled: state = .cancelled; purchaseStates[id] = .cancelled
             case .unverified: state = .unavailable; purchaseStates[id] = .unavailable
             }
@@ -209,7 +223,14 @@ public extension ApplePurchaseStore {
     /// transaction ID) are kept. A failed purchase attempt on an open catalogue
     /// returns to ready; nothing is reloaded, credited or finished here.
     public func clearSettledOutcomes() {
-        transactionOutcomes = transactionOutcomes.filter { $0.value.state == .needsSupport }
+        let visibleSupportIDs = purchaseStates.compactMapValues { state -> String? in
+            if case let .needsSupport(id) = state { return id }
+            return nil
+        }
+        rowAcknowledgements = rowAcknowledgements.filter { visibleSupportIDs[$0.key] != nil }
+        transactionOutcomes = transactionOutcomes.filter { id, outcome in
+            visibleSupportIDs[outcome.productID] == id
+        }
         purchaseStates = purchaseStates.filter { _, value in
             switch value {
             case .purchasing, .pending, .retrying, .needsSupport, .sandboxCapExceeded: true
@@ -244,36 +265,62 @@ public extension ApplePurchaseStore {
     private func enqueue(_ transaction: AppleVerifiedTransaction) {
         guard let api, accountID != nil, let environment = acceptedEnvironment,
               transaction.environment == environment,
-              Self.productIDs.contains(transaction.productID), submissions[transaction.id] == nil,
-              !finished.contains(transaction.id) else { return }
+              Self.productIDs.contains(transaction.productID) else { return }
         let scope = generation
+        let id = transaction.id
+        if transaction.isRevoked, acknowledgedCredits.remove(id) != nil {
+            // StoreKit verified a refund for a credit we already processed.
+            // Invalidate it before refreshing, including when its first refresh is still running.
+            acknowledgementOrder += 1
+            let outcome = TransactionOutcome(productID: transaction.productID, state: .revoked)
+            publishOutcome(outcome, transactionID: id, state: .revoked, order: acknowledgementOrder)
+            Task { [weak self] in
+                guard let self, self.isCurrent(scope) else { return }
+                await self.refreshWallet()
+            }
+            return
+        }
+        guard !finished.contains(id) else { return }
+        if transaction.isRevoked { unresolvedRefunds.insert(id) }
+        guard submissions[id] == nil else { return }
+        if pendingProductID == transaction.productID { pendingProductID = nil }
+        unresolvedTransactions.insert(id)
         state = .retrying; purchaseStates[transaction.productID] = .retrying
-        submissions[transaction.id] = Task { [weak self] in
+        submissions[id] = Task { [weak self] in
             guard let self else { return }
-            defer { if self.generation == scope { self.submissions[transaction.id] = nil } }
+            defer { if self.generation == scope { self.submissions[id] = nil } }
             var delay: UInt64 = 2
             while self.isCurrent(scope) {
                 do {
                     let request = try AppleTransactionRequest(signedTransaction: transaction.signedTransaction)
                     let result = try await api.appleTransaction(request)
                     guard self.isCurrent(scope) else { return }
-                    guard result.transactionId == transaction.id, result.finish else { throw ContractViolation.invariant }
+                    guard result.transactionId == id, result.finish else { throw ContractViolation.invariant }
                     self.acknowledgementOrder += 1
                     let order = self.acknowledgementOrder
                     await transaction.finish()
                     guard self.isCurrent(scope) else { return }
-                    self.finished.insert(transaction.id)
+                    self.finished.insert(id)
+                    self.unresolvedTransactions.remove(id)
                     let terminalState: State
                     switch result.state {
                     case .credited, .alreadyCredited: terminalState = .succeeded
-                    case .needsSupport: terminalState = .needsSupport(transaction.id)
+                    case .needsSupport: terminalState = .needsSupport(id)
                     case .creditedToOtherAccount: terminalState = .otherAccount
                     case .revoked: terminalState = .revoked
                     }
+                    let hasVerifiedRefund = self.unresolvedRefunds.remove(id) != nil
+                    let refundOverridesCredit = hasVerifiedRefund && terminalState == .succeeded
+                    let outcome = TransactionOutcome(
+                        productID: transaction.productID, state: refundOverridesCredit ? .revoked : result.state)
+                    if outcome.isCredited { self.acknowledgedCredits.insert(id) }
                     self.state = terminalState
                     if terminalState == .succeeded || terminalState == .revoked { await self.refreshWallet() }
-                    guard self.isCurrent(scope) else { return }
-                    self.publishOutcome(result, productID: transaction.productID, state: terminalState, order: order)
+                    guard self.isCurrent(scope), !outcome.isCredited || self.acknowledgedCredits.contains(id) else {
+                        return
+                    }
+                    self.publishOutcome(outcome, transactionID: id,
+                                        state: refundOverridesCredit ? .revoked : terminalState, order: order)
                     return
                 } catch {
                     guard self.isCurrent(scope) else { return }
@@ -295,8 +342,9 @@ public extension ApplePurchaseStore {
         }
     }
 
-    private func publishOutcome(_ result: AppleTransactionResponse, productID: String, state: State, order: Int) {
-        transactionOutcomes[result.transactionId] = .init(productID: productID, state: result.state)
+    private func publishOutcome(_ outcome: TransactionOutcome, transactionID: String, state: State, order: Int) {
+        transactionOutcomes[transactionID] = outcome
+        let productID = outcome.productID
         // Wallet refresh and StoreKit finish can resume out of acknowledgement order.
         if order > rowAcknowledgements[productID, default: 0] {
             rowAcknowledgements[productID] = order
