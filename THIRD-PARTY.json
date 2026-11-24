@@ -14,6 +14,8 @@
     "ios/App/Resources/ThirdPartyNotices/MathFonts-GUST-FONT-LICENSE.txt",
     "ios/App/Resources/ThirdPartyNotices/MathFonts-MIT-LICENSE.txt",
     "ios/App/Resources/ThirdPartyNotices/Prism-LICENSE.txt",
+    "ios/App/Resources/ThirdPartyNotices/ProviderMarks-NOTICE.txt",
+    "ios/App/Resources/ThirdPartyNotices/ProviderMarks-SimpleIcons-CC0-1.0.txt",
     "ios/App/Resources/ThirdPartyNotices/Sentry-LICENSE.txt",
     "ios/App/Resources/ThirdPartyNotices/Sentry-THIRD_PARTY_NOTICES.txt",
     "ios/App/Resources/ThirdPartyNotices/SwiftUIMath-LICENSE.txt",
@@ -91,5 +93,51 @@
     }
   ],
   "modifications": "Matrix SDK patch and Apache-era Element X provenance documented in NOTICE; vendored design attribution in ios/Vendor/AtumDesign/ATTRIBUTION.md",
-  "hermesBlanketNotice": "NOTICE and LICENSES/Hermes-Agent-MIT.txt apply to all inherited Hermes content; no absent-path ownership assumption"
+  "hermesBlanketNotice": "NOTICE and LICENSES/Hermes-Agent-MIT.txt apply to all inherited Hermes content; no absent-path ownership assumption",
+  "bundledArtwork": [
+    {
+      "id": "simple-icons-provider-marks",
+      "license": "CC0-1.0",
+      "source": "https://github.com/simple-icons/simple-icons/tree/90646e4bf7f3b89df6c37e65baf3e7bc759a517c",
+      "files": [
+        "claude",
+        "deepseek",
+        "gemini",
+        "github-copilot",
+        "minimax",
+        "opencode",
+        "qwen"
+      ],
+      "path": "ios/App/Assets.xcassets/ProviderMarks",
+      "notice": "ios/App/Resources/ThirdPartyNotices/ProviderMarks-NOTICE.txt"
+    },
+    {
+      "id": "lobe-icons-provider-marks",
+      "license": "MIT",
+      "copyright": [
+        "Copyright (c) 2023 LobeHub"
+      ],
+      "source": "https://github.com/lobehub/lobe-icons/tree/8b7bbc433d38437fa2b0cca58ae896917162b812",
+      "files": [
+        "openai",
+        "grok"
+      ],
+      "modified": "fill=currentColor written as #000000 for the iOS asset compiler",
+      "path": "ios/App/Assets.xcassets/ProviderMarks",
+      "notice": "ios/App/Resources/ThirdPartyNotices/ProviderMarks-NOTICE.txt"
+    },
+    {
+      "id": "t3code-antigravity-mark",
+      "license": "MIT",
+      "copyright": [
+        "Copyright (c) 2026 T3 Tools Inc."
+      ],
+      "source": "https://github.com/pingdotgg/t3code (apps/web/src/components/Icons.tsx), via atum-desktop 2365efe8 provider-marks/antigravity.png",
+      "files": [
+        "antigravity"
+      ],
+      "path": "ios/App/Assets.xcassets/ProviderMarks",
+      "notice": "ios/App/Resources/ThirdPartyNotices/ProviderMarks-NOTICE.txt"
+    }
+  ]
 }

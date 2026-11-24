@@ -555,17 +555,19 @@ private struct ComposerModelChoiceButton: View {
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        // FlowPhone: a plain capsule, the model's name in `.subheadline`
-        // ink-2 and a caret-down; no globe, no chevron-right.
+        // The desktop's chip (model-picker-spec.json `trigger`, #119): a plain
+        // capsule, the answering model's mark before its name, weight 500,
+        // no chevron. The name is `.subheadline` ink-2.
         Button { presented = true } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
+                if let markArt {
+                    ProviderMark(design: design, art: markArt, size: 16)
+                }
                 Text(verbatim: label)
                     .lineLimit(1)
                     .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.6 : 0.85)
-                Image(atum.symbol(.chevronDown))
-                    .font(.system(size: 11, weight: .regular))
             }
-            .font(.subheadline)
+            .font(.subheadline.weight(.medium))
             .foregroundStyle(atum.color(.soft, scheme: scheme))
             .padding(.horizontal, 10)
             .frame(minHeight: 30)
@@ -629,6 +631,38 @@ private struct ComposerModelChoiceButton: View {
             return name
         }
         return design.text("desktop.atum.settings.model")
+    }
+
+    /// The chip's mark, read from the same facts as its name: Atum's eclipse
+    /// for a line-up model, the connection's mark for a subscription or own
+    /// key. Nil (no mark) only while nothing names the choice yet.
+    private var markArt: ProviderMark.Art? {
+        let saved = destination?.choice(for: cloudDestination)
+        if let pickedModel {
+            if ManagedModelLineup.productName(for: pickedModel) != nil { return .atum }
+            if let saved, saved.model == pickedModel { return Self.art(saved.source) }
+            return nil
+        }
+        if let saved {
+            if ManagedModelLineup.productName(for: saved.model) != nil { return .atum }
+            if saved.source != .atum { return Self.art(saved.source) }
+        }
+        if let alias = snapshot?.choice.model, ManagedModelLineup.productName(for: alias) != nil {
+            return .atum
+        }
+        if let model = destination?.recommended.model, ManagedModelLineup.productName(for: model) != nil {
+            return .atum
+        }
+        return nil
+    }
+
+    private static func art(_ source: ManagedModelDestinationSource) -> ProviderMark.Art {
+        switch source {
+        case .atum: .atum
+        case .chatGPTPlan: ProviderMark.art(provider: "openai", label: "ChatGPT")
+        case .opencodeGo: ProviderMark.art(provider: "opencode", label: "OpenCode Go")
+        case let .ownKey(provider): ProviderMark.art(provider: provider, label: provider)
+        }
     }
 
     private var cloudDestination: ManagedModelDestinationID {
