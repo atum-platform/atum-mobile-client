@@ -183,8 +183,6 @@ final class StoreCommercePresentationTests: XCTestCase {
         }
         // A failed or unanswered purchase never says nothing was charged.
         XCTAssertNotEqual(ProtonTopUpPresentation.notice(for: .unavailable)?.key, StoreCopyKey.failed)
-        XCTAssertTrue(ProtonTopUpPresentation.finished(["a": .cancelled, "b": .succeeded]))
-        XCTAssertFalse(ProtonTopUpPresentation.finished(["a": .pending, "b": .retrying]))
         XCTAssertTrue(ProtonTopUpPresentation.isOut(999_999))
         XCTAssertFalse(ProtonTopUpPresentation.isOut(1_000_000))
     }
