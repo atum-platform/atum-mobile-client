@@ -19,7 +19,6 @@ final class ProviderMarkTests: XCTestCase {
             ("xai", "Grok", "provider.grok"),
             ("minimax", "MiniMax", "provider.minimax"),
             ("qwen", "Qwen", "provider.qwen"),
-            ("copilot-acp", "GitHub Copilot", "provider.github-copilot"),
         ]
         for (provider, label, asset) in expected {
             guard case let .template(name, _) = ProviderMark.art(provider: provider, label: label) else {
@@ -27,6 +26,14 @@ final class ProviderMarkTests: XCTestCase {
             }
             XCTAssertEqual(name, asset, provider)
             XCTAssertNotNil(UIImage(named: name), "\(name) is not in the asset catalog")
+        }
+    }
+
+    /// Copilot's mark isn't bundled (its catalog licence is MIT, not CC0), so it
+    /// falls back to an initial like any provider without a bundled logo.
+    func testCopilotFallsBackToItsInitial() {
+        guard case .monogram = ProviderMark.art(provider: "copilot-acp", label: "GitHub Copilot") else {
+            return XCTFail("copilot should use the initial fallback")
         }
     }
 
@@ -40,7 +47,7 @@ final class ProviderMarkTests: XCTestCase {
     /// Monochrome marks follow the theme's ink; the brand-coloured ones keep their colour.
     func testOnlyTheDesktopsColouredMarksCarryAColour() {
         let coloured = ["claude", "deepseek", "gemini", "minimax", "qwen"]
-        for provider in coloured + ["openai", "opencode", "grok", "copilot"] {
+        for provider in coloured + ["openai", "opencode", "grok"] {
             guard case let .template(_, color) = ProviderMark.art(provider: provider, label: provider) else {
                 return XCTFail(provider)
             }

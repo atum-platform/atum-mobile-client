@@ -71,6 +71,9 @@ struct ProviderMark: View {
                     .atumDesign(design)
             }
         }
+        // One lead column for every kind of mark, so names line up in a list
+        // even where AtumAvatar caps its own growth below `side`.
+        .frame(width: side, height: side)
         .accessibilityHidden(true)
     }
 
@@ -98,7 +101,6 @@ struct ProviderMark: View {
         (["xai", "grok"], .template(asset: "provider.grok", color: nil)),
         (["minimax"], .template(asset: "provider.minimax", color: hex(0xE73562))),
         (["qwen"], .template(asset: "provider.qwen", color: hex(0x6950EF))),
-        (["copilot-acp", "github copilot", "copilot"], .template(asset: "provider.github-copilot", color: nil)),
     ]
 
     private static func hex(_ value: UInt32) -> Color {

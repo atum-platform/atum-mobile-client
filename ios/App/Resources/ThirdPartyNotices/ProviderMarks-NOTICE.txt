@@ -9,8 +9,7 @@ of this set. The files are the ones the Atum desktop picker bundles
 
 Simple Icons (CC0-1.0), simple-icons/simple-icons commit
 90646e4bf7f3b89df6c37e65baf3e7bc759a517c: claude.svg, deepseek.svg,
-gemini.svg (icons/googlegemini.svg), github-copilot.svg
-(icons/githubcopilot.svg; the pinned catalog records MIT), minimax.svg (custom
+gemini.svg (icons/googlegemini.svg), minimax.svg (custom
 permission recorded at simple-icons/simple-icons#13982), opencode.svg,
 qwen.svg. CC0 does not waive the brands' trademark rights. Licence text:
 ProviderMarks-SimpleIcons-CC0-1.0.txt.

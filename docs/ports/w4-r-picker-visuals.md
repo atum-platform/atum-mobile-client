@@ -81,7 +81,6 @@ lane does not touch them.
 | `claude.svg` | Simple Icons `icons/claude.svg` | `029b69f0…049ecc` |
 | `deepseek.svg` | Simple Icons `icons/deepseek.svg` | `a7a1ebbb…f9084` |
 | `gemini.svg` | Simple Icons `icons/googlegemini.svg` | `ad591037…659e` |
-| `github-copilot.svg` | Simple Icons `icons/githubcopilot.svg` | `d2b82be0…085f` |
 | `minimax.svg` | Simple Icons `icons/minimax.svg` | `d835d615…c09` |
 | `opencode.svg` | Simple Icons `icons/opencode.svg` | `71850d1f…4a6f` |
 | `qwen.svg` | Simple Icons `icons/qwen.svg` | `180d5019…fdbb0` |
@@ -124,3 +123,9 @@ These are local evidence and are not committed.
 Seen in the captures, outside this lane: the chip names a ChatGPT-plan pick by its raw id (`gpt-6.1`),
 where the list says "GPT-6.1". The chip's name logic in `Composer.swift` only maps Atum's line-up names,
 and the subscription display name lives in W4-Q's projection. Follow-up for whichever lane owns it.
+
+## Review r1 (Opus): MERGE, coordinator fixes
+
+- **Copilot mark dropped.** Its Simple Icons catalog entry records MIT, not CC0, and the phone never names a Copilot provider today, so the asset, its table row and its notice/licence entries are removed; Copilot falls back to its initial like any provider without a bundled logo (test added). Desktop's `provider-marks/README.md` has the same gap.
+- **One lead column for every mark.** `ProviderMark` now frames every case at `side`, so Atum and initial marks (which cap their own growth at 1.35×) line up with logo marks at accessibility sizes.
+- **Follow-ups:** AX5 first-row name clipping in the sheet (needs a main baseline capture to tell whether it's new); the chip labels own-key marks with the provider id instead of the row's connection label; a brief no-mark flash on the chip after a subscription pick; evidence captures for a starred row, a current Atum row and the initial fallback; amber star contrast (desktop too); a 192 px Antigravity source; the chip's raw `gpt-6.1` name (W4-Q).
