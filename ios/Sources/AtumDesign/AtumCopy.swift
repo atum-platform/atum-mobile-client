@@ -24,7 +24,9 @@ public struct AtumCopy {
     }
     private struct Entry: Decodable { let localizations: [String: Localization] }
     private struct Catalog: Decodable { let sourceLanguage: String; let strings: [String: Entry] }
-    private struct Parameter: Decodable { let kind: String; let nullable: Bool }
+    /// `choice`: one of `values`, already folded into the key (`….plan=codex`);
+    /// it is checked, never formatted into the text.
+    private struct Parameter: Decodable { let kind: String; let nullable: Bool; let values: [String]? }
     private struct Exact: Decodable {
         let argumentIndex: Int
         let value: Int64
@@ -73,6 +75,9 @@ public struct AtumCopy {
         for (parameter, argument) in zip(parameters, arguments) {
             switch (parameter.kind, argument) {
             case ("string", .text), ("number", .number): break
+            // The value must be the one the key was exported for.
+            case let ("choice", .text(value)) where parameter.values?.contains(value) == true
+                && (key.hasSuffix("=" + value) || key.contains("=" + value + ".")): break
             default: throw CopyError.invalidArguments(key)
             }
         }
@@ -92,7 +97,9 @@ public struct AtumCopy {
             throw CopyError.missingKey(selected)
         }
         // Plain source strings are literal, even when they contain '%' or '%@'.
-        guard !parameters.isEmpty else { return localization.stringUnit.value }
+        // A choice argument is in the key, not the text, so a key whose only
+        // arguments are choices is plain too.
+        guard parameters.contains(where: { $0.kind != "choice" }) else { return localization.stringUnit.value }
         var format = localization.stringUnit.value
         for (name, substitution) in localization.substitutions ?? [:] {
             guard arguments.indices.contains(substitution.argNum - 1),
