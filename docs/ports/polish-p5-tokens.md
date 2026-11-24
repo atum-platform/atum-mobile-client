@@ -51,7 +51,8 @@ W4-S), and the model picker, `Composer.swift` and
   plays `.error`, through `StoreNotice.Tone.feedback`. The recovery sheets
   move from `UINotificationFeedbackGenerator` to `.sensoryFeedback`: copying the
   key plays `.success`, and a restore plays `.success` or, for a wrong key,
-  `.error`. The Appearance segmented
+  `.error`. A hire from a Store listing plays `.success` once it is hired and
+  `.error` on a failure line. The Appearance segmented
   control plays `.selection`.
 
 Text styles such as `.font(.body)` were left as they are. Moving them to
@@ -69,6 +70,7 @@ screen's look.
 | AppBots | `AppBotViews`, `AppOnboardingViews` | 14 → 0 |
 | Auth and Onboarding | `S6AuthViews`, `FirstRunCards` | 20 → 2 allowed |
 | Debug | `S6SystemGallery` | 14 → 0 |
+| Home side files | `AppCardSheet`, `AttentionBell`, `HomeGlobalSearch`, `ListingHireView` | 33 → 0 |
 
 ## Verification
 
