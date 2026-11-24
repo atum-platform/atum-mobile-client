@@ -298,12 +298,75 @@ final class AccountConnectionsTests: XCTestCase {
         do { _ = try await client.accountConnections(); XCTFail("a 503 was read as an answer") }
         catch {}
     }
+
+    /// The connect sheet's poll can run as the app suspends, so it must never
+    /// start the one-time token spend: no refresh of an expired bearer, no
+    /// 401 replay, no authentication-failure report. The foreground read,
+    /// the control, still refreshes once on a 401.
+    func testAPollNeverRefreshesOrReplaysA401() async throws {
+        let probe = PollProbe()
+        let client = NativeDomainClient(
+            testAuthorization: { forceRefresh in
+                probe.refreshes.append(forceRefresh)
+                return forceRefresh ? "refreshed-token" : "rotating-token"
+            },
+            protocolClasses: [AccountConnectionsProtocol.self],
+            testStoredAuthorization: { probe.stored },
+            onAuthenticationFailure: { _ in probe.failures += 1 })
+
+        // A valid stored bearer: one request with it, and the registry.
+        AccountConnectionsProtocol.reset(answers: [(200, AccountConnectionsTests.fixture)])
+        let value = try await client.accountConnections(.poll)
+        XCTAssertEqual(value.connections.count, 7)
+        XCTAssertEqual(AccountConnectionsProtocol.requests, 1)
+        XCTAssertEqual(AccountConnectionsProtocol.seen?.authorization, "Bearer stored-token")
+
+        // A 401 is final: one request, no refresh, no replay, no report.
+        AccountConnectionsProtocol.reset(answers: [(401, Data(#"{"error":"matrix_401"}"#.utf8)),
+                                                   (200, AccountConnectionsTests.fixture)])
+        do { _ = try await client.accountConnections(.poll); XCTFail("a 401 poll was replayed into an answer") }
+        catch { XCTAssertEqual(error as? NativeDomainClientFailure, .authenticationRefused) }
+        XCTAssertEqual(AccountConnectionsProtocol.requests, 1, "a poll never replays a 401")
+
+        // A bearer that would need a refresh: no request at all.
+        probe.stored = nil
+        AccountConnectionsProtocol.reset(answers: [(200, AccountConnectionsTests.fixture)])
+        do { _ = try await client.accountConnections(.poll); XCTFail("a poll ran without a stored bearer") }
+        catch { XCTAssertEqual(error as? NativeDomainClientFailure, .authenticationRefused) }
+        XCTAssertEqual(AccountConnectionsProtocol.requests, 0)
+
+        XCTAssertEqual(probe.refreshes, [], "a poll never asks the grant for a bearer, let alone a refresh")
+        XCTAssertEqual(probe.failures, 0, "a poll reports no authentication failure")
+
+        // Control: the foreground read refreshes once on a 401 and replays.
+        AccountConnectionsProtocol.reset(answers: [(401, Data(#"{"error":"matrix_401"}"#.utf8)),
+                                                   (200, AccountConnectionsTests.fixture)])
+        _ = try await client.accountConnections()
+        XCTAssertEqual(probe.refreshes, [false, true])
+        XCTAssertEqual(AccountConnectionsProtocol.requests, 2)
+        XCTAssertEqual(AccountConnectionsProtocol.seen?.authorization, "Bearer refreshed-token")
+    }
+}
+
+@MainActor private final class PollProbe {
+    var refreshes: [Bool] = []
+    var failures = 0
+    var stored: String? = "stored-token"
 }
 
 private final class AccountConnectionsProtocol: URLProtocol, @unchecked Sendable {
     struct Seen { let method: String; let path: String; let authorization: String?; let body: Data?; let version: String? }
     nonisolated(unsafe) static var seen: Seen?
     nonisolated(unsafe) static var answer: (Int, Data) = (200, Data())
+    /// Answered in order before `answer`; `requests` counts every request.
+    nonisolated(unsafe) static var answers: [(Int, Data)] = []
+    nonisolated(unsafe) static var requests = 0
+
+    static func reset(answers: [(Int, Data)]) {
+        self.answers = answers
+        requests = 0
+        seen = nil
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -312,7 +375,8 @@ private final class AccountConnectionsProtocol: URLProtocol, @unchecked Sendable
                          authorization: request.value(forHTTPHeaderField: "Authorization"),
                          body: Self.body(of: request),
                          version: request.value(forHTTPHeaderField: "Atum-Device-Service-Version"))
-        let (status, data) = Self.answer
+        Self.requests += 1
+        let (status, data) = Self.answers.isEmpty ? Self.answer : Self.answers.removeFirst()
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
                                                               headerFields: ["Content-Type": "application/json"])!,
                             cacheStoragePolicy: .notAllowed)

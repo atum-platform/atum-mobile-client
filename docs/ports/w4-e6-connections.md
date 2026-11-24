@@ -119,6 +119,14 @@ what the phone is. `file:line` is the phone code reused.
 4. **OpenCode Go key on the phone** (phone follow-up, not platform). The row
    shows the status. Connecting and managing the key stays on the desktop
    until a phone key sheet is ported.
+5. **Decoder parity with the desktop's zod schema** (phone follow-up, from
+   review r1). The phone counts a label's length in Unicode scalars; zod
+   counts UTF-16 code units (`apps/desktop/shared/account-connections.ts`
+   `label(max)`). The phone also refuses an integral JSON number written
+   with a fraction, such as `observedAt: 1.0`; zod's `.int()` accepts it.
+   So a device name made of astral characters near the bound, or a `1.0`,
+   can parse on the desktop and not on the phone. The phone then shows the
+   failed state, never a wrong row.
 
 ## Tests
 
@@ -168,3 +176,61 @@ Captures: `/Volumes/AtumTestFlight/dd-w4-e6/ui-scratch/ui-evidence/`
 (`connections-rows-en-light.png`, `connections-sheet-en-light.png`,
 `connections-sheet-done-vi-light.png`, `connections-rows-en-dark-ax5.png`,
 `AccountConnectionsPickerUITests.picker-connect-en.png`).
+
+## Review r1 fixes (r2, 2026-11-24)
+
+Codex review r1 held the lane on one account-access finding and two
+should-fixes.
+
+1. **The connect sheet could start token rotation in the background
+   (blocking). Fixed.** The sheet's follow-up reads are now polls that
+   never rotate the grant.
+   - `NativeDomainClient.accountConnections(.poll)` sends only a stored
+     bearer that stays valid for 60 s
+     (`OIDCGrantRefresh.storedAccessTokenWithoutRefresh`). It never
+     refreshes an expired one, never replays a 401 and reports no
+     authentication failure. When a refresh would be needed it fails
+     without a request, and the next foreground read renews the token.
+   - The sheet follows only while the scene is active
+     (`.task(id: scenePhase == .active)`). Leaving the scene cancels the
+     loop, and the 10-minute limit counts across pauses.
+   - The poll is made once, when the sheet first follows, by
+     `LiveAppModel.accountConnectionsPoller()`. It is bound to the client
+     current at that moment and answers nothing once that session is
+     replaced.
+2. **The picker kept offering Connect after a plan landed. Fixed.** The
+   sheet's registry now replaces the picker's
+   (`PhoneModelPickerList.account(_:with:)`), keeping the subscription
+   statuses already read. The poll is a dedicated registry read
+   (`AssistantSubscriptionActions.makeConnectionsPoll`). It no longer
+   repeats the relay and provider-connection reads.
+3. **A late Settings refresh could undo a landing. Fixed.** Each
+   `AccountConnectionsModel.reload` takes a generation. `landed` takes a
+   new one, so an older read in flight is dropped when it finishes.
+4. **Small fixes.**
+   - At accessibility sizes the picker's Connect row stacks the button
+     under the words, as Settings does.
+   - The home hub's trailing "Not connected" is hidden from VoiceOver,
+     since the row's label already says it.
+
+Tests added:
+- `AccountConnectionsTransportTests.testAPollNeverRefreshesOrReplaysA401`
+  (package): a valid stored bearer sends one request; a 401 is final after
+  one request; no stored bearer sends none; the grant is never asked and
+  no failure is reported. The foreground read is the control and still
+  refreshes once.
+- `OIDCTests.testStoredTokenWithoutRefreshNeverSpends` (package).
+- `AccountConnectionsStateTests` (AppTests):
+  `testALateRefreshNeverUndoesALanding` and
+  `testThePickerDropsConnectOnceThePlanLands`.
+
+r2 verification ran under the shared lock with
+`/Volumes/AtumTestFlight/dd-w4-e6/verify-r2.sh`. Per the slim lane rule, no
+UI tests ran locally; the hosted PR shards run them.
+
+| Check | Result |
+| --- | --- |
+| `swift test -j 2 --filter 'AccountConnections\|OIDCTests\|AtumCopyTests\|NativeDomainClientTests\|PhoneRegistry'` | Exit 0, 153 tests, 0 failures |
+| Debug `build-for-testing` | Exit 0 |
+| AppTests `AccountConnectionsStateTests`, `AccountSettingsStateTests`, `PhoneModelPickerCopyTests`, `ChatGPTTrainingGateTests` | Exit 0, 42 tests |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | Exit 0 on its own |

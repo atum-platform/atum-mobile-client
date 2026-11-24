@@ -647,7 +647,8 @@ struct AppRoot: View {
             loadDevices: { await model.ownDevices() },
             deviceSignOutURL: { await model.deviceSignOutURL(deviceID: $0) },
             phoneApprovals: model.phoneApprovals,
-            accountConnections: AccountConnectionsActions(read: { await model.accountConnections() })
+            accountConnections: AccountConnectionsActions(read: { await model.accountConnections() },
+                                                          makePoll: { model.accountConnectionsPoller() })
         )
     }
 

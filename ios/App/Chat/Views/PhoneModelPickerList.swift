@@ -34,8 +34,12 @@ struct PhoneModelPickerList: View {
     /// signed out): each gets "Use your {Plan} plan" and one Connect, which
     /// opens the connect sheet (desktop `AccountPlanConnectState`).
     let planConnects: [AccountPlan]
-    /// The account read the connect sheet follows while it is open.
-    let readConnections: (@MainActor () async -> AccountConnections?)?
+    /// Makes the connect sheet's registry poll when it opens (bound to that
+    /// account session; it never rotates the grant).
+    let makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
+    /// The sheet saw a plan land: the picker takes that registry, so the
+    /// plan's Connect entry goes away.
+    let onConnectionsChanged: @MainActor (AccountConnections) -> Void
     let select: (Row) -> Void
 
     @State private var query = ""
@@ -63,7 +67,8 @@ struct PhoneModelPickerList: View {
          selectEffort: @escaping (ManagedModelEffort) -> Void = { _ in },
          switchBack: (() -> Void)? = nil,
          planConnects: [AccountPlan] = [],
-         readConnections: (@MainActor () async -> AccountConnections?)? = nil,
+         makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)? = nil,
+         onConnectionsChanged: @escaping @MainActor (AccountConnections) -> Void = { _ in },
          select: @escaping (Row) -> Void) {
         self.design = design
         self.matrixAccountID = matrixAccountID
@@ -77,7 +82,8 @@ struct PhoneModelPickerList: View {
         self.selectEffort = selectEffort
         self.switchBack = switchBack
         self.planConnects = planConnects
-        self.readConnections = readConnections
+        self.makeConnectionsPoll = makeConnectionsPoll
+        self.onConnectionsChanged = onConnectionsChanged
         self.select = select
         self.preferenceStore = preferenceStore
         _query = State(initialValue: initialQuery)
@@ -153,7 +159,7 @@ struct PhoneModelPickerList: View {
         .onChange(of: rows) { _, _ in disclosure.settle(sections) }
         .sheet(item: $connecting) { request in
             AccountPlanConnectSheet(design: design, plan: request.plan,
-                                    read: readConnections ?? { nil }) { _ in }
+                                    makePoll: makeConnectionsPoll, onLanded: onConnectionsChanged)
         }
     }
 
@@ -163,11 +169,11 @@ struct PhoneModelPickerList: View {
         account?.accountConnections.map(AccountConnectionsView.pickerConnectPlans) ?? []
     }
 
-    /// The connect sheet's read, from the picker's own subscription read.
-    static func connectionsRead(_ subscriptions: AssistantSubscriptionActions?)
-        -> (@MainActor () async -> AccountConnections?)? {
-        guard let read = subscriptions?.read else { return nil }
-        return { await read().accountConnections }
+    /// The picker's account with the sheet's newer registry in place.
+    static func account(_ account: PhoneSubscriptionAccount?,
+                        with registry: AccountConnections) -> PhoneSubscriptionAccount {
+        PhoneSubscriptionAccount(chatGPT: account?.chatGPT, openCodeGo: account?.openCodeGo,
+                                 accountConnections: registry)
     }
 
     /// Desktop's Connect state for a plan with nothing to pick: the plan's
@@ -176,21 +182,38 @@ struct PhoneModelPickerList: View {
     private var planConnectSection: some View {
         Section {
             ForEach(planConnects, id: \.self) { plan in
-                HStack(spacing: 12) {
-                    AccountPlanMark(design: design, plan: plan, size: 24)
-                    Text(verbatim: AccountConnectionsWords.text(AccountConnectionsCopy.pickerUse(plan), design: design))
-                        .font(.body)
-                        .foregroundStyle(atum.color(.ink, scheme: scheme))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button(AccountConnectionsWords.text(AccountConnectionsCopy.connect, design: design)) {
-                        connecting = AccountPlanConnectRequest(plan: plan)
-                    }
-                    .buttonStyle(.atumSecondary)
-                    .accessibilityLabel(AccountConnectionsWords.text(AccountConnectionsCopy.sheetTitle(plan),
-                                                                     design: design))
-                    .accessibilityIdentifier("phone.model.plan." + plan.rawValue + ".connect")
+                let label = Text(verbatim: AccountConnectionsWords.text(AccountConnectionsCopy.pickerUse(plan),
+                                                                        design: design))
+                    .font(.body)
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                let connect = Button(AccountConnectionsWords.text(AccountConnectionsCopy.connect, design: design)) {
+                    connecting = AccountPlanConnectRequest(plan: plan)
                 }
+                .buttonStyle(.atumSecondary)
+                .accessibilityLabel(AccountConnectionsWords.text(AccountConnectionsCopy.sheetTitle(plan),
+                                                                 design: design))
+                .accessibilityIdentifier("phone.model.plan." + plan.rawValue + ".connect")
+                // At accessibility sizes Connect goes under the words, as in Settings.
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                AccountPlanMark(design: design, plan: plan, size: 24)
+                                label
+                            }
+                            connect
+                        }
+                    } else {
+                        HStack(spacing: 12) {
+                            AccountPlanMark(design: design, plan: plan, size: 24)
+                            label
+                            connect
+                        }
+                    }
+                }
+                .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 6 : 0)
                 .frame(minHeight: 52)
                 .listRowBackground(atum.color(.cell, scheme: scheme))
                 .accessibilityElement(children: .contain)

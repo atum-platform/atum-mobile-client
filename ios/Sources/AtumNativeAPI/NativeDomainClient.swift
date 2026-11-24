@@ -70,10 +70,14 @@ public struct AgentsRead: Sendable {
     private static let hostControlURL = URL(string: "https://api.atumplatform.com" + HostAgentDesk.controlPath)!
 
     typealias Authorization = @MainActor @Sendable (_ forceRefresh: Bool) async throws -> String
+    /// The stored bearer while it is still valid, never a refresh (nil when
+    /// one would be needed). Only polls read through it.
+    typealias StoredAuthorization = @MainActor @Sendable () -> String?
     /// Revalidates the live desk context on the main actor before each POST.
     public typealias DeskSendCheck = @MainActor @Sendable () -> Bool
     public typealias AuthenticationFailureObserver = @MainActor @Sendable (any Error) -> Void
     private let authorization: Authorization
+    private let storedAuthorization: StoredAuthorization
     private let authenticationFailureObserver: AuthenticationFailureObserver
     private let protocolClasses: [URLProtocol.Type]?
 
@@ -89,6 +93,11 @@ public struct AgentsRead: Sendable {
             }
             return try await refresh.accessToken(now: Date(), preflight: preflight, exchange: exchange)
         }
+        // A poll's bearer must outlive its request with a margin, so the
+        // request itself never meets an expired token mid-flight.
+        storedAuthorization = {
+            refresh.storedAccessTokenWithoutRefresh(now: Date(), minimumValidity: Self.pollBearerMargin)
+        }
         authenticationFailureObserver = onAuthenticationFailure
         protocolClasses = nil
     }
@@ -96,11 +105,16 @@ public struct AgentsRead: Sendable {
     /// Test-only transport and credential seam. It has no caller-supplied
     /// origin and is internal to this module's testable build.
     init(testAuthorization: @escaping Authorization, protocolClasses: [URLProtocol.Type],
+         testStoredAuthorization: @escaping StoredAuthorization = { nil },
          onAuthenticationFailure: @escaping AuthenticationFailureObserver = { _ in }) {
         authorization = testAuthorization
+        storedAuthorization = testStoredAuthorization
         authenticationFailureObserver = onAuthenticationFailure
         self.protocolClasses = protocolClasses
     }
+
+    /// How long a poll's stored bearer must stay valid (seconds).
+    static let pollBearerMargin: TimeInterval = 60
 
     private static let applePaths = ["products", "account-token", "transactions"].map {
         "/api/matrix/v1/store/apple/" + $0
@@ -1153,8 +1167,15 @@ public struct AgentsRead: Sendable {
     /// (`account_connections_read` on device-services), over the same
     /// owner-authenticated transport the phone registry uses. The body names
     /// no owner; Shell takes it from the bearer.
-    public func accountConnections() async throws -> AccountConnections {
-        let body = try await phoneDeviceServices(request: AccountConnectionsContract.requestBody)
+    ///
+    /// `.poll` (the connect sheet's follow-up reads) never rotates the grant:
+    /// it sends only a stored bearer that is still valid, never refreshes an
+    /// expired one, never replays a 401 and reports no authentication
+    /// failure. When a refresh would be needed it fails without a request,
+    /// and the next foreground read renews the token.
+    public func accountConnections(_ mode: AccountConnectionsReadMode = .foreground) async throws -> AccountConnections {
+        let body = try await phoneDeviceServices(request: AccountConnectionsContract.requestBody,
+                                                 rotation: mode == .foreground)
         guard body.count <= AccountConnectionsContract.maximumResponseBytes else {
             throw NativeDomainClientFailure.invalidResponse
         }
@@ -1536,17 +1557,25 @@ public struct AgentsRead: Sendable {
     /// `controllerKeys` reads the public pinned controller keys.
     func phoneDeviceServices(request: Data? = nil, revoking id: UUID? = nil,
                              listVersion: String = PhoneRegistryContract.listVersion,
-                             controllerKeys: Bool = false) async throws -> Data {
+                             controllerKeys: Bool = false, rotation: Bool = true) async throws -> Data {
         let root = Self.baseURL.appendingPathComponent("device-services")
         let url = controllerKeys ? Self.baseURL.appendingPathComponent("cloud/controller-keys")
             : (id.map { root.appendingPathComponent($0.uuidString.lowercased()) } ?? root)
         let method = id != nil ? "DELETE" : (request == nil ? "GET" : "POST")
         let headers = method == "GET" && !controllerKeys ? [PhoneRegistryContract.versionHeader: listVersion] : [:]
-        let token = try await authorize(forceRefresh: false)
+        let token: String
+        if rotation {
+            token = try await authorize(forceRefresh: false)
+        } else {
+            guard let stored = storedAuthorization() else { throw NativeDomainClientFailure.authenticationRefused }
+            token = stored
+        }
         try requireActiveTask()
         var result = try await perform(url: url, token: token, method: method,
             body: method == "GET" ? nil : (request ?? Data()),
             maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000, extraHeaders: headers)
+        // Without rotation a 401 is final: no refresh, no replay, no report.
+        if result.status == 401, !rotation { throw NativeDomainClientFailure.authenticationRefused }
         if result.status == 401 {
             let refreshed = try await authorize(forceRefresh: true)
             try requireActiveTask()

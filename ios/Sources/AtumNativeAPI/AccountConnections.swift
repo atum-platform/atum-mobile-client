@@ -21,6 +21,12 @@ public enum AccountConnectionsContract {
     public static let maximumResponseBytes = 256 * 1024
 }
 
+/// How a registry read may authorize. `.poll` is a follow-up read that may
+/// run while the app is leaving the foreground: it never rotates the grant.
+public enum AccountConnectionsReadMode: Sendable, Equatable {
+    case foreground, poll
+}
+
 /// The three plans in the order the desktop lists them (`ACCOUNT_PLANS`).
 public enum AccountPlan: String, CaseIterable, Sendable, Hashable, Decodable {
     case codex, claude, antigravity

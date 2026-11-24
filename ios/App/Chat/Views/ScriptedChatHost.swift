@@ -722,7 +722,8 @@ struct ScriptedChatHost: View {
                     scriptedTrainingConfirmed = true
                     return .confirmed(ChatGPTTrainingStatus(current: true, connectionID: connectionID,
                                                             confirmedAt: Self.trainingConfirmedAt, revision: 1))
-                }))
+                }),
+            makeConnectionsPoll: { { Self.scriptedAccountConnections } })
     }
 
     /// `-AtumScriptedTraining required`: the account has no current

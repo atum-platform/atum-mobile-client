@@ -247,7 +247,8 @@ struct S6ScriptedHost: View {
         )
         actions.phoneApprovals = phoneApprovals
         if scenario.isConnections {
-            actions.accountConnections = AccountConnectionsActions(read: { scriptedConnections() })
+            actions.accountConnections = AccountConnectionsActions(read: { scriptedConnections() },
+                                                                   makePoll: { { scriptedConnections() } })
         }
         if scriptedDevices {
             actions.loadDevices = { scriptedDeviceList() }

@@ -114,7 +114,7 @@ struct AccountSettingsDetail: View {
         }
         .sheet(item: $connectionsModel.connecting) { request in
             if let connections = actions.accountConnections {
-                AccountPlanConnectSheet(design: design, plan: request.plan, read: connections.read,
+                AccountPlanConnectSheet(design: design, plan: request.plan, makePoll: connections.makePoll,
                                         onLanded: connectionsModel.landed)
             }
         }

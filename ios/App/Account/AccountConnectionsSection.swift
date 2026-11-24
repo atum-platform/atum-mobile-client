@@ -10,6 +10,9 @@ import UIKit
 /// own to fall back on, so it never guesses "Not connected".
 struct AccountConnectionsActions {
     let read: @MainActor () async -> AccountConnections?
+    /// Makes the connect sheet's poll when the sheet opens: bound to that
+    /// account session, and never rotating the grant (`AccountConnectionsReadMode.poll`).
+    let makePoll: @MainActor () -> @MainActor () async -> AccountConnections?
 }
 
 /// The words of a connections phrase, from the pinned export.
@@ -42,9 +45,18 @@ struct AccountPlanMark: View {
 final class AccountConnectionsModel {
     var load = AccountConnectionsLoad.loading
     var connecting: AccountPlanConnectRequest?
+    /// Every read and every landing takes a new generation; a read applies
+    /// only if nothing newer started or landed while it was in flight.
+    @ObservationIgnored private var generation = 0
 
     func reload(_ read: @MainActor () async -> AccountConnections?) async {
-        guard let registry = await read() else {
+        generation += 1
+        let mine = generation
+        let registry = await read()
+        // A refresh that read "Not connected" before the sheet saw the plan
+        // land must not undo that newer answer.
+        guard mine == generation else { return }
+        guard let registry else {
             // A failed refresh keeps the last good read, as the desktop does.
             if case .loaded = load { return }
             load = .failed
@@ -53,8 +65,12 @@ final class AccountConnectionsModel {
         load = .loaded(registry)
     }
 
-    /// The connect sheet saw the plan land: the rows take that read.
-    func landed(_ registry: AccountConnections) { load = .loaded(registry) }
+    /// The connect sheet saw the plan land: the rows take that read, and any
+    /// older read still in flight is dropped.
+    func landed(_ registry: AccountConnections) {
+        generation += 1
+        load = .loaded(registry)
+    }
 }
 
 /// Settings › Connections, Subscriptions and Data and tools (desktop
@@ -203,7 +219,9 @@ struct AccountConnectionsSections: View {
                     lead
                     text
                     if let status {
+                        // The row's label already says it.
                         Text(status).font(.subheadline).foregroundStyle(atum.color(.soft, scheme: scheme))
+                            .accessibilityHidden(true)
                     }
                     control
                 }
@@ -249,10 +267,14 @@ struct AccountPlanConnectSheet: View {
 
     let design: LiveDesign
     let plan: AccountPlan
-    let read: @MainActor () async -> AccountConnections?
+    /// Makes the poll once, when the sheet first follows; nil: no follow.
+    let makePoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
     let onLanded: @MainActor (AccountConnections) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var poll: (@MainActor () async -> AccountConnections?)?
+    @State private var started: ContinuousClock.Instant?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var landed = false
@@ -300,15 +322,27 @@ struct AccountPlanConnectSheet: View {
         .atumDesign(design)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .task { await follow() }
+        // Follow only while the scene is active: leaving it cancels the
+        // loop (and a read in flight), and coming back resumes it.
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active, !landed else { return }
+            await follow()
+        }
     }
 
     @MainActor private func follow() async {
+        guard let makePoll else { return }
+        // Made once, for the session that was current when the sheet opened.
+        if poll == nil { poll = makePoll() }
+        guard let poll else { return }
         let clock = ContinuousClock()
-        let started = clock.now
+        // The 10-minute limit counts from the first follow, across pauses.
+        if started == nil { started = clock.now }
+        guard let started else { return }
         while clock.now - started < Self.waitLimit {
             do { try await Task.sleep(for: Self.pollInterval) } catch { return }
-            guard let registry = await read(), !Task.isCancelled else { continue }
+            guard scenePhase == .active else { return }
+            guard let registry = await poll(), !Task.isCancelled else { continue }
             if AccountConnectionsView.connectLanded(registry, plan: plan) {
                 onLanded(registry)
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { landed = true }

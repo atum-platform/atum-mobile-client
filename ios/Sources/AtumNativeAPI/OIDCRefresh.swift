@@ -176,6 +176,17 @@ public struct OIDCRefreshReply: Sendable, CustomStringConvertible, CustomDebugSt
         return try await startRefresh(expected: current, now: now, preflight: preflight, exchange: exchange)
     }
 
+    /// The stored access token while it stays valid for `minimumValidity`,
+    /// and never a refresh: nil while a refresh is in flight, when the token
+    /// is due, or when the record is not ready. A read that may run as the app
+    /// goes to the background (a poll) uses this, so it can never start the
+    /// one-time spend; the next foreground read renews the token.
+    public func storedAccessTokenWithoutRefresh(now: Date, minimumValidity: TimeInterval) -> String? {
+        guard flight == nil, let current = try? load(), current.phase == .ready,
+              current.expiresAt > now.addingTimeInterval(minimumValidity) else { return nil }
+        return current.accessToken
+    }
+
     /// Explicit 401 retry uses this even before the response-derived expiry.
     public func refresh(now: Date, preflight: @escaping Preflight = {},
                         exchange: @escaping Exchange) async throws -> String {

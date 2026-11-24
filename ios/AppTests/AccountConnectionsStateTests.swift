@@ -27,6 +27,41 @@ final class AccountConnectionsStateTests: XCTestCase {
         XCTAssertEqual(PhoneModelPickerList.planConnects(account), [.claude, .antigravity])
     }
 
+    /// A plan the sheet saw land leaves the picker: the picker takes the
+    /// sheet's registry, keeping the subscription statuses it already read.
+    func testThePickerDropsConnectOnceThePlanLands() {
+        let before = PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil,
+                                              accountConnections: registry([.codex: true, .claude: false]))
+        XCTAssertEqual(PhoneModelPickerList.planConnects(before), [.claude, .antigravity])
+        let after = PhoneModelPickerList.account(before, with: registry([.codex: true, .claude: true]))
+        XCTAssertEqual(PhoneModelPickerList.planConnects(after), [.antigravity])
+        XCTAssertEqual(PhoneModelPickerList.planConnects(PhoneModelPickerList.account(nil, with: registry([:]))),
+                       [.codex, .claude, .antigravity])
+    }
+
+    /// Settings: a foreground refresh that read "Not connected" and finishes
+    /// after the sheet saw the plan land must not undo the landing.
+    func testALateRefreshNeverUndoesALanding() async {
+        let model = AccountConnectionsModel()
+        let old = registry([.antigravity: false])
+        let newer = registry([.antigravity: true])
+        // The sheet lands while the refresh is still reading.
+        await model.reload { model.landed(newer); return old }
+        XCTAssertEqual(model.load, .loaded(newer))
+        // Nor does a failed refresh that was in flight.
+        await model.reload { model.landed(newer); return nil }
+        XCTAssertEqual(model.load, .loaded(newer))
+        // Of two overlapping refreshes, the one that started last wins.
+        await model.reload {
+            await model.reload { newer }
+            return old
+        }
+        XCTAssertEqual(model.load, .loaded(newer))
+        // A refresh that starts after the landing applies as usual.
+        await model.reload { old }
+        XCTAssertEqual(model.load, .loaded(old))
+    }
+
     func testTheConnectSheetFollowsAtTheDesktopsPace() {
         XCTAssertEqual(AccountPlanConnectSheet.pollInterval, .seconds(3))
         XCTAssertEqual(AccountPlanConnectSheet.waitLimit, .seconds(600))

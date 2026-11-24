@@ -18,6 +18,10 @@ struct AssistantSubscriptionActions {
     /// The one-time training-off confirmation a ChatGPT pick needs first.
     /// Without it a ChatGPT pick is never written (`ChatGPTTrainingGate`).
     var training: ChatGPTTrainingActions?
+    /// The connect sheet's registry poll, made when the sheet opens and bound
+    /// to that account session; it never rotates the grant. Nil: the sheet
+    /// does not follow the read.
+    var makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
 }
 
 /// One subscription pick, for an idempotent retry of the same write.
@@ -144,7 +148,8 @@ struct PhoneConversationModelPicker: View {
                     savingEffort: savingEffort,
                     selectEffort: chooseEffort,
                     planConnects: PhoneModelPickerList.planConnects(account),
-                    readConnections: PhoneModelPickerList.connectionsRead(destinations?.subscriptions),
+                    makeConnectionsPoll: destinations?.subscriptions?.makeConnectionsPoll,
+                    onConnectionsChanged: { account = PhoneModelPickerList.account(account, with: $0) },
                     select: choose
                 )
             } else if unavailable {
@@ -546,7 +551,8 @@ private struct PhoneDestinationModelPicker: View {
                     savingRowID: savingRowID,
                     saveFailed: saveFailed,
                     planConnects: destination.isCloud ? PhoneModelPickerList.planConnects(account) : [],
-                    readConnections: PhoneModelPickerList.connectionsRead(actions.subscriptions),
+                    makeConnectionsPoll: actions.subscriptions?.makeConnectionsPoll,
+                    onConnectionsChanged: { account = PhoneModelPickerList.account(account, with: $0) },
                     select: choose
                 )
             }
