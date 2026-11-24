@@ -216,9 +216,10 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
 
     /// A cloud offer whose current model is ready, with the levels it accepts.
     private func readySnapshot(model: String = "nguyet-thuc", effort: String? = "medium",
-                               efforts: [String] = ["low", "medium", "high"]) throws -> ManagedModelSnapshot {
+                               efforts: [Any] = ["low", "medium", "high"]) throws -> ManagedModelSnapshot {
         let digest = String(repeating: "a", count: 64)
-        let defaultEffort = efforts.contains("medium") ? "medium" : efforts[0]
+        let ids = efforts.compactMap { $0 as? String }
+        let defaultEffort = ids.contains("medium") ? "medium" : ids.first ?? "medium"
         var choice: [String: Any] = ["v": 2, "source": "atum", "model": model]
         if let effort { choice["effort"] = effort }
         var current = offer(alias: model, name: "Current", eligibility: ["state": "ready"])
@@ -283,6 +284,28 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         let onlyFuture = try readySnapshot(effort: nil, efforts: ["future"])
         XCTAssertNil(PhoneModelPickerProjection.thinking(onlyFuture))
         XCTAssertFalse(PhoneModelPickerProjection.cloud(onlyFuture)[0].selectable)
+    }
+
+    func testAssistantHomeKeepsAUsableOfferWhenEffortEntriesAreMalformedOrDuplicated() throws {
+        for entries: [Any] in [["medium", 7], ["medium", "future", "future"], ["medium", "medium"]] {
+            let snapshot = try readySnapshot(efforts: entries)
+            let offer = try XCTUnwrap(snapshot.models.first)
+            XCTAssertEqual(offer.efforts, [.medium])
+            XCTAssertTrue(AgentHomeModelRows.cloud(snapshot, selected: nil)[0].selectable)
+            XCTAssertEqual(AgentHomeModelRows.cloudChoice(for: offer)?.effort, .medium)
+        }
+    }
+
+    func testConversationCanUseAnOfferWhenTheDestinationRecommendationCannotBeWritten() throws {
+        let bytes = try fixture("destination.snapshot")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        object["recommended"] = ["source": "atum", "model": "nguyet-thuc", "effort": "maximum"]
+        let destination = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                               from: JSONSerialization.data(withJSONObject: object))
+        let offer = try readySnapshot(model: "nhat-thuc", efforts: ["medium"])
+        let rows = PhoneModelPickerProjection.conversation(
+            offer: offer, destination: destination, destinationID: try ManagedModelDestinationID("cloud"))
+        XCTAssertEqual(rows.filter { $0.selectable && !$0.selected }.map(\.model), ["nhat-thuc"])
     }
 
     func testAssistantHomeUsesOnlyLevelsItsCloudWriteAccepts() throws {

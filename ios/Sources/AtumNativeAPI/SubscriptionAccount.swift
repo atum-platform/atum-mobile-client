@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 // MARK: - The account's subscriptions, as the cloud can use them
 
@@ -30,6 +31,47 @@ public struct PhoneSubscriptionAccount: Equatable, Sendable {
     }
 }
 
+/// Orders subscription reads and Connect sheet landings for one picker.
+/// A newer read (or retirement) drops an older read whole. A landing only
+/// supersedes the registry: the read's ChatGPT and OpenCode Go statuses come
+/// from independent endpoints and still apply, so a plan disconnected
+/// elsewhere stops being offered even if a sheet landed meanwhile.
+@available(macOS 14.0, *)
+@MainActor @Observable
+public final class PhoneModelPickerAccount {
+    public private(set) var value: PhoneSubscriptionAccount?
+    public private(set) var loading = false
+    @ObservationIgnored private var readGeneration = 0
+    @ObservationIgnored private var registryGeneration = 0
+
+    public init() {}
+
+    public func reload(_ read: @MainActor () async -> PhoneSubscriptionAccount) async {
+        readGeneration += 1
+        let mine = readGeneration
+        let registryMine = registryGeneration
+        loading = true
+        defer { if mine == readGeneration { loading = false } }
+        let answer = await read()
+        guard !Task.isCancelled, mine == readGeneration else { return }
+        let registry = registryMine == registryGeneration ? answer.accountConnections : value?.accountConnections
+        value = PhoneSubscriptionAccount(chatGPT: answer.chatGPT, openCodeGo: answer.openCodeGo,
+                                         accountConnections: registry)
+    }
+
+    public func landed(_ registry: AccountConnections) {
+        registryGeneration += 1
+        value = PhoneSubscriptionAccount(chatGPT: value?.chatGPT, openCodeGo: value?.openCodeGo,
+                                         accountConnections: registry)
+    }
+
+    public func retire() {
+        readGeneration += 1
+        registryGeneration += 1
+        loading = false
+    }
+}
+
 /// One model a subscription serves, as both closed status shapes describe it.
 public struct SubscriptionModelDescriptor: Decodable, Equatable, Sendable {
     public let id: String
@@ -45,13 +87,10 @@ public struct SubscriptionModelDescriptor: Decodable, Equatable, Sendable {
         try c.closed(["id", "displayName", "efforts", "defaultEffort", "contextBudget", "outputBudget"])
         id = try c.string("id", minimum: 1, maximum: 200, pattern: "[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
         displayName = try c.string("displayName", minimum: 1, maximum: 120)
-        let ids: [String] = try c.value("efforts")
-        guard Set(ids).count == ids.count else {
-            throw ContractViolation.invalidValue
-        }
+        let levels: LossyDecodableArray<ManagedModelEffort> = try c.value("efforts")
         var seen = Set<ManagedModelEffort>()
-        efforts = ids.compactMap(ManagedModelEffort.init(wireID:)).filter { seen.insert($0).inserted }
-        usesDefaultOnly = ids.isEmpty
+        efforts = levels.elements.filter { seen.insert($0).inserted }
+        usesDefaultOnly = levels.sourceCount == 0
         defaultEffort = try ManagedModelEffort(wireID: c.value("defaultEffort"))
         contextBudget = try c.integer("contextBudget", minimum: 1)
         outputBudget = try c.integer("outputBudget", minimum: 1)
@@ -62,11 +101,11 @@ public struct SubscriptionModelDescriptor: Decodable, Equatable, Sendable {
     /// first listed level the destination write profile accepts.
     public var writeEffort: ManagedModelEffort? {
         if let defaultEffort,
-           defaultEffort.isCloudSubscriptionWriteEffort,
+           defaultEffort.isDestinationWriteEffort,
            usesDefaultOnly || efforts.contains(defaultEffort) {
             return defaultEffort
         }
-        return efforts.first(where: \.isCloudSubscriptionWriteEffort)
+        return efforts.first(where: \.isDestinationWriteEffort)
     }
 }
 

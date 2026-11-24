@@ -23,6 +23,12 @@ The baselines were mobile `0521e76`, desktop #119 at `2365efe8bdb0`, and platfor
 - Platform Shell / Work relay also owns making a switch to a legacy subscription retire the Work choice. The Work clear trigger runs on `matrix_model_choices` (`0536_work_relay_contract.sql:13–25`). The existing subscription writers use their own tables (`0335_provider_connections.sql:799–804`, `0336_chatgpt_relay.sql:439–441`). The phone needs one authoritative current choice across these writes before offering all plans together.
 - **Mobile picker** owns enabling Claude and Antigravity after that owner readback lands, using `work_subscription_read` for availability and the existing `work_selection_set` for writes. The readback supplies the current row after reopening and the fresh revision after a conflict. For the phone's existing ChatGPT path, a saved choice now uses the pinned “Loading models…” during the account read and the pinned unavailable message if the legacy relay reports disabled (`ios/Sources/AtumNativeAPI/PhoneModelPickerProjection.swift:245–250`, `ios/App/Chat/Views/PhoneModelPickerCopy.swift:80–88`). OpenCode Go continues through the existing projection and route.
 
+## Review round 2
+
+- The 1.1 managed offer and subscription model decoders read effort entries individually. They keep the catalog's usable levels and discard non-string entries, unknown levels, and duplicates. The managed offer still checks a recognized default against the surviving levels and retains the advertised token for a write. A subscription gets default-only behavior only when the server sent an empty list.
+- Atum destination rows and the destination write share the same effort rule. They use a compatible saved effort for the exact model or a compatible recommendation. A recommendation of `maximum` or `max` alone leaves a fallback pick read-only because the Atum destination route accepts `low`, `medium`, and `high`. A ready 1.1 offer supplies the effort for its own conversation write.
+- During an account read, the saved ChatGPT row shows “Loading models…” and all cached ChatGPT models are read-only. OpenCode Go keeps its independent status. The package tests exercise the same account state the picker uses, including a disabled response after a refusal and a late enabled response from a superseded read.
+
 ## Local verification
 
 The batch uses `TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock /bin/bash -c` to run both commands under the same lock.

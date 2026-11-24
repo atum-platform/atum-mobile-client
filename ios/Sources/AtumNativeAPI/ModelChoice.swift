@@ -166,8 +166,8 @@ public enum ManagedModelEffort: String, Codable, CaseIterable, Sendable {
         self = effort
     }
 
-    /// The 1.4 and 1.5 cloud subscription write contracts predate the wider vocabulary.
-    var isCloudSubscriptionWriteEffort: Bool {
+    /// The destination write contracts for Atum and cloud subscriptions accept these levels.
+    var isDestinationWriteEffort: Bool {
         switch self {
         case .low, .medium, .high: true
         default: false
@@ -266,7 +266,7 @@ public enum ManagedModelEligibility: Decodable, Equatable, Sendable {
 
 public struct ManagedModelOffer: Decodable, Equatable, Identifiable, Sendable {
     public let alias, displayName: String
-    private let effortIDs: [String]
+    private let effortIDs: [ManagedModelEffort: String]
     fileprivate let defaultEffortID: String
     public let efforts: [ManagedModelEffort]
     public var defaultEffort: ManagedModelEffort? { ManagedModelEffort(wireID: defaultEffortID) }
@@ -285,15 +285,18 @@ public struct ManagedModelOffer: Decodable, Equatable, Identifiable, Sendable {
                          pattern: "[A-Za-z0-9][A-Za-z0-9._/-]*")
         _ = try c.integer("contextBudget", minimum: 1)
         _ = try c.integer("outputBudget", minimum: 1)
-        let ids: [String] = try c.value("efforts")
-        guard !ids.isEmpty, Set(ids).count == ids.count else {
-            throw ContractViolation.invalidValue
+        let ids: LossyDecodableArray<String> = try c.value("efforts")
+        guard ids.sourceCount > 0 else { throw ContractViolation.invalidValue }
+        var knownIDs: [ManagedModelEffort: String] = [:]
+        for id in ids.elements {
+            guard let effort = ManagedModelEffort(wireID: id) else { continue }
+            // Use the canonical spelling when advertised alongside an alias.
+            if knownIDs[effort] == nil || id == effort.rawValue { knownIDs[effort] = id }
         }
-        effortIDs = ids
-        let knownEfforts = Set(ids.compactMap(ManagedModelEffort.init(wireID:)))
-        efforts = ManagedModelEffort.allCases.filter(knownEfforts.contains)
+        effortIDs = knownIDs
+        efforts = ManagedModelEffort.allCases.filter { knownIDs[$0] != nil }
         defaultEffortID = try c.value("defaultEffort")
-        if let level = ManagedModelEffort(wireID: defaultEffortID), !knownEfforts.contains(level) {
+        if let level = ManagedModelEffort(wireID: defaultEffortID), knownIDs[level] == nil {
             throw ContractViolation.invariant
         }
         _ = try c.value("cost", as: ManagedModelCost.self)
@@ -307,8 +310,7 @@ public struct ManagedModelOffer: Decodable, Equatable, Identifiable, Sendable {
 
     /// Labels group aliases, while a write uses the token the model advertised.
     fileprivate func effortID(for effort: ManagedModelEffort) -> String? {
-        effortIDs.first { $0 == effort.rawValue }
-            ?? effortIDs.first { ManagedModelEffort(wireID: $0) == effort }
+        effortIDs[effort]
     }
 }
 
@@ -647,7 +649,7 @@ private struct CompatibleManagedModelDestinationChoice: Decodable {
 public struct ManagedModelDestinationSnapshot: Decodable, Equatable, Sendable {
     public struct Recommendation: Decodable, Equatable, Sendable {
         public let model: String
-        fileprivate let effortID: String
+        private let effortID: String
         public var effort: ManagedModelEffort? { ManagedModelEffort(wireID: effortID) }
 
         public init(from decoder: Decoder) throws {
@@ -759,6 +761,17 @@ public struct ManagedModelDestinationSnapshot: Decodable, Equatable, Sendable {
         choices.first(where: { $0.destination == destination })
     }
 
+    /// Prefer the saved effort for the same Atum model, then the recommendation.
+    /// A newer read vocabulary cannot supply an effort to an older writer.
+    func atumWriteEffort(for destination: ManagedModelDestinationID, model: String) -> ManagedModelEffort? {
+        if let saved = choice(for: destination), saved.model == model,
+           let effort = saved.managedEffort, effort.isDestinationWriteEffort {
+            return effort
+        }
+        guard let effort = recommended.effort, effort.isDestinationWriteEffort else { return nil }
+        return effort
+    }
+
     public func effectiveModel(for destination: ManagedModelDestinationID) -> String {
         guard let choice = choice(for: destination), choice.source == .atum,
               ManagedModelLineup.displayName(for: choice.model) != nil else {
@@ -778,16 +791,14 @@ public struct ManagedModelDestinationWrite: Encodable, Equatable, Sendable {
                 snapshot: ManagedModelDestinationSnapshot,
                 destination: ManagedModelDestinationID,
                 model: String) throws {
-        let currentEffort = snapshot.choice(for: destination).flatMap { choice in
-            choice.model == model && choice.managedEffort != nil ? choice.effort : nil
+        guard let effort = snapshot.atumWriteEffort(for: destination, model: model) else {
+            throw ContractViolation.invalidValue
         }
-        let recommendedEffort = snapshot.recommended.effort == nil ? nil : snapshot.recommended.effortID
-        guard let effortID = currentEffort ?? recommendedEffort else { throw ContractViolation.invalidValue }
         self.requestId = requestId
         expectedRevision = snapshot.revision
         policyDigest = snapshot.policyDigest
         choice = try ManagedModelDestinationChoice(
-            destination: destination, source: .atum, model: model, effort: effortID
+            destination: destination, source: .atum, model: model, effort: effort.rawValue
         )
     }
 
@@ -824,7 +835,7 @@ public struct ManagedModelSubscriptionWrite: Encodable, Equatable, Sendable {
                 model: String,
                 effort: ManagedModelEffort) throws {
         guard source == .chatGPTPlan || source == .opencodeGo else { throw ContractViolation.invariant }
-        guard effort.isCloudSubscriptionWriteEffort else { throw ContractViolation.invalidValue }
+        guard effort.isDestinationWriteEffort else { throw ContractViolation.invalidValue }
         self.requestId = requestId
         expectedRevision = snapshot.revision
         policyDigest = snapshot.policyDigest
