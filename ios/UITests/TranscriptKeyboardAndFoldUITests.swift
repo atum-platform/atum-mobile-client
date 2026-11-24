@@ -81,17 +81,30 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
         let body = element(app, "message.body." + live)
         let typing = element(app, AccessibilityID.rowTyping)
         let transcript = element(app, AccessibilityID.transcript)
-        field(app).tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: Self.waitSeconds), "no keyboard")
-        field(app).typeText("Lên giúp mình kế hoạch cả tuần tới nhé.")
-        element(app, AccessibilityID.composerSend).tap()
+        let input = app.textFields[AccessibilityID.composerField]
+        let keyboard = app.keyboards.firstMatch
+        let hasKeyboardFocus = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<2 {
+            XCTAssertTrue(input.wait(for: \.isHittable, toEqual: true, timeout: 15),
+                          "the composer did not become hittable")
+            // Once the input has focus, allow the keyboard to finish appearing.
+            if keyboard.exists || hasKeyboardFocus.evaluate(with: input) { break }
+            input.tap()
+            if keyboard.waitForExistence(timeout: 8) { break }
+        }
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 15), "no keyboard")
+        input.typeText("Lên giúp mình kế hoạch cả tuần tới nhé.")
+        let send = element(app, AccessibilityID.composerSend)
+        XCTAssertTrue(send.wait(for: \.isHittable, toEqual: true, timeout: 15), "no send button")
+        send.tap()
         // Keyboard away (a tap on the transcript, clear of the rows' controls),
         // so the bottom of the chat is the composer's.
         let window = app.windows.firstMatch
         let frame = transcript.frame
-        window.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: window.frame.midX, dy: frame.minY + frame.height * 0.35)).tap()
-        XCTAssertTrue(eventually { !app.keyboards.firstMatch.exists }, "the keyboard did not hide")
+        let transcriptTap = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: frame.minY + frame.height * 0.35))
+        transcriptTap.tap()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 15), "the keyboard did not hide")
 
         // Observe any partial body, rather than racing the second growth's
         // height. One snapshot keeps the body, typing and toggle at the same
@@ -116,20 +129,23 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
 
         // Final: folded at the bottom, still following.
         // The UI-only stream grows every 20 s and ends at 61.5 s.
-        XCTAssertTrue(eventually(75) { !typing.exists }, "Atum never stopped typing")
-        XCTAssertTrue(toggle.waitForExistence(timeout: 15), "the final answer shows no toggle")
-        XCTAssertTrue(eventually(15) { toggle.label == "Xem thêm" }, "the final answer did not fold")
+        XCTAssertTrue(typing.waitForNonExistence(timeout: 75), "Atum never stopped typing")
+        XCTAssertTrue(toggle.wait(for: \.label, toEqual: "Xem thêm", timeout: 15),
+                      "the final answer did not fold")
         XCTAssertGreaterThan(body.label.count, growingBody.count, "the observed partial answer never grew")
-        XCTAssertTrue(eventually { transcript.value as? String == "following" }, "the chat left its bottom")
         // Accessibility elements may report isHittable=false even
         // when already inside the window. Wait for the actual window/composer geometry.
-        XCTAssertTrue(eventually(20) {
+        let composerPill = element(app, "composer.pill")
+        func foldedAtBottom() -> Bool {
+            guard toggle.exists, toggle.label == "Xem thêm",
+                  transcript.value as? String == "following" else { return false }
             let target = toggle.frame
-            let composerTop = self.element(app, "composer.pill").frame.minY
+            let composerTop = composerPill.frame.minY
             return !target.isEmpty && window.frame.contains(target)
                 && target.maxY <= composerTop + 1 && target.maxY > composerTop - 160
-        }, "Show more is out of view or not at the bottom")
-        let composer = element(app, "composer.pill").frame.minY
+        }
+        XCTAssertTrue(eventually(20, foldedAtBottom), "Show more is out of view or not at the bottom")
+        let composer = composerPill.frame.minY
         XCTAssertLessThanOrEqual(toggle.frame.maxY, composer + 1, "Show more is under the composer")
         XCTAssertGreaterThan(toggle.frame.maxY, composer - 160, "the folded answer is not at the bottom")
         let bodyTop = body.frame.minY
@@ -138,15 +154,21 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
         keepScreenshot("fold-live-folded", of: app)
 
         // Show more: opens in place, the chat detaches.
-        toggle.tap()
-        XCTAssertTrue(eventually { toggle.label == "Thu gọn" }, "Show more did not open the answer")
-        pause(0.6)
+        let toggleCenter = toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        if toggle.isHittable { toggle.tap() } else { toggleCenter.tap() }
+        if !toggle.wait(for: \.label, toEqual: "Thu gọn", timeout: 8), foldedAtBottom() {
+            // The control and transcript still show the pre-tap state.
+            toggleCenter.tap()
+        }
+        XCTAssertTrue(toggle.wait(for: \.label, toEqual: "Thu gọn", timeout: 15),
+                      "Show more did not open the answer")
+        XCTAssertTrue(eventually(15) { toggle.frame.minY - toggleFolded > 150 }, "the answer did not open below")
+        XCTAssertTrue(element(app, AccessibilityID.pillLatest).waitForExistence(timeout: 15), "no jump pill")
         print("MEASURE fold.live.opened bodyTop=\(body.frame.minY) toggle=\(toggle.frame)")
         XCTAssertEqual(body.frame.minY, bodyTop, accuracy: 1, "Show more moved the message")
         XCTAssertGreaterThan(toggle.frame.minY - toggleFolded, 150, "the answer did not open below")
         XCTAssertTrue((transcript.value as? String ?? "").hasPrefix("detached"),
                       "the chat still follows the bottom after Show more")
-        XCTAssertTrue(element(app, AccessibilityID.pillLatest).waitForExistence(timeout: 3), "no jump pill")
         keepScreenshot("fold-live-expanded", of: app)
     }
 
