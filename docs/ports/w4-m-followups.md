@@ -14,3 +14,48 @@ including a reconciliation retry. [Mobile client issue #85](https://github.com/a
 response failed, two subsequent busy reads, and recovery through Refresh.
 The reopen regression counts read starts after the closed desk's original
 one-second retry deadline.
+
+## Stop
+
+Each room retains up to 32 terminal Stop attempts to preserve recent
+outcomes across transcript gaps. At capacity, the oldest terminal attempt
+outside the current composer selection and the visible confirmation band
+is evicted. Pending, in-flight, and retryable attempts retain the first
+request ID and reply baseline. [Stop follow-up #87](https://github.com/atum-platform/atum-mobile-client/pull/87)
+
+The package regression fills the terminal cache and checks eviction order
+and request ID reuse for a hidden in-flight turn and pending schedule.
+
+## Verification
+
+The Swift and Xcode commands ran inside one
+`TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock /bin/bash`
+session. The simulator was an iPhone 17 on iOS 27.0. Build logs and the
+AppTests result bundle are under `/Volumes/AtumTestFlight/dd-w4-m`.
+
+| Check | Result | Exit code |
+| --- | --- | --- |
+| Filtered SwiftPM tests | 807 AtumChat tests and 11 HostAgentDesk tests passed | 0 |
+| Debug build-for-testing | Passed | 0 |
+| `AgentDeskBellTests` | 13 passed | 0 |
+| Simulator shutdown | The simulator was already shut down | 149 |
+
+```bash
+lane=/Volumes/AtumTestFlight/dd-w4-m
+swift test --package-path ios -j 2 --scratch-path "$lane/swift" --filter 'AtumChatTests|AgentDesk'
+xcode_args=(-project ios/AtumMobile.xcodeproj -scheme AtumMobileStateTests
+  -configuration Debug -destination 'platform=iOS Simulator,id=939B69F8-DA11-4E01-ACB3-FD5B3DC2AF4C'
+  -derivedDataPath "$lane" -clonedSourcePackagesDirPath /Volumes/AtumTestFlight/spm
+  -disableAutomaticPackageResolution -jobs 2 CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO)
+xcodebuild "${xcode_args[@]}" build-for-testing
+xcodebuild "${xcode_args[@]}" -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
+  -only-testing:AtumMobileTests/AgentDeskBellTests -resultBundlePath "$lane/AgentDeskBellTests.xcresult" \
+  test-without-building
+xcrun simctl shutdown 939B69F8-DA11-4E01-ACB3-FD5B3DC2AF4C
+```
+
+The public guard passed separately against the committed branch (exit 0).
+
+```bash
+python3 scripts/public_guard.py --base origin/main --head HEAD
+```

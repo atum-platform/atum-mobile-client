@@ -192,6 +192,11 @@ public struct AssistantTurnStop: Equatable, Sendable {
     // A projection may lose or replace a target while its request is active.
     // Keep the request and its terminal state under the exact target.
     private var attempts = [Target: Attempt]()
+    // Recent terminal attempts still protect against duplicate Stops across
+    // short transcript gaps. Retryable and in-flight attempts have their own
+    // lifetime and never enter this eviction order.
+    static let terminalAttemptLimit = 32
+    private var terminalTargets = [Target]()
     private var unavailableSchedule = false
     private var clearedSchedule: ChatScheduleExecution?
     private var confirmedSchedule: ChatScheduleExecution?
@@ -304,6 +309,7 @@ public struct AssistantTurnStop: Equatable, Sendable {
         case .failed: attempt.phase = .failed
         }
         attempts[intent.target] = attempt
+        if result == .stopped || result == .completed { retainTerminalAttempt(for: intent.target) }
         return visible
     }
 
@@ -316,6 +322,17 @@ public struct AssistantTurnStop: Equatable, Sendable {
         attempt.pending = false
         attempt.phase = .settled
         attempts[intent.target] = attempt
+        retainTerminalAttempt(for: intent.target)
+    }
+
+    private mutating func retainTerminalAttempt(for target: Target) {
+        terminalTargets.append(target)
+        guard terminalTargets.count > Self.terminalAttemptLimit else { return }
+        let noticeTarget = confirmedSchedule.map(Target.schedule)
+        if let index = terminalTargets.firstIndex(where: { $0 != selection && $0 != noticeTarget }) {
+            let evicted = terminalTargets.remove(at: index)
+            attempts.removeValue(forKey: evicted)
+        }
     }
 
     /// Desktop re-offers Stop after a pending/unknown schedule receipt. This

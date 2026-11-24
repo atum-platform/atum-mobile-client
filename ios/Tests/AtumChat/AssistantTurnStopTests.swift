@@ -620,6 +620,39 @@ extension AssistantTurnStopTests {
         XCTAssertEqual(stop.phase, .settled)
         XCTAssertNil(stop.beginStop(newRequestID: "duplicate"))
     }
+
+    func testTerminalAttemptEvictionKeepsPendingAndInFlightRequests() throws {
+        let run = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "pending"))
+        let scheduled = AssistantTurnSignal(unanswered: nil, working: true, scheduled: run)
+        var stop = AssistantTurnStop()
+        stop.observe(scheduled)
+        let pending = try XCTUnwrap(stop.beginStop(newRequestID: "pending"))
+        stop.resolve(.stopRequested, for: pending)
+        stop.observe(working)
+        let inFlight = try XCTUnwrap(stop.beginStop(newRequestID: "in-flight"))
+
+        for index in 0...AssistantTurnStop.terminalAttemptLimit {
+            stop.observe(.init(unanswered: "$terminal-\(index)", working: true))
+            let intent = try XCTUnwrap(stop.beginStop(newRequestID: "terminal-\(index)"))
+            XCTAssertTrue(stop.resolve(.completed, for: intent))
+        }
+
+        stop.observe(.init(unanswered: "$terminal-0", working: false))
+        XCTAssertNil(stop.selection, "the oldest terminal attempt was evicted")
+        stop.observe(.init(unanswered: "$terminal-1", working: false))
+        XCTAssertEqual(stop.requestID, "terminal-1")
+        XCTAssertEqual(stop.phase, .finishing)
+
+        stop.observe(working)
+        XCTAssertEqual(stop.requestID, inFlight.requestID)
+        XCTAssertTrue(stop.resolve(.failed, for: inFlight))
+        XCTAssertEqual(stop.beginStop(newRequestID: "retry-in-flight"), inFlight)
+
+        stop.observe(scheduled)
+        XCTAssertEqual(stop.phase, .stopping)
+        stop.retryPendingSchedule(for: pending)
+        XCTAssertEqual(stop.beginStop(newRequestID: "retry-pending"), pending)
+    }
 }
 
 /// Review r1, findings 1 and 2: the room-scoped controller.
