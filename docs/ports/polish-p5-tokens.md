@@ -52,7 +52,8 @@ W4-S), and the model picker, `Composer.swift` and
   move from `UINotificationFeedbackGenerator` to `.sensoryFeedback`: copying the
   key plays `.success`, and a restore plays `.success` or, for a wrong key,
   `.error`. A hire from a Store listing plays `.success` once it is hired and
-  `.error` on a failure line. The Appearance segmented
+  `.error` on a failure line. Connecting the Drive plays `.success` when the
+  connect lands. The Appearance segmented
   control plays `.selection`.
 
 Text styles such as `.font(.body)` were left as they are. Moving them to

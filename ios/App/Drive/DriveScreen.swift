@@ -27,6 +27,10 @@ struct DriveScreen: View {
             .navigationDestination(for: DriveFolderRoute.self) { route in
                 DriveDirectoryView(design: design, router: router, model: model, route: route)
             }
+            // Connecting the Drive is a connect that completes: one success haptic.
+            .sensoryFeedback(.success, trigger: model.connection) { old, new in
+                old == .connecting && new == .ready
+            }
             .sheet(item: $model.preview, onDismiss: {
                 model.dismissPreview()
                 DriveShareFile.clear()
