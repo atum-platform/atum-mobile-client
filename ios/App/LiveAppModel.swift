@@ -3622,8 +3622,13 @@ final class LiveAppModel {
 
     private func openConversation(roomID: String, row: LiveProductRoom) {
         // A conversation is named for the other people, from the platform's record, never
-        // from the Matrix room name.
-        let title = companyWorkspace.claim(roomID: roomID).map { claim in
+        // from the Matrix room name. The person's own Chief of Staff is "Private Chief of
+        // Staff" in its header and composer (desktop #114).
+        var privateCos: String?
+        if case .privateCos = companyWorkspace.roomClassification(roomID), let design = companyWorkspace.copy?.design {
+            privateCos = DirectMessagesCopy(design: design).privateChiefOfStaff
+        }
+        let title = privateCos ?? companyWorkspace.claim(roomID: roomID).map { claim in
             companyWorkspace.copy?.channelName(claim.displayName, isDefault: claim.isDefault)
                 ?? claim.displayName
         } ?? companyWorkspace.conversationClaim(roomID: roomID)?.title ?? row.title

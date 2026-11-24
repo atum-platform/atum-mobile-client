@@ -120,8 +120,21 @@ struct ConversationSectionView: View {
     }
 
     private func showsChief(_ chief: ChiefOfStaffRowPresentation) -> Bool {
-        TeamSpaceSearch.matches([dmCopy.chiefOfStaff(platformName: chief.platformName),
-                                 dmCopy.line(chief.status) ?? ""], needle: needle, locale: locale)
+        TeamSpaceSearch.matches([dmCopy.privateChiefOfStaff, dmCopy.line(chief.status) ?? ""],
+                                needle: needle, locale: locale)
+    }
+
+    /// Whether the header box leaves any Direct messages row on screen (W4-E7 "No matches").
+    static func anyMatch(_ directMessages: DirectMessagesPresentation, conversationsShown: Bool,
+                         design: LiveDesign, needle: String?) -> Bool {
+        let copy = DirectMessagesCopy(design: design)
+        let locale = Locale(identifier: design.locale)
+        if TeamSpaceSearch.matches([copy.you, copy.personalNotes], needle: needle, locale: locale) { return true }
+        if let chief = directMessages.chief,
+           TeamSpaceSearch.matches([copy.privateChiefOfStaff, copy.line(chief.status) ?? ""],
+                                   needle: needle, locale: locale) { return true }
+        guard conversationsShown, let section = directMessages.conversations else { return false }
+        return section.rows.contains { TeamSpaceSearch.matches([$0.row.title], needle: needle, locale: locale) }
     }
 
     private func shown(_ rows: [ConversationListRow]) -> [ConversationListRow] {
@@ -263,7 +276,7 @@ struct ConversationSectionView: View {
     // MARK: Chief of Staff
 
     private func chiefRow(_ chief: ChiefOfStaffRowPresentation) -> some View {
-        let name = dmCopy.chiefOfStaff(platformName: chief.platformName)
+        let name = dmCopy.privateChiefOfStaff
         let retry = chief.status.offersRetry
         let line = openingChief && retry ? dmCopy.line(.settingUp) : dmCopy.line(chief.status)
         return VStack(alignment: .leading, spacing: 2) {

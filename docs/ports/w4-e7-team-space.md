@@ -161,3 +161,5 @@ under `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, with derived data in
 
 1. State rules (`TeamSpaceRevampPolicy.swift`) with their tests, and this document.
 2. The six glyph mappings (`phosphor-map.json`, regenerated `PhosphorSymbols.swift`).
+3. The Team Space UI: header search, channel retry, Board · List and Mine, settings sections,
+   the Private Chief of Staff label, the pending table, scripted data and the UI walk.

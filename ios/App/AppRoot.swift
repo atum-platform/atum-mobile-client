@@ -444,7 +444,16 @@ struct AppRoot: View {
                             // Desktop `onOpenCompanyThread`: the room opens with its thread on top.
                             companyThreads.pending = CompanyThreadRoute(roomID: roomID, rootID: rootID)
                             routeFromRootDestination(roomID)
-                        })
+                        }),
+                    messageSearch: model.liveMatrix == nil ? nil : TeamSpaceMessageSearchActions(
+                        search: { await model.teamSpaceCompanySearch(companyID: $0, term: $1) },
+                        open: { result in
+                            await HomeSearchRoute.open(
+                                result, workspace: model.companyWorkspace,
+                                confirm: { await model.openHomeSearchResult(result) },
+                                route: { await openRoomAndRoute($0, requiringCompany: $1) })
+                        }),
+                    openChannel: { roomID in await openTeamSpaceChannel(roomID) }
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -1094,6 +1103,18 @@ struct AppRoot: View {
 
     private func requestRoomOpen(_ roomID: String, stagedCold: Bool = false, requiringCompany: String? = nil) {
         Task { _ = await openRoomAndRoute(roomID, stagedCold: stagedCold, requiringCompany: requiringCompany) }
+    }
+
+    /// A Team Space channel tap with its answer (W4-E7): true opened, false failed, nil when
+    /// another open replaced this one before it answered (desktop `openRoom`'s failure is
+    /// only for the open still on screen).
+    private func openTeamSpaceChannel(_ roomID: String) async -> Bool? {
+        let before = openRequestGeneration
+        if await openRoomAndRoute(roomID) { return true }
+        // This open bumped the generation once; a higher one means another open took over,
+        // and leaving Team Space meanwhile is the person's own navigation, not a failure.
+        guard openRequestGeneration &- before <= 1, router.selectedTab == .teamSpace else { return nil }
+        return false
     }
 
     private func routeFromRootDestination(_ roomID: String) {

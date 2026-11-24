@@ -108,12 +108,17 @@ PENDING = {
 
     # Drive folder search
     "src.matrix.mobile-copy.mobilePhoneCopy.drive.searchFolderOnly",
+
+    # Team Space revamp Board · List and Mine (W4-E7; desktop export W4-C5 adds them)
+    "shared.matrix-company-board-copy.copy.list",
+    "shared.matrix-company-board-copy.copy.mine",
 }
 
 # These fallback tables declare their keys separately from their guarded readers.
 PENDING_TABLE_READERS = {
     ROOT / "ios/App/Company/TeamSpacePendingCopy.swift": ROOT / "ios/App/Company/TeamSpaceCopy.swift",
     ROOT / "ios/App/Company/TeamSpaceThreadsPendingCopy.swift": ROOT / "ios/App/Company/CompanyThreadsCopy.swift",
+    ROOT / "ios/App/Company/TeamSpaceRevampPendingCopy.swift": ROOT / "ios/App/Company/TeamSpaceCopy.swift",
 }
 
 

@@ -123,6 +123,10 @@ struct DirectMessagesCopy {
         return design.text("shared.matrix-alias-copy.copy.assistant")
     }
 
+    /// "Private Chief of Staff": the person's own row under Direct messages, and its chat's
+    /// header and composer (desktop #114). "Chief of Staff" stays the shared one in channels.
+    var privateChiefOfStaff: String { design.text("src.matrix.team-space.revamp-copy.copy.privateChiefOfStaff") }
+
     /// The row's state line (desktop `matrixCompanyPrivateCosRowCopy`, `…PrivateCosCopy.paused`).
     func line(_ status: CompanyPrivateCosRowStatus) -> String? {
         switch status {
