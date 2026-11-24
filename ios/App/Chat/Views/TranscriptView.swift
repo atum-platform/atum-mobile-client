@@ -81,7 +81,33 @@ struct TranscriptView: View {
             ? rows.last { $0.item.kind == .message && !$0.item.isOwn }?.id : nil
         // Messages the agent may still be writing never fold (`MessageFold`).
         let growing = MessageFold.growingIDs(in: rows)
-        ScrollView {
+        let scroll = scrollBody(rows, following: following, latestAnswerID: latestAnswerID, growing: growing)
+        let observed = observingChanges(scroll, rows: rows, growing: growing)
+        withRowInteractions(observed)
+    }
+
+    // The transcript's modifier chain is split into three functions so each
+    // type-checks quickly; one expression timed out on the hosted runners.
+    private func transcriptRow(_ row: ChatRow, latestAnswerID: String?, growing: Set<String>) -> some View {
+        let highlight: Color = routedMatchRowID == row.id
+            ? (theme?.color("ink", scheme).opacity(0.12) ?? .clear) : .clear
+        return ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
+                           parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
+                           searchHighlight: search?.highlights[row.id], isGrowing: growing.contains(row.id))
+            .equatable()
+            .background(RoundedRectangle(cornerRadius: 8).fill(highlight))
+            // Each row's top in the content (it changes only when
+            // something above it changes height, never on scroll).
+            .onGeometryChange(for: Double.self) { proxy in
+                TranscriptGeometry.half(proxy.frame(in: .named(Self.contentSpace)).minY)
+            } action: { minY in
+                rowMoved(row.id, minY: minY)
+            }
+    }
+
+    private func scrollBody(_ rows: [ChatRow], following: Bool, latestAnswerID: String?,
+                            growing: Set<String>) -> some View {
+        return ScrollView {
             // An eager stack: every loaded row is laid out. A lazy stack
             // estimates rows it has not laid out, and with rows as different
             // as one-liners and 40-line code blocks its estimates flip-flopped
@@ -89,23 +115,7 @@ struct TranscriptView: View {
             // main thread (G-scroll record).
             VStack(spacing: 0) {
                 ForEach(rows) { row in
-                    ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
-                                parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
-                                searchHighlight: search?.highlights[row.id], isGrowing: growing.contains(row.id))
-                        .equatable()
-                        .background {
-                            if routedMatchRowID == row.id {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(theme?.color("ink", scheme).opacity(0.12) ?? .clear)
-                            }
-                        }
-                        // Each row's top in the content (it changes only when
-                        // something above it changes height, never on scroll).
-                        .onGeometryChange(for: Double.self) { proxy in
-                            TranscriptGeometry.half(proxy.frame(in: .named(Self.contentSpace)).minY)
-                        } action: { minY in
-                            rowMoved(row.id, minY: minY)
-                        }
+                    transcriptRow(row, latestAnswerID: latestAnswerID, growing: growing)
                 }
             }
             .scrollTargetLayout()
@@ -138,6 +148,10 @@ struct TranscriptView: View {
         .onScrollGeometryChange(for: TranscriptGeometry.self) { TranscriptGeometry($0) } action: { old, new in
             geometryChanged(from: old, to: new)
         }
+    }
+
+    private func observingChanges(_ content: some View, rows: [ChatRow], growing: Set<String>) -> some View {
+        content
         .onChange(of: search?.focus) { _, focus in
             routedMatchRowID = nil
             guard let focus else {
@@ -197,6 +211,10 @@ struct TranscriptView: View {
             updateBottomVisible()
             noteReading()
         }
+    }
+
+    private func withRowInteractions(_ content: some View) -> some View {
+        content
         .environment(\.chatRowInteractions.showOriginal, { id in showOriginal(id) })
         .environment(\.chatRowInteractions.opening, { id in rowOpening(id) })
         .environment(\.chatRowInteractions.folded, { id in rowFolded(id) })

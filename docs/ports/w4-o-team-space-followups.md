@@ -65,3 +65,14 @@ The scripted Team Space host uses a placeholder room destination. Its search
 walk covers tapping the result and navigating to the room. To cover production
 focus placement and highlighting in that walk, the host would need a
 scripted transcript and thread destination. That fixture remains deferred.
+
+## CI fix: transcript type-check time (24 Nov)
+
+The hosted runners (UI shard 0 and AppTests on `000caac`) failed with
+`TranscriptView.swift:185: the compiler is unable to type-check this expression in reasonable time`.
+The routed-match highlight added one more closure to the transcript's single long modifier chain.
+`transcript(_:)` now builds the same view through three helpers (`scrollBody`, `observingChanges`,
+`withRowInteractions`), and each row comes from `transcriptRow`, whose highlight is a plain `Color`
+background. Behaviour is unchanged. Verified with a locked Debug build carrying
+`-warn-long-expression-type-checking=300 -warn-long-function-bodies=1500`: BUILD SUCCEEDED, no
+TranscriptView timing warnings.
