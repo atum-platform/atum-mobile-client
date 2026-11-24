@@ -165,3 +165,4 @@ under `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, with derived data in
    the Private Chief of Staff label, the pending table, scripted data and the UI walk.
 4. UI walk imports `AtumChat` for its scripted scenarios (caught by the first locked build).
 5. UI walk scrolls the failed line on screen (the row under #design is lazily made on a 6.1" screen), and finds the page and view segments by identifier.
+6. UI walk checks the board's unavailable words, since `ContentUnavailableView` does not expose its identifier.

@@ -14,6 +14,7 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         let board: String
         let list: String
         let mine: String
+        let boardUnavailable: String
         let searchMessagesFor: String
         let noMatches: String
         let search: String
@@ -21,10 +22,11 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
 
     private let words: [String: Words] = [
         "en": Words(channelFailed: "Couldn’t open this channel.", tryAgain: "Try again", chat: "Chat",
-                    board: "Board", list: "List", mine: "Mine",
+                    board: "Board", list: "List", mine: "Mine", boardUnavailable: "Board is unavailable.",
                     searchMessagesFor: "Search messages for “launch”", noMatches: "No matches", search: "Search"),
         "vi": Words(channelFailed: "Không mở được kênh này.", tryAgain: "Thử lại", chat: "Trò chuyện",
                     board: "Bảng", list: "Danh sách", mine: "Của tôi",
+                    boardUnavailable: "Không tải được bảng.",
                     searchMessagesFor: "Tìm tin nhắn có “launch”", noMatches: "Không có kết quả phù hợp",
                     search: "Tìm kiếm"),
     ]
@@ -113,7 +115,8 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         XCTAssertEqual(board.label, expected.board)
         XCTAssertEqual(list.label, expected.list)
         XCTAssertTrue(board.isSelected)
-        XCTAssertTrue(element(app, "company.board.unavailable").exists)
+        // The controls sit over the board's own unavailable state (the phone has no board read).
+        XCTAssertTrue(app.staticTexts[expected.boardUnavailable].exists, boundedHierarchy(app))
 
         list.tap()
         XCTAssertTrue(waitFor(3) { list.isSelected }, "List not chosen")
