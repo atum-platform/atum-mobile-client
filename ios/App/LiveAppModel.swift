@@ -159,6 +159,11 @@ final class LiveAppModel {
     @ObservationIgnored private var drafts = [String: String]()
     @ObservationIgnored private var mediaDrafts = [String: ChatMediaComposerState]()
     @ObservationIgnored private var localMediaDrafts = [String: ConversationLocalMediaDraft]()
+    private struct TurnStopScope: Hashable {
+        let ownUserID: String
+        let roomID: String
+    }
+    @ObservationIgnored private var roomTurnStops = [TurnStopScope: AssistantTurnStopController]()
     @ObservationIgnored private var conversationMembersTask: Task<Void, Never>?
     @ObservationIgnored private var privateCosTurnProof: (PrivateCosTurnKey, CompanyTurnBinding)?
     @ObservationIgnored private let privateCosTurnLease = CompanyTurnProofLease()
@@ -2164,19 +2169,22 @@ final class LiveAppModel {
         guard let store = conversation, let client = domainClient,
               let route = assistantTurnStopRoute(roomID: roomID) else { return nil }
         let generation = assistantLifecycleGeneration
+        let accountGeneration = appAccountGeneration
         let unavailableTargets = assistantTurnStopUnavailable[route.agentPrincipal] ?? []
         return AssistantTurnStopActions(unavailableTargets: unavailableTargets) { [weak self, weak store] intent in
             guard let self, let store, self.conversation === store, self.domainClient === client,
+                  self.appAccountGeneration == accountGeneration,
                   self.assistantLifecycleGeneration == generation,
                   self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
             var unavailableTarget: AssistantTurnStopIntent.Target?
             let result = await route.stop(intent, using: client,
                                           unavailableTargets: self.assistantTurnStopUnavailable[route.agentPrincipal] ?? [],
                                           onRouteUnavailable: { unavailableTarget = $0 })
-            guard self.conversation === store, self.domainClient === client,
-                  self.assistantLifecycleGeneration == generation,
-                  self.assistantTurnStopRoute(roomID: roomID) == route else { return .failed }
-            if let unavailableTarget {
+            // The initiated request belongs to the account and exact target,
+            // even when the app has since closed or reopened its room.
+            guard self.appAccountGeneration == accountGeneration else { return .failed }
+            if let unavailableTarget, self.domainClient === client,
+               self.assistantLifecycleGeneration == generation {
                 self.assistantTurnStopUnavailable[route.agentPrincipal, default: []].insert(unavailableTarget)
             }
             return result
@@ -3823,6 +3831,14 @@ final class LiveAppModel {
         }
     }
 
+    func turnStopController(roomID: String, ownUserID: String) -> AssistantTurnStopController {
+        let scope = TurnStopScope(ownUserID: ownUserID, roomID: roomID)
+        if let controller = roomTurnStops[scope] { return controller }
+        let controller = AssistantTurnStopController()
+        roomTurnStops[scope] = controller
+        return controller
+    }
+
     private func openConversation(roomID: String, row: LiveProductRoom) {
         // A conversation is named for the other people, from the platform's record, never
         // from the Matrix room name.
@@ -3846,6 +3862,7 @@ final class LiveAppModel {
         let store = LiveConversationStore(info: info, draft: drafts[roomID] ?? "", history: .onScroll,
                                           mediaComposer: mediaComposer,
                                           localMediaDraft: localMediaDraft,
+                                          turnStop: turnStopController(roomID: roomID, ownUserID: info.context.ownUserID),
                                           makeTyping: Self.typingFactory(for: info))
         store.onUnsentAfterClose = { [weak self] text in self?.keepUnsentText(text, roomID: roomID) }
         store.onMessageSent = { LiveReporting.shared.messageSent() }
@@ -5418,6 +5435,7 @@ final class LiveAppModel {
 
     private func invalidateAppAccount(nextInstallationID: UUID? = nil) {
         handleStore.bind(owner: nil)
+        roomTurnStops.removeAll()
         cancelAppOnboarding()
         appContentPage = nil
         appOnboardingReadyRoomID = nil

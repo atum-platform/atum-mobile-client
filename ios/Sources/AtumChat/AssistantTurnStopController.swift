@@ -1,12 +1,8 @@
 import Foundation
 import Observation
 
-/// One chat's Stop, owned by the room's conversation store rather than the
-/// composer view (review r1): opening and closing in-chat search rebuilds the
-/// composer, and a view-owned state came back offering Stop while the first
-/// request was still out, so a second tap sent a second request ID. The state,
-/// the in-flight request and its timers live here for as long as the room is
-/// open; a new room has a new store and a new controller.
+/// One account and room's Stop. The app keeps this controller across store
+/// replacements so the same target keeps its request and timers on reopen.
 @available(macOS 14.0, *)
 @MainActor @Observable
 public final class AssistantTurnStopController {
@@ -20,6 +16,9 @@ public final class AssistantTurnStopController {
     public private(set) var stop = AssistantTurnStop()
     /// Set by the chat screen while it is shown, nil otherwise.
     @ObservationIgnored public var announce: (@MainActor (Announcement) -> Void)?
+    /// Terminal executions stay suppressed when a store rebuilds its timeline.
+    @ObservationIgnored public private(set) var settledSchedules = Set<ChatScheduleExecution>()
+    @ObservationIgnored public var onScheduleSettled: (@MainActor (ChatScheduleExecution) -> Void)?
     private let sleep: @Sendable (Duration) async throws -> Void
 
     public init(sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
@@ -48,11 +47,16 @@ public final class AssistantTurnStopController {
             guard let self else { return }
             let before = self.stop.notice
             let accepted = self.stop.resolve(result, for: intent)
+            if case let .schedule(execution) = intent.target,
+               result == .completed || result == .stopped,
+               self.settledSchedules.insert(execution).inserted {
+                self.onScheduleSettled?(execution)
+            }
             onResult?(intent, result, accepted)
             if accepted, let after = self.stop.notice, after != before {
                 self.announce?(after == .refused ? .refused : .scheduledStopped)
             }
-            guard accepted, result == .stopRequested, self.stop.phase == .stopping else { return }
+            guard result == .stopRequested else { return }
             if case .schedule = intent.target {
                 // Desktop re-offers an exact scheduled Stop after the delay.
                 do { try await self.sleep(AssistantTurnStop.scheduledRetryDelay) } catch { return }
