@@ -25,7 +25,7 @@ final class AccountConnectionsUITests: TranscriptUITestCase {
     }
 
     @MainActor
-    private func row(_ app: XCUIApplication, _ id: String, file: StaticString = #filePath,
+    private func connection(_ app: XCUIApplication, _ id: String, file: StaticString = #filePath,
                      line: UInt = #line) -> XCUIElement {
         let row = element(app, "account.settings.connections." + id)
         XCTAssertTrue(row.waitForExistence(timeout: 10), "no \(id) row", file: file, line: line)
@@ -48,18 +48,18 @@ final class AccountConnectionsUITests: TranscriptUITestCase {
     @MainActor
     func testRowsSayWhereEachPlanRunsAndConnectSaysToUseTheMac() {
         let app = launchConnections("connections.mixed")
-        XCTAssertTrue(row(app, "plan.codex").label.contains("ChatGPT, On MacBook Pro"))
-        XCTAssertTrue(row(app, "plan.claude").label.contains("Claude, Last seen on Mac mini"))
-        XCTAssertTrue(row(app, "plan.antigravity").label.contains("Antigravity, Not connected"))
+        XCTAssertTrue(connection(app, "plan.codex").label.contains("ChatGPT, On MacBook Pro"))
+        XCTAssertTrue(connection(app, "plan.claude").label.contains("Claude, Last seen on Mac mini"))
+        XCTAssertTrue(connection(app, "plan.antigravity").label.contains("Antigravity, Not connected"))
         XCTAssertFalse(element(app, "account.settings.connections.plan.codex.connect").exists,
                        "a connected plan offers no action on the phone")
         XCTAssertFalse(element(app, "account.settings.connections.plan.claude.connect").exists,
                        "a last-seen plan keeps its models and offers no Connect")
-        XCTAssertTrue(row(app, "opencode-go").label.contains("OpenCode Go, In the cloud"))
-        let chats = row(app, "owner-chats")
+        XCTAssertTrue(connection(app, "opencode-go").label.contains("OpenCode Go, In the cloud"))
+        let chats = connection(app, "owner-chats")
         XCTAssertTrue(scrollSettingsList(to: chats, in: app))
         XCTAssertEqual(chats.label, "Your chats, Every assistant knows your chats.")
-        XCTAssertTrue(row(app, "home_hub:strap-hub").label
+        XCTAssertTrue(connection(app, "home_hub:strap-hub").label
             .contains("Strap hub, Every assistant can use it., Not connected"))
         evidence("rows-en-light", of: app)
 
@@ -102,12 +102,12 @@ final class AccountConnectionsUITests: TranscriptUITestCase {
     @MainActor
     func testAFailedReadOffersTryAgain() {
         let app = launchConnections("connections.failed")
-        let failed = row(app, "failed")
+        let failed = connection(app, "failed")
         XCTAssertTrue(failed.label.contains("Couldn’t check this right now."), failed.label)
         XCTAssertFalse(element(app, "account.settings.connections.plan.antigravity").exists)
-        XCTAssertTrue(row(app, "owner-chats").exists, "your chats never depend on the read")
+        XCTAssertTrue(connection(app, "owner-chats").exists, "your chats never depend on the read")
         app.buttons["account.settings.connections.retry"].tap()
-        XCTAssertTrue(row(app, "plan.codex").label.contains("On MacBook Pro"))
+        XCTAssertTrue(connection(app, "plan.codex").label.contains("On MacBook Pro"))
     }
 
     /// Dark and the largest accessibility size: the action sits under the
@@ -115,7 +115,7 @@ final class AccountConnectionsUITests: TranscriptUITestCase {
     @MainActor
     func testDarkAtTheLargestTextSize() {
         let app = launchConnections("connections.mixed", dark: true, contentSize: Self.ax5Size)
-        XCTAssertTrue(row(app, "plan.antigravity").label.contains("Not connected"))
+        XCTAssertTrue(connection(app, "plan.antigravity").label.contains("Not connected"))
         let connect = app.buttons["account.settings.connections.plan.antigravity.connect"]
         XCTAssertTrue(scrollSettingsList(to: connect, in: app), "Connect is not reachable at AX5")
         evidence("rows-en-dark-ax5", of: app)

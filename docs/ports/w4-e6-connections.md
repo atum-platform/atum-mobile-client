@@ -146,3 +146,25 @@ what the phone is. `file:line` is the phone code reused.
   - the failed read and Try again;
   - dark at AX5;
   - the picker's Connect rows and their sheet.
+
+## Verification (2026-11-24)
+
+Each run took the shared heavy-build lock
+(`TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`)
+with `/Volumes/AtumTestFlight/dd-w4-e6/verify.sh`. DerivedData is
+`/Volumes/AtumTestFlight/dd-w4-e6`, `-jobs 2`, one iPhone 17 simulator booted
+inside the lock and `simctl shutdown all` on exit.
+
+| Check | Result |
+| --- | --- |
+| `swift test -j 2 --filter 'AccountConnections\|AtumCopyTests\|SidePanelCopyTests\|NativeDomainClientTests\|PhoneRegistry'` | Exit 0, 140 tests, 0 failures (run 1) |
+| Debug `build-for-testing` (AtumMobile, `CODE_SIGNING_ALLOWED=NO`) | Exit 0 (runs 1 and 2) |
+| AppTests `AccountConnectionsStateTests`, `AccountSettingsStateTests`, `PhoneModelPickerCopyTests` | Exit 0, 36 tests (runs 1 and 2) |
+| UI `AccountConnectionsUITests` (4) and `AccountConnectionsPickerUITests` (1) | Run 1: exit 65, all five failed on two test-side causes. The helper `row(app, id)` was shadowed by the base class's `row` (`row.` prefix). The sheet container's accessibility identifier overrode its children's. Both fixed. Run 2: exit 0, 5 passed |
+| `tests/test_copy_keys_in_pin.py`, `tests/test_ios_project_sources.py` | OK |
+| `python3 scripts/public_guard.py --base origin/main --head HEAD` | Exit 0 on its own |
+
+Captures: `/Volumes/AtumTestFlight/dd-w4-e6/ui-scratch/ui-evidence/`
+(`connections-rows-en-light.png`, `connections-sheet-en-light.png`,
+`connections-sheet-done-vi-light.png`, `connections-rows-en-dark-ax5.png`,
+`AccountConnectionsPickerUITests.picker-connect-en.png`).

@@ -300,7 +300,6 @@ struct AccountPlanConnectSheet: View {
         .atumDesign(design)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .accessibilityIdentifier("connections.sheet." + plan.rawValue)
         .task { await follow() }
     }
 
