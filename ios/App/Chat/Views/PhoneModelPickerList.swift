@@ -169,13 +169,6 @@ struct PhoneModelPickerList: View {
         account?.accountConnections.map(AccountConnectionsView.pickerConnectPlans) ?? []
     }
 
-    /// The picker's account with the sheet's newer registry in place.
-    static func account(_ account: PhoneSubscriptionAccount?,
-                        with registry: AccountConnections) -> PhoneSubscriptionAccount {
-        PhoneSubscriptionAccount(chatGPT: account?.chatGPT, openCodeGo: account?.openCodeGo,
-                                 accountConnections: registry)
-    }
-
     /// Desktop's Connect state for a plan with nothing to pick: the plan's
     /// mark, one line, one Connect. The phone has no rail, so each such plan
     /// is one row under the models instead of a hollow rail mark.
