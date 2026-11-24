@@ -185,9 +185,6 @@ struct ChatComposer: View {
                         )
                     }
                     if showsMicButton { micButton }
-                    // Desktop gives Stop priority: while a reply works or
-                    // settles, a draft or attachment never hides Stop or
-                    // "Stopping…" (review r1). Send stays for idle and editing.
                     if showsStopButton {
                         stopButton
                     } else if showsSendButton {
@@ -209,7 +206,8 @@ struct ChatComposer: View {
         // it the pill's own outline.
         .contentShape(.accessibility, RoundedRectangle(cornerRadius: pillRadius))
         .accessibilityElement(children: .contain)
-        .accessibilityValue(turnStop.isWorking ? ChatCopy.text(design, ChatCopy.Key.turnRunning) : "")
+        .accessibilityValue(store.canPresentTurnStop && turnStop.isWorking
+                            ? ChatCopy.text(design, ChatCopy.Key.turnRunning) : "")
         .accessibilityIdentifier(Self.pillID)
     }
 
@@ -261,7 +259,7 @@ struct ChatComposer: View {
     /// answered for this turn: the glyph again, disabled. Desktop dims a
     /// disabled Stop to 30 %.
     @ViewBuilder private var stopButton: some View {
-        switch turnStop.control {
+        switch stopControl {
         case .hidden:
             EmptyView()
         case let .stop(enabled):
@@ -352,24 +350,22 @@ struct ChatComposer: View {
         let store = store
         let haptics = haptics
         let sent = store.turnStop.tap(newRequestID: UUID().uuidString.lowercased(),
-                                      send: turnStopActions.stop) { intent, result, accepted in
-            if case let .schedule(execution) = intent.target, result == .completed || result == .stopped {
-                Task { @MainActor in await store.settleSchedule(execution) }
-            }
-            // Not stopped: Stop comes back and the refused band says so.
-            if accepted, result == .failed { haptics.failed() }
+                                      send: turnStopActions.stop) { [weak store] _, result, accepted in
+            if accepted, result == .failed, store?.canPresentTurnStop == true { haptics.failed() }
         }
         if sent != nil { haptics.stopped() }
     }
 
-    private var showsStopButton: Bool {
-        guard let turnStopActions, store.editTarget == nil else { return false }
-        if let target = turnStop.selection, turnStopActions.unavailableTargets.contains(target) { return false }
-        return turnStop.control != .hidden
+    private var showsStopButton: Bool { stopControl != .hidden }
+
+    private var stopControl: AssistantTurnStop.Control {
+        guard store.canPresentTurnStop, let turnStopActions, store.editTarget == nil else { return .hidden }
+        if let target = turnStop.selection, turnStopActions.unavailableTargets.contains(target) { return .hidden }
+        return turnStop.control(canSend: canSend)
     }
 
     private var turnLine: String? {
-        guard turnStopActions != nil else { return nil }
+        guard store.canPresentTurnStop, turnStopActions != nil else { return nil }
         switch turnStop.notice {
         case .refused: return ChatCopy.text(design, ChatCopy.Key.turnStopRefused)
         case .scheduledStopped: return ChatCopy.text(design, ChatCopy.Key.scheduledStopped)
@@ -824,22 +820,6 @@ struct AssistantTurnStopActions {
          stop: @escaping @MainActor (AssistantTurnStopIntent) async -> AssistantTurnStopResult) {
         self.unavailableTargets = unavailableTargets
         self.stop = stop
-    }
-}
-
-/// Reads the transcript for my assistant's turn (`AssistantTurnSignal`)
-/// into the room's Stop controller, invisibly. The chat screen hosts it, so
-/// it keeps reading while search replaces the composer (review r1).
-struct TurnSignalWatch: View {
-    let store: LiveConversationStore
-
-    var body: some View {
-        Color.clear
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .onChange(of: store.snapshot, initial: true) { _, snapshot in
-                store.turnStop.observe(AssistantTurnSignal.read(snapshot.rows, kind: store.kind))
-            }
     }
 }
 

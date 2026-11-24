@@ -126,9 +126,10 @@ final class LiveConversationStore: ConversationStore {
     let ownUserID: String
     let roomIsEncrypted: Bool?
     let mediaComposer: ChatMediaComposerState
-    /// My assistant's turn and its Stop, scoped to this room so it survives
-    /// the composer being rebuilt (search open/close; review r1).
-    let turnStop = AssistantTurnStopController()
+    let turnStop: AssistantTurnStopController
+    /// The reopened store has read a transcript that can identify the turn.
+    private var hasTurnStopSnapshot = false
+    var canPresentTurnStop: Bool { !isClosed && kind == .assistant && hasTurnStopSnapshot }
     /// The room's agent or bot users; the environment uses it for faces and
     /// the transient-line rule.
     private(set) var agentUserIDs: Set<String>
@@ -321,6 +322,7 @@ final class LiveConversationStore: ConversationStore {
     init(info: ConversationRoomInfo, draft: String = "", history: HistoryLoading = .onScroll,
          mediaComposer: ChatMediaComposerState = ChatMediaComposerState(),
          localMediaDraft: ConversationLocalMediaDraft = ConversationLocalMediaDraft(),
+         turnStop: AssistantTurnStopController = AssistantTurnStopController(),
          makeTyping: ConversationTypingFactory? = nil,
          clock: @escaping @Sendable () -> Date = { Date() }) {
         roomID = info.roomID
@@ -333,6 +335,7 @@ final class LiveConversationStore: ConversationStore {
         self.info = info
         self.mediaComposer = mediaComposer
         self.localMediaDraft = localMediaDraft
+        self.turnStop = turnStop
         self.makeTyping = makeTyping
         self.clock = clock
         draftValue = draft
@@ -351,6 +354,10 @@ final class LiveConversationStore: ConversationStore {
             edit: { [weak self] id in self?.beginEdit(id) },
             report: { [weak self] id, reason in await self?.report(id, reason: reason) ?? false }
         )
+        turnStop.onScheduleSettled = { [weak self] execution in
+            guard let controller = self?.controller else { return }
+            Task { await controller.settleSchedule(execution) }
+        }
         ProbeLog.mark(.chatOpened, id: LiveFlowLog.fingerprint(info.roomID))
     }
 
@@ -369,6 +376,7 @@ final class LiveConversationStore: ConversationStore {
         // from the old mapper cannot consume the refreshed projection boundary.
         detach()
         info = updated
+        if kind != updated.context.kind { hasTurnStopSnapshot = false }
         kind = updated.context.kind
         agentUserIDs = updated.context.agentUserIDs
         self.makeTyping = makeTyping
@@ -588,6 +596,11 @@ final class LiveConversationStore: ConversationStore {
 
     // MARK: Lifecycle
 
+    func setTurnStopAnnouncement(_ announce: (@MainActor (AssistantTurnStopController.Announcement) -> Void)?) {
+        guard !isClosed else { return }
+        turnStop.announce = announce
+    }
+
     /// Opens the room's timeline on the current session. Called on open and
     /// after every session renewal; a previous timeline is closed first.
     func attach(room: Room) async {
@@ -633,13 +646,6 @@ final class LiveConversationStore: ConversationStore {
         await install(controller, generation: generation)
     }
 
-    func settleSchedule(_ execution: ChatScheduleExecution) async {
-        guard !isClosed, settledSchedules.insert(execution).inserted else { return }
-        await controller?.settleSchedule(execution)
-    }
-
-    private var settledSchedules = Set<ChatScheduleExecution>()
-
     private func install(_ controller: TimelineController, generation: UInt64) async {
         guard generation == self.generation, !isClosed else {
             controller.close()
@@ -655,7 +661,7 @@ final class LiveConversationStore: ConversationStore {
         // handled as attached; sends held meanwhile go out now.
         run(core.attached(now: clock()))
         sync()
-        await controller.start(settledSchedules: settledSchedules)
+        await controller.start(settledSchedules: turnStop.settledSchedules)
         guard generation == self.generation, !isClosed else { return }
         if !core.typingNames.isEmpty { await controller.setTyping(core.typingNames) }
     }
@@ -711,6 +717,8 @@ final class LiveConversationStore: ConversationStore {
         guard !isClosed else { return }
         let leaving = core.leaving()
         isClosed = true
+        turnStop.onScheduleSettled = nil
+        turnStop.announce = nil
         searchPage?.cancel()
         searchPage = nil
         sync()
@@ -1069,7 +1077,19 @@ final class LiveConversationStore: ConversationStore {
     /// older rows (`SessionHandover`) and held sends.
     private func sync() {
         let next = core.snapshot
-        if next != snapshot { snapshot = next }
+        if next != snapshot {
+            if !isClosed, kind == .assistant,
+               hasTurnStopSnapshot || next.rows.contains(where: {
+                   $0.item.kind.isEventContent || $0.item.progress?.isScheduled == true
+               }) {
+                // An empty loading snapshot cannot invalidate a retained
+                // attempt. Once the transcript arrives, reconcile it before
+                // a request can resume against an older selection.
+                turnStop.observe(AssistantTurnSignal.read(next.rows, kind: kind))
+                if !hasTurnStopSnapshot { hasTurnStopSnapshot = true }
+            }
+            snapshot = next
+        }
         publishFollow()
         if core.scrollRequest != scrollRequest { scrollRequest = core.scrollRequest }
         if core.pagination != pagination { pagination = core.pagination }

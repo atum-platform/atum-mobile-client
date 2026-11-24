@@ -207,6 +207,31 @@ final class AssistantNameCheckTests: XCTestCase {
         XCTAssertEqual(AssistantNameCheck.normalized("  Thu \n Hà "), "Thu Hà")
     }
 
+    /// W4-E1 review finding 5: duplicates compare the platform's name key
+    /// (`assistant_name_key`, desktop `assistantNameKey`).
+    func testDuplicatesCompareThePlatformsNameKey() {
+        XCTAssertEqual(AssistantNameCheck.key("Re-searcher"), AssistantNameCheck.key("Researcher"))
+        XCTAssertEqual(AssistantNameCheck.key("Researcher 🔎"), AssistantNameCheck.key("researcher"))
+        XCTAssertEqual(AssistantNameCheck.key("Ian"), AssistantNameCheck.key("lan"))
+        XCTAssertEqual(AssistantNameCheck.key("Ｌａｎ"), AssistantNameCheck.key("Lan"))
+        XCTAssertNotEqual(AssistantNameCheck.key("Mãi"), AssistantNameCheck.key("Mai"))
+        XCTAssertEqual(AssistantNameCheck.problem("Re-searcher", others: ["Researcher"]), .duplicate)
+        XCTAssertNil(AssistantNameCheck.problem("Mãi", others: ["Mai"]))
+        XCTAssertNil(AssistantNameCheck.problem("🔎", others: ["🌙"]), "two names with no letters aren't the same name")
+        XCTAssertEqual(AssistantNameCheck.fold("M o ọ n"), "moon")
+    }
+
+    /// The catalog's app names are kept whole, numbered or not; one as a
+    /// word of a longer name is not (desktop `reservedFolds`).
+    func testAnAppsNameIsReserved() {
+        let apps = ["Lịch Việt", "Calendar"]
+        XCTAssertEqual(AssistantNameCheck.problem("Calendar", others: [], apps: apps), .reserved)
+        XCTAssertEqual(AssistantNameCheck.problem("calendar 2", others: [], apps: apps), .reserved)
+        XCTAssertEqual(AssistantNameCheck.problem("Lich viet", others: [], apps: apps), .reserved)
+        XCTAssertNil(AssistantNameCheck.problem("Calendar Lan", others: [], apps: apps))
+        XCTAssertNil(AssistantNameCheck.problem("Calendar", others: []))
+    }
+
     func testTheTwoAnswersBecomeDesktopsPersona() {
         XCTAssertNil(AssistantCreatePersona.soul(name: "Lan", who: " ", job: ""))
         XCTAssertEqual(AssistantCreatePersona.soul(name: " Lan ", who: "Warm.", job: "Plans posts."),

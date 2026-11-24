@@ -1,6 +1,6 @@
 {
-  "manifestSha256": "dbc8e64ab0a62c2057106b5e609e2f4b348aee301139b43f947a1e43826052f3",
+  "manifestSha256": "ae2736a1434057cbb8087ebcbfad1753172ee519c7e87be28369349a238cafc5",
   "repository": "atum-platform/atum-desktop",
-  "revision": "899cffdee306e87c4a14bf1344a7db4f545af6b4",
+  "revision": "fef8286cc6606a17127778ce2786c83887dc7841",
   "schemaVersion": 1
 }
