@@ -40,6 +40,10 @@ import XCTest
         // A second purchase in the same account/environment reuses the token.
         store.result = .cancelled; await c.purchase(id)
         XCTAssertEqual(api.tokenReads, 1)
+        XCTAssertEqual(c.purchaseState(for: id), .cancelled)
+        XCTAssertTrue(c.transactionOutcomes.values.contains(where: \.isCredited))
+        c.clearSettledOutcomes()
+        XCTAssertTrue(c.transactionOutcomes.isEmpty)
         c.bind(accountID: nil, api: nil)
     }
 
@@ -179,8 +183,10 @@ import XCTest
         var finishes = 0
         store.result = .verified(transaction { finishes += 1 })
         let c = await make(store, api)
-        await c.purchase(id); await settled { c.state == .succeeded }
+        await c.purchase(id); await settled { c.transactionOutcomes["2000000123456789"] != nil }
         XCTAssertEqual(api.posts, 1); XCTAssertEqual(finishes, 1)
+        XCTAssertEqual(c.transactionOutcomes["2000000123456789"]?.state, .alreadyCredited)
+        XCTAssertTrue(c.transactionOutcomes.values.contains(where: \.isCredited))
         c.bind(accountID: nil, api: nil)
     }
 
@@ -476,6 +482,81 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
+    func testRestoreKeepsDifferentPacksOutcomesSeparateDuringWalletRefresh() async throws {
+        let otherPack = "com.atum.mobile.protons.500k"
+        let c = try await settleInterleavedRestore(first: .revoked, then: .credited, productID: otherPack)
+        XCTAssertEqual(c.purchaseState(for: id), .revoked)
+        XCTAssertEqual(c.purchaseState(for: otherPack), .succeeded)
+        XCTAssertEqual(c.state, .succeeded)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testRestoreKeepsSamePackCreditWhenRefundRefreshFinishesLast() async throws {
+        let c = try await settleInterleavedRestore(first: .revoked, then: .credited, productID: id)
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+        XCTAssertTrue(c.transactionOutcomes.values.contains(where: \.isCredited))
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testRestoreKeepsNewerSamePackSupportOutcomeWhenRefundRefreshFinishesLast() async throws {
+        let c = try await settleInterleavedRestore(first: .revoked, then: .needsSupport, productID: id)
+        XCTAssertEqual(c.purchaseState(for: id), .needsSupport("102"))
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testRestoreShowsSamePackCreditWhenCreditRefreshFinishesAfterNewerRefund() async throws {
+        let c = try await settleInterleavedRestore(first: .credited, then: .revoked, productID: id)
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+        XCTAssertEqual(c.state, .revoked)
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testRestoreKeepsSamePackCreditWhenNewerRefundSettles() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        api.replies = [try api.reply(transactionID: "101", state: .credited),
+                       try api.reply(transactionID: "102", state: .revoked)]
+        let c = await make(store, api)
+        defer { c.bind(accountID: nil, api: nil) }
+        store.queue = [transaction(id: "101") {}]
+        await c.restore()
+        await settled { c.transactionOutcomes["101"] != nil }
+        store.continuation?.yield(transaction(id: "102") {})
+        await settled { c.transactionOutcomes["102"] != nil }
+        XCTAssertEqual(c.transactionOutcomes["102"]?.state, .revoked)
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+        XCTAssertTrue(c.transactionOutcomes.values.contains(where: \.isCredited))
+    }
+
+    private func settleInterleavedRestore(first: AppleTransactionResponse.State,
+                                          then second: AppleTransactionResponse.State,
+                                          productID: String) async throws -> ApplePurchaseCoordinator {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        api.replies = [try api.reply(transactionID: "101", state: first),
+                       try api.reply(transactionID: "102", state: second)]
+        var refreshes = 0
+        var blockedRefresh: CheckedContinuation<Void, Never>?
+        let c = await make(store, api, refresh: {
+            refreshes += 1
+            // The first refresh belongs to Restore itself. Hold the first transaction's refresh.
+            if refreshes == 2 { await withCheckedContinuation { blockedRefresh = $0 } }
+        })
+        store.queue = [transaction(id: "101") {}]
+        await c.restore()
+        await settled { blockedRefresh != nil }
+        let refresh = try XCTUnwrap(blockedRefresh)
+
+        store.continuation?.yield(transaction(id: "102", productID: productID) {})
+        await settled { c.transactionOutcomes["102"] != nil }
+        XCTAssertNil(c.transactionOutcomes["101"])
+        XCTAssertEqual(c.transactionOutcomes["102"], .init(productID: productID, state: second))
+
+        refresh.resume()
+        await settled { c.transactionOutcomes["101"] != nil }
+        XCTAssertEqual(c.transactionOutcomes["101"], .init(productID: id, state: first))
+        XCTAssertEqual(api.posts, 2)
+        return c
+    }
+
     func testWrongTransactionIDOrEnvironmentCannotFinish() async throws {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         var finishes = 0
@@ -561,9 +642,10 @@ import XCTest
     }
 
     private func transaction(id transactionID: String = "2000000123456789",
+                             productID: String? = nil,
                              environment: ApplePurchaseEnvironment = .sandbox,
                              _ finish: @escaping @MainActor @Sendable () async -> Void) -> AppleVerifiedTransaction {
-        .init(id: transactionID, productID: id, environment: environment, accountToken: nil,
+        .init(id: transactionID, productID: productID ?? id, environment: environment, accountToken: nil,
               signedTransaction: "synthetic.payload.signature", finish: finish)
     }
 }
@@ -636,10 +718,12 @@ import XCTest
         }
         return try reply()
     }
-    func reply(finish: Bool = true) throws -> AppleTransactionResponse {
+    func reply(finish: Bool = true, transactionID: String? = nil,
+               state: AppleTransactionResponse.State? = nil) throws -> AppleTransactionResponse {
         if let replyData { return try NativeAPI.decode(AppleTransactionResponse.self, from: replyData) }
         var value = ApplePurchaseTestData.object(sample)
-        if let replyState {
+        if let transactionID { value["transactionId"] = transactionID }
+        if let replyState = state ?? replyState {
             value["state"] = replyState.rawValue
             if replyState != .credited { value["credited"] = NSNull(); value["balances"] = NSNull() }
         }

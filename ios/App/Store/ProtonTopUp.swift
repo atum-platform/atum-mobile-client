@@ -211,11 +211,6 @@ enum ProtonTopUpPresentation {
         }
     }
 
-    /// Done (or Continue) appears once a pack was credited in this sheet.
-    static func finished(_ states: [String: ApplePurchaseCoordinator.State]) -> Bool {
-        states.values.contains(.succeeded)
-    }
-
     /// Below one whole Proton: the wallet floors to zero, as desktop shows it.
     static func isOut(_ balance: Int64) -> Bool { balance < 1_000_000 }
 }
@@ -448,7 +443,7 @@ struct ProtonTopUpSheet: View {
     }
 
     @ViewBuilder private var finishBar: some View {
-        if ProtonTopUpPresentation.finished(purchases.purchaseStates) {
+        if purchases.transactionOutcomes.values.contains(where: \.isCredited) {
             Button {
                 dismiss()
                 onFinished?()
