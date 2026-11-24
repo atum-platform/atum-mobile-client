@@ -23,18 +23,16 @@ enum AccountConnectionsWords {
     }
 }
 
-/// A plan's mark: a squircle monogram, as the picker draws it (services are
-/// squircles; no third-party brand art is shipped). ChatGPT reads as OpenAI's
-/// "O", as on the desktop.
+/// A plan's mark: the provider's real mark, as the desktop draws it
+/// (`connect-sheet.tsx` `AccountPlanMark` is a bare `ProviderMark`, #119).
+/// ChatGPT (codex) reads as OpenAI's mark.
 struct AccountPlanMark: View {
     let design: LiveDesign
     let plan: AccountPlan
-    var size: CGFloat = 28
+    var size: CGFloat = 22
 
     var body: some View {
-        AtumAvatar(kind: .app, name: plan == .codex ? "OpenAI" : plan.productName, size: size)
-            .atumDesign(design)
-            .accessibilityHidden(true)
+        ProviderMark(design: design, provider: plan.rawValue, label: plan.productName, size: size)
     }
 }
 
@@ -126,7 +124,8 @@ struct AccountConnectionsSections: View {
     private func planRow(_ row: AccountPlanRow) -> some View {
         let line = words(AccountConnectionsCopy.line(AccountConnectionsView.line(row)))
         return connectionRow(
-            lead: AnyView(AccountPlanMark(design: design, plan: row.plan)),
+            // The 28 pt lead column the tool glyphs share keeps the titles aligned.
+            lead: AnyView(AccountPlanMark(design: design, plan: row.plan).frame(minWidth: 28)),
             title: row.plan.productName, line: line,
             identifier: "account.settings.connections.plan." + row.plan.rawValue) {
             if row.offersConnect {
@@ -144,8 +143,8 @@ struct AccountConnectionsSections: View {
     /// where it stands (follow-up: the key sheet, docs/ports/w4-e6-connections.md).
     private func openCodeGoRow(_ connected: Bool) -> some View {
         connectionRow(
-            lead: AnyView(AtumAvatar(kind: .app, name: "OpenCode Go", size: 28)
-                .atumDesign(design).accessibilityHidden(true)),
+            lead: AnyView(ProviderMark(design: design, provider: "opencode-go", label: "OpenCode Go", size: 22)
+                .frame(minWidth: 28)),
             title: "OpenCode Go",
             line: words(connected ? AccountConnectionsCopy.inCloud : AccountConnectionsCopy.notConnected),
             identifier: "account.settings.connections.opencode-go") { EmptyView() }
@@ -283,7 +282,7 @@ struct AccountPlanConnectSheet: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            AccountPlanMark(design: design, plan: plan, size: 56)
+            AccountPlanMark(design: design, plan: plan, size: 44)
                 .padding(.top, 8)
             Text(words(AccountConnectionsCopy.sheetTitle(plan)))
                 .font(.title3.weight(.semibold))

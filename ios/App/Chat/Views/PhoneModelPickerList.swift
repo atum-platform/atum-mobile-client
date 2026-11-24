@@ -193,14 +193,14 @@ struct PhoneModelPickerList: View {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                AccountPlanMark(design: design, plan: plan, size: 24)
+                                AccountPlanMark(design: design, plan: plan, size: 20)
                                 label
                             }
                             connect
                         }
                     } else {
                         HStack(spacing: 12) {
-                            AccountPlanMark(design: design, plan: plan, size: 24)
+                            AccountPlanMark(design: design, plan: plan, size: 20)
                             label
                             connect
                         }
@@ -265,7 +265,7 @@ struct PhoneModelPickerList: View {
                 }
             } label: {
                 HStack(spacing: 10) {
-                    PhoneModelConnectionMark(design: design, connectionID: id, name: markName(forConnection: id))
+                    ProviderMark(design: design, art: connectionArt(id), size: 20)
                     Text(verbatim: name)
                     Spacer(minLength: 8)
                     Image(atum.symbol(.chevronDown))
@@ -288,10 +288,15 @@ struct PhoneModelPickerList: View {
 
     // MARK: Rows
 
+    /// Desktop's row (`model-picker-list.tsx`, spec `row`): the provider's
+    /// mark, the name with the check beside it, Atum's muted line, the star.
+    /// The phone keeps that line under the name (an iPhone row is too narrow
+    /// to trail it) and a tap target of at least 44 pt.
     private func modelRow(_ row: Row, in section: PhoneModelPickerSection) -> some View {
         HStack(spacing: 4) {
             Button { choose(row) } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
+                    ProviderMark(design: design, art: markArt(row), size: 20)
                     VStack(alignment: .leading, spacing: 3) {
                         nameLine(row)
                         if let detail = detail(row, withConnection: !section.isCollapsible) {
@@ -320,23 +325,54 @@ struct PhoneModelPickerList: View {
             }
         }
         .frame(minHeight: 52)
-        .listRowBackground(atum.color(.cell, scheme: scheme))
+        // The current row is shaded as well as checked, as on the desktop
+        // (`current && bg-(--atum-hover)`); the shade alone would read as a press.
+        .listRowBackground(rowBackground(selected: row.selected))
+    }
+
+    private func rowBackground(selected: Bool) -> some View {
+        atum.color(.cell, scheme: scheme)
+            .overlay(selected ? atum.kitColor(.fillHover, scheme: scheme) : .clear)
     }
 
     @ViewBuilder
     private func nameLine(_ row: Row) -> some View {
         let words = row.badges.map(badgeWord)
+        let named = HStack(alignment: .firstTextBaseline, spacing: 6) { // design-lint: allow: desktop #119 puts the check 6 pt after the name
+            name(row)
+            if row.selected, savingRowID != row.stableID { check }
+        }
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 4) {
-                name(row)
+                named
                 badges(words)
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                name(row)
+                named
                 badges(words)
             }
         }
+    }
+
+    /// The saved choice's check, beside its name (desktop STYLE.md §12).
+    private var check: some View {
+        Image(atum.symbol(.check))
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(atum.color(.ink, scheme: scheme))
+            .accessibilityHidden(true)
+    }
+
+    /// The row's mark: Atum's crescent for Atum's line-up, else the
+    /// connection's provider (desktop `PickerRouteMark`).
+    private func markArt(_ row: Row) -> ProviderMark.Art {
+        let provider: String = switch row.source {
+        case .atum: "atum"
+        case .chatGPTPlan: "openai"
+        case .opencodeGo: "opencode"
+        case let .ownKey(id): id
+        }
+        return ProviderMark.art(provider: provider, label: row.connectionLabel ?? label(for: row.source))
     }
 
     private func name(_ row: Row) -> some View {
@@ -361,9 +397,8 @@ struct PhoneModelPickerList: View {
         if savingRowID == row.stableID {
             ProgressView().controlSize(.small)
         } else if row.selected {
-            Image(atum.symbol(.check))
-                .foregroundStyle(atum.color(.ink, scheme: scheme))
-                .accessibilityHidden(true)
+            // The check is beside the name.
+            EmptyView()
         } else if row.announced {
             Text(verbatim: design.text("desktop.atum.discover.comingSoon"))
                 .font(.caption)
@@ -381,8 +416,11 @@ struct PhoneModelPickerList: View {
     private func starButton(_ row: Row, favoriteID: String) -> some View {
         let favorite = preferences.favorites.contains(favoriteID)
         return Button { toggleFavorite(favoriteID) } label: {
+            // Desktop: a starred model's star is the mark amber (`--atum-mark-amber`,
+            // #ffa100); an unstarred one is faint. A phone has no hover, so the
+            // unstarred star stays drawn rather than waiting for the pointer.
             Image(atum.symbol(favorite ? .starFilled : .star))
-                .foregroundStyle(favorite ? atum.color(.ink, scheme: scheme)
+                .foregroundStyle(favorite ? AssistantMarkPalette.color(.amber, scheme: scheme)
                                           : atum.color(.soft, scheme: scheme))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
@@ -446,7 +484,7 @@ struct PhoneModelPickerList: View {
         Section {
             Button(action: action) {
                 HStack(spacing: 10) {
-                    PhoneModelConnectionMark(design: design, connectionID: "atum", name: "Atum")
+                    ProviderMark(design: design, art: .atum, size: 20)
                     Text(verbatim: copy.text(.backToAtum))
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
                     Spacer(minLength: 8)
@@ -597,16 +635,14 @@ struct PhoneModelPickerList: View {
         } ?? id
     }
 
-    /// The word a connection's monogram is drawn from; OpenAI's own mark is not
-    /// available, so a ChatGPT plan reads as an "O" like it does on desktop.
-    private func markName(forConnection id: String) -> String {
-        if rows.contains(where: { $0.connectionID == id && $0.source == .chatGPTPlan }) {
-            return "OpenAI"
+    /// A connection's mark in its section header: its first row's provider,
+    /// as the desktop rail draws it (a signed-out connection keeps its full mark).
+    private func connectionArt(_ id: String) -> ProviderMark.Art {
+        if id == "atum" { return .atum }
+        guard let row = rows.first(where: { $0.connectionID == id }) else {
+            return .monogram(label(forConnection: id))
         }
-        if rows.contains(where: { $0.connectionID == id && $0.source == .opencodeGo }) {
-            return "OpenCode Go"
-        }
-        return label(forConnection: id)
+        return markArt(row)
     }
 
     /// The line under a model's name: whose it is. Only a connected model drawn
@@ -618,8 +654,9 @@ struct PhoneModelPickerList: View {
         if let unavailable = row.unavailable {
             return label(for: row.source) + " · " + copy.unavailable(unavailable)
         }
-        guard withConnection else { return nil }
+        // Atum's own line always follows its name, as on the desktop.
         if let tagline = row.tagline { return copy.tagline(tagline) }
+        guard withConnection else { return nil }
         if let connectionLabel = row.connectionLabel, row.source != .atum { return connectionLabel }
         switch row.source {
         case .atum: return nil
@@ -647,22 +684,5 @@ struct PhoneModelPickerList: View {
     private func toggleFavorite(_ favoriteID: String) {
         preferences = preferences.toggling(favoriteID)
         preferenceStore.write(preferences, matrixAccountID: matrixAccountID, destinationID: destinationID)
-    }
-}
-
-/// A connection's mark in its section header: Atum's own mark for Atum, else a
-/// monogram in the shared squircle (no third-party brand art is shipped).
-private struct PhoneModelConnectionMark: View {
-    let design: LiveDesign
-    let connectionID: String
-    let name: String
-
-    var body: some View {
-        if connectionID == "atum" {
-            LiveEclipseMark(design: design).frame(width: 24, height: 24)
-        } else {
-            AtumAvatar(kind: .app, name: name, size: 24)
-                .atumDesign(design)
-        }
     }
 }
