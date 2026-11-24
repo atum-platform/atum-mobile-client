@@ -106,7 +106,17 @@ enum S6ScriptedScenario: String, CaseIterable {
     /// Setting up while offline.
     case approvalsOffline = "approvals.offline"
 
+    /// Settings › Connections (W4-E6) over a synthetic account registry:
+    /// ChatGPT on a Mac, Claude last seen, Antigravity not connected, OpenCode
+    /// Go in the cloud and one home hub.
+    case connectionsMixed = "connections.mixed"
+    /// The first read fails; Try again loads the mixed registry.
+    case connectionsFailed = "connections.failed"
+    /// Antigravity lands on a Mac while its connect sheet is open.
+    case connectionsLands = "connections.lands"
+
     var isPhoneApprovals: Bool { rawValue.hasPrefix("approvals.") }
+    var isConnections: Bool { rawValue.hasPrefix("connections.") }
 }
 
 /// The preview host for `-AtumExpiredSessionPreview`: the same S6 welcome

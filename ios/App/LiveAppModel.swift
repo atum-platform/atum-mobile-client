@@ -2420,8 +2420,20 @@ final class LiveAppModel {
         guard let client = domainClient else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
         async let relay = try? client.chatGPTRelayStatus()
         async let connections = try? client.providerConnectionsStatus()
-        let value = PhoneSubscriptionAccount(chatGPT: await relay, openCodeGo: await connections)
+        async let registry = try? client.accountConnections()
+        let value = PhoneSubscriptionAccount(chatGPT: await relay, openCodeGo: await connections,
+                                             accountConnections: await registry)
         guard domainClient === client else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
+        return value
+    }
+
+    /// The account's connections (`atum.account-connections/1`) for Settings ›
+    /// Connections and the connect sheet's watch. nil is "could not read"; an
+    /// answer that arrives after a sign-out or account switch is dropped.
+    func accountConnections() async -> AccountConnections? {
+        guard let client = domainClient else { return nil }
+        let value = try? await client.accountConnections()
+        guard domainClient === client else { return nil }
         return value
     }
 

@@ -1148,6 +1148,19 @@ public struct AgentsRead: Sendable {
         try await read(ProviderConnectionsStatus.self, url: Self.providerConnectionsURL)
     }
 
+    /// `atum.account-connections/1`: every plan and connection of the account
+    /// and the Macs each plan is on. The desktop's own read
+    /// (`account_connections_read` on device-services), over the same
+    /// owner-authenticated transport the phone registry uses. The body names
+    /// no owner; Shell takes it from the bearer.
+    public func accountConnections() async throws -> AccountConnections {
+        let body = try await phoneDeviceServices(request: AccountConnectionsContract.requestBody)
+        guard body.count <= AccountConnectionsContract.maximumResponseBytes else {
+            throw NativeDomainClientFailure.invalidResponse
+        }
+        return try decode(AccountConnections.self, data: body)
+    }
+
     // MARK: ChatGPT with Google data (Shell training-confirmation r3)
 
     /// The account's one-time training-off confirmation. Any answer other than

@@ -21,6 +21,7 @@ struct S6ScriptedHost: View {
     @State private var deviceReads = ScriptedReadCounter()
     @State private var openedDeviceSignOut: URL?
     @State private var phoneApprovals: PhoneApprovalSettingsModel?
+    @State private var connectionReads = ScriptedReadCounter()
 
     var body: some View {
         Group {
@@ -53,6 +54,8 @@ struct S6ScriptedHost: View {
             case .accountDefault, .accountRestore, .recoveryRejected, .recoveryDone,
                  .accountKey, .signOutPlain, .signOutSaveKey, .accountLegal,
                  .accountDevices, .accountDevicesFailed:
+                accountHost
+            case .connectionsMixed, .connectionsFailed, .connectionsLands:
                 accountHost
             case .approvalsOff, .approvalsCancel, .approvalsOn, .approvalsNoPasscode,
                  .approvalsPasscodeOnly, .approvalsKeyMissing, .approvalsLegacy, .approvalsOffline:
@@ -129,6 +132,33 @@ struct S6ScriptedHost: View {
             AccountDevice(id: "SCRIPTEDMAC", name: "MacBook Pro", lastSeen: now.addingTimeInterval(-2 * 3_600)),
             AccountDevice(id: "SCRIPTEDOLD", name: nil, lastSeen: now.addingTimeInterval(-3 * 86_400)),
         ]
+    }
+
+    /// A synthetic account registry; no real Mac or account. `lands`: the
+    /// page reads first (once or twice, as the scene settles), then the open
+    /// sheet follows; from the fourth read Antigravity is on a Mac.
+    private func scriptedConnections() -> AccountConnections? {
+        connectionReads.count += 1
+        if scenario == .connectionsFailed && connectionReads.count == 1 { return nil }
+        let landed = scenario == .connectionsLands && connectionReads.count >= 4
+        let now: Int64 = 1_795_000_000_000
+        func mac(_ id: String, _ name: String, stale: Bool = false) -> AccountConnectionDevice {
+            AccountConnectionDevice(deviceServiceID: id, displayName: name, stale: stale, observedAt: now)
+        }
+        let book = mac("11111111-1111-4111-8111-11111111abcd", "MacBook Pro")
+        let mini = mac("22222222-2222-4222-8222-22222222abcd", "Mac mini")
+        return AccountConnections(connections: [
+            AccountConnection(id: "codex", kind: .plan, status: .connected, devices: [book],
+                              models: [AccountConnectionModel(id: "gpt-6.1", displayName: "GPT-6.1")]),
+            AccountConnection(id: "claude", kind: .plan, status: .connected,
+                              devices: [mac("22222222-2222-4222-8222-22222222abcd", "Mac mini", stale: true)],
+                              models: [AccountConnectionModel(id: "claude-sonnet-5-5", displayName: "Claude Sonnet 5.5")]),
+            AccountConnection(id: "antigravity", kind: .plan, status: landed ? .connected : .notConnected,
+                              devices: landed ? [mini] : []),
+            AccountConnection(id: "opencode_go", kind: .apiKey, status: .connected),
+            AccountConnection(id: "owner_chats", kind: .tools, status: .connected),
+            AccountConnection(id: "home_hub:strap-hub", kind: .tools, status: .notConnected),
+        ])
     }
 
     private var storePresentation: LiveProductStoreRead {
@@ -216,6 +246,9 @@ struct S6ScriptedHost: View {
             saveProfileName: { _ in .saved }
         )
         actions.phoneApprovals = phoneApprovals
+        if scenario.isConnections {
+            actions.accountConnections = AccountConnectionsActions(read: { scriptedConnections() })
+        }
         if scriptedDevices {
             actions.loadDevices = { scriptedDeviceList() }
             actions.deviceSignOutURL = { deviceID in

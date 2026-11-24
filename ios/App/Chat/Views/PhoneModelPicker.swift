@@ -143,6 +143,8 @@ struct PhoneConversationModelPicker: View {
                         : snapshot.flatMap(PhoneModelPickerProjection.thinking),
                     savingEffort: savingEffort,
                     selectEffort: chooseEffort,
+                    planConnects: PhoneModelPickerList.planConnects(account),
+                    readConnections: PhoneModelPickerList.connectionsRead(destinations?.subscriptions),
                     select: choose
                 )
             } else if unavailable {
@@ -543,6 +545,8 @@ private struct PhoneDestinationModelPicker: View {
                     context: destination.isCloud ? .cloudAssistant : .mac,
                     savingRowID: savingRowID,
                     saveFailed: saveFailed,
+                    planConnects: destination.isCloud ? PhoneModelPickerList.planConnects(account) : [],
+                    readConnections: PhoneModelPickerList.connectionsRead(actions.subscriptions),
                     select: choose
                 )
             }

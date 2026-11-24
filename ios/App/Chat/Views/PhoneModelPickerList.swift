@@ -30,12 +30,19 @@ struct PhoneModelPickerList: View {
     let selectEffort: (ManagedModelEffort) -> Void
     /// Returns a Mac to Atum's model; given only when its saved choice is a connection's.
     let switchBack: (() -> Void)?
+    /// The account's plans with nothing to pick yet (connected nowhere or
+    /// signed out): each gets "Use your {Plan} plan" and one Connect, which
+    /// opens the connect sheet (desktop `AccountPlanConnectState`).
+    let planConnects: [AccountPlan]
+    /// The account read the connect sheet follows while it is open.
+    let readConnections: (@MainActor () async -> AccountConnections?)?
     let select: (Row) -> Void
 
     @State private var query = ""
     @State private var filter = PhoneModelPickerFilter.none
     @State private var disclosure = PhoneModelPickerDisclosure()
     @State private var preferences: ModelPickerPreferences
+    @State private var connecting: AccountPlanConnectRequest?
     /// The bar's controls grow with the text, to a cap, so a large type size
     /// never squeezes the filter symbol out of its circle.
     @ScaledMetric(relativeTo: .body) private var barControl = 44.0
@@ -55,6 +62,8 @@ struct PhoneModelPickerList: View {
          savingEffort: ManagedModelEffort? = nil,
          selectEffort: @escaping (ManagedModelEffort) -> Void = { _ in },
          switchBack: (() -> Void)? = nil,
+         planConnects: [AccountPlan] = [],
+         readConnections: (@MainActor () async -> AccountConnections?)? = nil,
          select: @escaping (Row) -> Void) {
         self.design = design
         self.matrixAccountID = matrixAccountID
@@ -67,6 +76,8 @@ struct PhoneModelPickerList: View {
         self.savingEffort = savingEffort
         self.selectEffort = selectEffort
         self.switchBack = switchBack
+        self.planConnects = planConnects
+        self.readConnections = readConnections
         self.select = select
         self.preferenceStore = preferenceStore
         _query = State(initialValue: initialQuery)
@@ -108,6 +119,9 @@ struct PhoneModelPickerList: View {
             if let thinking {
                 thinkingSection(thinking)
             }
+            if !planConnects.isEmpty, !browsing {
+                planConnectSection
+            }
             Section {
                 Text(verbatim: contextCopy)
                     .font(.footnote)
@@ -137,6 +151,52 @@ struct PhoneModelPickerList: View {
         }
         .onChange(of: viewKey) { _, next in disclosure.show(view: next) }
         .onChange(of: rows) { _, _ in disclosure.settle(sections) }
+        .sheet(item: $connecting) { request in
+            AccountPlanConnectSheet(design: design, plan: request.plan,
+                                    read: readConnections ?? { nil }) { _ in }
+        }
+    }
+
+    /// The plans a cloud assistant's picker offers to connect, once the
+    /// account read has answered (an unread registry offers nothing).
+    static func planConnects(_ account: PhoneSubscriptionAccount?) -> [AccountPlan] {
+        account?.accountConnections.map(AccountConnectionsView.pickerConnectPlans) ?? []
+    }
+
+    /// The connect sheet's read, from the picker's own subscription read.
+    static func connectionsRead(_ subscriptions: AssistantSubscriptionActions?)
+        -> (@MainActor () async -> AccountConnections?)? {
+        guard let read = subscriptions?.read else { return nil }
+        return { await read().accountConnections }
+    }
+
+    /// Desktop's Connect state for a plan with nothing to pick: the plan's
+    /// mark, one line, one Connect. The phone has no rail, so each such plan
+    /// is one row under the models instead of a hollow rail mark.
+    private var planConnectSection: some View {
+        Section {
+            ForEach(planConnects, id: \.self) { plan in
+                HStack(spacing: 12) {
+                    AccountPlanMark(design: design, plan: plan, size: 24)
+                    Text(verbatim: AccountConnectionsWords.text(AccountConnectionsCopy.pickerUse(plan), design: design))
+                        .font(.body)
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(AccountConnectionsWords.text(AccountConnectionsCopy.connect, design: design)) {
+                        connecting = AccountPlanConnectRequest(plan: plan)
+                    }
+                    .buttonStyle(.atumSecondary)
+                    .accessibilityLabel(AccountConnectionsWords.text(AccountConnectionsCopy.sheetTitle(plan),
+                                                                     design: design))
+                    .accessibilityIdentifier("phone.model.plan." + plan.rawValue + ".connect")
+                }
+                .frame(minHeight: 52)
+                .listRowBackground(atum.color(.cell, scheme: scheme))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("phone.model.plan." + plan.rawValue)
+            }
+        }
     }
 
     // MARK: Layout
