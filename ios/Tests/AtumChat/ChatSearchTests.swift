@@ -123,6 +123,11 @@ final class ChatSearchTests: XCTestCase {
         }, loadPage: {
             loaded.insert(F.text("old", from: F.agent, "launch", threadRoot: "$thread"), at: 0)
             return .loaded(hasMore: true)
+        }, placeMatch: { _ in
+            try await ChatHistorySearch.waitForRoutedPlacement { completion in
+                completion.yield(())
+                completion.finish()
+            }
         })
         XCTAssertEqual(result.phase, .found)
         XCTAssertEqual(result.pages, 1)
@@ -281,6 +286,30 @@ final class ChatSearchTests: XCTestCase {
         XCTAssertEqual(result.pages, 2, "placement retry shares the original walk's page count")
         XCTAssertEqual(attempted, [oldReply.id, newReply.id])
         XCTAssertNil(selectedEvent)
+    }
+
+    @MainActor
+    func testRoutedSearchFailsWhenLayoutNeverConfirmsPlacement() async {
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        let snapshot = Snapshot(rows: rows([reply]), change: .reset, generation: 1)
+        let returned = expectation(description: "placement timeout releases the walk")
+        let walk = Task {
+            let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot }, loadPage: {
+                XCTFail("a placement timeout should end the walk without loading another page")
+                return .failed
+            }, placeMatch: { _ in
+                try await ChatHistorySearch.waitForRoutedPlacement(timeout: .milliseconds(20)) { _ in
+                    // No layout callback arrives to complete the placement.
+                }
+            })
+            returned.fulfill()
+            return result
+        }
+        await fulfillment(of: [returned], timeout: 2)
+        walk.cancel()
+        let result = await walk.value
+        XCTAssertEqual(result.phase, .failed)
+        XCTAssertEqual(result.pages, 0)
     }
 
     @MainActor

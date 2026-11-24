@@ -568,7 +568,7 @@ struct TranscriptView: View {
                                                   timelineGeneration: { store.timelineGeneration }, loadPage: {
             guard store.searchTargetEventID == eventID else { return .failed }
             return await store.loadOlderPageForSearch()
-        }, placeMatch: { await placeRoutedMatch($0) })
+        }, placeMatch: { try await placeRoutedMatch($0) })
         guard answer.phase != .found, !Task.isCancelled, store.searchTargetEventID == eventID else { return }
         routeFocusFailed += 1
         store.searchTargetEventID = nil
@@ -577,20 +577,20 @@ struct TranscriptView: View {
 
     /// The walk waits for a layout-confirmed placement. A replaced projection
     /// releases the waiter so the same walk can find the reply again.
-    private func placeRoutedMatch(_ match: ChatHistorySearch.RoutedMatch) async -> Bool {
+    private func placeRoutedMatch(_ match: ChatHistorySearch.RoutedMatch) async throws -> Bool {
         guard !Task.isCancelled, store.searchTargetEventID == match.eventID,
               match.isCurrent(in: routedSearchSnapshot), showSearchMatch(match.rowID) else { return false }
-        let (result, completion) = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let generation = scratch.searchGeneration
-        scratch.routedPlacement = (match, completion)
-        routedHighlightRowID = match.rowID
-        var iterator = result.makeAsyncIterator()
-        let placed = await iterator.next() == true
-        // AsyncStream also unblocks when SwiftUI cancels the route task.
-        if generation == scratch.searchGeneration, scratch.routedPlacement != nil {
-            stopSearchPlacement()
+        defer {
+            if generation == scratch.searchGeneration, scratch.routedPlacement != nil {
+                stopSearchPlacement()
+            }
         }
-        return placed
+        // Allow the full scroll retry sequence and time for layout to catch up.
+        return try await ChatHistorySearch.waitForRoutedPlacement { completion in
+            scratch.routedPlacement = (match, completion)
+            routedHighlightRowID = match.rowID
+        }
     }
 
     /// The person asked for this match, so the chat leaves the bottom first
@@ -685,9 +685,9 @@ struct TranscriptView: View {
                                        viewportHeight: geometry.viewportHeight, motion: scratch.motion))
                 syncFollowState()
                 if let placement = scratch.routedPlacement {
+                    guard case .enqueued = placement.completion.yield(()) else { return }
                     scratch.routedPlacement = nil
                     store.searchTargetEventID = nil
-                    placement.completion.yield(true)
                     placement.completion.finish()
                 }
                 updateBottomVisible()
@@ -850,7 +850,8 @@ private final class TranscriptScratch {
     /// HC-6: the explicitly requested match owns the anchor until cancelled.
     var placingSearchMatch: Bool { searchRowID != nil }
     var searchRowID: String?
-    var routedPlacement: (match: ChatHistorySearch.RoutedMatch, completion: AsyncStream<Bool>.Continuation)?
+    var routedPlacement: (match: ChatHistorySearch.RoutedMatch,
+                          completion: AsyncThrowingStream<Void, Error>.Continuation)?
     var searchAttempts = 0
     var searchHasScrolled = false
     var searchTickScheduled = false

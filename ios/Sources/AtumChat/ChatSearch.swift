@@ -247,7 +247,7 @@ public enum ChatHistorySearch {
 
     public enum Phase: Equatable, Sendable {
         case searching, found, complete, capped, cancelled
-        /// A page could not load; the line goes away, as desktop's does.
+        /// A page could not load or routed placement failed.
         case failed
     }
 
@@ -287,7 +287,7 @@ public enum ChatHistorySearch {
                            progress: @MainActor (Progress) -> Void = { _ in }) async -> Progress {
         var index = ChatSearchIndex()
         return await run(maximumPages: maximumPages, rows: rows,
-                         acceptMatch: { !index.matches(in: rows(), query: query).isEmpty },
+                         acceptMatch: { index.matches(in: rows(), query: query).isEmpty ? nil : .found },
                          loadPage: loadPage, progress: progress)
     }
 
@@ -302,13 +302,35 @@ public enum ChatHistorySearch {
         }
     }
 
+    /// Wait for layout to confirm placement. Finishing the stream without a
+    /// value lets the walk retry. A timeout ends the walk even if layout stops.
+    @MainActor
+    public static func waitForRoutedPlacement(
+        timeout: Duration = .seconds(3),
+        start: (AsyncThrowingStream<Void, Error>.Continuation) -> Void
+    ) async throws -> Bool {
+        let (result, completion) = AsyncThrowingStream<Void, Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let deadline = ContinuousClock.now + timeout
+        start(completion)
+        let timer = Task {
+            do { try await Task.sleep(until: deadline, clock: .continuous) }
+            catch { return }
+            completion.finish(throwing: PlacementTimedOut())
+        }
+        defer { timer.cancel() }
+        var iterator = result.makeAsyncIterator()
+        return try await iterator.next() != nil
+    }
+
+    private struct PlacementTimedOut: Error {}
+
     /// A routed result names a Matrix event. The same walk keeps its page
     /// budget while the transcript tries to place a match in the current projection.
     @MainActor
     public static func find(eventID: String, snapshot: @MainActor () -> Snapshot,
                             timelineGeneration: (@MainActor () -> UInt64)? = nil,
                             loadPage: @MainActor () async -> Page,
-                            placeMatch: @MainActor (RoutedMatch) async -> Bool = { _ in true }) async -> Progress {
+                            placeMatch: @MainActor (RoutedMatch) async throws -> Bool = { _ in true }) async -> Progress {
         var replacedGeneration: UInt64?
         func currentProjection() -> Snapshot {
             let current = snapshot()
@@ -326,15 +348,19 @@ public enum ChatHistorySearch {
                                  let current = currentProjection()
                                  guard current.generation != Snapshot.empty.generation,
                                        let row = current.rows.first(where: { $0.item.eventID == eventID })
-                                 else { return false }
+                                 else { return nil }
                                  let match = RoutedMatch(rowID: row.id, eventID: eventID,
                                                          generation: current.generation)
-                                 if await placeMatch(match) { return true }
+                                 do {
+                                     if try await placeMatch(match) { return .found }
+                                 } catch {
+                                     return Task.isCancelled ? .cancelled : .failed
+                                 }
                                  // If the replacement already contains the reply,
                                  // try it before spending another page.
-                                 if match.isCurrent(in: currentProjection()) { return false }
+                                 if match.isCurrent(in: currentProjection()) { return nil }
                              }
-                             return false
+                             return nil
                          }, loadPage: {
                              let generation = snapshot().generation
                              let page = await loadPage()
@@ -346,7 +372,7 @@ public enum ChatHistorySearch {
     @MainActor
     private static func run(maximumPages: Int, rows: @MainActor () -> [ChatRow],
                             generation: @MainActor () -> UInt64 = { 0 },
-                            acceptMatch: @MainActor () async -> Bool,
+                            acceptMatch: @MainActor () async -> Phase?,
                             loadPage: @MainActor () async -> Page,
                             progress: @MainActor (Progress) -> Void = { _ in }) async -> Progress {
         let limit = max(0, min(maximumPages, Self.maximumPages))
@@ -356,7 +382,7 @@ public enum ChatHistorySearch {
             return value
         }
         if Task.isCancelled { return report(.cancelled, 0) }
-        if await acceptMatch() { return report(.found, 0) }
+        if let phase = await acceptMatch() { return report(phase, 0) }
         if Task.isCancelled { return report(.cancelled, 0) }
         guard limit > 0 else { return report(.capped, 0) }
         for pages in 1...limit {
@@ -364,7 +390,7 @@ public enum ChatHistorySearch {
             let page = await loadPage()
             let pageGeneration = generation()
             if Task.isCancelled { return report(.cancelled, pages) }
-            if await acceptMatch() { return report(.found, pages) }
+            if let phase = await acceptMatch() { return report(phase, pages) }
             if Task.isCancelled { return report(.cancelled, pages) }
             switch page {
             case .failed: return report(.failed, pages)
@@ -374,7 +400,7 @@ public enum ChatHistorySearch {
                 if generation() != pageGeneration { continue }
                 do { try await Task.sleep(for: .milliseconds(300)) }
                 catch { return report(.cancelled, pages) }
-                if await acceptMatch() { return report(.found, pages) }
+                if let phase = await acceptMatch() { return report(phase, pages) }
                 if Task.isCancelled { return report(.cancelled, pages) }
                 if generation() != pageGeneration { continue }
                 return report(.complete, pages)

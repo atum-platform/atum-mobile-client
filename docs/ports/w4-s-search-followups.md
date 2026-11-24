@@ -32,3 +32,12 @@ Focused verification covers `ChatSearchTests`, `ConversationCoreTests`,
 `CompanySearchServiceTests`, `CompanyMessageSearchTests` and
 `TeamSpaceRevampPolicyTests`, plus a Debug simulator build of `AtumMobile`.
 The SwiftPM and Xcode builds run under the shared heavy-build lock.
+
+## Routed placement timeout (#100)
+
+Once the walk finds a candidate, the transcript gives layout three seconds to
+confirm placement. That covers the 14 scroll commands (about 1.9 seconds) and
+allows time for a late layout pass. If confirmation never arrives, the walk
+fails, clears the pending event, and resumes bottom visibility tracking from
+the last geometry. A replaced projection can still retry within the original
+40-page walk and its 300 ms end-of-history grace period.
