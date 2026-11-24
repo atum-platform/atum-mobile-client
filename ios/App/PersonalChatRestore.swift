@@ -22,11 +22,62 @@ struct LastPersonalChatStore {
         guard let room = try? MatrixRoomID(roomID), self.roomID() != room.rawValue else { return }
         defaults.set(room.rawValue, forKey: key)
     }
+
+    func forget(_ roomID: String) {
+        if self.roomID() == roomID { defaults.removeObject(forKey: key) }
+    }
+}
+
+struct PersonalChatRestoreSession {
+    private var installationID: UUID?
+    private var signOutStarted = false
+    private(set) var exitedRoomIDs = Set<String>()
+
+    mutating func begin(installationID: UUID) {
+        guard self.installationID != installationID else { return }
+        self.installationID = installationID
+        signOutStarted = false
+        exitedRoomIDs.removeAll()
+    }
+
+    mutating func beginSignOut() { signOutStarted = true }
+
+    func canRestore(installationID: UUID, signOutInProgress: Bool) -> Bool {
+        self.installationID == installationID && !signOutInProgress && !signOutStarted
+    }
+
+    mutating func beginExit(_ roomID: String, store: LastPersonalChatStore) {
+        store.forget(roomID)
+        exitedRoomIDs.insert(roomID)
+    }
+
+    mutating func reconcileJoinedRooms(_ roomIDs: Set<String>) {
+        exitedRoomIDs.formIntersection(roomIDs)
+    }
 }
 
 enum PersonalChatRestoreEntry {
     case launch
     case chatsTap
+}
+
+enum PersonalChatCompanyClaim: Equatable {
+    static let eventType = "io.atum.company_private_cos"
+    case checking, absent, claimed, unavailable
+
+    static func read(status: Int?, body: Data) -> Self {
+        struct MatrixError: Decodable { let errcode: String }
+        if status == 200 { return .claimed }
+        if status == 404, (try? JSONDecoder().decode(MatrixError.self, from: body))?.errcode == "M_NOT_FOUND" {
+            return .absent
+        }
+        return .unavailable
+    }
+}
+
+enum PersonalChatRestoreDecision: Equatable {
+    case checkCompanyClaim(String)
+    case open(LiveProductRoom)
 }
 
 enum PersonalChatRestorePolicy {
@@ -35,14 +86,11 @@ enum PersonalChatRestorePolicy {
 
     /// Check the Matrix room as well as the platform's agent identities. A
     /// former assistant's marked room can project as an ordinary people row.
-    static func isPersonal(_ room: LiveMatrixRoomRow, classification: CompanyRoomClassification,
-                           agents: [AgentsResponse.Agent], allowsUnclassified: Bool) -> Bool {
-        switch classification {
-        case .company, .conversation, .privateCos, .notesSelf, .quarantined: return false
-        case .unknown where !allowsUnclassified: return false
-        case .personal, .unknown: break
-        }
-        guard !ConversationRoomType.isClaimed(room.roomType),
+    static func mayRemember(_ room: LiveMatrixRoomRow, classification: CompanyRoomClassification,
+                            agents: [AgentsResponse.Agent]) -> Bool {
+        guard classification == .personal || classification == .unknown else { return false }
+        guard room.hasCreateState,
+              !ConversationRoomType.isClaimed(room.roomType),
               !MobileRoomTypePolicy.isHiddenFromChats(room.roomType),
               room.roomType != companyChannelType,
               room.legacyAppBotMove == nil else { return false }
@@ -56,36 +104,46 @@ enum PersonalChatRestorePolicy {
         return agents.contains { $0.canOpenChat && isDirectChat(room, with: $0) }
     }
 
-    static func destination(
+    static func decision(
         for entry: PersonalChatRestoreEntry, rememberedRoomID: String?,
         joinedRooms: [LiveMatrixRoomRow], rows: [LiveProductRoom], agents: [AgentsResponse.Agent]?,
-        allowsUnclassified: Bool = false, hasExplicitRoute: Bool, isCurrent: Bool,
-        classification: (String) -> CompanyRoomClassification
-    ) -> LiveProductRoom? {
+        hasExplicitRoute: Bool, isCurrent: Bool, exitedRoomIDs: Set<String>,
+        classification: (String) -> CompanyRoomClassification,
+        companyClaim: (String) -> PersonalChatCompanyClaim?
+    ) -> PersonalChatRestoreDecision? {
         guard isCurrent, !hasExplicitRoute else { return nil }
         let knownAgents = agents ?? []
-        // Give a joined remembered room time to be classified before a
-        // fallback can replace its pointer.
-        if let rememberedRoomID, !allowsUnclassified,
-           joinedRooms.contains(where: { $0.roomID == rememberedRoomID }),
-           classification(rememberedRoomID) == .unknown { return nil }
         var eligibleRooms = [String: LiveMatrixRoomRow]()
-        for room in joinedRooms where isPersonal(room, classification: classification(room.roomID),
-                                                 agents: knownAgents, allowsUnclassified: allowsUnclassified) {
-            eligibleRooms[room.roomID] = room
+        for room in joinedRooms {
+            let roomID = room.roomID
+            let claim = companyClaim(roomID)
+            guard !exitedRoomIDs.contains(roomID), claim != .claimed, claim != .unavailable,
+                  classification(roomID) == .personal,
+                  // Untyped DMs can be former assistants until the roster identifies their peers.
+                  agents != nil || room.roomType != nil || !(room.isDirect || room.memberCount == 2),
+                  mayRemember(room, classification: .personal, agents: knownAgents) else { continue }
+            eligibleRooms[roomID] = room
         }
         let eligibleRows = rows.filter { $0.canOpen && !$0.isInvitation && eligibleRooms[$0.id] != nil }
+        func decide(_ row: LiveProductRoom) -> PersonalChatRestoreDecision? {
+            switch companyClaim(row.id) {
+            case .none: return .checkCompanyClaim(row.id)
+            case .absent: return .open(row)
+            case .checking, .claimed, .unavailable: return nil
+            }
+        }
         if let remembered = eligibleRows.first(where: { $0.id == rememberedRoomID }) {
-            return remembered
+            return decide(remembered)
         }
 
         if let primary = knownAgents.first(where: { $0.isDefault && $0.status == .active }) {
-            return eligibleRows.first { row in
+            let primaryRow = eligibleRows.first { row in
                 guard row.assistant?.id == primary.id.rawValue, let room = eligibleRooms[row.id] else {
                     return false
                 }
                 return isDirectChat(room, with: primary)
             }
+            return primaryRow.flatMap(decide)
         }
 
         // Only a known agent roster without an active agent permits the
@@ -93,7 +151,7 @@ enum PersonalChatRestorePolicy {
         guard entry == .chatsTap, let agents, agents.allSatisfy({ $0.status == .retired }) else {
             return nil
         }
-        return eligibleRows.min { left, right in
+        let first = eligibleRows.min { left, right in
             if left.isPinned != right.isPinned { return left.isPinned }
             if left.isPinned {
                 let leftOrder = eligibleRooms[left.id]?.favouriteOrder ?? 2
@@ -106,6 +164,7 @@ enum PersonalChatRestorePolicy {
             let rightTime = eligibleRooms[right.id]?.latestTimestamp ?? 0
             return leftTime == rightTime ? left.id < right.id : leftTime > rightTime
         }
+        return first.flatMap(decide)
     }
 
     private static func isDirectChat(_ room: LiveMatrixRoomRow, with agent: AgentsResponse.Agent) -> Bool {

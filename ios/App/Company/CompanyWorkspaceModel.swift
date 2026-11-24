@@ -702,6 +702,14 @@ final class CompanyWorkspaceModel {
         return .unknown
     }
 
+    func personalChatRestoreClassification(_ roomID: String) -> CompanyRoomClassification {
+        if quarantinedCompanyRoomIDs.contains(roomID) { return .quarantined }
+        let classification = roomClassification(roomID)
+        // An explicit v1 capability downgrade settles directory discovery.
+        // Restore still requires the Matrix state check for each candidate.
+        return phase == .hidden && classification == .unknown ? .personal : classification
+    }
+
     private func invalidateClassification() {
         if classificationComplete {
             classificationComplete = false

@@ -430,6 +430,7 @@ final class LiveAppModel {
     private(set) var cachedChatList = [ChatListSnapshot.Room]()
     @ObservationIgnored private var cachedChatListAccountID: String?
     @ObservationIgnored private let chatListSnapshots = ChatListSnapshotStore()
+    @ObservationIgnored private var personalChatRestoreSession = PersonalChatRestoreSession()
     private var hiddenRoomStore: LiveHiddenRoomStore?
     @ObservationIgnored private var loggedAgentRoomChoices = [String: String]()
     @ObservationIgnored private var attemptedInvites = Set<String>()
@@ -783,6 +784,7 @@ final class LiveAppModel {
             return false
         }
         signOutInProgress = true
+        personalChatRestoreSession.beginSignOut()
         // Phone approvals: fence any in-flight set-up, revoke this iPhone's
         // registrations while the bearer still works (or record them for the
         // next sign-in) and delete every approval key. Sign-out is held while
@@ -1802,7 +1804,8 @@ final class LiveAppModel {
     /// "Delete chat" / "Leave group" (`ChatExitPolicy`). The row disappears once
     /// the room list publishes the leave; a failure says so on the row.
     func exitRoom(_ roomID: String, _ action: ChatExitAction) {
-        guard let liveMatrix else { return }
+        guard let liveMatrix, let accountID = context?.runtime.ticket.session.userID else { return }
+        personalChatRestoreSession.beginExit(roomID, store: LastPersonalChatStore(matrixUserID: accountID))
         Task { @MainActor [weak self] in
             let succeeded = await liveMatrix.exit(roomID: roomID, forget: action == .deleteChat)
             guard let self, self.liveMatrix === liveMatrix else { return }
@@ -4138,6 +4141,8 @@ final class LiveAppModel {
             LiveFlowLog.botRoom(.hideRefused, outcome: "not_bot_room", roomID: roomID)
             return
         }
+        let lastChat = context.map { LastPersonalChatStore(matrixUserID: $0.runtime.ticket.session.userID) }
+        lastChat?.forget(roomID)
         let nowMillis = UInt64(max(0, Date().timeIntervalSince1970 * 1000))
         hiddenRooms.hide(roomID: roomID, latestTimestamp: room.latestTimestamp, nowMillis: nowMillis)
         discardRoomDrafts(roomID)
@@ -4148,6 +4153,7 @@ final class LiveAppModel {
         for other in liveMatrix.rooms where other.roomID != roomID
             && botUserID(for: other) == bot
             && !hiddenRooms.isHidden(roomID: other.roomID, latestTimestamp: other.latestTimestamp) {
+            lastChat?.forget(other.roomID)
             hiddenRooms.hide(roomID: other.roomID, latestTimestamp: other.latestTimestamp, nowMillis: nowMillis)
             discardRoomDrafts(other.roomID)
             LiveFlowLog.botRoom(.hide, outcome: "duplicate_hidden", roomID: other.roomID)
@@ -4770,6 +4776,7 @@ final class LiveAppModel {
         matrix.onRoomsChanged = { [weak self, weak matrix] rooms in
             guard let self, let matrix, self.liveMatrix === matrix else { return }
             self.roomPublicationRevision &+= 1
+            self.personalChatRestoreSession.reconcileJoinedRooms(Set(rooms.map(\.roomID)))
             self.requestHandles(for: rooms.filter { $0.isDirect }.flatMap(\.memberUserIDs))
             self.reconcileRoomMutations(with: rooms, revision: self.roomPublicationRevision)
             self.reconcileFounderBindingFromKnownMarker()
@@ -5400,6 +5407,7 @@ final class LiveAppModel {
     }
 
     private func publishSignedIn(_ current: Context) {
+        personalChatRestoreSession.begin(installationID: current.installation.id)
         if appAccountInstallationID != current.installation.id {
             invalidateAppAccount(nextInstallationID: current.installation.id)
         }
@@ -7094,6 +7102,10 @@ final class LiveAppModel {
     /// The signed-in Matrix account the notification room directory belongs to.
     var notificationOwnUserID: String? { context?.runtime.ticket.session.userID }
 
+    /// A pending restore can retry when its Matrix claim read settles.
+    var personalChatRestoreRevision: UInt64 { liveMatrix?.personalChatClaimRevision ?? 0 }
+    var hasPersonalChatAgentRoster: Bool { agentsRead.value != nil }
+
     /// The shell calls this on launch or on an explicit Chats tap. It owns the
     /// navigation generation and supplies any pending or claimed explicit route.
     /// Opening and returning the canonical room ID happen without suspension.
@@ -7102,21 +7114,32 @@ final class LiveAppModel {
                              stillCurrent: @MainActor () -> Bool) -> String? {
         guard !Task.isCancelled, stillCurrent(), !hasExplicitRoute,
               case let .signedIn(account) = stage,
-              account.matrixUserID == context?.runtime.ticket.session.userID,
+              let context, account.matrixUserID == context.runtime.ticket.session.userID,
+              personalChatRestoreSession.canRestore(installationID: context.installation.id,
+                                                    signOutInProgress: signOutInProgress),
               let liveMatrix, liveMatrix.isReady, liveMatrix.hasCompletedInitialSync,
               liveMatrix.hasPublishedRooms, !liveMatrix.isLoadingRooms,
               entry != .launch || (conversation == nil && appBotRoomOpening == nil) else { return nil }
         let store = LastPersonalChatStore(matrixUserID: account.matrixUserID)
-        let row = PersonalChatRestorePolicy.destination(
+        let decision = PersonalChatRestorePolicy.decision(
             for: entry, rememberedRoomID: store.roomID(), joinedRooms: liveMatrix.rooms,
             rows: productRooms(), agents: personalChatAgents,
-            allowsUnclassified: companyWorkspace.phase == .hidden,
             hasExplicitRoute: hasExplicitRoute, isCurrent: stillCurrent(),
-            classification: companyWorkspace.roomClassification
+            exitedRoomIDs: personalChatRestoreSession.exitedRoomIDs,
+            classification: companyWorkspace.personalChatRestoreClassification,
+            companyClaim: liveMatrix.personalChatCompanyClaim
         )
-        guard let row else { return nil }
-        openConversation(roomID: row.id, row: row)
-        return conversation?.roomID == row.id ? row.id : nil
+        switch decision {
+        case let .checkCompanyClaim(roomID):
+            liveMatrix.checkPersonalChatCompanyClaim(roomID)
+            return nil
+        case let .open(row):
+            openConversation(roomID: row.id, row: row)
+            liveMatrix.consumePersonalChatCompanyClearance(row.id)
+            return conversation?.roomID == row.id ? row.id : nil
+        case nil:
+            return nil
+        }
     }
 
     private var personalChatAgents: [AgentsResponse.Agent]? {
@@ -7128,10 +7151,12 @@ final class LiveAppModel {
     }
 
     private func rememberOpenedPersonalChat(_ roomID: String, accountID: String) {
-        guard let room = liveMatrix?.rooms.first(where: { $0.roomID == roomID }),
-              PersonalChatRestorePolicy.isPersonal(
-                  room, classification: companyWorkspace.roomClassification(roomID),
-                  agents: personalChatAgents ?? [], allowsUnclassified: true
+        guard let liveMatrix, let room = liveMatrix.rooms.first(where: { $0.roomID == roomID }),
+              !personalChatRestoreSession.exitedRoomIDs.contains(roomID),
+              liveMatrix.personalChatCompanyClaim(roomID) != .claimed,
+              PersonalChatRestorePolicy.mayRemember(
+                  room, classification: companyWorkspace.personalChatRestoreClassification(roomID),
+                  agents: personalChatAgents ?? []
               ) else { return }
         LastPersonalChatStore(matrixUserID: accountID).remember(roomID)
     }

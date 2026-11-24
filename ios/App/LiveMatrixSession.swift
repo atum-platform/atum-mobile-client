@@ -41,6 +41,8 @@ struct LiveMatrixRoomRow: Equatable, Identifiable, Sendable {
     /// The custom room type from cached `m.room.create` state, when present.
     /// The SDK room-list service already requests that state event.
     let roomType: String?
+    /// Distinguishes a room with an untyped create event from missing create state.
+    var hasCreateState = true
     /// From the SDK's room info: true with encryption, false without, nil
     /// while the SDK does not know yet. 0.20 agent and bot rooms are false.
     let isEncrypted: Bool?
@@ -217,6 +219,8 @@ final class LiveMatrixSession {
     private var requestedRoomPages = 1
     private var directCreations: [String: Task<String?, Never>] = [:]
     private var maximumMediaUploadSizeTask: Task<UInt64?, Never>?
+    @ObservationIgnored private var personalChatCompanyClaims = [String: PersonalChatCompanyClaim]()
+    private(set) var personalChatClaimRevision: UInt64 = 0
 
     init(runtime: MatrixLiveRuntime,
          displaySnapshot: LiveMatrixSessionDisplaySnapshot? = nil) {
@@ -796,6 +800,65 @@ final class LiveMatrixSession {
         }
     }
 
+    // MARK: Personal chat restore
+
+    func personalChatCompanyClaim(_ roomID: String) -> PersonalChatCompanyClaim? {
+        personalChatCompanyClaims[roomID]
+    }
+
+    func checkPersonalChatCompanyClaim(_ roomID: String) {
+        guard personalChatCompanyClaims[roomID] == nil else { return }
+        personalChatCompanyClaims[roomID] = .checking
+        let epoch = sessionEpoch
+        Task { @MainActor [weak self] in
+            guard let self, self.sessionEpoch == epoch else { return }
+            let claim = await self.readPersonalChatCompanyClaim(roomID)
+            guard self.sessionEpoch == epoch else { return }
+            self.personalChatCompanyClaims[roomID] = claim
+            self.personalChatClaimRevision &+= 1
+        }
+    }
+
+    func consumePersonalChatCompanyClearance(_ roomID: String) {
+        if personalChatCompanyClaims[roomID] == .absent {
+            personalChatCompanyClaims[roomID] = nil
+        }
+    }
+
+    /// The room-list subscription may omit custom state. Confirm the empty-key
+    /// CoS marker on the homeserver for restore candidates only.
+    private func readPersonalChatCompanyClaim(_ roomID: String) async -> PersonalChatCompanyClaim {
+        do {
+            try runtime.requireCurrent()
+            let session = try runtime.client.session()
+            guard var components = URLComponents(string: session.homeserverUrl), components.scheme == "https",
+                  components.host?.isEmpty == false, let room = Self.pathSegment(roomID)
+            else { return .unavailable }
+            let base = components.percentEncodedPath.hasSuffix("/")
+                ? String(components.percentEncodedPath.dropLast()) : components.percentEncodedPath
+            components.percentEncodedPath = base + "/_matrix/client/v3/rooms/\(room)/state/"
+                + PersonalChatCompanyClaim.eventType
+            guard let url = components.url else { return .unavailable }
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
+            request.httpShouldHandleCookies = false
+            request.setValue("Bearer " + session.accessToken, forHTTPHeaderField: "Authorization")
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpCookieStorage = nil
+            configuration.urlCache = nil
+            configuration.timeoutIntervalForResource = 5
+            let transport = URLSession(configuration: configuration, delegate: LiveMatrixNoRedirect(),
+                                       delegateQueue: nil)
+            defer { transport.finishTasksAndInvalidate() }
+            let (body, response) = try await transport.data(for: request)
+            try runtime.requireCurrent()
+            return PersonalChatCompanyClaim.read(status: (response as? HTTPURLResponse)?.statusCode, body: body)
+        } catch {
+            return .unavailable
+        }
+    }
+
+    // MARK: Group names and topics
+
     /// A group's name for everyone in it (`m.room.name`, never empty). Your
     /// own private name would hide the new one from you, so it goes too
     /// (desktop `groupName`).
@@ -1195,6 +1258,7 @@ final class LiveMatrixSession {
     }
 
     private func discardLiveResources() async {
+        personalChatCompanyClaims.removeAll()
         sharedCollectionsRegistry.closeAll()
         roomListener?.deactivate()
         roomEntriesStream?.cancel()
@@ -1538,7 +1602,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         async let latest = room.latestEvent()
         // The room type is read for every room (cached `m.room.create`, no extra request): a
         // company conversation of any size must be recognised so it never reads as a Personal chat.
-        async let roomTypeValue = roomTypeIfChatCandidate(from: room, isChatCandidate: true)
+        async let createState = roomCreate(from: room)
         async let botData = appBotAccountDataIfChatCandidate(from: room, isChatCandidate: isChatCandidate)
         async let privateTitleData = try? await room.accountDataRaw(eventType: ChatPrivateTitle.eventType)
         async let tagData = info.isFavourite ? (try? await room.accountDataRaw(eventType: "m.tag")) : nil
@@ -1551,7 +1615,8 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
                                          isNotice: preview.isNotice)
         } ?? false
         let bot = await botData
-        let type = await roomTypeValue
+        let create = await createState
+        let type = MobileRoomTypePolicy.roomType(createContentJSON: create?.contentJson)
         let name = [info.displayName, info.rawName].lazy.compactMap(MatrixPersonName.readableRoomName).first
             ?? PeopleNameWords.room(nil, isDirect: info.isDirect)
         let members = (try? await LiveMatrixSession.cachedMembers(from: room, synchronize: true, includeInvited: true)) ?? []
@@ -1580,6 +1645,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
                                  memberUserIDs: members.map(\.userID).filter { $0 != room.ownUserId() },
                                  memberCount: info.activeMembersCount,
                                  roomType: type,
+                                 hasCreateState: create != nil,
                                  isEncrypted: Self.encrypted(info.encryptionState),
                                  appBotHiddenAt: bot.hiddenAt,
                                  legacyAppBotMove: bot.move,
@@ -1602,13 +1668,6 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         return try? await room.memberAvatarUrl(userId: userID)
     }
 
-    nonisolated private static func roomTypeIfChatCandidate(
-        from room: Room, isChatCandidate: Bool
-    ) async -> String? {
-        guard isChatCandidate else { return nil }
-        return await roomType(from: room)
-    }
-
     nonisolated private static func appBotAccountDataIfChatCandidate(
         from room: Room, isChatCandidate: Bool
     ) async -> (hiddenAt: UInt64?, move: MobileLegacyAppBotMove?) {
@@ -1629,9 +1688,11 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
     }
 
     nonisolated private static func roomType(from room: Room) async -> String? {
-        guard let events = try? await room.stateEvents(eventType: .roomCreate),
-              let create = events.first(where: { $0.stateKey.isEmpty }) else { return nil }
-        return MobileRoomTypePolicy.roomType(createContentJSON: create.contentJson)
+        MobileRoomTypePolicy.roomType(createContentJSON: await roomCreate(from: room)?.contentJson)
+    }
+
+    nonisolated private static func roomCreate(from room: Room) async -> RoomStateEvent? {
+        (try? await room.stateEvents(eventType: .roomCreate))?.first { $0.stateKey.isEmpty }
     }
 
     nonisolated private static func encrypted(_ state: EncryptionState) -> Bool? {
