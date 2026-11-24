@@ -15,3 +15,15 @@ placement and highlighting in that walk requires a transcript and thread
 fixture, so that coverage is deferred. The package regression test covers the
 old reply arriving just before a binding refresh and the replacement having to
 page back to the reply again.
+
+Team Space filters hits using the room bindings at response time. If that check
+removes any requested room, the response omits its continuation token. The
+results from eligible rooms stay visible. Submitting the query again starts
+from page one, which can recover the omitted room's hits if it is eligible
+again.
+
+Focused verification covers `ChatSearchTests`, `ConversationCoreTests`,
+`CompanySearchServiceTests`, `CompanyMessageSearchTests` and
+`TeamSpaceRevampPolicyTests`, plus a Debug simulator build of `AtumMobile`.
+The SwiftPM and Xcode builds run under the shared heavy-build lock with
+artifacts under `/Volumes/AtumTestFlight/dd-w4-s`.

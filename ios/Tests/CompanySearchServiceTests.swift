@@ -196,6 +196,32 @@ final class CompanySearchServiceTests: XCTestCase {
         XCTAssertEqual(state.page?.continuation?.token, "new-cursor")
     }
 
+    func testTeamSpaceDropsTheCursorWhenARequestedRoomBecomesIneligibleInFlight() async throws {
+        eligibility = allEligible()
+        let search = service(limit: 1)
+        let env = environment()
+        transport.nextBatch = "first-cursor"
+        let first = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                       continuation: nil, environment: env)
+        let cursor = try XCTUnwrap(first?.continuation)
+
+        transport.nextBatch = "past-design-results"
+        transport.beforeAnswer = { self.eligibility = self.without(self.design) }
+        let second = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                        continuation: cursor, environment: env)
+        XCTAssertEqual(transport.tokens, [nil, cursor.token])
+        XCTAssertEqual(transport.rooms(1), [general.roomID, design.roomID])
+        XCTAssertEqual(second?.results.map(\.roomID), [general.roomID])
+        XCTAssertNil(second?.continuation)
+
+        eligibility = allEligible()
+        transport.beforeAnswer = {}
+        let restarted = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                           continuation: second?.continuation, environment: env)
+        XCTAssertEqual(transport.tokens, [nil, cursor.token, nil])
+        XCTAssertEqual(restarted?.results.map(\.roomID), [general.roomID, design.roomID])
+    }
+
     func testTeamSpaceRestartsWhenTheFromFilterResolvesToADifferentSender() async throws {
         eligibility = allEligible()
         let search = service(limit: 1)
