@@ -14,7 +14,7 @@ struct AgentDeskActions {
     /// (desktop `matrixAgentDeskSteers`); otherwise new messages wait.
     let steers: Bool
     /// `POST /api/host/desk` `{read: schedule}`; nil without the host route.
-    var schedule: (@MainActor () async -> HostAgentDesk.Schedule?)?
+    var schedule: (@MainActor () async throws -> HostAgentDesk.Schedule?)?
     /// `POST /api/host/desk` `{read: files, path?}`; nil without the host route.
     /// A busy outcome is the Shell's 10 s read admission, asked again later.
     var files: (@MainActor (String?) async -> HostAgentDesk.FilesOutcome)?
@@ -405,7 +405,7 @@ struct AgentDeskPage: View {
 /// Now, only while it works: the working line's head ("Working · 4 min"), the
 /// line itself clamped to three lines with Show more, and its checklist. How a
 /// message steers or waits is a hint on the head, never a sentence on the panel.
-private struct AgentDeskNow: View {
+struct AgentDeskNow: View {
     let design: LiveDesign
     let now: AgentDeskPolicy.Now
     let steers: Bool
@@ -485,7 +485,7 @@ private struct AgentDeskClamped: View {
     let design: LiveDesign
     let text: String
     let font: Font
-    /// A checklist step: its completion is a trait on its words.
+    /// A checklist step: its completion is spoken as an accessibility value.
     var done: Bool?
     let id: String
 
@@ -494,11 +494,16 @@ private struct AgentDeskClamped: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        // The desk pin has no completion labels. Speak the localized progress value.
+        let completion = done.map { done in
+            let progress = done ? 1.0 : 0.0
+            return progress.formatted(.percent.locale(Locale(identifier: design.locale)))
+        }
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: text)
                 .font(font)
                 .lineLimit(open ? nil : 3)
-                .accessibilityAddTraits(done == true ? .isSelected : [])
+                .accessibilityValue(Text(verbatim: completion ?? ""), isEnabled: completion != nil)
                 .accessibilityIdentifier(id)
                 .background {
                     // The full height against the clamped one decides whether More shows.
