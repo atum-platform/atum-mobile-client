@@ -27,7 +27,9 @@ lane does not touch them.
 - **One shared mark view**, `ios/App/DesignSystem/ProviderMark.swift`. It carries the desktop's
   `PROVIDER_ICONS` table (same order, same match strings, same colours: Claude `#D97757`, DeepSeek
   `#5786FE`, Gemini `#8E75B2`, MiniMax `#E73562`, Qwen `#6950EF`; the rest in the theme's ink), Atum as
-  `LiveEclipseMark` (`ios/App/LiveDesign.swift:138`), Antigravity as its full-colour image, and the
+  its small crescent face (`AtumAvatar(kind: .atum)`, `ios/App/DesignSystem/AtumAvatar.swift:171`, the
+  face the chat title draws; the first run used `LiveEclipseMark`, which reads as a solid dot at 20 pt in
+  light mode), Antigravity as its full-colour image, and the
   initial in the shared `AtumAvatar` squircle (`ios/App/DesignSystem/AtumAvatar.swift:27`) for anything
   else, as the desktop's `BrandTile`. Marks scale with Dynamic Type up to 2×. Signed-out connections
   are never dimmed.

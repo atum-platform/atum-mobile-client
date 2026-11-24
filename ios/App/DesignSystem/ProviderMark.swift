@@ -7,7 +7,7 @@ import SwiftUI
 /// on the provider's id and label, and the same colours. Monochrome marks
 /// follow the theme's ink; Claude, Gemini, DeepSeek, MiniMax and Qwen keep
 /// their identifying colour; Antigravity is a full-colour image. Atum is its
-/// own eclipse. A provider with no bundled mark falls back to its initial in
+/// own crescent. A provider with no bundled mark falls back to its initial in
 /// the shared squircle, as the desktop's `BrandTile` does. A signed-out
 /// connection keeps its full-strength mark (desktop round 2).
 struct ProviderMark: View {
@@ -47,8 +47,11 @@ struct ProviderMark: View {
         Group {
             switch art {
             case .atum:
-                LiveEclipseMark(design: design)
-                    .frame(width: side, height: side)
+                // Atum's small face, the crescent the chat title draws
+                // (`AtumAvatar.swift:171`); the full eclipse reads as a solid
+                // dot at row size in light mode. AtumAvatar scales itself.
+                AtumAvatar(kind: .atum, name: "Atum", size: size)
+                    .atumDesign(design)
             case let .template(asset, color):
                 Image(asset)
                     .renderingMode(.template)
