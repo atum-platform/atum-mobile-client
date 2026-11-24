@@ -56,6 +56,12 @@ final class AgentDeskBellTests: XCTestCase {
         XCTAssertFalse(AgentDeskPage.nextRun(Date(), locale: "en").isEmpty)
     }
 
+    func testChecklistExposesCompletionAsAnAccessibilityValue() {
+        XCTAssertEqual(AgentDeskPage.checklistAccessibilityValue(true, locale: "en"), "100%")
+        XCTAssertEqual(AgentDeskPage.checklistAccessibilityValue(false, locale: "en"), "0%")
+        XCTAssertNil(AgentDeskPage.checklistAccessibilityValue(nil, locale: "en"))
+    }
+
     // MARK: The desk's host state (r2 review)
 
     @MainActor
@@ -67,13 +73,21 @@ final class AgentDeskBellTests: XCTestCase {
         var gate: CheckedContinuation<Void, Never>?
         var holdControls = false
         var scheduleReads = 0
+        var busyScheduleReads = 0
         var schedule = HostAgentDesk.Schedule(jobs: [
             .init(id: "a", name: "A", state: .scheduled), .init(id: "b", name: "B", state: .scheduled)])
 
         func actions() -> AgentDeskActions {
             AgentDeskActions(
                 agentUserID: "@luna:atum.test", steers: true,
-                schedule: { [self] in scheduleReads += 1; return schedule },
+                schedule: { [self] in
+                    scheduleReads += 1
+                    if busyScheduleReads > 0 {
+                        busyScheduleReads -= 1
+                        throw HostAgentDesk.ReadBusy()
+                    }
+                    return schedule
+                },
                 files: { [self] path in
                     fileReads.append(path)
                     let key = path ?? ""
@@ -144,6 +158,26 @@ final class AgentDeskBellTests: XCTestCase {
     }
 
     @MainActor
+    func testForwardNavigationRefetchesAPreviouslyOpenedFolder() async {
+        let host = Host()
+        let reports = "home/reports"
+        host.files = ["": [.listed(Self.listing("home", ["reports"]))],
+                      reports: [.listed(Self.listing(reports, ["q3"])), .listed(Self.listing(reports, ["q4"]))]]
+        let model = AgentDeskModel(actions: host.actions())
+        model.appear()
+        await until({ model.ownView != nil }, "home never listed")
+        model.open(reports)
+        await until({ model.ownView?.rows.map(\.name) == ["q3"] }, "the first listing never arrived")
+
+        model.back()
+        XCTAssertNil(model.ownPath)
+        XCTAssertEqual(model.ownView?.deskPath, "home")
+        model.open(reports)
+        await until({ model.ownView?.rows.map(\.name) == ["q4"] }, "the refreshed listing never arrived")
+        XCTAssertEqual(host.fileReads, [nil, reports, reports])
+    }
+
+    @MainActor
     func testControlsReachTheHostOneAtATimeAndUndoOnlyTheirOwnChange() async {
         let host = Host()
         host.holdControls = true
@@ -169,6 +203,25 @@ final class AgentDeskBellTests: XCTestCase {
     }
 
     @MainActor
+    func testAmbiguousControlFailureRetriesABusyScheduleAndUsesHostState() async {
+        let host = Host()
+        host.outcomes = [.failed]
+        let model = AgentDeskModel(actions: host.actions().fenced(by: { true }), readRetryDelay: .milliseconds(10))
+        model.appear()
+        await until({ model.jobs != nil }, "no schedule")
+
+        host.schedule = HostAgentDesk.Schedule(jobs: [
+            .init(id: "a", name: "A", state: .paused), .init(id: "b", name: "B", state: .scheduled)])
+        host.busyScheduleReads = 1
+        model.run(.routineOff(job: "a"))
+        await until({ !model.controlPending }, "the schedule never reconciled")
+
+        XCTAssertEqual(host.scheduleReads, 3)
+        XCTAssertEqual(host.controls, [.routineOff(job: "a")])
+        XCTAssertEqual(model.jobs, host.schedule.jobs)
+    }
+
+    @MainActor
     func testTheDelayedRetryIsNeverSentAfterTheDeskCloses() async {
         let host = Host()
         host.outcomes = [.busy, .changed(1)]
@@ -190,7 +243,7 @@ final class AgentDeskBellTests: XCTestCase {
         var current = false
         let actions = host.actions().fenced(by: { current })
         // Not current: nothing reaches the host at all.
-        let refusedSchedule = await actions.schedule?()
+        let refusedSchedule = try? await actions.schedule?()
         let refusedFiles = await actions.files?(nil)
         let refusedControl = await actions.control?(.pause)
         XCTAssertNil(refusedSchedule)
