@@ -18,6 +18,16 @@ ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "ios/Vendor/AtumDesign"
 SOURCES = [ROOT / "ios/App", ROOT / "ios/Sources", ROOT / "ios/Notifications"]
 KEY = re.compile(r'"((?:desktop|src|shared)\.[A-Za-z0-9_.\-=]+)"')
+WORK_COPY = "src.matrix.mobile-copy.mobileScreensCopy.work."
+RETIRED_KEYS = (
+    WORK_COPY + "planRow",
+    WORK_COPY + "consent",
+    "shared.matrix-company-copy.copy.channelOpenFailed",
+)
+# Catch a channel suffix passed to a copy wrapper as well as full key literals.
+RETIRED_REFERENCE = re.compile(
+    rf"\b(?:{re.escape(WORK_COPY)}(?:planRow|consent)|channelOpenFailed)\b"
+)
 
 # Keys the pin does not carry yet. Each is read only after `design.copy.contains`
 # says it is there, with a fallback or nothing shown. Remove an entry once the key
@@ -107,10 +117,15 @@ PENDING_TABLE_READERS = {
 }
 
 
-def pinned_keys():
+def pin_key_sets():
     strings = json.loads((VENDOR / "Localizable.xcstrings").read_text())["strings"]
     parameters = json.loads((VENDOR / "copy-contract.json").read_text())["parameters"]
-    return set(strings) & set(parameters)
+    return strings.keys(), parameters.keys()
+
+
+def pinned_keys():
+    strings, parameters = pin_key_sets()
+    return strings & parameters
 
 
 def key_literals():
@@ -158,16 +173,35 @@ class CopyKeysInPinTests(unittest.TestCase):
                 self.assertIn("copy.contains(", source,
                               f"{key} is pending but {reader.relative_to(ROOT)} never checks the pin")
 
-    def test_the_phone_does_not_reference_retired_work_copy(self):
-        work = "src.matrix.mobile-copy.mobileScreensCopy.work."
-        plan_row = work + "planRow"
-        consent = work + "consent"
+    def test_connections_plan_choice_branches_are_pinned(self):
+        pinned = pinned_keys()
+        prefix = "src.matrix.mobile-copy.mobileScreensCopy.connections."
+        for formatter in ("sheet.title", "sheet.line", "progress.signingIn",
+                          "progress.done", "progress.failed", "picker.use"):
+            for plan in ("claude", "antigravity", "codex"):
+                key = f"{prefix}{formatter}.plan={plan}"
+                with self.subTest(key=key):
+                    self.assertIn(key, pinned)
+
+    def test_retired_copy_is_absent_from_the_pin(self):
+        strings, parameters = pin_key_sets()
+        retired = sorted(
+            key for key in strings | parameters
+            if any(key == root or key.startswith(root + ".") for root in RETIRED_KEYS)
+        )
+        self.assertEqual(retired, [], "retired copy is still exported")
+
+    def test_the_phone_does_not_reference_retired_copy(self):
+        directories = [*SOURCES, ROOT / "ios/Tests", ROOT / "ios/AppTests",
+                       ROOT / "ios/NotificationsTests", ROOT / "ios/UITests"]
         references = [
-            f"{path.relative_to(ROOT)}:{number}: {key}"
-            for key, path, number in key_literals()
-            if key == plan_row or key == consent or key.startswith(consent + ".")
+            f"{path.relative_to(ROOT)}:{number}: {match.group()}"
+            for directory in directories
+            for path in sorted(directory.rglob("*.swift"))
+            for number, line in enumerate(path.read_text().splitlines(), 1)
+            for match in RETIRED_REFERENCE.finditer(line)
         ]
-        self.assertEqual(references, [], "retired Work copy is unavailable in the desktop export")
+        self.assertEqual(references, [], "retired copy is unavailable in the desktop export")
 
     def test_a_missing_key_is_reported(self):
         pinned = {"src.matrix.group-picker-copy.copies.block.full"}
