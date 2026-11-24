@@ -423,6 +423,19 @@ extension AssistantTurnStopTests {
         }
     }
 
+    func testAReadyDraftTakesTheSlotFromADisabledStop() throws {
+        for result in [AssistantTurnStopResult.stopped, .completed, .stopRequested] {
+            var stop = inProgress()
+            XCTAssertEqual(stop.control(canSend: true), .stop(enabled: true))
+            let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
+            XCTAssertEqual(stop.control(canSend: true), .stopping)
+            stop.resolve(result, for: intent)
+            stop.settlePendingTurn(for: intent)
+            XCTAssertEqual(stop.control(canSend: false), .stop(enabled: false))
+            XCTAssertEqual(stop.control(canSend: true), .hidden)
+        }
+    }
+
     func testARefusedStopSaysSoAndOffersStopAgain() throws {
         var stop = inProgress()
         let intent = try XCTUnwrap(stop.beginStop(newRequestID: "r1"))
@@ -541,6 +554,27 @@ extension AssistantTurnStopTests {
         XCTAssertEqual(stop.control, .hidden, "no Stop for a run that is gone")
         XCTAssertNil(stop.notice)
     }
+
+    func testAReturningScheduleIsRetryableAfterThePendingTimer() throws {
+        var (stop, intent) = try scheduledInFlight()
+        guard case let .schedule(run) = intent.target else { return XCTFail("expected a schedule") }
+        stop.resolve(.stopRequested, for: intent)
+        stop.observe(.idle)
+        stop.observe(.init(unanswered: nil, working: true, scheduled: run))
+        XCTAssertFalse(stop.scheduleMarkerCleared)
+        stop.retryPendingSchedule(for: intent)
+        XCTAssertEqual(stop.beginStop(newRequestID: "retry"), intent)
+    }
+
+    func testAReturningScheduleIsRetryableAfterAFailedReceipt() throws {
+        var (stop, intent) = try scheduledInFlight()
+        guard case let .schedule(run) = intent.target else { return XCTFail("expected a schedule") }
+        stop.observe(.idle)
+        stop.observe(.init(unanswered: nil, working: true, scheduled: run))
+        XCTAssertTrue(stop.resolve(.failed, for: intent))
+        XCTAssertEqual(stop.notice, .refused)
+        XCTAssertEqual(stop.beginStop(newRequestID: "retry"), intent)
+    }
 }
 
 /// Review r1, findings 1 and 2: the room-scoped controller.
@@ -573,8 +607,8 @@ final class AssistantTurnStopControllerTests: XCTestCase {
         controller.observe(working)
         let first = try XCTUnwrap(controller.tap(newRequestID: "r1", send: route.send))
         await route.waitForRequest()
-        // Search opened and closed: a new composer and a new watch read the
-        // same room controller and re-observe the same transcript.
+        // Search opened and closed: a new composer reads the same room
+        // controller while the store continues to observe the transcript.
         controller.observe(working)
         XCTAssertEqual(controller.stop.control, .stopping, "still Stopping…, not Stop again")
         XCTAssertNil(controller.tap(newRequestID: "r2", send: route.send), "no second request while one is out")

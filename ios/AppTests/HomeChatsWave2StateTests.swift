@@ -101,6 +101,131 @@ final class HomeChatsWave2StateTests: XCTestCase {
 
 }
 
+@MainActor
+final class ConversationStopStateTests: XCTestCase {
+    private let owner = "@me:atum.test"
+    private let agent = "@agent:atum.test"
+    private let room = "!assistant:atum.test"
+
+    func testReopeningKeepsTheExactPendingAndStoppedAttemptInItsRoomAndAccount() async throws {
+        let model = LiveAppModel()
+        let controller = model.turnStopController(roomID: room, ownUserID: owner)
+        let original = makeStore(controller)
+        defer { original.close() }
+        await open(original, with: workingTurn("$question"))
+        try await waitUntil { original.snapshot.rows.contains { $0.item.eventID == "$question" } }
+        XCTAssertEqual(controller.stop.selection, .turn(eventID: "$question"))
+
+        let (receipts, reply) = AsyncStream<AssistantTurnStopResult>.makeStream()
+        defer { reply.finish() }
+        var sent = [AssistantTurnStopIntent]()
+        let send: @MainActor (AssistantTurnStopIntent) async -> AssistantTurnStopResult = { intent in
+            sent.append(intent)
+            for await receipt in receipts { return receipt }
+            return .failed
+        }
+        let pending = try XCTUnwrap(original.turnStop.tap(newRequestID: "original", send: send))
+        try await waitUntil { sent.count == 1 }
+        original.close()
+
+        let reopened = makeStore(model.turnStopController(roomID: room, ownUserID: owner))
+        defer { reopened.close() }
+        await open(reopened, with: [])
+        try await waitUntil { reopened.snapshot.generation > 0 }
+        XCTAssertFalse(reopened.canPresentTurnStop)
+        XCTAssertEqual(reopened.turnStop.stop.phase, .stopping)
+        await open(reopened, with: workingTurn("$question"))
+        try await waitUntil { reopened.snapshot.rows.contains { $0.item.eventID == "$question" } }
+        XCTAssertTrue(reopened.canPresentTurnStop)
+        XCTAssertNil(reopened.turnStop.tap(newRequestID: "duplicate", send: send))
+
+        reply.yield(.stopped)
+        await pending.value
+        XCTAssertEqual(reopened.turnStop.stop.phase, .stopped)
+        reopened.close()
+
+        let settled = makeStore(model.turnStopController(roomID: room, ownUserID: owner))
+        defer { settled.close() }
+        await open(settled, with: workingTurn("$question"))
+        try await waitUntil { settled.snapshot.rows.contains { $0.item.eventID == "$question" } }
+        XCTAssertNil(settled.turnStop.tap(newRequestID: "duplicate", send: send))
+        XCTAssertEqual(sent, [AssistantTurnStopIntent(eventID: "$question", requestID: "original")])
+
+        XCTAssertFalse(model.turnStopController(roomID: "!other:atum.test", ownUserID: owner) === controller)
+        XCTAssertFalse(model.turnStopController(roomID: room, ownUserID: "@other:atum.test") === controller)
+        await open(settled, with: workingTurn("$newer"))
+        try await waitUntil { settled.snapshot.rows.contains { $0.item.eventID == "$newer" } }
+        XCTAssertEqual(settled.turnStop.stop.selection, .turn(eventID: "$newer"))
+        XCTAssertTrue(settled.turnStop.stop.offersStop)
+        XCTAssertNil(settled.turnStop.stop.requestID)
+    }
+
+    func testPublishedNewerReplyRejectsAnOlderScheduledReceiptWithoutAView() async throws {
+        let execution = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run"))
+        let controller = AssistantTurnStopController()
+        let store = makeStore(controller)
+        defer { store.close() }
+        var progress = ChatProgress(phase: .working)
+        progress.isScheduled = true
+        progress.schedule = execution
+        let marker = ChatItem(id: "$schedule", kind: .notice, sender: agent,
+                              timestamp: Date(), eventOrTransactionId: .event("$schedule"),
+                              progress: progress)
+        await open(store, with: [marker])
+        try await waitUntil { store.snapshot.rows.last?.item.progress?.schedule == execution }
+        XCTAssertEqual(controller.stop.selection, .schedule(execution))
+
+        let (receipts, reply) = AsyncStream<AssistantTurnStopResult>.makeStream()
+        defer { reply.finish() }
+        var announcements = [AssistantTurnStopController.Announcement]()
+        store.setTurnStopAnnouncement { announcements.append($0) }
+        let pending = try XCTUnwrap(controller.tap(newRequestID: "scheduled", send: { _ in
+            for await receipt in receipts { return receipt }
+            return .failed
+        }))
+        await open(store, with: workingTurn("$newer"))
+        try await waitUntil { store.snapshot.rows.contains { $0.item.eventID == "$newer" } }
+        XCTAssertEqual(controller.stop.selection, .turn(eventID: "$newer"))
+        reply.yield(.stopped)
+        await pending.value
+        XCTAssertEqual(announcements, [.stopping])
+        XCTAssertNil(controller.stop.notice)
+        XCTAssertEqual(controller.stop.selection, .turn(eventID: "$newer"))
+    }
+
+    private func makeStore(_ controller: AssistantTurnStopController) -> LiveConversationStore {
+        LiveConversationStore(info: ConversationRoomInfo(
+            roomID: room, title: "Atum",
+            context: RoomContext(kind: .assistant, ownUserID: owner, agentUserIDs: [agent]),
+            knownNames: [:], catalogBotUserIDs: [], languageCode: "en"
+        ), turnStop: controller)
+    }
+
+    private func open(_ store: LiveConversationStore, with items: [ChatItem]) async {
+        let context = RoomContext(kind: .assistant, ownUserID: owner, agentUserIDs: [agent])
+        let script = ScriptedScript(name: "stop", title: "Atum", context: context, initial: items)
+        await store.attach(source: ScriptedTimelineSource(script: script))
+    }
+
+    private func workingTurn(_ eventID: String) -> [ChatItem] {
+        [
+            ChatItem(id: eventID, kind: .message, sender: owner, isOwn: true,
+                     eventOrTransactionId: .event(eventID), body: "Question"),
+            ChatItem(id: "$progress", kind: .notice, sender: agent,
+                     replyTo: eventID, progress: ChatProgress(phase: .working)),
+        ]
+    }
+
+    private func waitUntil(file: StaticString = #filePath, line: UInt = #line,
+                           _ ready: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !ready(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(ready(), "timed out waiting for the test condition", file: file, line: line)
+    }
+}
+
 /// Home search's People section (`docs/ports/home-search-people.md`).
 final class HomePeopleSearchPolicyTests: XCTestCase {
     /// Home search's People (desktop roster global search): two characters

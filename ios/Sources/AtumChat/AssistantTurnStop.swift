@@ -214,6 +214,7 @@ public struct AssistantTurnStop: Equatable, Sendable {
         if selected == selection {
             // The latch: the same question stays the turn until it is
             // answered, even after the typing signal lapses.
+            scheduleMarkerCleared = false
             return
         }
         guard signal.working else {
@@ -318,6 +319,12 @@ public struct AssistantTurnStop: Equatable, Sendable {
         case .stopping: return .stopping
         case .settled, .stopped, .finishing: return .stop(enabled: false)
         }
+    }
+
+    /// A draft that can be sent takes the slot from a disabled Stop glyph.
+    public func control(canSend: Bool) -> Control {
+        if canSend, control == .stop(enabled: false) { return .hidden }
+        return control
     }
 
     public var notice: Notice? {

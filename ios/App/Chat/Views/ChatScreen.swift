@@ -380,14 +380,12 @@ struct ChatScreen: View {
             }
             .onDisappear { onPresentationChanged(false) }
             .onAppear { links.openCompanyBoard = onOpenCompanyBoard }
-            // The room's Stop reads the transcript here, not in the composer,
-            // so search replacing the composer never resets it (review r1).
-            .background { TurnSignalWatch(store: store) }
             // Desktop's `role="status"`: an accepted Stop transition is read
             // once, and only while this chat is the one shown.
             .onAppear {
                 let design = design
-                store.turnStop.announce = { announcement in
+                store.setTurnStopAnnouncement { [weak store = store] announcement in
+                    guard store?.canPresentTurnStop == true else { return }
                     let key: ChatCopy.Key = switch announcement {
                     case .stopping: .turnStopping
                     case .refused: .turnStopRefused
@@ -396,7 +394,7 @@ struct ChatScreen: View {
                     AccessibilityNotification.Announcement(ChatCopy.text(design, key)).post()
                 }
             }
-            .onDisappear { store.turnStop.announce = nil }
+            .onDisappear { store.setTurnStopAnnouncement(nil) }
             .fullScreenCover(item: $links.presented) { page in
                 SafariView(url: page.url).ignoresSafeArea()
             }
