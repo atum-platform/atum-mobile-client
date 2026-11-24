@@ -11,7 +11,7 @@ lane does not touch them.
   star; `trigger`: height 28, gap 6, mark 16, weight 500, capsule, `chevron: false`.
 - `apps/desktop/src/matrix/model-picker-list.tsx` (~:88–197): the row, the current row's shade
   (`current && bg-(--atum-hover)`), the check beside the name (~:120), the star in `--atum-mark-amber`
-  when starred (~:174); `PickerRouteMark` (~:199): Atum's eclipse for Atum, else the provider's mark.
+  when starred (~:174); `PickerRouteMark` (~:199): Atum's own mark for Atum, else the provider's mark.
 - `apps/desktop/src/matrix/model-picker.tsx` (~:2458): the chip is the answering model's mark before its
   name, no chevron.
 - `apps/desktop/src/matrix/model-picker-provider-mark.tsx` (~:42–125): `PROVIDER_ICONS` matching over
@@ -44,7 +44,7 @@ lane does not touch them.
   "Back to Atum" use the same marks; the private monogram `PhoneModelConnectionMark` is gone.
 - **Composer chip**, `ios/App/Chat/Views/Composer.swift` `ComposerModelChoiceButton`: the current
   model's mark (16 pt) and its name, weight medium, gap 6, no chevron. The mark comes from the same
-  facts as the name (Atum's line-up → the eclipse; a subscription or own key → its provider); while
+  facts as the name (Atum's line-up → the crescent; a subscription or own key → its provider); while
   nothing names the choice yet it shows the name only.
 - **Settings › Connections**, `ios/App/Account/AccountConnectionsSection.swift`: `AccountPlanMark` is the
   real mark (ChatGPT → OpenAI, Claude, Antigravity), as is OpenCode Go's row; 22 pt in a 28 pt lead
@@ -98,6 +98,29 @@ lane does not touch them.
   `ATUM_UI_SCRATCH/ui-evidence`.
 - `python3 -m unittest tests.test_ios_project_sources`: OK (licence screen holds every bundled text).
 
-## Verification
+## Verification (2026-11-24)
 
-See the session's locked run below (filled after the run).
+Each run went through `TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/AtumTestFlight/.heavy-build.lock
+/Volumes/AtumTestFlight/tmp/w4-r-locked.sh`: Debug `build-for-testing` with `-jobs 2 -derivedDataPath
+/Volumes/AtumTestFlight/dd-w4-r -clonedSourcePackagesDirPath /Volumes/AtumTestFlight/spm`, then one iPhone 18 Pro
+simulator booted, the tests, and `simctl shutdown all` in the same command.
+
+- Run 1 (`0eed4d6`): build 0; AppTests `ProviderMarkTests`, `PhoneModelPickerCopyTests`,
+  `AccountConnectionsStateTests` 19/19, exit 0; UI exit 0, 12/12: `PhoneModelPickerVisualsUITests` (2),
+  `AccountConnectionsPickerUITests` (1), `AccountConnectionsUITests` (4),
+  `ComposerUITests/testTheModelSheetListsTheAccountSubscriptions`, four `ChatInfoUITests` picker tests.
+  Its screenshots showed the Atum eclipse as a solid dot at 20 pt in light mode, so it was replaced.
+- Run 2 (`4abcb61`, the crescent fix): build 0; the same AppTests 19/19, exit 0;
+  `PhoneModelPickerVisualsUITests` 2/2, exit 0; `shutdown_exit=0`.
+- `python3 -m unittest tests.test_ios_project_sources`: 6 OK.
+
+Screenshots (final, run 2): `/Volumes/AtumTestFlight/w4-r-shots/run2/ui-evidence/PhoneModelPickerVisualsUITests.`
+`{chip,sheet,sheet-plans}-{en,vi}-{light,dark}.png` and `{chip,sheet,sheet-plans}-en-light-ax5.png`. Run 1's
+Settings › Connections and other picker captures: `/Volumes/AtumTestFlight/w4-r-shots/ui-evidence/`
+(`connections-rows-en-light.png`, `connections-rows-en-dark-ax5.png`, `connections-sheet-en-light.png`,
+`AccountConnectionsPickerUITests.picker-connect-en.png`, `ComposerUITests.subscriptions-ready-capture.png`).
+These are local evidence and are not committed.
+
+Seen in the captures, outside this lane: the chip names a ChatGPT-plan pick by its raw id (`gpt-6.1`),
+where the list says "GPT-6.1". The chip's name logic in `Composer.swift` only maps Atum's line-up names,
+and the subscription display name lives in W4-Q's projection. Follow-up for whichever lane owns it.
