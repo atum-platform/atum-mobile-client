@@ -52,6 +52,17 @@ final class AccountConnectionsStateTests: XCTestCase {
         XCTAssertEqual(PhoneModelPickerList.planConnects(state.value), [])
         await state.reload { old }
         XCTAssertEqual(PhoneModelPickerList.planConnects(state.value), [.claude])
+        // A landing during the read keeps the sheet's registry but still takes
+        // the read's fresh subscription status (OpenCode Go disconnected elsewhere).
+        let disconnected = try! NativeAPI.decode(ProviderConnectionsStatus.self, from: Data("""
+            {"profile":"atum.provider-connections/1","revision":3,"connections":[{"provider":"opencode_go","state":"disconnected","revision":3,"models":[],"modelPolicy":"none"}]}
+            """.utf8))
+        await state.reload {
+            state.landed(connected)
+            return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: disconnected, accountConnections: old.accountConnections)
+        }
+        XCTAssertEqual(state.value?.openCodeGo, disconnected, "a landing must not drop the fresh OpenCode Go status")
+        XCTAssertEqual(state.value?.accountConnections, connected)
         await state.reload {
             await state.reload { newer }
             return old

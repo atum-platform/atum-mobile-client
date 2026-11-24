@@ -62,3 +62,20 @@ The public guard runs separately against the committed branch.
 ```bash
 python3 scripts/public_guard.py --base origin/main --head HEAD
 ```
+
+## Review r1 fix (coordinator)
+
+Review r1 (Sol) held on one blocker: a Connect sheet landing during a
+refused-pick refresh dropped the whole read, including the fresh OpenCode Go
+status, so models the cloud already refused stayed selectable. Fixed: a
+landing now supersedes only the registry; the read's ChatGPT and OpenCode Go
+statuses still apply. A newer read or retirement still drops an older read
+whole. `testARefusedPickRefreshCannotOfferConnectOverANewerAnswer` now covers
+a disconnected OpenCode Go status arriving across a landing.
+
+The three should-fix decoder edge cases (`1e-400` underflow, escaped lone
+surrogates, canonical-equality and duplicate-key leniency) fail closed and are
+deferred to atum-platform/atum-mobile-client#91.
+
+Locked rerun: Debug build-for-testing exit 0, `AccountConnectionsStateTests`
+6 passed (exit 0). Package sources are unchanged by this fix.

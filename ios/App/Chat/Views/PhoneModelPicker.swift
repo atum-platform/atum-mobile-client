@@ -26,27 +26,36 @@ struct AssistantSubscriptionActions {
 }
 
 /// Orders subscription reads and Connect sheet landings for one picker.
+/// A newer read (or retirement) drops an older read whole. A landing only
+/// supersedes the registry: the read's ChatGPT and OpenCode Go statuses come
+/// from independent endpoints and still apply, so a plan disconnected
+/// elsewhere stops being offered even if a sheet landed meanwhile.
 @MainActor @Observable
 final class PhoneModelPickerAccount {
     private(set) var value: PhoneSubscriptionAccount?
-    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var readGeneration = 0
+    @ObservationIgnored private var registryGeneration = 0
 
     func reload(_ read: @MainActor () async -> PhoneSubscriptionAccount) async {
-        generation += 1
-        let mine = generation
+        readGeneration += 1
+        let mine = readGeneration
+        let registryMine = registryGeneration
         let answer = await read()
-        guard !Task.isCancelled, mine == generation else { return }
-        value = answer
+        guard !Task.isCancelled, mine == readGeneration else { return }
+        let registry = registryMine == registryGeneration ? answer.accountConnections : value?.accountConnections
+        value = PhoneSubscriptionAccount(chatGPT: answer.chatGPT, openCodeGo: answer.openCodeGo,
+                                         accountConnections: registry)
     }
 
     func landed(_ registry: AccountConnections) {
-        generation += 1
+        registryGeneration += 1
         value = PhoneSubscriptionAccount(chatGPT: value?.chatGPT, openCodeGo: value?.openCodeGo,
                                          accountConnections: registry)
     }
 
     func retire() {
-        generation += 1
+        readGeneration += 1
+        registryGeneration += 1
     }
 }
 
