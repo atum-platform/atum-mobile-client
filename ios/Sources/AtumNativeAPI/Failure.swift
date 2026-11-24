@@ -8,13 +8,25 @@ public struct NativeErrorResponse: Decodable, Equatable, Sendable {
     }
     public struct Details: Decodable, Equatable, Sendable {
         public let reason, launchError: String?
+        /// The seat price a `hire_required` / `hire_insufficient_protons`
+        /// refusal carries (platform 0314 `hireRefusalDetails`), in whole
+        /// Protons. A malformed price is absent, never a failed refusal.
+        public let hirePriceProtons: Int64?
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
-            try c.closed(["reason", "launch_error"])
+            try c.closed(["reason", "launch_error", "hire"])
             reason = try c.optional("reason"); launchError = try c.optional("launch_error")
             for value in [reason, launchError].compactMap({ $0 }) {
                 _ = try checkedString(value, minimum: 1, maximum: 64, pattern: "[a-z][a-z0-9_]*")
             }
+            hirePriceProtons = c.lossyNullable("hire", as: HirePrice.self)?.protons
+        }
+    }
+    private struct HirePrice: Decodable {
+        let protons: Int64
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Field.self)
+            protons = try c.integer("price_protons")
         }
     }
     public let error: Code

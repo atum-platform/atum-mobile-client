@@ -3609,6 +3609,240 @@ extension NativeDomainClientTests {
     }
 }
 
+// MARK: Open listing hire (desktop PR #100, platform 0535)
+
+extension NativeDomainClientTests {
+    private static let researcherRow = #"""
+    {"listingId":"open/agents/researcher","displayName":"Researcher",
+     "title":{"en":"Researcher","vi":"Nhà nghiên cứu"},
+     "summary":{"en":"Finds and checks sources.","vi":"Tìm và kiểm tra nguồn."},
+     "glyph":"🔎","accent":"#4b6bfb","visibility":"open","revision":1,
+     "skills":["trend-researcher","atum-weekly-digest"],
+     "seatPriceProtons":60000,"hireRequired":true}
+    """#
+
+    func testOpenCatalogReadsTheOneFixedQueryAndDropsRowsItCannotShow() async throws {
+        let value = client(TestAuthorization(first: "hire-token"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/matrix/v1/agents")
+            XCTAssertEqual(request.url?.query, "catalog=open")
+            XCTAssertNil(self.body(of: request))
+            return .json(Data(("[" + Self.researcherRow + #"""
+            ,{"listingId":"","displayName":"Broken","seatPriceProtons":1,"hireRequired":false}
+            ,{"listingId":"open/agents/x","displayName":"No price","hireRequired":false}
+            ,{"listingId":"open/agents/y","displayName":"Plain","title":"Plain title","skills":null,
+              "seatPriceProtons":0,"hireRequired":false}]
+            """#).utf8))
+        }
+        let listings = try await value.openAgentListings()
+        XCTAssertEqual(listings.map(\.listingID), ["open/agents/researcher", "open/agents/y"])
+        let researcher = try XCTUnwrap(listings.first)
+        XCTAssertEqual(researcher.title(locale: "vi"), "Nhà nghiên cứu")
+        XCTAssertEqual(researcher.title(locale: "ja"), "Researcher")
+        XCTAssertEqual(researcher.summary(locale: "en"), "Finds and checks sources.")
+        XCTAssertEqual(researcher.glyph, "🔎")
+        XCTAssertEqual(researcher.seatPriceProtons, 60_000)
+        XCTAssertTrue(researcher.hireRequired)
+        XCTAssertEqual(listings[1].title(locale: "vi"), "Plain title")
+        XCTAssertEqual(listings[1].skills, [])
+    }
+
+    func testOpenCatalogThatIsNotAListIsAnEmptyShelf() async throws {
+        NativeDomainProtocol.state.handler = { _ in .json(Data(#"{"rows":[]}"#.utf8)) }
+        let listings = try await client(TestAuthorization(first: "hire-token")).openAgentListings()
+        XCTAssertEqual(listings, [])
+    }
+
+    func testPlainCreateBodyIsUnchangedAndAHireCarriesItsListing() throws {
+        let id = try NativeID("00000000-0000-4000-8000-c9ead89f3604")
+        let plain = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(AgentCreateRequest(requestId: id, displayName: "Alfred"))) as? [String: Any]
+        XCTAssertEqual(Set(try XCTUnwrap(plain).keys), ["requestId", "displayName"])
+
+        let free = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            AgentCreateRequest(requestId: id, displayName: "Researcher", listingId: "open/agents/researcher")))
+            as? [String: Any]
+        XCTAssertEqual(Set(try XCTUnwrap(free).keys), ["requestId", "displayName", "listingId"])
+
+        let confirmed = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            AgentCreateRequest(requestId: id, displayName: "Researcher 2", listingId: "open/agents/researcher",
+                               hireConfirmed: true, disclosureVersion: 3))) as? [String: Any]
+        XCTAssertEqual(confirmed?["hireConfirmed"] as? Bool, true)
+        XCTAssertEqual(confirmed?["disclosureVersion"] as? Int, 3)
+        XCTAssertEqual(confirmed?["listingId"] as? String, "open/agents/researcher")
+
+        XCTAssertThrowsError(try AgentCreateRequest(requestId: id, displayName: "R", listingId: ""))
+        XCTAssertThrowsError(try AgentCreateRequest(requestId: id, displayName: "R",
+                                                    listingId: String(repeating: "x", count: 129)))
+    }
+
+    func testListingHirePostsTheExistingCreateRoute() async throws {
+        let value = client(TestAuthorization(first: "hire-token"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/matrix/v1/agents")
+            XCTAssertNil(request.url?.query)
+            let body = try! XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(self.body(of: request))) as? [String: Any])
+            XCTAssertEqual(body["listingId"] as? String, "open/agents/researcher")
+            XCTAssertEqual(body["displayName"] as? String, "Researcher")
+            XCTAssertNil(body["persona"])
+            var record = self.agentRecord(matrixUser: true)
+            record["cloud_placement"] = "placed"
+            return .json(try! JSONSerialization.data(withJSONObject: record))
+        }
+        let created = try await value.createAgent(AgentCreateRequest(
+            requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+            listingId: "open/agents/researcher"))
+        XCTAssertEqual(created.id.rawValue, agentID)
+    }
+
+    /// Review finding 4: the hire's answer keeps `cloud_placement`, so a
+    /// `capacity` seat isn't shown as an open chat. An unknown placement is
+    /// absent, never a failed create (the seat is already charged).
+    func testListingHireKeepsThePlatformsPlacement() async throws {
+        func placed(_ placement: Any?) async throws -> AgentCreateResponse {
+            var record = agentRecord(matrixUser: true)
+            if let placement { record["cloud_placement"] = placement }
+            let data = try JSONSerialization.data(withJSONObject: record)
+            NativeDomainProtocol.state.handler = { _ in .json(data) }
+            return try await client(TestAuthorization(first: "hire-token")).createAgentPlaced(AgentCreateRequest(
+                requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+                listingId: "open/agents/researcher"))
+        }
+        let capacity = try await placed("capacity")
+        XCTAssertEqual(capacity.placement, .capacity)
+        XCTAssertEqual(capacity.agent.id.rawValue, agentID)
+        let pendingTrust = try await placed("pending_trust")
+        XCTAssertEqual(pendingTrust.placement, .pendingTrust)
+        let placedNow = try await placed("placed")
+        XCTAssertEqual(placedNow.placement, .placed)
+        let unknown = try await placed("somewhere_new")
+        XCTAssertNil(unknown.placement)
+        let malformed = try await placed(7)
+        XCTAssertNil(malformed.placement)
+        let absent = try await placed(nil)
+        XCTAssertNil(absent.placement)
+    }
+
+    func testHireRefusalsMapAsDesktopsDo() async throws {
+        func refusal(_ status: Int, _ body: String) async -> OpenAgentHireRefusal {
+            NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(body.utf8)]) }
+            do {
+                _ = try await client(TestAuthorization(first: "hire-token")).createAgent(AgentCreateRequest(
+                    requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+                    listingId: "open/agents/researcher"))
+                XCTFail("hire accepted")
+                return .retry
+            } catch {
+                return OpenAgentHireRefusal.from(error)
+            }
+        }
+        let required = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_required","hire":{"price_protons":60000,"price_micro_protons":60000000000}}}"#)
+        XCTAssertEqual(required, .hireRequired(priceProtons: 60_000))
+        XCTAssertFalse(required.letsNameChange)
+        let malformedPrice = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_required","hire":{"price_protons":"lots"}}}"#)
+        XCTAssertEqual(malformedPrice, .hireRequired(priceProtons: nil))
+        let short = await refusal(409, #"{"error":"matrix_409","details":{"reason":"hire_insufficient_protons","hire":{"price_protons":60000}}}"#)
+        XCTAssertEqual(short, .short)
+        XCTAssertFalse(short.letsNameChange)
+        let outage = await refusal(503, #"{"error":"matrix_503"}"#)
+        XCTAssertEqual(outage, .retry)
+        XCTAssertFalse(outage.letsNameChange)
+        // A blocked dispatch sent nothing; the request is retried as stored.
+        XCTAssertEqual(OpenAgentHireRefusal.from(NativeDispatchBlocked()), .retry)
+    }
+
+    /// Review r2 finding 3: the platform checks the name before it looks a
+    /// request up (0192 `matrix_agent_create_begin`), so a 422 doesn't prove
+    /// the UUID was never charged. No refusal lets a sent request go; only
+    /// a name refusal lets the next try change the name, and a bare 400
+    /// (`matrix_invalid`) is retried, not read as a name.
+    func testNoRefusalLetsASentHireRequestGoAndOnlyANameRefusalRenames() async throws {
+        func refusal(_ status: Int, _ body: String) async -> OpenAgentHireRefusal {
+            NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(body.utf8)]) }
+            do {
+                _ = try await client(TestAuthorization(first: "hire-token")).createAgentPlaced(AgentCreateRequest(
+                    requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+                    listingId: "open/agents/researcher"))
+                XCTFail("hire accepted")
+                return .retry
+            } catch {
+                return OpenAgentHireRefusal.from(error)
+            }
+        }
+        let name = await refusal(422, #"{"error":"assistant_name_taken"}"#)
+        XCTAssertEqual(name, .name)
+        XCTAssertTrue(name.letsNameChange)
+        let invalid = await refusal(400, #"{"error":"matrix_400"}"#)
+        XCTAssertEqual(invalid, .retry, "a bare 400 after provisioning began reads as a name refusal")
+        XCTAssertFalse(invalid.letsNameChange)
+        let limit = await refusal(409, #"{"error":"matrix_409"}"#)
+        XCTAssertEqual(limit, .limit)
+        XCTAssertFalse(limit.letsNameChange)
+        let account = await refusal(403, #"{"error":"matrix_403"}"#)
+        XCTAssertEqual(account, .account)
+        XCTAssertFalse(account.letsNameChange)
+        let missing = await refusal(404, #"{"error":"matrix_404"}"#)
+        XCTAssertEqual(missing, .account)
+        XCTAssertFalse(missing.letsNameChange)
+    }
+
+    /// Review r2 finding 1: checkout can close (or the account change) while
+    /// the token is read or force-refreshed. The gate is asked right before
+    /// each send: closed before the first, nothing is sent; open for the
+    /// first, which answers 401, and closed after the refresh, the resend
+    /// never goes out. Open throughout, the 401 resend goes as before.
+    func testAHireDispatchGateIsRecheckedBeforeEachSend() async throws {
+        let request = try AgentCreateRequest(
+            requestId: NativeID("00000000-0000-4000-8000-c9ead89f3604"), displayName: "Researcher",
+            listingId: "open/agents/researcher", hireConfirmed: true)
+        let created = try JSONSerialization.data(withJSONObject: agentRecord(matrixUser: true))
+        NativeDomainProtocol.state.handler = { request in
+            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old"
+                ? .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)]) : .json(created)
+        }
+
+        var asked = 0
+        do {
+            _ = try await client(TestAuthorization(first: "hire-old", refreshed: "hire-new"))
+                .createAgentPlaced(request, dispatchGate: { asked += 1; return false })
+            XCTFail("a blocked hire was sent")
+        } catch {
+            XCTAssertEqual(error as? NativeDispatchBlocked, NativeDispatchBlocked())
+        }
+        XCTAssertEqual(asked, 1)
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty, "nothing goes out when the gate is closed")
+
+        asked = 0
+        let authorization = TestAuthorization(first: "hire-old", refreshed: "hire-new")
+        do {
+            _ = try await client(authorization)
+                .createAgentPlaced(request, dispatchGate: { asked += 1; return asked == 1 })
+            XCTFail("the resend went out after the gate closed")
+        } catch {
+            XCTAssertEqual(error as? NativeDispatchBlocked, NativeDispatchBlocked())
+        }
+        XCTAssertEqual(asked, 2)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1, "only the first send went out")
+
+        NativeDomainProtocol.state.reset()
+        NativeDomainProtocol.state.handler = { request in
+            request.value(forHTTPHeaderField: "Authorization") == "Bearer hire-old"
+                ? .init(status: 401, chunks: [Data(#"{"error":"matrix_401"}"#.utf8)]) : .json(created)
+        }
+        asked = 0
+        let placed = try await client(TestAuthorization(first: "hire-old", refreshed: "hire-new"))
+            .createAgentPlaced(request, dispatchGate: { asked += 1; return true })
+        XCTAssertEqual(placed.agent.id.rawValue, agentID)
+        XCTAssertEqual(asked, 2)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 2)
+        let bodies = NativeDomainProtocol.state.requests.map { self.body(of: $0) }
+        XCTAssertEqual(bodies[0], bodies[1], "the resend is the same request")
+    }
+}
+
 // MARK: - W4-E3 the agent's desk on the Shell's host routes (desktop #51)
 
 extension NativeDomainClientTests {

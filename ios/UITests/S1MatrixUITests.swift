@@ -237,12 +237,12 @@ final class S1MatrixUITests: TranscriptUITestCase {
     /// reader's face ("Đã xem") once Atum's receipt lands (U4, U4b). One read
     /// signal (desktop #89, owner 2026-11-19): no check and no "Đã gửi" at
     /// any point. The keyboard is up (no audit: the system keyboard is not
-    /// the app's). `chat.send` accepts after 1.5 s and the receipt lands
-    /// about 2.65 s later, so the unread state is captured with a bare
-    /// screenshot, not the slower full check.
+    /// the app's). The test checks and captures the unread state before
+    /// releasing the receipt.
     @MainActor
     func testSendThenSeen() throws {
-        let app = launchChatCell(ScriptedScenario.chatSend.rawValue)
+        let receipt = ScriptedSendReceipt()
+        let app = launchChatCell(ScriptedScenario.chatSend.rawValue, extra: receipt.arguments)
         let field = composerField(app)
         field.tap()
         // 10 s: on a loaded simulator one keyboard query alone took over 2 s.
@@ -250,31 +250,17 @@ final class S1MatrixUITests: TranscriptUITestCase {
         let text = "Ma trận \(cell.tag)"
         field.typeText(text)
         element(app, AccessibilityID.composerSend).tap()
-        // My message is found by its unique text across the transcript, not
-        // as `row.latest`: Atum's answer becomes the newest row about 7.6 s
-        // after the send, which a slow run reaches before Seen is checked.
-        let row = transcript(app)
+        let transcript = self.transcript(app)
         let seenWord = word("Đã xem", "Seen")
         let sendingWord = word("Đang gửi", "Sending")
         let sentWord = word("Đã gửi", "Sent")
-        let sending = row.descendants(matching: .any).matching(NSPredicate(
+        let sending = transcript.descendants(matching: .any).matching(NSPredicate(
             format: "label CONTAINS %@ AND label CONTAINS %@", text, sendingWord)).firstMatch
         if sending.waitForExistence(timeout: 1) { keepScreenshot("send-sending--\(cell.tag)", of: app) }
-        let settled = row.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@ AND NOT (label CONTAINS %@) AND NOT (label CONTAINS %@)",
-            text, sendingWord, word("Chưa gửi được", "Not sent"))).firstMatch
-        XCTAssertTrue(settled.waitForExistence(timeout: 5), "the clock never went")
-        XCTAssertFalse(settled.label.contains(sentWord), "no Sent receipt (desktop #89): \(settled.label)")
-        // Settled and nobody has read it yet: just its time.
-        let unread = row.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@ AND NOT (label CONTAINS %@) AND NOT (label CONTAINS %@)",
-            text, sendingWord, seenWord)).firstMatch
-        if unread.exists { keepScreenshot("send-unread--\(cell.tag)", of: app) }
-        let seen = row.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@ AND label CONTAINS %@", text, seenWord)).firstMatch
-        XCTAssertTrue(seen.waitForExistence(timeout: 8), "no Seen on my message")
-        XCTAssertTrue(row.descendants(matching: .any)["delivery.seen"].exists, "the reader's face says Seen")
-        XCTAssertFalse(seen.label.contains(sentWord), "the faces are the only receipt: \(seen.label)")
+        let message = receipt.assertUnread(in: transcript, text: text, sending: sendingWord,
+                                           failed: word("Chưa gửi được", "Not sent"), sent: sentWord, seen: seenWord)
+        keepScreenshot("send-unread--\(cell.tag)", of: app)
+        try receipt.releaseAndAssertSeen(message, sent: sentWord, seen: seenWord)
         try check(app, "send-seen", audits: false)
     }
 

@@ -63,6 +63,8 @@ struct AppRoot: View {
     @State private var rosterStore = RosterStore()
     /// HC-3: my assistants' typing, for Home's working atom.
     @State private var assistantActivity = HomeAssistantActivity()
+    /// A listing hire outlives the New assistant sheet (desktop D9).
+    @State private var listingHire = ListingHireFlow()
     @State private var openRequestGeneration: UInt64 = 0
     @State private var dismissChatPresentationRequest: UInt64 = 0
     @State private var signInAttempt = SignInAttemptGate()
@@ -232,6 +234,11 @@ struct AppRoot: View {
             guard appliedAccountScopeGeneration != model.accountScopeGeneration else { return }
             appliedAccountScopeGeneration = model.accountScopeGeneration
             router.resetAccountScope()
+        }
+        // A listing hire belongs to the account it was picked under: a new
+        // (or no) account lets it go, mid-hire included.
+        .onChange(of: model.listingHireAccount, initial: true) { _, account in
+            listingHire.accountChanged(to: account)
         }
     }
 
@@ -975,7 +982,13 @@ struct AppRoot: View {
                 create: { name in await model.createAssistant(name) },
                 names: model.assistantNames,
                 checkHandle: model.newAssistantHandleCheck,
-                followUp: { model.assistantCreateFollowUp(roomID: $0) }
+                followUp: { model.assistantCreateFollowUp(roomID: $0) },
+                listings: { await model.openAgentListings() },
+                hire: { await model.hireListing($0, name: $1, hireConfirmed: $2, account: $3) },
+                hireFlow: listingHire,
+                hireAccount: model.listingHireAccount,
+                appNames: model.appCatalogNames,
+                chatReady: { model.hiredAssistantChatReady($0) }
             ) : nil,
             founderDraft: founderDraftActions(dismissAccountOnSent: false),
             exitRoom: { model.exitRoom($0, $1) },
