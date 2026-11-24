@@ -164,6 +164,26 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testTeamSpaceBoardListAndMineUseDesktopCopyInAllLocales() throws {
+        let copy = try AtumCopy()
+        let list = "shared.matrix-company-board-copy.copy.list"
+        let mine = "shared.matrix-company-board-copy.copy.mine"
+        let expected = [
+            "en": ("List", "Mine"),
+            "vi": ("Danh sách", "Của tôi"),
+            "ja": ("リスト", "自分"),
+            "zh": ("列表", "我的"),
+            "zh-Hant": ("清單", "我的"),
+        ]
+        XCTAssertEqual(copy.locales, Set(expected.keys))
+        XCTAssertEqual(copy.parameterKinds(list), [])
+        XCTAssertEqual(copy.parameterKinds(mine), [])
+        for (locale, (listLabel, mineLabel)) in expected {
+            XCTAssertEqual(try copy.text(list, locale: locale), listLabel, locale)
+            XCTAssertEqual(try copy.text(mine, locale: locale), mineLabel, locale)
+        }
+    }
+
     func testTeamSpaceHeaderSearchInterpolatesTheQueryInAllLocales() throws {
         let copy = try AtumCopy()
         let prefix = "src.matrix.team-space.revamp-copy.copy."

@@ -239,7 +239,6 @@
 		D1274E94D1DD5E953D413816 /* AssistantHomeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271735A94A42C3A31E7A200F /* AssistantHomeSheet.swift */; };
 		D2BC5DFDDD70C97E107A5437 /* TeamSpaceWave3PendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83AF7CE33CF8F2427E43B78 /* TeamSpaceWave3PendingCopy.swift */; };
 		2D7D9E93B0BB1CA6CABB7E4F /* TeamSpaceRevampViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 565AC7D278D5EFA8B1C9CA3C /* TeamSpaceRevampViews.swift */; };
-		3D0ED85FAA5C1A855BFC19F5 /* TeamSpaceRevampPendingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54F004210B2744D3055D58C8 /* TeamSpaceRevampPendingCopy.swift */; };
 		D2F169D0FB4C53EF6BAA7D73 /* AtumChat in Frameworks */ = {isa = PBXBuildFile; productRef = A4E4E4EA773C229EAB3BB88C /* AtumChat */; };
 		D3D4F996335F5324643CEC0A /* LegalScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22FACE799EB35A301605EFC /* LegalScreens.swift */; };
 		D42307709D5555ED5CE37FE4 /* NOTICE in Resources */ = {isa = PBXBuildFile; fileRef = E1DFC5829F618FE0152B0E77 /* NOTICE */; };
@@ -578,7 +577,6 @@
 		C7F63C1B58186F8A073F792B /* ChatEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatEnvironment.swift; sourceTree = "<group>"; };
 		C83AF7CE33CF8F2427E43B78 /* TeamSpaceWave3PendingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceWave3PendingCopy.swift; sourceTree = "<group>"; };
 		565AC7D278D5EFA8B1C9CA3C /* TeamSpaceRevampViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceRevampViews.swift; sourceTree = "<group>"; };
-		54F004210B2744D3055D58C8 /* TeamSpaceRevampPendingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpaceRevampPendingCopy.swift; sourceTree = "<group>"; };
 		C849D6466FA13E610FFFFE1B /* MathFonts-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "MathFonts-OFL.txt"; sourceTree = "<group>"; };
 		CC46B135FE2676C3AA48CB9F /* ThirdPartyLicences.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ThirdPartyLicences.json; sourceTree = "<group>"; };
 		CCD5AAA5DB301D749DE40E08 /* AssistantCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantCard.swift; sourceTree = "<group>"; };
@@ -1136,7 +1134,6 @@
 				15F6614A6EB16B2D06489CDC /* TeamSpacePendingCopy.swift */,
 				C83AF7CE33CF8F2427E43B78 /* TeamSpaceWave3PendingCopy.swift */,
 				565AC7D278D5EFA8B1C9CA3C /* TeamSpaceRevampViews.swift */,
-				54F004210B2744D3055D58C8 /* TeamSpaceRevampPendingCopy.swift */,
 			);
 			path = Company;
 			sourceTree = "<group>";
@@ -1777,7 +1774,6 @@
 				E27319D8D48889689C291439 /* TeamSpacePendingCopy.swift in Sources */,
 				D2BC5DFDDD70C97E107A5437 /* TeamSpaceWave3PendingCopy.swift in Sources */,
 				2D7D9E93B0BB1CA6CABB7E4F /* TeamSpaceRevampViews.swift in Sources */,
-				3D0ED85FAA5C1A855BFC19F5 /* TeamSpaceRevampPendingCopy.swift in Sources */,
 				C2990FFE0E818136B095EB67 /* TimelineController.swift in Sources */,
 				C2FD7254CCF6633C18FBD49F /* TimelineStartRow.swift in Sources */,
 				DC16172A5CF2A96B274C7064 /* TranscriptView.swift in Sources */,

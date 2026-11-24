@@ -21,10 +21,9 @@ struct TeamSpaceCopy {
         return table?[locale] ?? table?["en"] ?? key
     }
 
-    /// The wave 2, wave 3 and revamp (W4-E7) generated desktop tables.
+    /// The wave 2 and wave 3 generated desktop tables.
     private static func pending(_ key: String) -> [String: String]? {
         TeamSpacePendingCopy.tables[key] ?? TeamSpaceWave3PendingCopy.tables[key]
-            ?? TeamSpaceRevampPendingCopy.tables[key]
     }
 
     /// A two-argument phrase ({0}, {1} in the pending table, `%1$@`, `%2$@` in the export).
@@ -93,15 +92,15 @@ struct TeamSpaceCopy {
     var channelFailed: String { design.text(Self.revamp + "channelFailed") }
     var tryAgain: String { design.text(Self.revamp + "tryAgain") }
 
-    /// Board · List and Mine. `list` and `mine` wait for desktop export W4-C5 (PENDING-COPY).
+    /// Board · List and Mine.
     var boardViews: String { design.text(Self.revamp + "boardViews") }
     func boardView(_ view: CompanyBoardView) -> String {
         switch view {
-        case .board: text(Self.board + "board")
-        case .list: text(Self.board + "list")
+        case .board: design.text(Self.board + "board")
+        case .list: design.text(Self.board + "list")
         }
     }
-    var mine: String { text(Self.board + "mine") }
+    var mine: String { design.text(Self.board + "mine") }
 
     // MARK: Company menu and overview (TS-8)
 
