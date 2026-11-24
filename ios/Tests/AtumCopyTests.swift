@@ -123,6 +123,92 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testTeamSpaceRevampLabelsUseDesktopCopyInAllLocales() throws {
+        let copy = try AtumCopy()
+        let prefix = "src.matrix.team-space.revamp-copy.copy."
+        let locales = ["en", "vi", "ja", "zh", "zh-Hant"]
+        let cases: [(name: String, values: [String])] = [
+            ("search", ["Search", "Tìm kiếm", "検索", "搜索", "搜尋"]),
+            ("noMatches", ["No matches", "Không có kết quả phù hợp", "一致する項目はありません",
+                           "没有匹配的结果", "沒有相符的結果"]),
+            ("settingsSections", ["Settings sections", "Mục cài đặt", "設定セクション", "设置分区", "設定分區"]),
+            ("people", ["People", "Thành viên", "メンバー", "成员", "成員"]),
+            ("workspace", ["Workspace", "Không gian", "ワークスペース", "工作区", "工作區"]),
+            ("ai", ["AI", "AI", "AI", "AI", "AI"]),
+            ("billing", ["Billing", "Thanh toán", "支払い", "账单", "帳單"]),
+            ("hiringPreparing", ["Company hiring is being prepared", "Tính năng thuê cho công ty đang được chuẩn bị",
+                                 "会社での採用は準備中です", "公司招聘功能正在准备中", "公司招聘功能正在準備中"]),
+            ("companyWallet", ["Company wallet", "Ví công ty", "会社のウォレット", "公司钱包", "公司錢包"]),
+            ("openWallet", ["Open", "Mở", "開く", "打开", "開啟"]),
+            ("boardViews", ["Board views", "Chế độ xem bảng", "ボードの表示", "看板视图", "看板檢視"]),
+            ("suggested", ["Suggested", "Đề xuất", "提案", "建议", "建議"]),
+            ("suggestedHint", ["Not on the board until someone accepts it", "Chưa lên bảng cho đến khi có người chấp nhận",
+                               "誰かが承認するまでボードには載りません", "有人接受后才会加入看板", "有人接受後才會加入看板"]),
+            ("showLessActivity", ["Show less", "Thu gọn", "閉じる", "收起", "收起"]),
+            ("preparingChannel", ["Preparing your channel…", "Đang chuẩn bị kênh…", "チャンネルを準備しています…",
+                                  "正在准备频道…", "正在準備頻道…"]),
+            ("channelFailed", ["Couldn’t open this channel.", "Không mở được kênh này.",
+                               "このチャンネルを開けませんでした。", "无法打开此频道。", "無法開啟此頻道。"]),
+            ("tryAgain", ["Try again", "Thử lại", "もう一度", "重试", "重試"]),
+            ("privateChiefOfStaff", ["Private Chief of Staff", "Chief of Staff riêng", "自分専用の Chief of Staff",
+                                     "私人 Chief of Staff", "私人 Chief of Staff"]),
+        ]
+        XCTAssertEqual(copy.locales, Set(locales))
+        for (name, values) in cases {
+            let key = prefix + name
+            XCTAssertEqual(copy.parameterKinds(key), [], key)
+            XCTAssertEqual(values.count, locales.count, key)
+            for (locale, value) in zip(locales, values) {
+                XCTAssertEqual(try copy.text(key, locale: locale), value, "\(locale): \(key)")
+            }
+        }
+    }
+
+    func testTeamSpaceHeaderSearchInterpolatesTheQueryInAllLocales() throws {
+        let copy = try AtumCopy()
+        let prefix = "src.matrix.team-space.revamp-copy.copy."
+        let query = "Kế hoạch 100%"
+        let expected = [
+            "en": ("Search “\(query)”", "Search messages for “\(query)”"),
+            "vi": ("Tìm “\(query)”", "Tìm tin nhắn có “\(query)”"),
+            "ja": ("「\(query)」を検索", "「\(query)」をメッセージから検索"),
+            "zh": ("搜索“\(query)”", "在消息中搜索“\(query)”"),
+            "zh-Hant": ("搜尋「\(query)」", "在訊息中搜尋「\(query)」"),
+        ]
+        let search = prefix + "searchFor"
+        let messages = prefix + "searchMessagesFor"
+        XCTAssertEqual(copy.parameterKinds(search), ["string"])
+        XCTAssertEqual(copy.parameterKinds(messages), ["string"])
+        for (locale, (searchText, messagesText)) in expected {
+            XCTAssertEqual(try copy.text(search, locale: locale, arguments: [.text(query)]), searchText, locale)
+            XCTAssertEqual(try copy.text(messages, locale: locale, arguments: [.text(query)]), messagesText, locale)
+        }
+    }
+
+    func testTeamSpaceBoardActivityPreservesExactCountsAndInterpolation() throws {
+        let copy = try AtumCopy()
+        let key = "src.matrix.team-space.revamp-copy.copy.showAllActivity"
+        XCTAssertEqual(copy.parameterKinds(key), ["number"])
+        for count in [0, 1] {
+            let branch = key + ".count=\(count)"
+            XCTAssertTrue(copy.contains(branch), branch)
+            XCTAssertEqual(copy.parameterKinds(branch), ["number"], branch)
+        }
+        for count: Int64 in [0, 1, 12] {
+            let expected = [
+                "en": "Show all activity (\(count))",
+                "vi": "Xem toàn bộ hoạt động (\(count))",
+                "ja": "すべてのアクティビティ (\(count))",
+                "zh": "查看全部动态（\(count)）",
+                "zh-Hant": "查看全部動態（\(count)）",
+            ]
+            for (locale, text) in expected {
+                XCTAssertEqual(try copy.text(key, locale: locale, arguments: [.number(count)]),
+                               text, "\(locale), \(count)")
+            }
+        }
+    }
+
     func testTypedArgumentsAndMissingLocaleFailInsteadOfEnglishFallback() throws {
         let copy = try AtumCopy()
         XCTAssertThrowsError(try copy.text("desktop.atum.agents.photoUploading", locale: "vi", arguments: [.text("42")]))

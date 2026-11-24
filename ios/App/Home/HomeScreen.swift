@@ -1685,7 +1685,7 @@ private struct HomeStartChatSheet: View {
     @ViewBuilder private var creationActionViews: some View {
         if let newAssistant = actions.newAssistant {
             NavigationLink {
-                AssistantNewSheet(design: design, actions: newAssistant) { roomID in
+                AssistantNewSheet(design: design, actions: newAssistant, close: close) { roomID in
                     close()
                     actions.openRoom(roomID)
                 }
