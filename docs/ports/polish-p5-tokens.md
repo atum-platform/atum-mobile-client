@@ -114,11 +114,13 @@ insets.
 - Store confirmation plays success for a purchased item in the granted or
   completed state. An already-owned result keeps its notice and is silent.
   Failure notices play the error haptic.
-- Each top-up row gets its status from its own acknowledged transaction.
-  Success feedback is keyed to the credited transaction ID. The coordinator
-  keeps the terminal result across wallet refresh, so a revoked pack stays
-  revoked while another pack credits during Restore. The focused coordinator
-  test holds the revoked refresh open until the second pack settles.
+- The top-up sheet has no haptics. Round r2 first tried to key each row's
+  status and success haptic to its own transaction inside the purchase
+  coordinator. Review r2 found that a revoked transaction could then hide a
+  credited one for the same pack during Restore. The coordinator, its tests
+  and the top-up row's status therefore match `main` exactly, and P5 only
+  moves the top-up sheet's spacing to tokens. Per-transaction row status in
+  Restore is pre-existing behaviour and gets its own engineering issue.
 - Each recovery-key copy increments an event counter for haptic feedback. The
   copied label resets 1.5 seconds after the latest copy.
 

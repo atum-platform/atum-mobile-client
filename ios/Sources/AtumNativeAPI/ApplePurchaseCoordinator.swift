@@ -46,10 +46,6 @@ public extension ApplePurchaseStore {
         case idle, loading, unavailable, closed, ready, purchasing, pending, cancelled, retrying
         case succeeded, needsSupport(String), otherAccount, revoked, sandboxCapExceeded
     }
-    public struct TransactionOutcome: Equatable, Sendable {
-        public let transactionID: String
-        public let state: State
-    }
     public static let productIDs: Set<String> = ["com.atum.mobile.protons.100k", "com.atum.mobile.protons.500k"]
     @Published public private(set) var state: State = .idle
     @Published public private(set) var packs: [AppleProductsResponse.Pack] = []
@@ -64,11 +60,6 @@ public extension ApplePurchaseStore {
         }
     }
     public func purchaseState(for productID: String) -> State { purchaseStates[productID] ?? .idle }
-    public func transactionOutcome(for productID: String) -> TransactionOutcome? {
-        guard let outcome = transactionOutcomes[productID], outcome.state == purchaseStates[productID]
-        else { return nil }
-        return outcome
-    }
 
     private let store: any ApplePurchaseStore
     private var deviceEnvironment: ApplePurchaseEnvironment?
@@ -81,10 +72,8 @@ public extension ApplePurchaseStore {
     private var generation = UUID()
     private var tokens: [String: UUID] = [:]
     @Published public private(set) var checkoutOpen = false
-    /// Latest state by product ID.
+    /// Latest state by product ID; transaction identity is carried by needsSupport.
     @Published public private(set) var purchaseStates: [String: State] = [:]
-    /// Latest acknowledged outcome for each pack, published alongside its row state.
-    private var transactionOutcomes: [String: TransactionOutcome] = [:]
     private var listener: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     private var submissions: [String: Task<Void, Never>] = [:]
@@ -120,7 +109,6 @@ public extension ApplePurchaseStore {
         let switchedAccount = self.accountID != accountID
         self.accountID = accountID; self.api = api
         acceptedEnvironment = nil
-        transactionOutcomes = [:]
         checkoutOpen = false; products = []; packs = []; purchaseStates = [:]; state = .idle
         // Re-fetch after every account switch; don't strand token-bound transactions.
         if switchedAccount { tokens.removeAll() }
@@ -211,10 +199,6 @@ public extension ApplePurchaseStore {
     /// transaction ID) are kept. A failed purchase attempt on an open catalogue
     /// returns to ready; nothing is reloaded, credited or finished here.
     public func clearSettledOutcomes() {
-        transactionOutcomes = transactionOutcomes.filter { _, outcome in
-            if case .needsSupport = outcome.state { return true }
-            return false
-        }
         purchaseStates = purchaseStates.filter { _, value in
             switch value {
             case .purchasing, .pending, .retrying, .needsSupport, .sandboxCapExceeded: true
@@ -266,19 +250,18 @@ public extension ApplePurchaseStore {
                     await transaction.finish()
                     guard self.isCurrent(scope) else { return }
                     self.finished.insert(transaction.id)
-                    let terminalState: State
                     switch result.state {
-                    case .credited, .alreadyCredited: terminalState = .succeeded
-                    case .needsSupport: terminalState = .needsSupport(transaction.id)
-                    case .creditedToOtherAccount: terminalState = .otherAccount
-                    case .revoked: terminalState = .revoked
+                    case .credited, .alreadyCredited:
+                        self.state = .succeeded
+                        await self.refreshWallet()
+                    case .needsSupport: self.state = .needsSupport(transaction.id)
+                    case .creditedToOtherAccount: self.state = .otherAccount
+                    case .revoked:
+                        self.state = .revoked
+                        await self.refreshWallet()
                     }
-                    self.state = terminalState
-                    if terminalState == .succeeded || terminalState == .revoked { await self.refreshWallet() }
                     guard self.isCurrent(scope) else { return }
-                    self.transactionOutcomes[transaction.productID] = .init(transactionID: result.transactionId,
-                                                                           state: terminalState)
-                    self.purchaseStates[transaction.productID] = terminalState
+                    self.purchaseStates[transaction.productID] = self.state
                     return
                 } catch {
                     guard self.isCurrent(scope) else { return }
@@ -286,15 +269,13 @@ public extension ApplePurchaseStore {
                         // No durable outcome: keep StoreKit's transaction unfinished.
                         // A later explicit restore/replay can settle after a cap raise.
                         self.checkoutOpen = false; self.state = .sandboxCapExceeded
-                        self.purchaseStates[transaction.productID] = .sandboxCapExceeded
+                        self.purchaseStates[transaction.productID] = self.state
                         return
                     }
-                    let retryState: State
                     if let error = error as? ApplePurchaseError, error.error == .closed {
-                        self.checkoutOpen = false; self.products = []; retryState = .closed
-                    } else { retryState = .retrying }
-                    self.state = retryState
-                    self.purchaseStates[transaction.productID] = retryState
+                        self.checkoutOpen = false; self.products = []; self.state = .closed
+                    } else { self.state = .retrying }
+                    self.purchaseStates[transaction.productID] = self.state
                     do { try await self.sleep(delay) } catch { return }
                     delay = min(delay * 2, 300)
                 }
