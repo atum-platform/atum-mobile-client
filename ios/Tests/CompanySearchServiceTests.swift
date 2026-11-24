@@ -16,7 +16,7 @@ final class CompanySearchServiceTests: XCTestCase {
     private let studio = CompanySearchTarget(channelID: "00000000-0000-4000-8000-000000000003",
                                              roomID: "!studio:example.invalid", channelName: "studio")
 
-    /// Answers every room it is asked about with one message per room and tab.
+    /// Answers each requested room with fixture messages for the requested tab.
     @MainActor
     private final class FakeTransport: CompanySearchTransport {
         var bodies = [[String: Any]]()
@@ -30,6 +30,7 @@ final class CompanySearchServiceTests: XCTestCase {
         var beforeAnswer: () -> Void = {}
         /// Senders whose messages the server holds (any membership now).
         var authors = ["@minh:atum.test"]
+        var eventIDSuffixes = [""]
 
         func search(body: Data, endpoint: CompanySearchEndpoint, nextBatch: String?) async throws -> Data {
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
@@ -48,15 +49,17 @@ final class CompanySearchServiceTests: XCTestCase {
             let rooms = filter["rooms"] as? [String] ?? []
             let senders = filter["senders"] as? [String] ?? authors
             let results: [[String: Any]] = rooms.flatMap { room in
-                senders.filter(authors.contains).map { sender -> [String: Any] in
+                senders.filter(authors.contains).flatMap { sender in
                     let local = String(room.dropFirst().prefix(while: { $0 != ":" }))
                     let id = "$" + local + (files ? "-file" : "-msg")
                     let content: [String: Any] = files
                         ? ["msgtype": "m.file", "body": "launch-deck.pdf"]
                         : ["msgtype": "m.text", "body": "the launch plan"]
-                    return ["rank": 1, "result": ["type": "m.room.message", "room_id": room, "event_id": id,
-                                                  "sender": sender, "origin_server_ts": 1_762_000_000_000,
-                                                  "content": content]]
+                    return eventIDSuffixes.map { suffix in
+                        ["rank": 1, "result": ["type": "m.room.message", "room_id": room, "event_id": id + suffix,
+                                              "sender": sender, "origin_server_ts": 1_762_000_000_000,
+                                              "content": content]]
+                    }
                 }
             }
             var page: [String: Any] = ["count": results.count, "results": results]
@@ -200,26 +203,48 @@ final class CompanySearchServiceTests: XCTestCase {
         eligibility = allEligible()
         let search = service(limit: 1)
         let env = environment()
+        var state = TeamSpaceMessageSearchState()
+        state.submit("launch")
+        let initial = try XCTUnwrap(state.request)
+        transport.eventIDSuffixes = ["", "-newer"]
         transport.nextBatch = "first-cursor"
-        let first = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                       continuation: nil, environment: env)
-        let cursor = try XCTUnwrap(first?.continuation)
+        let first = await search.searchCompanyMessages(companyID: companyA, term: initial.term,
+                                                       continuation: initial.continuation, environment: env)
+        state.finish(initial, answer: first)
+        let firstPageIDs = ["$design-msg", "$design-msg-newer", "$general-msg", "$general-msg-newer"]
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.eventID).sorted(), firstPageIDs)
+        let cursor = try XCTUnwrap(state.page?.continuation)
 
+        state.loadMore()
+        let more = try XCTUnwrap(state.request)
+        transport.eventIDSuffixes = ["", "-older"]
         transport.nextBatch = "past-design-results"
         transport.beforeAnswer = { self.eligibility = self.without(self.design) }
-        let second = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                        continuation: cursor, environment: env)
+        let second = await search.searchCompanyMessages(companyID: companyA, term: more.term,
+                                                        continuation: more.continuation, environment: env)
+        state.finish(more, answer: second)
         XCTAssertEqual(transport.tokens, [nil, cursor.token])
         XCTAssertEqual(transport.rooms(1), [general.roomID, design.roomID])
-        XCTAssertEqual(second?.results.map(\.roomID), [general.roomID])
-        XCTAssertNil(second?.continuation)
+        XCTAssertEqual(Set(second?.results.map(\.eventID) ?? []), ["$general-msg", "$general-msg-older"])
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.eventID).sorted(),
+                       ["$general-msg", "$general-msg-newer", "$general-msg-older"],
+                       "keep distinct eligible hits from both pages and deduplicate the overlap")
+        XCTAssertNil(state.page?.continuation)
+        state.loadMore()
+        XCTAssertNil(state.request)
 
         eligibility = allEligible()
         transport.beforeAnswer = {}
-        let restarted = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                           continuation: second?.continuation, environment: env)
+        transport.eventIDSuffixes = ["", "-newer"]
+        state.submit("launch")
+        let resubmitted = try XCTUnwrap(state.request)
+        XCTAssertNil(resubmitted.continuation)
+        XCTAssertNil(state.page)
+        let restarted = await search.searchCompanyMessages(companyID: companyA, term: resubmitted.term,
+                                                           continuation: resubmitted.continuation, environment: env)
+        state.finish(resubmitted, answer: restarted)
         XCTAssertEqual(transport.tokens, [nil, cursor.token, nil])
-        XCTAssertEqual(restarted?.results.map(\.roomID), [general.roomID, design.roomID])
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.eventID).sorted(), firstPageIDs)
     }
 
     func testTeamSpaceRestartsWhenTheFromFilterResolvesToADifferentSender() async throws {

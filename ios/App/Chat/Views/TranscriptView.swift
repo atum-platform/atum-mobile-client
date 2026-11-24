@@ -49,7 +49,7 @@ struct TranscriptView: View {
     /// Per-frame bookkeeping the body never reads (not observed).
     @State private var scratch = TranscriptScratch()
     @State private var tuning = TranscriptTuning.current
-    @State private var routedMatchRowID: String?
+    @State private var routedHighlightRowID: String?
     @State private var routeFocusFailed = 0
 
     var body: some View {
@@ -89,7 +89,7 @@ struct TranscriptView: View {
     // The transcript's modifier chain is split into three functions so each
     // type-checks quickly; one expression timed out on the hosted runners.
     private func transcriptRow(_ row: ChatRow, latestAnswerID: String?, growing: Set<String>) -> some View {
-        let highlight: Color = routedMatchRowID == row.id
+        let highlight: Color = routedHighlightRowID == row.id
             ? (theme?.color("ink", scheme).opacity(0.12) ?? .clear) : .clear
         return ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
                            parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
@@ -139,9 +139,8 @@ struct TranscriptView: View {
             scratch.motion = ScrollMotion(phase)
             if scratch.motion == .user {
                 scratch.pendingHold = nil
-                stopSearchPlacement()
-                routedMatchRowID = nil
                 store.searchTargetEventID = nil
+                stopSearchPlacement()
             }
             updateHeldRows()
         }
@@ -153,7 +152,7 @@ struct TranscriptView: View {
     private func observingChanges(_ content: some View, rows: [ChatRow], growing: Set<String>) -> some View {
         content
         .onChange(of: search?.focus) { _, focus in
-            routedMatchRowID = nil
+            store.searchTargetEventID = nil
             guard let focus else {
                 stopSearchPlacement()
                 // Find released its anchor: normal holds/following learn
@@ -162,10 +161,6 @@ struct TranscriptView: View {
                 return
             }
             showSearchMatch(focus.rowID)
-        }
-        .onChange(of: routedMatchRowID) { _, rowID in
-            if let rowID { showSearchMatch(rowID) }
-            updateBottomVisible()
         }
         .onChange(of: store.searchTargetEventID) { _, _ in updateBottomVisible() }
         .onChange(of: store.scrollRequest) { _, request in
@@ -200,15 +195,14 @@ struct TranscriptView: View {
             scratch.rowOrder = rows.map(\.id)
             scratch.isOnScreen = true
             updateBottomVisible()
-            store.handle(.opened)
+            if !scratch.placingSearchMatch { store.handle(.opened) }
             syncFollowState()
-            if let routedMatchRowID { showSearchMatch(routedMatchRowID) }
+            scheduleSearchPlacement()
             markMemory("chat.open")
         }
         .onDisappear {
-            stopSearchPlacement()
             scratch.isOnScreen = false
-            updateBottomVisible()
+            stopSearchPlacement()
             noteReading()
         }
     }
@@ -415,7 +409,6 @@ struct TranscriptView: View {
                 // placement, so the person's newer action still wins.
                 guard store.follow.isFollowing else { return }
                 stopSearchPlacement()
-                routedMatchRowID = nil
             }
             if animated {
                 withAnimation(.smooth(duration: 0.3)) { position.scrollTo(edge: .bottom) }
@@ -437,6 +430,10 @@ struct TranscriptView: View {
     }
 
     private func snapshotChanged(from old: Snapshot, to new: Snapshot) {
+        if let placement = scratch.routedPlacement, !placement.match.isCurrent(in: routedSearchSnapshot) {
+            stopSearchPlacement()
+            scheduleSettle(after: Self.settleSeconds)
+        }
         if store.pagination == .idle(hitTimelineStart: true),
            new.rows.contains(where: { $0.item.kind == .timelineStart }),
            !old.rows.contains(where: { $0.item.kind == .timelineStart }) {
@@ -452,10 +449,12 @@ struct TranscriptView: View {
     private func rowsShown(from old: [String], to new: [String]) {
         scratch.rowOrder = new
         let ids = Set(new)
-        if let rowID = scratch.searchRowID, !ids.contains(rowID) {
+        if let rowID = scratch.searchRowID, !ids.contains(rowID),
+           !store.snapshot.rows.contains(where: { $0.id == rowID }) {
             stopSearchPlacement()
-            if routedMatchRowID == rowID { routedMatchRowID = nil }
             scheduleSettle(after: Self.settleSeconds)
+        } else {
+            scheduleSearchPlacement()
         }
         if let anchor = scratch.anchor, !ids.contains(anchor.id),
            let index = old.firstIndex(of: anchor.id) {
@@ -474,7 +473,7 @@ struct TranscriptView: View {
     private func updateBottomVisible() {
         let geometry = scratch.geometry
         let visible = scratch.isOnScreen && scenePhase == .active && !covered
-            && store.searchTargetEventID == nil && routedMatchRowID == nil
+            && store.searchTargetEventID == nil
             && geometry.viewportHeight > 0 && geometry.distanceFromBottom <= FollowPolicy.nearBottomPoints
         if store.bottomVisible != visible { store.bottomVisible = visible }
     }
@@ -558,18 +557,40 @@ struct TranscriptView: View {
 
     // MARK: HC-6: bringing a search match into view
 
+    private var routedSearchSnapshot: Snapshot {
+        let snapshot = store.snapshot
+        return snapshot.generation == store.timelineGeneration ? snapshot : .empty
+    }
+
     private func focusRoutedMessage(_ eventID: String?) async {
         guard let eventID, !Task.isCancelled else { return }
-        let answer = await ChatHistorySearch.find(eventID: eventID, snapshot: { store.snapshot },
-                                                  loadPage: { await store.loadOlderPageForSearch() },
-                                                  onFound: { rowID in
-            guard !Task.isCancelled, store.searchTargetEventID == eventID else { return }
-            routedMatchRowID = rowID
-            store.searchTargetEventID = nil
-        })
+        let answer = await ChatHistorySearch.find(eventID: eventID, snapshot: { routedSearchSnapshot },
+                                                  timelineGeneration: { store.timelineGeneration }, loadPage: {
+            guard store.searchTargetEventID == eventID else { return .failed }
+            return await store.loadOlderPageForSearch()
+        }, placeMatch: { await placeRoutedMatch($0) })
         guard answer.phase != .found, !Task.isCancelled, store.searchTargetEventID == eventID else { return }
         routeFocusFailed += 1
         store.searchTargetEventID = nil
+        updateBottomVisible()
+    }
+
+    /// The walk waits for a layout-confirmed placement. A replaced projection
+    /// releases the waiter so the same walk can find the reply again.
+    private func placeRoutedMatch(_ match: ChatHistorySearch.RoutedMatch) async -> Bool {
+        guard !Task.isCancelled, store.searchTargetEventID == match.eventID,
+              match.isCurrent(in: routedSearchSnapshot), showSearchMatch(match.rowID) else { return false }
+        let (result, completion) = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let generation = scratch.searchGeneration
+        scratch.routedPlacement = (match, completion)
+        routedHighlightRowID = match.rowID
+        var iterator = result.makeAsyncIterator()
+        let placed = await iterator.next() == true
+        // AsyncStream also unblocks when SwiftUI cancels the route task.
+        if generation == scratch.searchGeneration, scratch.routedPlacement != nil {
+            stopSearchPlacement()
+        }
+        return placed
     }
 
     /// The person asked for this match, so the chat leaves the bottom first
@@ -579,8 +600,10 @@ struct TranscriptView: View {
     /// measured top. Keep that row as the anchor after the first successful
     /// placement too: a page's remaining layout can arrive afterwards. A
     /// drag, jump, new query or closing search ends it.
-    private func showSearchMatch(_ rowID: String) {
-        guard store.snapshot.rows.contains(where: { $0.id == rowID }) else { return }
+    @discardableResult
+    private func showSearchMatch(_ rowID: String) -> Bool {
+        stopSearchPlacement()
+        guard store.snapshot.rows.contains(where: { $0.id == rowID }) else { return false }
         let geometry = scratch.geometry
         store.handle(.geometry(distanceFromBottom: max(geometry.distanceFromBottom, FollowPolicy.nearBottomPoints + 1),
                                distanceFromTop: geometry.distanceFromTop,
@@ -588,10 +611,10 @@ struct TranscriptView: View {
         syncFollowState()
         scratch.pendingHold = nil
         scratch.anchor = nil
-        stopSearchPlacement()
         scratch.searchRowID = rowID
         recordSearchPlacement("request")
         scheduleSearchPlacement()
+        return true
     }
 
     private func stopSearchPlacement() {
@@ -601,6 +624,11 @@ struct TranscriptView: View {
         scratch.searchAttempts = 0
         scratch.searchHasScrolled = false
         scratch.searchTickScheduled = false
+        let completion = scratch.routedPlacement?.completion
+        scratch.routedPlacement = nil
+        routedHighlightRowID = nil
+        completion?.finish()
+        updateBottomVisible()
     }
 
     /// Coalesce layout and scroll callbacks. Missing row geometry waits for
@@ -618,12 +646,21 @@ struct TranscriptView: View {
 
     private func placeSearchMatch(_ rowID: String, generation: UInt64) {
         guard generation == scratch.searchGeneration else { return }
+        if let placement = scratch.routedPlacement {
+            let match = placement.match
+            guard store.searchTargetEventID == match.eventID, match.isCurrent(in: routedSearchSnapshot) else {
+                stopSearchPlacement()
+                return
+            }
+        }
+        // The route task can see the row before the scroll view has appeared.
+        guard scratch.isOnScreen else { return }
         let isSearchMatch = search?.isOpen == true && search?.focus?.rowID == rowID
-        guard scratch.isOnScreen, scratch.motion != .user,
-              isSearchMatch || routedMatchRowID == rowID else {
+        guard scratch.motion != .user, isSearchMatch || routedHighlightRowID == rowID else {
             stopSearchPlacement()
             return
         }
+        guard scratch.rowOrder.contains(rowID) else { return }
         let geometry = scratch.geometry
         if let minY = scratch.rowMinY[rowID], geometry.viewportHeight > 0,
            geometry.contentHeight >= minY {
@@ -647,6 +684,12 @@ struct TranscriptView: View {
                                        distanceFromTop: geometry.distanceFromTop,
                                        viewportHeight: geometry.viewportHeight, motion: scratch.motion))
                 syncFollowState()
+                if let placement = scratch.routedPlacement {
+                    scratch.routedPlacement = nil
+                    store.searchTargetEventID = nil
+                    placement.completion.yield(true)
+                    placement.completion.finish()
+                }
                 updateBottomVisible()
                 return
             }
@@ -807,6 +850,7 @@ private final class TranscriptScratch {
     /// HC-6: the explicitly requested match owns the anchor until cancelled.
     var placingSearchMatch: Bool { searchRowID != nil }
     var searchRowID: String?
+    var routedPlacement: (match: ChatHistorySearch.RoutedMatch, completion: AsyncStream<Bool>.Continuation)?
     var searchAttempts = 0
     var searchHasScrolled = false
     var searchTickScheduled = false

@@ -172,7 +172,10 @@ final class ChatSearchTests: XCTestCase {
                 snapshot.rows = self.rows([newReply, recent])
                 return .loaded(hasMore: true)
             }
-        }, onFound: { focused.append($0) })
+        }, placeMatch: {
+            focused.append($0.rowID)
+            return true
+        })
         XCTAssertEqual(result.phase, .found)
         XCTAssertEqual(result.pages, 3)
         XCTAssertEqual(focused, [newReply.id])
@@ -208,10 +211,76 @@ final class ChatSearchTests: XCTestCase {
             _ = core.attached(now: now)
             _ = core.receive(projection, now: now)
             return .loaded(hasMore: true)
-        }, onFound: { focused = $0 })
+        }, placeMatch: {
+            focused = $0.rowID
+            return true
+        })
         XCTAssertEqual(result.phase, .found)
         XCTAssertEqual(result.pages, 2)
         XCTAssertEqual(focused, reply.id)
+    }
+
+    @MainActor
+    func testRoutedSearchIgnoresEndOfHistoryWhenBindingChangesDuringTheGracePeriod() async {
+        let recent = F.text("recent", from: F.agent, "launch")
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var snapshot = Snapshot(rows: rows([recent]), change: .reset, generation: 1)
+        var timelineGeneration: UInt64 = 1
+        var calls = 0
+        var refresh: Task<Void, Never>?
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot },
+                                                  timelineGeneration: { timelineGeneration }, loadPage: {
+            calls += 1
+            if calls == 1 {
+                // Reattach after the old final page returns and the walk yields.
+                refresh = Task { @MainActor in
+                    timelineGeneration = 2
+                }
+                return .loaded(hasMore: false)
+            }
+            XCTAssertEqual(timelineGeneration, 2)
+            XCTAssertEqual(snapshot.generation, 1, "the replacement need not have projected yet")
+            snapshot = Snapshot(rows: self.rows([reply, recent]), change: .reset, generation: 2)
+            return .loaded(hasMore: true)
+        })
+        await refresh?.value
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2)
+        XCTAssertEqual(calls, 2)
+    }
+
+    @MainActor
+    func testRoutedSearchResumesWhenTheReplyDisappearsBeforePlacement() async {
+        let recent = F.text("recent", from: F.agent, "launch")
+        let oldReply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var newReply = oldReply
+        newReply.id = "replacement-reply"
+        var snapshot = Snapshot(rows: rows([recent]), change: .reset, generation: 1)
+        var calls = 0
+        var attempted = [String]()
+        var selectedEvent: String? = "$reply"
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot }, loadPage: {
+            calls += 1
+            XCTAssertEqual(selectedEvent, "$reply", "discovery and a failed placement leave the route pending")
+            snapshot.rows = self.rows([calls == 1 ? oldReply : newReply, recent])
+            return .loaded(hasMore: true)
+        }, placeMatch: { match in
+            attempted.append(match.rowID)
+            XCTAssertEqual(selectedEvent, match.eventID)
+            if match.rowID == oldReply.id {
+                // The view sees the row, then loses it before layout places it.
+                XCTAssertTrue(match.isCurrent(in: snapshot))
+                await Task.yield()
+                snapshot = Snapshot(rows: self.rows([recent]), change: .reset, generation: 2)
+            }
+            guard match.isCurrent(in: snapshot) else { return false }
+            selectedEvent = nil
+            return true
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2, "placement retry shares the original walk's page count")
+        XCTAssertEqual(attempted, [oldReply.id, newReply.id])
+        XCTAssertNil(selectedEvent)
     }
 
     @MainActor
