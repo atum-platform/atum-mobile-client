@@ -40,19 +40,20 @@ struct AppOnboardingSheet: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.atum) private var atum
     @State private var termsPage: AppContentPage?
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: kit.space(.s4)) {
                     AppBotAvatar(app: presentation.app, size: 64)
                     Text(verbatim: presentation.app.name)
                         .font(.title3.weight(.semibold))
                     content
                 }
                 .frame(maxWidth: 440)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 28)
+                .padding(.horizontal, kit.space(.s6))
+                .padding(.vertical, kit.space(.s6))
                 .frame(maxWidth: .infinity)
             }
             .background(design.color("ground", scheme: scheme).ignoresSafeArea())
@@ -126,14 +127,14 @@ struct AppOnboardingSheet: View {
     }
 
     @ViewBuilder private func intake(_ fields: [AppIntakeStatus.FieldSpec]) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: kit.space(.s4)) {
             Text(copy("desktop.dm.intake.title", [.text(presentation.app.name)]))
                 .font(.headline)
             Text(copy("desktop.dm.intake.description"))
                 .font(.subheadline)
                 .foregroundStyle(design.color("soft", scheme: scheme))
             ForEach(fields) { field in
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: kit.space(.s2)) {
                     let label = presentation.copy.fieldLabels[field.name]
                         ?? AppOnboardingCopy.readableName(field.name)
                     Text(verbatim: label).font(.subheadline.weight(.medium))

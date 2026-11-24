@@ -35,10 +35,11 @@ struct AppBotHero: View {
     let app: AppBotPresentation
     let design: LiveDesign
     @Environment(\.colorScheme) private var scheme
+    private var kit: AtumKit { design.kit }
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: kit.space(.s2)) {
             AppBotAvatar(app: app, size: 72)
             AppNameWithSeal(tier: app.verification) {
                 Text(verbatim: app.name)
@@ -53,7 +54,7 @@ struct AppBotHero: View {
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             }
         }
-        .padding(.horizontal, 32)
+        .padding(.horizontal, kit.space(.s8))
         .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier(AccessibilityID.appBotHero)
@@ -66,9 +67,10 @@ struct AppBotRoomOpeningView: View {
     let retry: () -> Void
     @Environment(\.atum) private var atum
     @Environment(\.colorScheme) private var scheme
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: kit.space(.s4)) {
             Spacer()
             AppBotHero(app: opening.app, design: design)
             switch opening.phase {
@@ -76,7 +78,7 @@ struct AppBotRoomOpeningView: View {
                 AtomWait()
                     .frame(width: 24, height: 24)
                     .foregroundStyle(design.color("muted", scheme: scheme))
-                    .padding(.top, 8)
+                    .padding(.top, kit.space(.s2))
                     .accessibilityHidden(true)
             case .failed:
                 Text(ChatCopy.text(design, .appBotRoomFailed, [.text(opening.app.name)]))
@@ -99,7 +101,7 @@ struct AppBotRoomOpeningView: View {
             }
             Spacer()
         }
-        .padding(24)
+        .padding(kit.space(.s6))
         .background(design.color("ground", scheme: scheme).ignoresSafeArea())
     }
 }
@@ -110,10 +112,11 @@ struct ContinueOnMacSheet: View {
     let dismiss: () -> Void
     @Environment(\.atum) private var atum
     @Environment(\.colorScheme) private var scheme
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
+            VStack(spacing: kit.space(.s4)) {
                 AppBotAvatar(app: request.app, size: 56)
                 Text(copy(.appBotContinueTitle))
                     .font(.headline)
@@ -129,9 +132,9 @@ struct ContinueOnMacSheet: View {
                         .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 28)
-            .padding(.bottom, 16)
+            .padding(.horizontal, kit.space(.s6))
+            .padding(.top, kit.space(.s6))
+            .padding(.bottom, kit.space(.s4))
         }
         .presentationDragIndicator(.visible)
         .presentationSizing(.fitted)

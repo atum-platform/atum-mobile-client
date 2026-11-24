@@ -66,6 +66,7 @@ screen's look.
 | Drive | `DriveScreen`, `DriveGalleryView` | 40 → 0 |
 | Account | `AccountProfileHeader`, `AccountScreen`, `AccountSettingsDetail`, `DeleteAccountRequestSheet`, `IgnoredPeopleList`, `LegalScreens`, `PhoneApprovalSettings` | 56 → 0 |
 | Recovery | `RecoverySheets` | 15 → 0 |
+| AppBots | `AppBotViews`, `AppOnboardingViews` | 14 → 0 |
 
 ## Verification
 
