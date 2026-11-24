@@ -91,6 +91,22 @@ final class OIDCTests: XCTestCase {
         XCTAssertThrowsError(try controller.install(now: Date(timeIntervalSince1970: 100))) // Cannot reinstall stale credentials.
     }
 
+    /// A poll's bearer (W4-E6): the stored token while it stays valid, nil
+    /// once a refresh would be due, and never a spend or journal write.
+    @MainActor func testStoredTokenWithoutRefreshNeverSpends() throws {
+        let store = MemoryGrantStore(), grant = try initialGrant(), generation = UUID()
+        let controller = try OIDCGrantRefresh(store: store, metadata: metadata(), grant: grant, generation: generation, kind: .domain, clients: clients())
+        try controller.install(now: Date(timeIntervalSince1970: 100))
+        let expiry = try XCTUnwrap(store.record?.expiresAt)
+        XCTAssertEqual(controller.storedAccessTokenWithoutRefresh(now: expiry.addingTimeInterval(-10), minimumValidity: 5),
+                       store.record?.accessToken)
+        XCTAssertNil(controller.storedAccessTokenWithoutRefresh(now: expiry.addingTimeInterval(-10), minimumValidity: 60),
+                     "a token too close to expiry needs a refresh, which a poll never starts")
+        XCTAssertNil(controller.storedAccessTokenWithoutRefresh(now: expiry, minimumValidity: 0))
+        XCTAssertEqual(store.phases, [.ready], "no spending journal was written")
+        XCTAssertEqual(store.record?.phase, .ready)
+    }
+
     @MainActor func testRefreshPreflightFailureDoesNotJournalOrSpendTheReadyGrant() async throws {
         let store = MemoryGrantStore(), grant = try initialGrant(), generation = UUID()
         let controller = try OIDCGrantRefresh(

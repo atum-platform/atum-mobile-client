@@ -722,7 +722,8 @@ struct ScriptedChatHost: View {
                     scriptedTrainingConfirmed = true
                     return .confirmed(ChatGPTTrainingStatus(current: true, connectionID: connectionID,
                                                             confirmedAt: Self.trainingConfirmedAt, revision: 1))
-                }))
+                }),
+            makeConnectionsPoll: { { Self.scriptedAccountConnections } })
     }
 
     /// `-AtumScriptedTraining required`: the account has no current
@@ -776,8 +777,36 @@ struct ScriptedChatHost: View {
             chatGPT: try! NativeAPI.decode(ChatGPTRelayStatus.self,
                                            from: JSONSerialization.data(withJSONObject: relay)),
             openCodeGo: try! NativeAPI.decode(ProviderConnectionsStatus.self,
-                                              from: JSONSerialization.data(withJSONObject: connections)))
+                                              from: JSONSerialization.data(withJSONObject: connections)),
+            accountConnections: scriptedAccountConnections)
     }
+
+    /// `-AtumScriptedConnections plans`: the account registry the picker's
+    /// Connect entries read (W4-E6), decoded from its wire shape: ChatGPT on a
+    /// Mac, Claude and Antigravity connected nowhere. Without the flag the
+    /// picker has no registry and offers no Connect entry. Synthetic data.
+    static let connectionsFlag = "-AtumScriptedConnections"
+    private static let scriptedAccountConnections: AccountConnections? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: connectionsFlag), index + 1 < arguments.count,
+              arguments[index + 1] == "plans" else { return nil }
+        let reach: [String: Any] = ["chat": "relay", "work": "native", "agents": "all"]
+        let none: [String: Any] = ["chat": "none", "work": "none", "agents": "all"]
+        func plan(_ id: String, connected: Bool) -> [String: Any] {
+            ["id": id, "kind": "plan", "provider": id, "custody": "device",
+             "status": connected ? "connected" : "not_connected",
+             "devices": connected ? [["deviceServiceId": "14600000-0000-4000-8000-0000000000d1",
+                                      "displayName": "MacBook Pro", "status": "connected",
+                                      "observedAt": 1_760_000_000_000]] : [],
+             "models": connected ? [["id": "gpt-6.1", "displayName": "GPT-6.1"]] : [],
+             "reach": connected ? reach : none]
+        }
+        let value: [String: Any] = ["profile": "atum.account-connections/1",
+                                    "connections": [plan("codex", connected: true),
+                                                    plan("claude", connected: false),
+                                                    plan("antigravity", connected: false)]]
+        return try! NativeAPI.decode(AccountConnections.self, from: JSONSerialization.data(withJSONObject: value))
+    }()
 
     private static func presentation(title: String? = nil,
                                      mark: AgentMark = AgentMark(shape: .spark, color: .violet),

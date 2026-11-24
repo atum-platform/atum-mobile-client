@@ -18,10 +18,15 @@ import Foundation
 public struct PhoneSubscriptionAccount: Equatable, Sendable {
     public let chatGPT: ChatGPTRelayStatus?
     public let openCodeGo: ProviderConnectionsStatus?
+    /// The account's plans and where they run (`atum.account-connections/1`),
+    /// for the picker's Connect entries. nil: not read, or unreadable.
+    public let accountConnections: AccountConnections?
 
-    public init(chatGPT: ChatGPTRelayStatus?, openCodeGo: ProviderConnectionsStatus?) {
+    public init(chatGPT: ChatGPTRelayStatus?, openCodeGo: ProviderConnectionsStatus?,
+                accountConnections: AccountConnections? = nil) {
         self.chatGPT = chatGPT
         self.openCodeGo = openCodeGo
+        self.accountConnections = accountConnections
     }
 }
 

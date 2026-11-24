@@ -54,6 +54,7 @@ struct AccountSettingsDetail: View {
     @State private var deviceSignOutPending = false
     @State private var deviceSignOutFailed = false
     @State private var showsPhoneApprovals = false
+    @State private var connectionsModel = AccountConnectionsModel()
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
@@ -103,10 +104,19 @@ struct AccountSettingsDetail: View {
         }
         .task(id: section.page) {
             if section.page == .account { await reloadDevices() }
+            if section.page == .connections { await reloadConnections() }
         }
         .onChange(of: scenePhase) { _, phase in
             // Back from the browser page that signed a device out.
             if phase == .active, section.page == .account { Task { await reloadDevices() } }
+            // Back from the Mac, as the desktop re-reads on focus.
+            if phase == .active, section.page == .connections { Task { await reloadConnections() } }
+        }
+        .sheet(item: $connectionsModel.connecting) { request in
+            if let connections = actions.accountConnections {
+                AccountPlanConnectSheet(design: design, plan: request.plan, makePoll: connections.makePoll,
+                                        onLanded: connectionsModel.landed)
+            }
         }
         .accessibilityIdentifier("account.settings." + section.page.rawValue)
     }
@@ -552,19 +562,29 @@ struct AccountSettingsDetail: View {
 
     // MARK: Connections
 
-    /// Desktop's Connections: the account's subscription first, then Google
-    /// and the apps used in your chats. Browser logins read Chrome on a Mac
-    /// and stay there. Each row says "Not available yet" until its phone
-    /// adapter exists (plan v2 AC-5, wave 3 S8).
+    private func reloadConnections() async {
+        guard let connections = actions.accountConnections else { return }
+        await connectionsModel.reload(connections.read)
+    }
+
+    /// Desktop's Connections (#106): every plan and the OpenCode Go key, the
+    /// data and tools every assistant has, then Google and the apps used in
+    /// your chats. Work on this Mac, browser logins and this Mac's switch are
+    /// the Mac's own and stay there. Without the account read wired, the
+    /// subscription row says "Not available yet" (plan v2 AC-5, wave 3 S8).
     @ViewBuilder private var connectionsContent: some View {
-        Section {
-            helpRow(glyph: .sparkles,
-                    title: text(.yourSubscription),
-                    help: text(.subscriptionHelp),
-                    value: text(.notAvailableYet),
-                    identifier: "account.settings.connections.subscription")
-        } header: {
-            Text(copy("src.matrix.model-picker-copy.COPY.subscriptions"))
+        if let connections = actions.accountConnections {
+            AccountConnectionsSections(design: design, actions: connections, model: connectionsModel)
+        } else {
+            Section {
+                helpRow(glyph: .sparkles,
+                        title: text(.yourSubscription),
+                        help: text(.subscriptionHelp),
+                        value: text(.notAvailableYet),
+                        identifier: "account.settings.connections.subscription")
+            } header: {
+                Text(copy("src.matrix.model-picker-copy.COPY.subscriptions"))
+            }
         }
 
         Section {

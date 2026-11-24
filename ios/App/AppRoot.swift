@@ -653,7 +653,9 @@ struct AppRoot: View {
             setIgnored: { await model.setIgnored(userID: $0, ignored: $1) },
             loadDevices: { await model.ownDevices() },
             deviceSignOutURL: { await model.deviceSignOutURL(deviceID: $0) },
-            phoneApprovals: model.phoneApprovals
+            phoneApprovals: model.phoneApprovals,
+            accountConnections: AccountConnectionsActions(read: { await model.accountConnections() },
+                                                          makePoll: { model.accountConnectionsPoller() })
         )
     }
 
