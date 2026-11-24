@@ -22,9 +22,12 @@ import Observation
 @Observable
 final class AgentDeskModel {
     enum Problem: Equatable { case failed, stopped }
+    private enum ScheduleState { case confirmed, unconfirmed, refreshAvailable }
 
     private(set) var jobs: [HostAgentDesk.Job]?
     private(set) var problem: Problem?
+    /// Nothing is confirmed until a host read lands, so a failed entry read also offers Refresh.
+    private var scheduleState: ScheduleState = .unconfirmed
     /// A control is on its way to the host: every schedule switch waits.
     private(set) var controlPending = false
     /// The folder whose listing is shown (nil: the agent's home).
@@ -51,6 +54,8 @@ final class AgentDeskModel {
     }
 
     var canControl: Bool { actions.control != nil && !(jobs ?? []).isEmpty }
+    var controlsDisabled: Bool { controlPending || scheduleState != .confirmed }
+    var canRefreshSchedule: Bool { scheduleState == .refreshAvailable && actions.schedule != nil }
 
     /// Desktop shows its own files only while the folder has rows or is a subfolder.
     var shownOwnView: HostAgentDesk.Files? {
@@ -63,7 +68,7 @@ final class AgentDeskModel {
     func appear() {
         guard !started else { return }
         started = true
-        scheduleTask = Task { [weak self] in await self?.readSchedule() }
+        startScheduleRead()
         load(ownPath)
     }
 
@@ -79,6 +84,7 @@ final class AgentDeskModel {
             controlTask.cancel()
             self.controlTask = nil
             controlPending = false
+            scheduleState = .unconfirmed
         }
     }
 
@@ -137,14 +143,32 @@ final class AgentDeskModel {
 
     // MARK: Schedule
 
+    func refreshSchedule() {
+        guard started, canRefreshSchedule else { return }
+        startScheduleRead(manual: true)
+    }
+
+    private func startScheduleRead(manual: Bool = false) {
+        if scheduleState == .refreshAvailable { scheduleState = .unconfirmed }
+        scheduleTask = Task { [weak self] in await self?.readSchedule(clearingProblem: manual) }
+    }
+
     /// An entry or reconciliation read can land inside the host's cooldown.
-    private func readSchedule() async {
+    /// A manual Refresh shows the host's schedule as the answer, so it clears the earlier failure.
+    private func readSchedule(clearingProblem: Bool = false) async {
         guard let read = actions.schedule else { return }
+        defer {
+            if !Task.isCancelled, scheduleState == .unconfirmed {
+                scheduleState = .refreshAvailable
+            }
+        }
         for attempt in 0...1 {
             guard !Task.isCancelled else { return }
             do {
                 guard let schedule = try await read(), !Task.isCancelled else { return }
                 jobs = schedule.jobs
+                scheduleState = .confirmed
+                if clearingProblem { problem = nil }
                 return
             } catch is HostAgentDesk.ReadBusy where attempt == 0 {
                 do { try await Task.sleep(for: readRetryDelay) } catch { return }
@@ -157,7 +181,7 @@ final class AgentDeskModel {
     /// Optimistic: the switch moves at once and rolls back if the host refuses
     /// or changes nothing; a busy reply (the shared cooldown) is retried once.
     func run(_ control: HostAgentDesk.Control) {
-        guard !controlPending, let send = actions.control, let before = jobs else { return }
+        guard !controlsDisabled, let send = actions.control, let before = jobs else { return }
         // An entry read from a previous schedule must not overwrite this control.
         scheduleTask?.cancel()
         problem = nil
@@ -178,10 +202,14 @@ final class AgentDeskModel {
                     self.undo(control, before)
                     self.problem = .stopped
                 case .rollBackFailed:
-                    self.undo(control, before)
                     self.problem = .failed
                     // It may have reached the host: the host's schedule decides.
-                    if outcome == .failed { await self.readSchedule() }
+                    if outcome == .failed {
+                        self.scheduleState = .unconfirmed
+                        await self.readSchedule()
+                    } else {
+                        self.undo(control, before)
+                    }
                 case .retryAfterCooldown:
                     retried = true
                     do { try await Task.sleep(for: self.controlRetryDelay) } catch { return }

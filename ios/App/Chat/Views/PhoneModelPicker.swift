@@ -1,6 +1,7 @@
 import AtumChat
 import AtumDesign
 import AtumNativeAPI
+import Observation
 import SwiftUI
 
 /// The cloud's subscription models: the account status the desktop reads for a
@@ -8,7 +9,7 @@ import SwiftUI
 /// it sends (`chooseRoute`, `model-picker.tsx`). No credential, device name or
 /// sign-in crosses: connecting a plan stays where the desktop does it.
 struct AssistantSubscriptionActions {
-    let read: () async -> PhoneSubscriptionAccount
+    let read: @MainActor () async -> PhoneSubscriptionAccount
     /// The consent decision is what a ChatGPT write is made
     /// under (nil for any other plan); the save re-checks it before an
     /// automatic retry and after a refusal. The selection must remain live for each send.
@@ -22,6 +23,40 @@ struct AssistantSubscriptionActions {
     /// to that account session; it never rotates the grant. Nil: the sheet
     /// does not follow the read.
     var makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
+}
+
+/// Orders subscription reads and Connect sheet landings for one picker.
+/// A newer read (or retirement) drops an older read whole. A landing only
+/// supersedes the registry: the read's ChatGPT and OpenCode Go statuses come
+/// from independent endpoints and still apply, so a plan disconnected
+/// elsewhere stops being offered even if a sheet landed meanwhile.
+@MainActor @Observable
+final class PhoneModelPickerAccount {
+    private(set) var value: PhoneSubscriptionAccount?
+    @ObservationIgnored private var readGeneration = 0
+    @ObservationIgnored private var registryGeneration = 0
+
+    func reload(_ read: @MainActor () async -> PhoneSubscriptionAccount) async {
+        readGeneration += 1
+        let mine = readGeneration
+        let registryMine = registryGeneration
+        let answer = await read()
+        guard !Task.isCancelled, mine == readGeneration else { return }
+        let registry = registryMine == registryGeneration ? answer.accountConnections : value?.accountConnections
+        value = PhoneSubscriptionAccount(chatGPT: answer.chatGPT, openCodeGo: answer.openCodeGo,
+                                         accountConnections: registry)
+    }
+
+    func landed(_ registry: AccountConnections) {
+        registryGeneration += 1
+        value = PhoneSubscriptionAccount(chatGPT: value?.chatGPT, openCodeGo: value?.openCodeGo,
+                                         accountConnections: registry)
+    }
+
+    func retire() {
+        readGeneration += 1
+        registryGeneration += 1
+    }
 }
 
 /// One subscription pick, for an idempotent retry of the same write.
@@ -69,7 +104,8 @@ struct PhoneConversationModelPicker: View {
     @State private var writes = ModelWriteRequests<ConversationModelWrite>()
     @State private var destinationWrites = ModelWriteRequests<ConversationDestinationWrite>()
     /// What the account's subscriptions can run in the cloud now; nil until read.
-    @State private var account: PhoneSubscriptionAccount?
+    @State private var accountState = PhoneModelPickerAccount()
+    private var account: PhoneSubscriptionAccount? { accountState.value }
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
     /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
     @State private var confirming: PendingChatGPTTraining?
@@ -149,7 +185,7 @@ struct PhoneConversationModelPicker: View {
                     selectEffort: chooseEffort,
                     planConnects: PhoneModelPickerList.planConnects(account),
                     makeConnectionsPoll: destinations?.subscriptions?.makeConnectionsPoll,
-                    onConnectionsChanged: { account = PhoneModelPickerList.account(account, with: $0) },
+                    onConnectionsChanged: accountState.landed,
                     select: choose
                 )
             } else if unavailable {
@@ -180,9 +216,7 @@ struct PhoneConversationModelPicker: View {
         guard let token = lifetime.beginLoad() else { return }
         defer { lifetime.endLoad(token) }
         if accountOnly, let read = destinations?.subscriptions?.read {
-            let subscriptionAccount = await read()
-            guard !Task.isCancelled, lifetime.isCurrentLoad(token) else { return }
-            account = subscriptionAccount
+            await accountState.reload(read)
             return
         }
         unavailable = false
@@ -190,10 +224,9 @@ struct PhoneConversationModelPicker: View {
         let offer: AssistantModelLoadResult? = if let actions { await actions.read() } else { nil }
         let defaults: AssistantModelDestinationLoadResult? =
             if let destinations { await destinations.read() } else { nil }
-        let subscriptionAccount: PhoneSubscriptionAccount? =
-            if let read = destinations?.subscriptions?.read { await read() } else { nil }
         guard !Task.isCancelled, lifetime.isCurrentLoad(token) else { return }
-        if let subscriptionAccount { account = subscriptionAccount }
+        if let read = destinations?.subscriptions?.read { await accountState.reload(read) }
+        guard !Task.isCancelled, lifetime.isCurrentLoad(token) else { return }
 
         var anyValue = false
         if let offer {
@@ -348,6 +381,7 @@ struct PhoneConversationModelPicker: View {
     /// follow-up or a write after this.
     private func retire() {
         lifetime.retire()
+        accountState.retire()
         confirming = nil
         savingRowID = nil
     }
@@ -395,7 +429,7 @@ struct PhoneConversationModelPicker: View {
                 }
                 saveFailed = true
                 // A relay that went down or a disconnected plan shows as such now.
-                if let read = destinations?.subscriptions?.read { account = await read() }
+                if let read = destinations?.subscriptions?.read { await accountState.reload(read) }
             }
         }
     }
@@ -515,7 +549,8 @@ private struct PhoneDestinationModelPicker: View {
     @State private var savingRowID: String?
     @State private var saveFailed = false
     @State private var writes = ModelWriteRequests<DestinationModelWrite>()
-    @State private var account: PhoneSubscriptionAccount?
+    @State private var accountState = PhoneModelPickerAccount()
+    private var account: PhoneSubscriptionAccount? { accountState.value }
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
     /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
     @State private var confirming: PendingChatGPTTraining?
@@ -552,13 +587,13 @@ private struct PhoneDestinationModelPicker: View {
                     saveFailed: saveFailed,
                     planConnects: destination.isCloud ? PhoneModelPickerList.planConnects(account) : [],
                     makeConnectionsPoll: actions.subscriptions?.makeConnectionsPoll,
-                    onConnectionsChanged: { account = PhoneModelPickerList.account(account, with: $0) },
+                    onConnectionsChanged: accountState.landed,
                     select: choose
                 )
             }
         }
         .task {
-            if let read = actions.subscriptions?.read { account = await read() }
+            if let read = actions.subscriptions?.read { await accountState.reload(read) }
         }
     }
 
@@ -652,6 +687,7 @@ private struct PhoneDestinationModelPicker: View {
 
     private func retire() {
         lifetime.retire()
+        accountState.retire()
         confirming = nil
         savingRowID = nil
     }
@@ -698,7 +734,7 @@ private struct PhoneDestinationModelPicker: View {
                     onValue(value)
                 }
                 saveFailed = true
-                if let read = actions.subscriptions?.read { account = await read() }
+                if let read = actions.subscriptions?.read { await accountState.reload(read) }
             }
         }
     }

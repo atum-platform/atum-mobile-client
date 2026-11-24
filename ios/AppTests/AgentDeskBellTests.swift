@@ -26,11 +26,11 @@ final class AgentDeskBellTests: XCTestCase {
 
     func testEveryDeskWordIsInThePinForEveryLocale() throws {
         let pin = try AtumCopy()
-        for name in deskKeys {
-            let key = AgentDeskCopy.key(name)
+        let keys = deskKeys.map { (AgentDeskCopy.key($0), arguments($0)) } + [(AgentDeskCopy.refresh, [])]
+        for (key, arguments) in keys {
             XCTAssertTrue(pin.contains(key), key)
             for locale in pin.locales {
-                let value = try pin.text(key, locale: locale, arguments: arguments(name))
+                let value = try pin.text(key, locale: locale, arguments: arguments)
                 XCTAssertFalse(value.isEmpty, "\(key) \(locale)")
             }
         }
@@ -259,7 +259,7 @@ final class AgentDeskBellTests: XCTestCase {
         await until({ host.gate != nil }, "A was not sent")
         XCTAssertEqual(host.controls, [.routineOff(job: "a")])
         XCTAssertEqual(model.jobs?.map(\.state), [.paused, .scheduled])
-        // A fails ambiguously: it is undone, and the host's own schedule is read again.
+        // A fails ambiguously, and the host's schedule confirms its original state.
         host.gate?.resume()
         await until({ !model.controlPending }, "A never settled")
         XCTAssertEqual(model.problem, .failed)
@@ -287,6 +287,59 @@ final class AgentDeskBellTests: XCTestCase {
     }
 
     @MainActor
+    func testFailedPauseKeepsControlsDisabledUntilAManualRefreshConfirmsTheSchedule() async {
+        let host = Host()
+        host.outcomes = [.failed]
+        let model = AgentDeskModel(actions: host.actions(), readRetryDelay: .milliseconds(200))
+        model.appear()
+        defer { model.disappear() }
+        await until({ model.canControl }, "the initial schedule did not load")
+
+        host.schedule = HostAgentDesk.Schedule(jobs: [
+            .init(id: "a", name: "A", state: .paused, pausedReason: "owner_pause"),
+            .init(id: "b", name: "B", state: .paused, pausedReason: "owner_pause")])
+        host.busyScheduleReads = 2
+        model.run(.pause)
+        await until({ host.scheduleReads >= 2 }, "the failed Pause never reconciled")
+        XCTAssertTrue(model.controlsDisabled)
+        XCTAssertTrue(HostAgentDesk.isPaused(model.jobs), "the busy read must not restore the pre-Pause values")
+
+        await until({ model.canRefreshSchedule }, "refresh was not offered after the retry")
+        XCTAssertEqual(host.scheduleReads, 3)
+        XCTAssertFalse(model.controlPending)
+        XCTAssertTrue(model.controlsDisabled)
+        model.run(.resume)
+        model.refreshSchedule()
+        model.refreshSchedule()
+        XCTAssertTrue(model.controlsDisabled)
+        XCTAssertFalse(model.canRefreshSchedule)
+
+        await until({ !model.controlsDisabled }, "the confirmed schedule did not restore the switches")
+        XCTAssertEqual(model.jobs, host.schedule.jobs)
+        XCTAssertFalse(model.canRefreshSchedule)
+        XCTAssertEqual(host.scheduleReads, 4)
+        XCTAssertEqual(host.controls, [.pause])
+        XCTAssertNil(model.problem, "the confirmed schedule replaces the earlier failure")
+    }
+
+    @MainActor
+    func testFailedEntryReadOffersRefresh() async {
+        let host = Host()
+        host.busyScheduleReads = 2
+        let model = AgentDeskModel(actions: host.actions(), readRetryDelay: .milliseconds(50))
+        model.appear()
+        defer { model.disappear() }
+        await until({ model.canRefreshSchedule }, "refresh was not offered after the entry read failed")
+        XCTAssertFalse(model.canControl)
+        XCTAssertEqual(host.scheduleReads, 2)
+
+        model.refreshSchedule()
+        await until({ model.canControl && !model.controlsDisabled }, "refresh did not load the schedule")
+        XCTAssertEqual(model.jobs, host.schedule.jobs)
+        XCTAssertFalse(model.canRefreshSchedule)
+    }
+
+    @MainActor
     func testReopeningDuringTheScheduleCooldownRestoresControls() async throws {
         DeskScheduleProtocol.setReplies([
             (200, Self.scheduleReply(.scheduled)), (429, Data()), (429, Data()), (200, Self.scheduleReply(.paused)),
@@ -299,8 +352,10 @@ final class AgentDeskBellTests: XCTestCase {
         host.outcomes = [.failed]
         var actions = host.actions()
         let read = AgentDeskActions.liveSchedule(client: client, agent: agent, current: current)
+        var startedReads = 0
         var completedReads = 0
         actions.schedule = {
+            startedReads += 1
             defer { completedReads += 1 }
             return try await read()
         }
@@ -318,7 +373,9 @@ final class AgentDeskBellTests: XCTestCase {
         defer { reopened.disappear() }
         await until({ reopened.canControl }, "the reopened desk did not recover from its busy read")
         XCTAssertEqual(reopened.jobs?.map(\.state), [.paused])
-        XCTAssertEqual(completedReads, 4)
+        XCTAssertFalse(reopened.controlsDisabled)
+        try await Task.sleep(for: .milliseconds(1100))
+        XCTAssertEqual(startedReads, 4, "the closed desk sent another request after its retry delay")
         XCTAssertEqual(host.controls, [.routineOff(job: "a")])
     }
 
