@@ -37,7 +37,7 @@ public struct RowGrouping: Equatable, Hashable, Sendable {
     /// TL-4, desktop's run time (`src/matrix/app.tsx`, `runEnd`,
     /// `MatrixSendState`'s `time`): the clock sits in the quiet line under
     /// this bubble. Under the last bubble of every run (mine share the line
-    /// with Sent or Seen), and under every answer of my agent (desktop's
+    /// with readers' faces once seen), and under every answer of my agent (desktop's
     /// answer toolbar). Never on a message still sending, failed, or
     /// undecryptable, never on notices.
     public var showsTime: Bool

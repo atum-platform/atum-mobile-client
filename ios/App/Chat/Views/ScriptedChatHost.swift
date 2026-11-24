@@ -358,6 +358,7 @@ struct ScriptedChatHost: View {
                                     ? Self.scriptedTurnStop : nil,
                                 sharedCollections: ScriptedSharedCollectionsScope.opener(),
                                 appPanel: ScriptedAppPanel.actions(isAppChat: script.context.kind == .appBot),
+                                agentDesk: ScriptedAgentDesk.actions(scenario: script.name),
                                 // HC-7: Rename names a group for everyone (the
                                 // scripted admin may), a person chat privately.
                                 rename: script.context.kind == .person || script.context.kind == .group
@@ -880,6 +881,12 @@ enum UITestProbe {
     }()
     static let moonAnswerID = "\(ScriptedScenario.botMoonNotice.rawValue).answer"
 
+    /// U4b releases the chat.send receipt after XCTest observes the unread message.
+    static let sendReceiptRelease: URL? = {
+        guard ProcessInfo.processInfo.arguments.contains("-AtumScriptedHoldSendReceipt") else { return nil }
+        return folder?.appendingPathComponent("release-send-receipt")
+    }()
+
     /// `-AtumScriptedLateDetails`: the quotes of each older page arrive
     /// late, as the SDK delivers them (`ScriptedSourceProbe`).
     static let lateDetails = ProcessInfo.processInfo.arguments.contains("-AtumScriptedLateDetails")
@@ -937,8 +944,7 @@ actor ScriptedSourceProbe: ChatTimelineSource {
             relay = Task {
                 defer { continuation.finish() }
                 for await output in inner.outputs {
-                    if let release = UITestProbe.moonAnswerRelease, case let .batch(batch) = output,
-                       batch.diffs.contains(where: { $0.carriedItems.contains { $0.id == UITestProbe.moonAnswerID } }) {
+                    if let release = Self.releaseFile(for: output) {
                         while !FileManager.default.fileExists(atPath: release.path) {
                             do { try await Task.sleep(for: .milliseconds(100)) }
                             catch { return }
@@ -956,6 +962,27 @@ actor ScriptedSourceProbe: ChatTimelineSource {
             }
         }
         await inner.start()
+    }
+
+    private static func releaseFile(for output: ChatTimelineOutput) -> URL? {
+        guard case let .batch(batch) = output else { return nil }
+        if let release = UITestProbe.moonAnswerRelease,
+           batch.diffs.contains(where: { $0.carriedItems.contains { $0.id == UITestProbe.moonAnswerID } }) {
+            return release
+        }
+        if let release = UITestProbe.sendReceiptRelease,
+           batch.diffs.contains(where: { diff in
+               diff.carriedItems.contains {
+                   $0.id.hasPrefix("\(ScriptedScenario.chatSend.rawValue).send-")
+                       && $0.receiptUserIDs.contains(ScriptedCast.atum)
+               }
+           }) {
+            if !FileManager.default.fileExists(atPath: release.path) {
+                UITestProbe.append("send-receipt-held", to: "clock.txt")
+            }
+            return release
+        }
+        return nil
     }
 
     func stop() async {

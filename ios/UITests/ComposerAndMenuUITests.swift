@@ -2,7 +2,7 @@ import AtumChat
 import XCTest
 
 /// WS3's U proofs (revamp plan §5.2 S1 acceptance): U4 and U4b (instant send,
-/// the clock, Sent then Seen), U5 (a failed send: "Thử lại", "Xóa"), the
+/// the clock, unread then Seen), U5 (a failed send: "Thử lại", "Xóa"), the
 /// composer parts of U7 and U8, and `chat.actions` (the menu per room kind,
 /// reply and quote, reaction toggles), plus B11's people line and the B30
 /// glyph. Scripted scenarios only, synthetic data, Vietnamese.
@@ -309,17 +309,17 @@ final class ComposerUITests: WS3UITestCase {
     /// text and a clock; the field is empty, the keyboard stays, and more
     /// typing lands in the field. U4b, one read signal (desktop #89): once
     /// accepted the clock goes and nothing says "Đã gửi"; then "Đã xem" (the
-    /// reader's face) on the sent row itself (`chat.send` accepts after 1.5 s
-    /// and Atum's receipt lands about 2.65 s later, so neither state can be
-    /// missed).
+    /// reader's face) on the sent row itself after the test releases the receipt.
     @MainActor
-    func testU4SendIsInstantLiteralAndKeepsTheKeyboard() {
-        let app = launchChat(.chatSend)
+    func testU4SendIsInstantLiteralAndKeepsTheKeyboard() throws {
+        let receipt = ScriptedSendReceipt()
+        let app = launchChat(.chatSend, extra: receipt.arguments)
         let field = field(app)
         XCTAssertTrue(field.waitForExistence(timeout: Self.waitSeconds))
         XCTAssertFalse(element(app, AccessibilityID.composerSend).exists, "no send circle for an empty draft")
         field.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: Self.waitSeconds))
+        // The system keyboard took 12 s to appear after the tap on a loaded simulator.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 15), "the keyboard did not open")
         let text = "*hi* 1. a_b_"
         field.typeText(text)
         let send = element(app, AccessibilityID.composerSend)
@@ -354,21 +354,13 @@ final class ComposerUITests: WS3UITestCase {
         XCTAssertEqual(Self.text(of: field), "", "the draft cleared in the same frame")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "the keyboard stays")
 
-        // U4b, scoped to the sent bubble by its text in the transcript, not
-        // as `row.latest`: Atum's answer becomes the newest row about 7.6 s
-        // after the send, which a slow run reaches before Seen is checked.
-        // Once the server accepts it the clock goes and the bubble reads just
-        // its text and time, no "Đã gửi".
-        let sent = element(app, AccessibilityID.transcript)
-        XCTAssertTrue(settled(sent, text).waitForExistence(timeout: 4), "the clock goes once the server accepts it")
-        XCTAssertFalse(bubble(sent, text, reading: "Đã gửi").exists, "no Sent receipt (desktop #89)")
+        let transcript = element(app, AccessibilityID.transcript)
+        let message = receipt.assertUnread(in: transcript, text: text, sending: "Đang gửi", failed: "Chưa gửi được",
+                                           sent: "Đã gửi", seen: "Đã xem")
         keepScreenshot("U4b-1-unread", of: app)
         field.typeText("thêm")
         XCTAssertEqual(Self.text(of: field), "thêm", "focus kept: more typing lands in the field")
-        XCTAssertTrue(bubble(sent, text, reading: "Đã xem").waitForExistence(timeout: 15),
-                      "Seen once Atum's receipt lands")
-        XCTAssertTrue(sent.descendants(matching: .any)["delivery.seen"].exists, "the reader's face says Seen")
-        XCTAssertFalse(bubble(sent, text, reading: "Đã gửi").exists, "the faces are the only receipt")
+        try receipt.releaseAndAssertSeen(message, sent: "Đã gửi", seen: "Đã xem")
         keepScreenshot("U4b-2-seen", of: app)
     }
 

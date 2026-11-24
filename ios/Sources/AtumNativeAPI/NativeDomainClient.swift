@@ -28,6 +28,17 @@ public enum NativeDomainClientFailure: Error, Equatable, Sendable, CustomStringC
 
 /// One roster read plus the optional A38 acknowledgement. The ack echoes the
 /// zone this caller sent or is absent; it is never another owner's value.
+/// Rechecked right before a write's bytes go out, at the first send and at
+/// the resend after a 401 refresh: a token read or a forced refresh can take
+/// long enough for the caller's preconditions (open checkout, the signed-in
+/// account, the live client) to change. `false` sends nothing.
+public typealias NativeDispatchGate = @MainActor () -> Bool
+
+/// A dispatch gate said no: nothing was sent for this attempt.
+public struct NativeDispatchBlocked: Error, Equatable, Sendable {
+    public init() {}
+}
+
 public struct AgentsRead: Sendable {
     public let response: AgentsResponse
     public let timeZoneAck: String?
@@ -40,6 +51,7 @@ public struct AgentsRead: Sendable {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
     private static let scheduleStopOrigin = "https://api.atumplatform.com"
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
+    private static let openAgentCatalogURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents?catalog=open")!
     private static let agentLifecycleURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents/lifecycle")!
     private static let appsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/apps")!
     private static let officialAccountsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/official-accounts")!
@@ -65,8 +77,13 @@ public struct AgentsRead: Sendable {
     private static let chatGPTRelayURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/chatgpt-relay")!
     private static let providerConnectionsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/provider-connections")!
     private static let driveAccountURL = DriveContract.accountURL
+    /// The Shell's host routes for an agent's desk (W4-E3, desktop #51).
+    private static let hostDeskURL = URL(string: "https://api.atumplatform.com" + HostAgentDesk.deskPath)!
+    private static let hostControlURL = URL(string: "https://api.atumplatform.com" + HostAgentDesk.controlPath)!
 
     typealias Authorization = @MainActor @Sendable (_ forceRefresh: Bool) async throws -> String
+    /// Revalidates the live desk context on the main actor before each POST.
+    public typealias DeskSendCheck = @MainActor @Sendable () -> Bool
     public typealias AuthenticationFailureObserver = @MainActor @Sendable (any Error) -> Void
     private let authorization: Authorization
     private let authenticationFailureObserver: AuthenticationFailureObserver
@@ -203,6 +220,64 @@ public struct AgentsRead: Sendable {
         )
         do { return try CloudTurnStop.response(response.body, for: input) }
         catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    /// One agent's native schedule through the Shell's host desk route
+    /// (desktop `requestHostDesk`). Any status but a contract-exact 200 throws.
+    public func hostDeskSchedule(agent: NativeID, canSend: DeskSendCheck? = nil) async throws -> HostAgentDesk.Schedule {
+        let data = try await hostDesk(agent: agent, read: .schedule, canSend: canSend)
+        do { return try HostAgentDesk.schedule(data) }
+        catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    /// One folder of an agent's own files on its cloud computer: listing only.
+    /// The Shell's read admission (429) throws `HostAgentDesk.ReadBusy`.
+    public func hostDeskFiles(agent: NativeID, path: String?,
+                              canSend: DeskSendCheck? = nil) async throws -> HostAgentDesk.Files {
+        let data = try await hostDesk(agent: agent, read: .files(path: path), canSend: canSend)
+        do { return try HostAgentDesk.files(data, for: path) }
+        catch { throw NativeDomainClientFailure.invalidResponse }
+    }
+
+    private func hostDesk(agent: NativeID, read: HostAgentDesk.Read, canSend: DeskSendCheck?) async throws -> Data {
+        let body: Data
+        do { body = try HostAgentDesk.deskBody(agent: agent, read: read) }
+        catch { throw NativeDomainClientFailure.invalidRequest }
+        let response = try await performAuthorized(
+            url: Self.hostDeskURL, body: body,
+            extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion],
+            maximumResponseBodyBytes: HostAgentDesk.maximumDeskBytes, canSend: canSend)
+        if response.status == 429 { throw HostAgentDesk.ReadBusy() }
+        guard response.status == 200 else {
+            throw response.status >= 500 ? NativeDomainClientFailure.transportUnavailable
+                : NativeDomainClientFailure.invalidResponse
+        }
+        return response.body
+    }
+
+    /// Pause / Resume or one routine on or off (desktop `requestHostAgentControl`).
+    /// A stopped runtime (409) and the shared cooldown (429) are their own outcomes.
+    public func hostAgentControl(agent: NativeID, _ control: HostAgentDesk.Control,
+                                 canSend: DeskSendCheck? = nil) async -> HostAgentDesk.ControlOutcome {
+        guard let body = try? control.body(agent: agent) else { return .failed }
+        do {
+            let response = try await performAuthorized(
+                url: Self.hostControlURL, body: body,
+                extraHeaders: [HostAgentDesk.bridgeHeader: HostAgentDesk.bridgeVersion],
+                maximumResponseBodyBytes: HostAgentDesk.maximumControlBytes, canSend: canSend)
+            switch response.status {
+            case 200:
+                guard let reply = try? HostAgentDesk.controlReply(response.body, for: control) else { return .failed }
+                return .changed(reply.changed)
+            case 409: return .stopped
+            case 429: return .busy
+            default: return .failed
+            }
+        } catch NativeDomainClientFailure.cancelled {
+            return .cancelled
+        } catch {
+            return .failed
+        }
     }
 
     public func cloudScheduleStop(_ input: CloudScheduleStop.Request,
@@ -853,15 +928,36 @@ public struct AgentsRead: Sendable {
     /// this a usable assistant until a definition, answering runtime and
     /// canonical Matrix conversation have their own authoritative success.
     public func createAgent(_ input: AgentCreateRequest) async throws -> AgentsResponse.Agent {
+        try await createAgentPlaced(input).agent
+    }
+
+    /// `createAgent` with the platform's `cloud_placement`, so a listing hire
+    /// can tell a placed assistant from one whose chat is still being set up.
+    ///
+    /// `dispatchGate` is asked right before each send (the first, and the
+    /// resend after a 401 refresh); when it says no, nothing goes out and
+    /// `NativeDispatchBlocked` is thrown, so a paid hire never leaves after
+    /// its checkout closed or its account changed mid-authorization.
+    public func createAgentPlaced(_ input: AgentCreateRequest,
+                                  dispatchGate: NativeDispatchGate? = nil) async throws -> AgentCreateResponse {
         let body: Data
         do { body = try JSONEncoder().encode(input) }
         catch { throw NativeDomainClientFailure.invalidRequest }
-        let agent = try await request(AgentsResponse.Agent.self, url: Self.agentsURL,
-                                      method: "POST", body: body,
-                                      acceptsAssistantNameRefusal: true)
+        let created = try await request(AgentCreateResponse.self, url: Self.agentsURL,
+                                        method: "POST", body: body,
+                                        acceptsAssistantNameRefusal: true,
+                                        dispatchGate: dispatchGate)
+        let agent = created.agent
         guard !agent.isDefault, agent.status == .active, agent.matrixUser != nil
         else { throw NativeDomainClientFailure.invalidResponse }
-        return agent
+        return created
+    }
+
+    /// The open listings this person can hire (platform 0535), for the
+    /// new-assistant sheet's shelf (desktop `listMatrixOpenAgents`). Hired
+    /// with `createAgent` and the listing's id.
+    public func openAgentListings() async throws -> [OpenAgentListing] {
+        try await read(OpenAgentCatalog.self, url: Self.openAgentCatalogURL).listings
     }
 
     public func agentDefinition(assistantID: NativeID) async throws -> AgentDefinitionSnapshot {
@@ -1306,12 +1402,14 @@ public struct AgentsRead: Sendable {
                                        acceptsAssistantNameRefusal: Bool,
                                        maximumRequestBodyBytes: Int = 262_144,
                                        maximumResponseBodyBytes: Int = 262_144,
-                                       acceptedStatuses: Set<Int> = [200]) async throws -> T {
+                                       acceptedStatuses: Set<Int> = [200],
+                                       dispatchGate: NativeDispatchGate? = nil) async throws -> T {
         try await requestWithHeaders(type, url: url, method: method, body: body,
                                      acceptsAssistantNameRefusal: acceptsAssistantNameRefusal,
                                      maximumRequestBodyBytes: maximumRequestBodyBytes,
                                      maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                     acceptedStatuses: acceptedStatuses).value
+                                     acceptedStatuses: acceptedStatuses,
+                                     dispatchGate: dispatchGate).value
     }
 
     private func requestWithHeaders<T: Decodable>(_ type: T.Type, url: URL, method: String, body: Data?,
@@ -1319,7 +1417,8 @@ public struct AgentsRead: Sendable {
                                                   maximumRequestBodyBytes: Int = 262_144,
                                                   maximumResponseBodyBytes: Int = 262_144,
                                                   extraHeaders: [String: String] = [:],
-                                                  acceptedStatuses: Set<Int> = [200])
+                                                  acceptedStatuses: Set<Int> = [200],
+                                                  dispatchGate: NativeDispatchGate? = nil)
         async throws -> (value: T, headers: [String: String]) {
         let response = try await response(url: url, method: method, body: body,
                                           acceptsAssistantNameRefusal: acceptsAssistantNameRefusal,
@@ -1327,7 +1426,8 @@ public struct AgentsRead: Sendable {
                                           maximumRequestBodyBytes: maximumRequestBodyBytes,
                                           maximumResponseBodyBytes: maximumResponseBodyBytes,
                                           extraHeaders: extraHeaders,
-                                          acceptedStatuses: acceptedStatuses)
+                                          acceptedStatuses: acceptedStatuses,
+                                          dispatchGate: dispatchGate)
         return (try decode(type, data: response.body), response.headers)
     }
 
@@ -1351,12 +1451,14 @@ public struct AgentsRead: Sendable {
                           extraHeaders: [String: String] = [:],
                           acceptedStatuses: Set<Int> = [200],
                           reportsAuthenticationFailure: Bool = true,
+                          dispatchGate: NativeDispatchGate? = nil,
                           isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false,
                                              reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
+        if let dispatchGate, !dispatchGate() { throw NativeDispatchBlocked() }
         let first = try await perform(url: url, token: firstToken, method: method, body: body,
                                       companyWire: companyWire,
                                       maximumRequestBodyBytes: maximumRequestBodyBytes,
@@ -1376,6 +1478,7 @@ public struct AgentsRead: Sendable {
         let refreshedToken = try await authorize(forceRefresh: true,
                                                  reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
+        if let dispatchGate, !dispatchGate() { throw NativeDispatchBlocked() }
         let second = try await perform(url: url, token: refreshedToken, method: method, body: body,
                                        companyWire: companyWire,
                                        maximumRequestBodyBytes: maximumRequestBodyBytes,
@@ -1398,14 +1501,15 @@ public struct AgentsRead: Sendable {
     /// returning the raw response so a caller can answer a refused body
     /// itself (the assistant placement retries a 4xx with the empty body).
     private func performAuthorized(url: URL, body: Data, extraHeaders: [String: String] = [:],
-                                   maximumResponseBodyBytes: Int = 262_144) async throws -> NativeDomainHTTPResponse {
+                                   maximumResponseBodyBytes: Int = 262_144,
+                                   canSend: DeskSendCheck? = nil) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
         catch { throw NativeDomainClientFailure.cancelled }
         let firstToken = try await authorize(forceRefresh: false)
         try requireActiveTask()
         let first = try await perform(url: url, token: firstToken, method: "POST", body: body,
                                       maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                      extraHeaders: extraHeaders)
+                                      extraHeaders: extraHeaders, canSend: canSend)
         try requireActiveTask()
         guard first.status == 401 else { return first }
 
@@ -1415,7 +1519,7 @@ public struct AgentsRead: Sendable {
         try requireActiveTask()
         let second = try await perform(url: url, token: refreshedToken, method: "POST", body: body,
                                        maximumRequestBodyBytes: 4_096, maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                       extraHeaders: extraHeaders)
+                                       extraHeaders: extraHeaders, canSend: canSend)
         try requireActiveTask()
         if second.status == 401 {
             authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused)
@@ -1495,6 +1599,7 @@ public struct AgentsRead: Sendable {
                          body: Data?, companyWire: CompanyWire? = nil, maximumRequestBodyBytes: Int,
                          maximumResponseBodyBytes: Int,
                          extraHeaders: [String: String] = [:],
+                         canSend: DeskSendCheck? = nil,
                          isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         guard isApprovedURL(url), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
               !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
@@ -1522,6 +1627,12 @@ public struct AgentsRead: Sendable {
                   }
                   if name == OwnerTimeZoneContract.requestHeader {
                       return OwnerTimeZoneContract.isValid(value)
+                  }
+                  // The host bridge header is shared with the ChatGPT training route,
+                  // so the desk rule governs only the desk's own two paths.
+                  if name == HostAgentDesk.bridgeHeader,
+                     url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path {
+                      return value == HostAgentDesk.bridgeVersion && method == "POST"
                   }
                   if name == AppPanelContract.negotiationHeader {
                       return value == AppPanelContract.profile && method == "GET"
@@ -1553,8 +1664,9 @@ public struct AgentsRead: Sendable {
                                                   maximumBodyBytes: maximumResponseBodyBytes)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                // Authorization may have suspended. Check here for every dispatch, including a 401 replay.
-                guard isCurrent() else {
+                // Keep the context checks and URLSession start in one main-actor turn.
+                // Authorization may have suspended, so check on every dispatch, including a 401 replay.
+                guard canSend?() != false, isCurrent() else {
                     continuation.resume(throwing: NativeDomainClientFailure.cancelled)
                     return
                 }
@@ -1636,6 +1748,7 @@ public struct AgentsRead: Sendable {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
         // The Shell routes outside the domain prefix, each by its exact path.
+        if url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path { return url.query == nil }
         if url.path == CloudScheduleStop.path { return url.query == nil }
         if url.path == ChatGPTTraining.url.path { return url.query == nil }
         guard url.path.hasPrefix(Self.baseURL.path + "/") else { return false }
@@ -1669,6 +1782,8 @@ public struct AgentsRead: Sendable {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         let query = components.queryItems ?? []
         if dynamicAgentPath || dynamicCompanyPath || dynamicAppPath { return url.query == nil }
+        // `/agents` takes exactly one fixed query: the open catalog (0535).
+        if url.path == Self.agentsURL.path, url.query != nil { return url.query == "catalog=open" }
         if url.path == Self.aliasLookupURL.path {
             guard query.count == 1, query[0].name == "handle", let value = query[0].value,
                   (try? NativeHandle(value)) != nil else { return false }
