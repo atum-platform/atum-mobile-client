@@ -62,11 +62,20 @@ struct TeamSpaceMessageSearchSheet: View {
     let actions: TeamSpaceMessageSearchActions
     let opened: () -> Void
 
+    /// One ask of the search: a new one (or the sheet closing) cancels the one before,
+    /// so a replaced fan-out stops holding the shared search queue's slots.
+    private struct Ask: Equatable {
+        let term: String
+        let serial: Int
+    }
+
     @State private var query: String
+    @State private var ask: Ask?
     @State private var searched: String?
     @State private var results: [CompanySearchResult] = []
     @State private var searching = false
-    @State private var generation: UInt64 = 0
+    /// A result is being opened; a second tap waits for it.
+    @State private var opening = false
     @State private var openFailed = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
@@ -81,6 +90,7 @@ struct TeamSpaceMessageSearchSheet: View {
         self.actions = actions
         self.opened = opened
         _query = State(initialValue: initialQuery)
+        _ask = State(initialValue: TeamSpaceHeaderSearch.messageQuery(initialQuery).map { Ask(term: $0, serial: 0) })
     }
 
     var body: some View {
@@ -125,7 +135,7 @@ struct TeamSpaceMessageSearchSheet: View {
                 }
             }
         }
-        .task { run(initialQuery) }
+        .task(id: ask) { await search(ask) }
         .sensoryFeedback(.error, trigger: openFailed)
         .accessibilityIdentifier("company.search.sheet")
     }
@@ -138,23 +148,29 @@ struct TeamSpaceMessageSearchSheet: View {
             .listRowSeparator(.hidden)
     }
 
-    /// Desktop asks once the query has two characters; only the latest answer lands.
+    /// Desktop asks once the query has two characters. Each ask replaces the last.
     private func run(_ raw: String) {
         guard let term = TeamSpaceHeaderSearch.messageQuery(raw) else { return }
-        generation &+= 1
-        let current = generation
+        ask = Ask(term: term, serial: (ask?.serial ?? 0) + 1)
+    }
+
+    /// Runs in `.task(id: ask)`: SwiftUI cancels it when the ask changes or the sheet goes,
+    /// and a cancelled search lands nothing.
+    private func search(_ ask: Ask?) async {
+        guard let ask else { return }
         searching = true
-        Task { @MainActor in
-            let answer = await actions.search(companyID, term)
-            guard current == generation else { return }
-            searching = false
-            searched = term
-            results = answer
-        }
+        let answer = await actions.search(companyID, ask.term)
+        guard !Task.isCancelled else { return }
+        searching = false
+        searched = ask.term
+        results = answer
     }
 
     private func open(_ result: CompanySearchResult) {
+        guard !opening else { return }
+        opening = true
         Task { @MainActor in
+            defer { opening = false }
             if await actions.open(result) {
                 opened()
             } else {

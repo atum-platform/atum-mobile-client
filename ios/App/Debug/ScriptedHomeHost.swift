@@ -367,7 +367,8 @@ struct ScriptedHomeHost: View {
                                                     revokeInviteLink: true),
             canCreateChannel: true,
             // The section captures show the desktop's C2 channels mode.
-            sectionsChannels: true)
+            sectionsChannels: true,
+            activeRoomID: router.teamSpaceRoomID)
     }
 
     /// TS-11/TS-13 with synthetic answers (the desktop public pack's fixture shapes): "@nobody"

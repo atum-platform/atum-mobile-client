@@ -18,6 +18,18 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
         XCTAssertNil(TeamSpaceHeaderSearch.messageQuery("\u{1EAF}"))
     }
 
+    func testChannelsSaysNoMatchesOnlyWhileAQueryHidesLiveChannels() {
+        XCTAssertEqual(CompanyChannelListNote.note(query: "zz", shown: 0, live: 3, archived: 0), .noMatches)
+        XCTAssertEqual(CompanyChannelListNote.note(query: "  ", shown: 0, live: 3, archived: 0), .noChannels,
+                       "a blank box is no query")
+        XCTAssertEqual(CompanyChannelListNote.note(query: "zz", shown: 0, live: 0, archived: 0), .noChannels,
+                       "with no channel at all it stays No channels")
+        XCTAssertEqual(CompanyChannelListNote.note(query: "", shown: 0, live: 0, archived: 0), .noChannels)
+        XCTAssertNil(CompanyChannelListNote.note(query: "zz", shown: 1, live: 3, archived: 0))
+        XCTAssertNil(CompanyChannelListNote.note(query: "zz", shown: 0, live: 3, archived: 1),
+                     "an archived channel keeps the section quiet")
+    }
+
     // MARK: Settings sections
 
     func testSectionsKeepDesktopOrderAndAIIsAlwaysThere() {
@@ -128,6 +140,17 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
         state.navigated(toCompany: "studio")
         state.finish(pending, opened: false)
         XCTAssertNil(state.failedRoom(companyID: "anka"), "an open for a company no longer shown cannot land")
+        XCTAssertNil(state.opening)
+    }
+
+    func testAnyRoomComingOnScreenClearsTheFailure() {
+        // Desktop clears it on `activeRoomId` as well as on the company: a push or a
+        // search result opening another room is a successful navigation.
+        var state = CompanyChannelOpenState()
+        state.finish(state.begin(design), opened: false)
+        XCTAssertEqual(state.failedRoom(companyID: "anka"), design.roomID)
+        state.navigated(toCompany: "anka")
+        XCTAssertNil(state.failedRoom(companyID: "anka"))
         XCTAssertNil(state.opening)
     }
 

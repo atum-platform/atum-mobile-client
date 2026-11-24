@@ -124,19 +124,6 @@ struct ConversationSectionView: View {
                                 needle: needle, locale: locale)
     }
 
-    /// Whether the header box leaves any Direct messages row on screen (W4-E7 "No matches").
-    static func anyMatch(_ directMessages: DirectMessagesPresentation, conversationsShown: Bool,
-                         design: LiveDesign, needle: String?) -> Bool {
-        let copy = DirectMessagesCopy(design: design)
-        let locale = Locale(identifier: design.locale)
-        if TeamSpaceSearch.matches([copy.you, copy.personalNotes], needle: needle, locale: locale) { return true }
-        if let chief = directMessages.chief,
-           TeamSpaceSearch.matches([copy.privateChiefOfStaff, copy.line(chief.status) ?? ""],
-                                   needle: needle, locale: locale) { return true }
-        guard conversationsShown, let section = directMessages.conversations else { return false }
-        return section.rows.contains { TeamSpaceSearch.matches([$0.row.title], needle: needle, locale: locale) }
-    }
-
     private func shown(_ rows: [ConversationListRow]) -> [ConversationListRow] {
         rows.filter { TeamSpaceSearch.matches([$0.row.title], needle: needle, locale: locale) }
     }

@@ -396,7 +396,8 @@ struct AppRoot: View {
                     canCreateChannel: model.companyWorkspace.channelCreationAllowed(
                         companyID: model.companyWorkspace.activeCompanyID),
                     sectionsChannels: model.companyWorkspace.teamSpaceProfile.channels,
-                    boardLinkRequest: model.companyWorkspace.boardLinkRequest
+                    boardLinkRequest: model.companyWorkspace.boardLinkRequest,
+                    activeRoomID: router.teamSpaceRoomID
                 ),
                 actions: TeamSpaceActions(
                     refresh: { await model.refreshCompanyWorkspace() },

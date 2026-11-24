@@ -18,6 +18,25 @@ public enum TeamSpaceHeaderSearch {
     }
 }
 
+/// The one line the Channels section says when it lists nothing (desktop
+/// `team-space/channel-sections.tsx:152–156`): "No matches" while a query hides live
+/// channels, else "No channels". An Archived list still on screen keeps it quiet.
+public enum CompanyChannelListNote: Equatable, Sendable {
+    case noChannels, noMatches
+
+    /// - Parameters:
+    ///   - query: the header box's text.
+    ///   - shown: live channels left after filtering (Favorites and Channels).
+    ///   - live: live channels before filtering.
+    ///   - archived: archived channels still listed (desktop's list is unfiltered; the
+    ///     phone's box filters Archived, so the caller passes what it still shows).
+    public static func note(query: String, shown: Int, live: Int, archived: Int) -> CompanyChannelListNote? {
+        guard shown == 0, archived == 0 else { return nil }
+        let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return searching && live > 0 ? .noMatches : .noChannels
+    }
+}
+
 // MARK: Settings sections
 
 /// Company settings show one section at a time (desktop `CompanySettingsSection`).

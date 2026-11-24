@@ -70,6 +70,9 @@ struct TeamSpacePresentation: Equatable {
     var sectionsChannels = false
     /// A board link tapped in a chat, until this screen shows that board.
     var boardLinkRequest: CompanyBoardLinkRequest?
+    /// The room pushed over the list (the router's Team Space room), so a held channel
+    /// failure clears when another room comes on screen (W4-E7).
+    var activeRoomID: String?
 }
 
 struct TeamSpaceActions {
@@ -379,6 +382,11 @@ struct TeamSpaceScreen: View {
             messageSearch = nil
             channelOpen.navigated(toCompany: companyID)
         }
+        // Any room coming on screen (or leaving it) is a successful navigation: desktop
+        // clears a held failure on `activeRoomId` as well as on the company.
+        .onChange(of: presentation.activeRoomID) { _, _ in
+            channelOpen.navigated(toCompany: presentation.workspace?.id)
+        }
         .sheet(item: $messageSearch) { request in
             if let search = actions.messageSearch {
                 TeamSpaceMessageSearchSheet(design: design, companyID: request.companyID,
@@ -541,8 +549,14 @@ struct TeamSpaceScreen: View {
                 Section {
                     if workspace.channelsLoading {
                         note(copy.text(CompanyCopyKey("loadingChannels")))
-                    } else if workspace.channels.isEmpty {
-                        note(copy.text(CompanyCopyKey("noChannels")))
+                    } else if let empty = channelListNote(workspace, plan: plan) {
+                        // Desktop `channel-sections.tsx:152–156`: one line in Channels.
+                        switch empty {
+                        case .noMatches:
+                            note(team.noMatches).accessibilityIdentifier("company.search.noMatches")
+                        case .noChannels:
+                            note(copy.text(CompanyCopyKey("noChannels")))
+                        }
                     } else {
                         ForEach(plan.channels) { channel in channelListRow(channel) }
                     }
@@ -854,44 +868,40 @@ struct TeamSpaceScreen: View {
         Task { @MainActor in
             let opened = await open(roomID)
             channelOpen.finish(attempt, opened: opened)
-            if opened == false { actionFailure += 1 }
+            // Desktop's failed pane is `role="alert"`: VoiceOver hears the line when it lands.
+            if opened == false, channelOpen.failedRoom(companyID: companyID) == roomID {
+                actionFailure += 1
+                AccessibilityNotification.Announcement(team.channelFailed).post()
+            }
         }
     }
 
     // MARK: Header search (W4-E7)
 
-    /// "Search “…”" under the box once the query is long enough, and "No matches" when the
-    /// box leaves nothing in the list (desktop `data-matrix-company-sidebar-search`).
+    /// "Search “…”" under the box once the query is long enough
+    /// (desktop `data-matrix-company-sidebar-search`).
     @ViewBuilder
     private func headerSearch(_ workspace: CompanyWorkspacePresentation) -> some View {
-        let messageQuery = actions.messageSearch == nil ? nil : TeamSpaceHeaderSearch.messageQuery(query)
-        if messageQuery != nil || showsNoMatches(workspace) {
+        if actions.messageSearch != nil, let messageQuery = TeamSpaceHeaderSearch.messageQuery(query) {
             Section {
-                if let messageQuery {
-                    TeamSpaceSearchMessagesRow(design: design, query: messageQuery) { openMessageSearch() }
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-                if showsNoMatches(workspace) {
-                    note(team.noMatches)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 52, bottom: 4, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .accessibilityIdentifier("company.search.noMatches")
-                }
+                TeamSpaceSearchMessagesRow(design: design, query: messageQuery) { openMessageSearch() }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
             .listSectionSeparator(.hidden)
         }
     }
 
-    private func showsNoMatches(_ workspace: CompanyWorkspacePresentation) -> Bool {
-        guard needle != nil, !workspace.channelsLoading else { return false }
-        let plan = channelPlan(workspace)
-        let channels = plan.favorites.count + plan.channels.count + plan.archived.count
-        return channels == 0 && !ConversationSectionView.anyMatch(
-            workspace.directMessages, conversationsShown: actions.conversations != nil,
-            design: design, needle: needle)
+    /// What Channels says when it lists nothing: "No matches" while the box hides live
+    /// channels, else "No channels" (`CompanyChannelListNote`).
+    /// Desktop never filters Archived, so any archived channel keeps it quiet there; the
+    /// phone's box filters Archived too (wave 3), so only archived rows still shown count.
+    private func channelListNote(_ workspace: CompanyWorkspacePresentation,
+                                 plan: CompanyChannelSectionPlan<CompanyChannelRow>) -> CompanyChannelListNote? {
+        CompanyChannelListNote.note(query: query, shown: plan.favorites.count + plan.channels.count,
+                                    live: workspace.channels.filter { !$0.isArchived }.count,
+                                    archived: plan.archived.count)
     }
 
     private func openMessageSearch() {
