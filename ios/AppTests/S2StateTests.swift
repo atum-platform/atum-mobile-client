@@ -96,7 +96,52 @@ final class S2StateTests: XCTestCase {
         }
     }
 
-    func testPersonalChatRestoreFencesSignOutAcrossFailedCleanup() {
+    func testPersonalChatRestoreRefreshesClaimAfterSupersededIntent() {
+        let room = rosterRoom("!room:atum.test", userID: "@person:atum.test", latest: 1)
+        let roomID = room.roomID
+        var checks = PersonalChatClaimChecks()
+        checks.begin(intentID: UUID())
+        XCTAssertEqual(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                       companyClaim: checks.claim), .checkCompanyClaim(roomID))
+        let superseded = checks.start(roomID)
+        XCTAssertFalse(checks.finish(roomID, claim: .absent, scopeID: superseded, stillCurrent: false))
+        XCTAssertNil(checks.claim(roomID))
+
+        // The directory still sees a personal room, but the Matrix marker has appeared.
+        checks.begin(intentID: UUID())
+        XCTAssertEqual(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                       companyClaim: checks.claim), .checkCompanyClaim(roomID))
+        let current = checks.start(roomID)
+        XCTAssertFalse(checks.finish(roomID, claim: .absent, scopeID: superseded, stillCurrent: true))
+        XCTAssertEqual(checks.claim(roomID), .checking)
+        XCTAssertTrue(checks.finish(roomID, claim: .claimed, scopeID: current, stillCurrent: true))
+        XCTAssertNil(restoreDestination(entry: .chatsTap, remembered: roomID, rooms: [room],
+                                        companyClaim: checks.claim))
+    }
+
+    func testPersonalChatRestoreRetriesTimedOutClaimOnLaterTap() {
+        let room = rosterRoom("!room:atum.test", userID: "@person:atum.test", latest: 1)
+        let roomID = room.roomID
+        var checks = PersonalChatClaimChecks()
+        let firstIntent = UUID()
+        checks.begin(intentID: firstIntent)
+        let firstScope = checks.start(roomID)
+        let timeout = PersonalChatCompanyClaim.read(status: nil, body: Data())
+        XCTAssertTrue(checks.finish(roomID, claim: timeout, scopeID: firstScope, stillCurrent: true))
+        checks.begin(intentID: firstIntent)
+        XCTAssertNil(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                     companyClaim: checks.claim))
+
+        checks.begin(intentID: UUID())
+        XCTAssertEqual(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                       companyClaim: checks.claim), .checkCompanyClaim(roomID))
+        let nextScope = checks.start(roomID)
+        XCTAssertTrue(checks.finish(roomID, claim: .absent, scopeID: nextScope, stillCurrent: true))
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, remembered: roomID, rooms: [room],
+                                          companyClaim: checks.claim), roomID)
+    }
+
+    func testPersonalChatRestoreResumesAfterAbortedSignOut() {
         var session = PersonalChatRestoreSession()
         let installation = UUID()
         session.begin(installationID: installation)
@@ -108,43 +153,81 @@ final class S2StateTests: XCTestCase {
         session.begin(installationID: installation)
         XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: false))
 
+        session.abortSignOut(installationID: UUID())
+        XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: false))
+        session.abortSignOut(installationID: installation)
+        XCTAssertTrue(session.canRestore(installationID: installation, signOutInProgress: false))
+
+        session.beginSignOut()
         let replacement = UUID()
         session.begin(installationID: replacement)
         XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: false))
         XCTAssertTrue(session.canRestore(installationID: replacement, signOutInProgress: false))
     }
 
-    func testPersonalChatRestoreFencesExitedRoomsUntilPublicationRemovesThem() throws {
+    func testPersonalChatRestoreFencesPendingExitAfterListOmission() throws {
         let name = "PersonalChatRestoreExitTests." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let store = LastPersonalChatStore(matrixUserID: "@owner:atum.test", defaults: defaults)
-        let other = LastPersonalChatStore(matrixUserID: "@another:atum.test", defaults: defaults)
         let primary = try cloudPrimaryForRestore()
         let room = rosterRoom("!exit:atum.test", userID: "@primary:atum.test", latest: 1,
                               roomType: "io.atum.assistant")
-        let second = "!second:atum.test"
-        var session = PersonalChatRestoreSession()
-        session.begin(installationID: UUID())
         store.remember(room.roomID)
-        other.remember(room.roomID)
 
-        session.beginExit(second, store: store)
-        XCTAssertEqual(store.roomID(), room.roomID)
-        session.beginExit(room.roomID, store: store)
+        store.beginExit(room.roomID)
         XCTAssertNil(store.roomID())
-        XCTAssertEqual(other.roomID(), room.roomID)
-        session.reconcileJoinedRooms([room.roomID])
-        XCTAssertEqual(session.exitedRoomIDs, [room.roomID])
-        for entry in [PersonalChatRestoreEntry.launch, .chatsTap] {
-            // Even the fallback would choose this room while the published list is stale.
-            XCTAssertNil(restoreDestination(entry: entry, rooms: [room], agents: [primary],
-                                            exitedRoomIDs: session.exitedRoomIDs))
+        // A room-list rebuild can omit the room while the SDK still knows it as joined.
+        store.pruneExitedRooms(membership: { _ in .joined })
+        XCTAssertNil(restoreDestination(rooms: [], agents: [primary], exitedRoomIDs: store.exitedRoomIDs()))
+        store.pruneExitedRooms(membership: { _ in nil })
+        XCTAssertEqual(store.exitedRoomIDs(), [room.roomID])
+        XCTAssertNil(restoreDestination(remembered: room.roomID, rooms: [room], agents: [primary],
+                                        exitedRoomIDs: store.exitedRoomIDs()))
+        XCTAssertNil(restoreDestination(rooms: [room], agents: [primary], exitedRoomIDs: store.exitedRoomIDs()))
+
+        let person = rosterRoom("!person:atum.test", userID: "@person:atum.test", latest: 2)
+        store.beginExit(person.roomID)
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: [person], exitedRoomIDs: store.exitedRoomIDs()))
+    }
+
+    func testPersonalChatRestorePersistsExitFenceAcrossRelaunch() throws {
+        let name = "PersonalChatRestoreExitTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let room = rosterRoom("!exit:atum.test", userID: "@person:atum.test", latest: 1)
+        let owner = "@owner:atum.test"
+        LastPersonalChatStore(matrixUserID: owner, defaults: defaults).beginExit(room.roomID)
+
+        let relaunched = try XCTUnwrap(UserDefaults(suiteName: name))
+        let restoredStore = LastPersonalChatStore(matrixUserID: owner, defaults: relaunched)
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: [room], exitedRoomIDs: restoredStore.exitedRoomIDs()))
+        let other = LastPersonalChatStore(matrixUserID: "@another:atum.test", defaults: relaunched)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: [room], exitedRoomIDs: other.exitedRoomIDs()),
+                       room.roomID)
+    }
+
+    func testPersonalChatRestoreClearsExitOnConfirmedLeaveOrExplicitOpen() throws {
+        let name = "PersonalChatRestoreExitTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = LastPersonalChatStore(matrixUserID: "@owner:atum.test", defaults: defaults)
+        let left = "!left:atum.test"
+        let banned = "!banned:atum.test"
+        let opened = rosterRoom("!opened:atum.test", userID: "@person:atum.test", latest: 1)
+        for roomID in [left, banned, opened.roomID] { store.beginExit(roomID) }
+        store.pruneExitedRooms { roomID in
+            switch roomID {
+            case left: return .left
+            case banned: return .banned
+            default: return .joined
+            }
         }
-        session.reconcileJoinedRooms([])
-        XCTAssertTrue(session.exitedRoomIDs.isEmpty)
-        XCTAssertEqual(restoreDestination(rooms: [room], agents: [primary],
-                                          exitedRoomIDs: session.exitedRoomIDs), room.roomID)
+        XCTAssertEqual(store.exitedRoomIDs(), [opened.roomID])
+        store.clearExit(opened.roomID)
+        XCTAssertTrue(store.exitedRoomIDs().isEmpty)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: [opened], exitedRoomIDs: store.exitedRoomIDs()),
+                       opened.roomID)
     }
 
     func testPersonalChatRestoreWaitsForAgentsBeforeRestoringUntypedDirectChat() throws {

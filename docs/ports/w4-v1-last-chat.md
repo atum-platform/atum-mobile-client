@@ -28,9 +28,10 @@ as a personal assistant. The room-list SDK subscription can omit its
 empty-state-key event directly from the signed-in homeserver for the selected
 candidate. A successful state read disqualifies the room, including when
 directory discovery failed. A Matrix `M_NOT_FOUND` response clears that
-check for the open. Other failures leave the candidate ineligible and allow
-the fallback to be considered. The pending read publishes a revision and the
-shell can retry its current intent. [Matrix room-state endpoint](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey)
+check for the current intent. Other failures make the candidate ineligible
+for that intent and allow the fallback to be considered. Every new intent
+reads fresh state. A reply to a superseded intent is discarded. A current
+reply publishes a revision so the shell can retry its decision. [Matrix room-state endpoint](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey)
 
 A former assistant can appear as a people row. An untyped direct chat waits
 for the first successful agent roster before it can be restored. If the
@@ -46,13 +47,20 @@ Known Team Space rooms and their type claims are excluded on write. A direct
 open can precede directory discovery, so each restore revalidates the room
 against the live workspace and current Matrix state before opening it.
 
-Sign-out fences restoration before its first suspension. The fence lasts for
-that installation, including when cleanup fails and the UI returns to a
-signed-in stage. Leave and Delete clear a matching pointer immediately, then
-fence the room from every restore path until a joined-room publication omits
-it. The fence also covers an ambiguous leave or forget response while the
-room remains listed. App-bot Delete clears matching pointers and uses the
-existing device-local hide ledger.
+Sign-out fences restoration before its first suspension and discards pending
+claim checks. If it aborts and the installation stays signed in, that
+installation can restore again.
+
+Leave and Delete record a room ID in the same account's UserDefaults and
+clear a matching pointer immediately. All restore paths consult that set.
+Room-list publications prune fences using the SDK's per-room membership
+when it reports left or banned. An acknowledged SDK forget also removes the
+fence. Unknown membership, including lookup failure or a room omitted by
+pagination, keeps the fence. A successful explicit open or rejoin clears the
+fence. The selected restore candidate must still be joined in the SDK before
+it opens, even if a stale roster row survived a confirmed exit. App-bot
+Delete clears matching pointers and uses the existing device-local hide
+ledger.
 
 ## UI lane hook
 
@@ -60,8 +68,9 @@ existing device-local hide ledger.
 @MainActor
 func restorePersonalChat(
     for entry: PersonalChatRestoreEntry,
+    intentID: UUID,
     hasExplicitRoute: Bool,
-    stillCurrent: @MainActor () -> Bool
+    stillCurrent: @escaping @MainActor () -> Bool
 ) -> String?
 ```
 
@@ -69,7 +78,9 @@ func restorePersonalChat(
   tab action. Try once live Matrix room data is available. A pending intent
   that gets `nil` can retry on updates to the room list, workspace
   classification, `hasPersonalChatAgentRoster`, or
-  `personalChatRestoreRevision` under the same generation.
+  `personalChatRestoreRevision` under the same intent ID. Generate a fresh
+  UUID for each launch intent or new Chats tap. A later tap retries a state
+  check that failed or timed out in an earlier intent.
 - Pass the current explicit-route state. A pending or already claimed
   notification route counts as explicit, including while the shell waits to
   validate it. Capture the shell route generation at the start of the restore
@@ -79,6 +90,11 @@ func restorePersonalChat(
 - A returned ID names the conversation that the model has already opened.
   Publish it to the personal route synchronously in the same turn. A `nil`
   result leaves route ownership with the shell.
+
+## Follow-ups
+
+A permanent `/agents` failure keeps a genuine remembered untyped DM
+ineligible. The roster is needed to distinguish it from a former assistant.
 
 W4-V2 owns the shell-level route-precedence test. It should exercise a
 notification claim and a newer manual navigation while a launch retry or
@@ -96,3 +112,13 @@ pin-order parsing. The Debug build and the XCTest run use the shared
 TestFlight lock and retain the `w4-v1/r2-*` logs on the build volume.
 Swift 6 syntax validation and a macOS smoke run of the production resolver
 and storage with synthetic room rows passed.
+
+### R3
+
+The r3 check uses the shared TestFlight lock for a Debug build-for-testing
+and all 16 restore methods in `AtumMobileTests/S2StateTests`. The added and
+updated cases cover a superseded claim reply followed by a new Team Space
+marker, a timed-out claim retried by a new Chats tap, an exit fence across
+publication gaps and relaunch, exit confirmation and explicit reopening,
+and recovery after aborted sign-out. The build volume holds the
+`w4-v1/r3-*` logs and XCTest result bundle.

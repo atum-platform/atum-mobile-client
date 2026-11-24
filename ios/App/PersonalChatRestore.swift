@@ -1,9 +1,9 @@
 import AtumNativeAPI
 import CryptoKit
 import Foundation
+import MatrixRustSDK
 
-/// A device-local pointer, scoped to an exact Matrix account. The value is
-/// the canonical room ID from the joined room list, including for app rows.
+/// The device-local pointer and exit fences for one exact Matrix account.
 struct LastPersonalChatStore {
     private let key: String
     private let defaults: UserDefaults
@@ -26,33 +26,65 @@ struct LastPersonalChatStore {
     func forget(_ roomID: String) {
         if self.roomID() == roomID { defaults.removeObject(forKey: key) }
     }
+
+    private var exitsKey: String { key + ".exitedRooms" }
+
+    func exitedRoomIDs() -> Set<String> {
+        Set(defaults.stringArray(forKey: exitsKey) ?? [])
+    }
+
+    func beginExit(_ roomID: String) {
+        guard let room = try? MatrixRoomID(roomID) else { return }
+        var exits = exitedRoomIDs()
+        if exits.insert(room.rawValue).inserted { saveExits(exits) }
+        forget(room.rawValue)
+    }
+
+    /// A successful explicit open or SDK forget can remove this fence.
+    func clearExit(_ roomID: String) {
+        var exits = exitedRoomIDs()
+        if exits.remove(roomID) != nil { saveExits(exits) }
+    }
+
+    func pruneExitedRooms(membership: (String) -> Membership?) {
+        let exits = exitedRoomIDs()
+        let retained = exits.filter {
+            switch membership($0) {
+            case .left, .banned: return false
+            default: return true
+            }
+        }
+        if retained != exits { saveExits(retained) }
+    }
+
+    private func saveExits(_ exits: Set<String>) {
+        if exits.isEmpty {
+            defaults.removeObject(forKey: exitsKey)
+        } else {
+            defaults.set(exits.sorted(), forKey: exitsKey)
+        }
+    }
 }
 
 struct PersonalChatRestoreSession {
     private var installationID: UUID?
     private var signOutStarted = false
-    private(set) var exitedRoomIDs = Set<String>()
 
     mutating func begin(installationID: UUID) {
         guard self.installationID != installationID else { return }
         self.installationID = installationID
         signOutStarted = false
-        exitedRoomIDs.removeAll()
     }
 
     mutating func beginSignOut() { signOutStarted = true }
 
+    mutating func abortSignOut(installationID: UUID) {
+        guard self.installationID == installationID else { return }
+        signOutStarted = false
+    }
+
     func canRestore(installationID: UUID, signOutInProgress: Bool) -> Bool {
         self.installationID == installationID && !signOutInProgress && !signOutStarted
-    }
-
-    mutating func beginExit(_ roomID: String, store: LastPersonalChatStore) {
-        store.forget(roomID)
-        exitedRoomIDs.insert(roomID)
-    }
-
-    mutating func reconcileJoinedRooms(_ roomIDs: Set<String>) {
-        exitedRoomIDs.formIntersection(roomIDs)
     }
 }
 
@@ -72,6 +104,37 @@ enum PersonalChatCompanyClaim: Equatable {
             return .absent
         }
         return .unavailable
+    }
+}
+
+/// Claim results only authorize decisions within the intent that requested them.
+struct PersonalChatClaimChecks {
+    private var intentID: UUID?
+    private var scopeID = UUID()
+    private var claims = [String: PersonalChatCompanyClaim]()
+
+    mutating func begin(intentID: UUID) {
+        guard self.intentID != intentID else { return }
+        self = Self()
+        self.intentID = intentID
+    }
+
+    func claim(_ roomID: String) -> PersonalChatCompanyClaim? { claims[roomID] }
+
+    mutating func start(_ roomID: String) -> UUID {
+        claims[roomID] = .checking
+        return scopeID
+    }
+
+    mutating func finish(_ roomID: String, claim: PersonalChatCompanyClaim,
+                         scopeID: UUID, stillCurrent: @autoclosure () -> Bool) -> Bool {
+        guard self.scopeID == scopeID else { return false }
+        guard stillCurrent() else {
+            self = Self()
+            return false
+        }
+        claims[roomID] = claim
+        return true
     }
 }
 

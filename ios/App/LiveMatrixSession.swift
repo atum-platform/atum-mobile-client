@@ -219,7 +219,7 @@ final class LiveMatrixSession {
     private var requestedRoomPages = 1
     private var directCreations: [String: Task<String?, Never>] = [:]
     private var maximumMediaUploadSizeTask: Task<UInt64?, Never>?
-    @ObservationIgnored private var personalChatCompanyClaims = [String: PersonalChatCompanyClaim]()
+    @ObservationIgnored private var personalChatClaimChecks = PersonalChatClaimChecks()
     private(set) var personalChatClaimRevision: UInt64 = 0
 
     init(runtime: MatrixLiveRuntime,
@@ -802,27 +802,34 @@ final class LiveMatrixSession {
 
     // MARK: Personal chat restore
 
-    func personalChatCompanyClaim(_ roomID: String) -> PersonalChatCompanyClaim? {
-        personalChatCompanyClaims[roomID]
+    func roomMembership(_ roomID: String) -> Membership? {
+        guard (try? runtime.requireCurrent()) != nil else { return nil }
+        return (try? runtime.client.getRoom(roomId: roomID))?.membership()
     }
 
-    func checkPersonalChatCompanyClaim(_ roomID: String) {
-        guard personalChatCompanyClaims[roomID] == nil else { return }
-        personalChatCompanyClaims[roomID] = .checking
+    func beginPersonalChatClaimChecks(intentID: UUID) {
+        personalChatClaimChecks.begin(intentID: intentID)
+    }
+
+    func personalChatCompanyClaim(_ roomID: String) -> PersonalChatCompanyClaim? {
+        personalChatClaimChecks.claim(roomID)
+    }
+
+    func checkPersonalChatCompanyClaim(_ roomID: String, stillCurrent: @escaping @MainActor () -> Bool) {
+        let scopeID = personalChatClaimChecks.start(roomID)
         let epoch = sessionEpoch
         Task { @MainActor [weak self] in
             guard let self, self.sessionEpoch == epoch else { return }
             let claim = await self.readPersonalChatCompanyClaim(roomID)
-            guard self.sessionEpoch == epoch else { return }
-            self.personalChatCompanyClaims[roomID] = claim
+            guard self.sessionEpoch == epoch,
+                  self.personalChatClaimChecks.finish(roomID, claim: claim, scopeID: scopeID,
+                                                      stillCurrent: stillCurrent()) else { return }
             self.personalChatClaimRevision &+= 1
         }
     }
 
-    func consumePersonalChatCompanyClearance(_ roomID: String) {
-        if personalChatCompanyClaims[roomID] == .absent {
-            personalChatCompanyClaims[roomID] = nil
-        }
+    func clearPersonalChatClaimChecks() {
+        personalChatClaimChecks = PersonalChatClaimChecks()
     }
 
     /// The room-list subscription may omit custom state. Confirm the empty-key
@@ -1258,7 +1265,7 @@ final class LiveMatrixSession {
     }
 
     private func discardLiveResources() async {
-        personalChatCompanyClaims.removeAll()
+        clearPersonalChatClaimChecks()
         sharedCollectionsRegistry.closeAll()
         roomListener?.deactivate()
         roomEntriesStream?.cancel()
