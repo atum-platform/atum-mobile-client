@@ -73,8 +73,12 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         let designOpens = { self.probeLines("team-actions.txt").filter { $0.text == "open-channel !design:atum.test" }.count }
         let before = designOpens()
         let channel = app.buttons.matching(identifier: "company.channel.design").firstMatch
-        XCTAssertTrue(channel.waitForExistence(timeout: 5), boundedHierarchy(app))
-        for _ in 0..<6 where !channel.isHittable { app.swipeUp(velocity: .slow) }
+        // On a short screen (the hosted iPhone 16e) #design is below the fold, and the
+        // List makes its row only once it scrolls near: scroll until it exists.
+        XCTAssertTrue(app.buttons.matching(identifier: "company.channel.general").firstMatch
+            .waitForExistence(timeout: 5), boundedHierarchy(app))
+        for _ in 0..<6 where !(channel.exists && channel.isHittable) { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(channel.waitForExistence(timeout: 2), boundedHierarchy(app))
         channel.tap()
         XCTAssertTrue(waitFor(3) { designOpens() - before == 1 }, "the tap did not ask to open #design")
         XCTAssertFalse(element(app, "teamSpace.scripted.destination").exists, "a failed open pushed")

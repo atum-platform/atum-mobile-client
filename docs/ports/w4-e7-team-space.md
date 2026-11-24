@@ -192,3 +192,13 @@ under `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, with derived data in
 Left for the coordinator's follow-ups (not done here): focus on event, result limit and error state, the Forward glyph choice, an open-result token, 44 pt board controls.
 
 r2 verification (locked, head `98736a7`): `swift test --filter 'TeamSpaceRevampPolicyTests|CompanySpacePolicyTests|CompanyMessageSearchTests|CompanySearchServiceTests'` exit 0 (50 tests, 0 failures); Debug `build-for-testing` exit 0 (arm64); `TeamSpaceRevampUITests` exit 0 (1 test, 327 s, en/vi light/dark).
+
+## Hosted iPhone 16e fix (PR #90)
+
+The first hosted run of `TeamSpaceRevampUITests` failed on UI shard 0
+(iPhone 16e, iOS 26.2): `#design` sits below the fold on that shorter screen,
+and the List builds its row only once it scrolls near, so waiting for it to
+exist before scrolling timed out. The walk now waits for `#general`, then
+scrolls until `#design` exists and is hittable. Locked local rerun on an
+iPhone 16e simulator: build-for-testing exit 0, `TeamSpaceRevampUITests` 1/1
+(en + vi, light + dark) exit 0.
