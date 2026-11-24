@@ -400,19 +400,12 @@ struct AgentDeskPage: View {
         date.formatted(Date.FormatStyle.dateTime.weekday(.abbreviated).hour().minute()
             .locale(Locale(identifier: locale)))
     }
-
-    nonisolated static func checklistAccessibilityValue(_ done: Bool?, locale: String) -> String? {
-        guard let done else { return nil }
-        // The desk pin has no completion labels. Speak the localized progress value.
-        let completion = done ? 1.0 : 0.0
-        return completion.formatted(.percent.locale(Locale(identifier: locale)))
-    }
 }
 
 /// Now, only while it works: the working line's head ("Working · 4 min"), the
 /// line itself clamped to three lines with Show more, and its checklist. How a
 /// message steers or waits is a hint on the head, never a sentence on the panel.
-private struct AgentDeskNow: View {
+struct AgentDeskNow: View {
     let design: LiveDesign
     let now: AgentDeskPolicy.Now
     let steers: Bool
@@ -501,7 +494,11 @@ private struct AgentDeskClamped: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let completion = AgentDeskPage.checklistAccessibilityValue(done, locale: design.locale)
+        // The desk pin has no completion labels. Speak the localized progress value.
+        let completion = done.map { done in
+            let progress = done ? 1.0 : 0.0
+            return progress.formatted(.percent.locale(Locale(identifier: design.locale)))
+        }
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: text)
                 .font(font)

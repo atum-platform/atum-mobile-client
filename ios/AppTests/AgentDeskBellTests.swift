@@ -1,8 +1,12 @@
 import AtumChat
 import AtumDesign
-import AtumNativeAPI
+import Darwin
+import os
+import SwiftUI
+import UIKit
 import XCTest
 @testable import AtumMobile
+@testable import AtumNativeAPI
 
 /// W4-E3: the agent's desk (desktop #51) and Home's bell (desktop #48) take
 /// every word from the pinned export, in every locale, with no pending table.
@@ -56,10 +60,71 @@ final class AgentDeskBellTests: XCTestCase {
         XCTAssertFalse(AgentDeskPage.nextRun(Date(), locale: "en").isEmpty)
     }
 
-    func testChecklistExposesCompletionAsAnAccessibilityValue() {
-        XCTAssertEqual(AgentDeskPage.checklistAccessibilityValue(true, locale: "en"), "100%")
-        XCTAssertEqual(AgentDeskPage.checklistAccessibilityValue(false, locale: "en"), "0%")
-        XCTAssertNil(AgentDeskPage.checklistAccessibilityValue(nil, locale: "en"))
+    @MainActor
+    func testChecklistExposesCompletionAsAnAccessibilityValue() async throws {
+        let restoreAccessibility = try enableAccessibilityAutomation()
+        defer { restoreAccessibility() }
+        let design = try LiveDesign()
+        let steps = [WorkingLineText.Step(text: "Find sources", done: true),
+                     WorkingLineText.Step(text: "Write summary", done: false)]
+        let now = AgentDeskNow(design: design, now: .working(since: nil, line: "Working on it", steps: steps), steers: true)
+        let host = UIHostingController(rootView: now)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKeyWindow = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            previousKeyWindow?.makeKey()
+        }
+        window.layoutIfNeeded()
+        host.view.layoutIfNeeded()
+
+        await until({ self.accessibilityElement(in: host.view, labeled: steps[0].text) != nil }, "checklist is missing")
+        let percent = FloatingPointFormatStyle<Double>.Percent().locale(Locale(identifier: design.locale))
+        for step in steps {
+            let row = try XCTUnwrap(accessibilityElement(in: host.view, labeled: step.text))
+            XCTAssertEqual(row.accessibilityValue, (step.done ? 1.0 : 0.0).formatted(percent))
+            XCTAssertFalse(row.accessibilityTraits.contains(.selected))
+        }
+        let line = try XCTUnwrap(accessibilityElement(in: host.view, labeled: "Working on it"))
+        XCTAssertTrue((line.accessibilityValue ?? "").isEmpty)
+    }
+
+    /// Enable the rendered UIKit accessibility tree inside this unit test process.
+    private func enableAccessibilityAutomation() throws -> () -> Void {
+        let simulatorRoot = ProcessInfo.processInfo.environment["IPHONE_SIMULATOR_ROOT"] ?? ""
+        let library = try XCTUnwrap(dlopen(simulatorRoot + "/usr/lib/libAccessibility.dylib", RTLD_LAZY | RTLD_LOCAL))
+        guard let get = dlsym(library, "_AXSAutomationEnabled"), let set = dlsym(library, "_AXSSetAutomationEnabled") else {
+            dlclose(library)
+            throw XCTSkip("This runtime does not expose accessibility automation to the test host")
+        }
+        let initial = unsafeBitCast(get, to: (@convention(c) () -> Int32).self)()
+        let setEnabled = unsafeBitCast(set, to: (@convention(c) (Int32) -> Void).self)
+        setEnabled(1)
+        return {
+            setEnabled(initial)
+            dlclose(library)
+        }
+    }
+
+    @MainActor
+    private func accessibilityElement(in root: NSObject, labeled label: String) -> NSObject? {
+        if root.isAccessibilityElement, root.accessibilityLabel == label { return root }
+        let children: [Any]
+        if let elements = root.accessibilityElements {
+            children = elements
+        } else {
+            let count = root.accessibilityElementCount()
+            children = count > 0 && count != NSNotFound
+                ? (0..<count).compactMap { root.accessibilityElement(at: $0) }
+                : (root as? UIView)?.subviews ?? []
+        }
+        for case let child as NSObject in children {
+            if let element = accessibilityElement(in: child, labeled: label) { return element }
+        }
+        return nil
     }
 
     // MARK: The desk's host state (r2 review)
@@ -222,6 +287,51 @@ final class AgentDeskBellTests: XCTestCase {
     }
 
     @MainActor
+    func testReopeningDuringTheScheduleCooldownRestoresControls() async throws {
+        DeskScheduleProtocol.setReplies([
+            (200, Self.scheduleReply(.scheduled)), (429, Data()), (429, Data()), (200, Self.scheduleReply(.paused)),
+        ])
+        let client = NativeDomainClient(testAuthorization: { _ in "desk-fixture" },
+                                        protocolClasses: [DeskScheduleProtocol.self])
+        let agent = try NativeID("01234567-89ab-4def-8123-456789abcdef")
+        let current: NativeDomainClient.DeskSendCheck = { true }
+        let host = Host()
+        host.outcomes = [.failed]
+        var actions = host.actions()
+        let read = AgentDeskActions.liveSchedule(client: client, agent: agent, current: current)
+        var completedReads = 0
+        actions.schedule = {
+            defer { completedReads += 1 }
+            return try await read()
+        }
+        actions = actions.fenced(by: current)
+
+        let desk = AgentDeskModel(actions: actions, readRetryDelay: .seconds(1))
+        desk.appear()
+        await until({ desk.canControl }, "the initial schedule did not load")
+        desk.run(.routineOff(job: "a"))
+        await until({ completedReads == 2 && desk.controlPending }, "the failed control never reached a busy read")
+        desk.disappear()
+
+        let reopened = AgentDeskModel(actions: actions, readRetryDelay: .milliseconds(30))
+        reopened.appear()
+        defer { reopened.disappear() }
+        await until({ reopened.canControl }, "the reopened desk did not recover from its busy read")
+        XCTAssertEqual(reopened.jobs?.map(\.state), [.paused])
+        XCTAssertEqual(completedReads, 4)
+        XCTAssertEqual(host.controls, [.routineOff(job: "a")])
+    }
+
+    private static func scheduleReply(_ state: HostAgentDesk.Job.State) -> Data {
+        Data(#"""
+        {"read":"schedule","observedAt":1,"truncated":false,"jobs":[
+         {"id":"a","name":"A","kind":"cron","display":"0 8 * * *","timezone":null,
+          "state":"\#(state.rawValue)","nextRunAt":null,"lastRunAt":null,"lastStatus":null,
+          "expr":null,"minutes":null,"runAt":null}]}
+        """#.utf8)
+    }
+
+    @MainActor
     func testTheDelayedRetryIsNeverSentAfterTheDeskCloses() async {
         let host = Host()
         host.outcomes = [.busy, .changed(1)]
@@ -263,4 +373,31 @@ final class AgentDeskBellTests: XCTestCase {
         XCTAssertEqual(dropped, .cancelled)
         XCTAssertEqual(host.controls, [.pause])
     }
+}
+
+/// Only the test client's session uses this protocol. It feeds real HTTP status codes to `NativeDomainClient`.
+private final class DeskScheduleProtocol: URLProtocol, @unchecked Sendable {
+    private static let replies = OSAllocatedUnfairLock(initialState: [(Int, Data)]())
+
+    static func setReplies(_ replies: [(Int, Data)]) {
+        Self.replies.withLock { $0 = replies }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url, url.path == HostAgentDesk.deskPath,
+              let reply = Self.replies.withLock({ $0.isEmpty ? nil : $0.removeFirst() }),
+              let response = HTTPURLResponse(url: url, statusCode: reply.0, httpVersion: nil,
+                                             headerFields: ["Content-Type": "application/json"]) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: reply.1)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
