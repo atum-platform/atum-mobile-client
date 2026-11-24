@@ -454,7 +454,8 @@ struct AppRoot: View {
                             routeFromRootDestination(roomID)
                         }),
                     messageSearch: model.liveMatrix == nil ? nil : TeamSpaceMessageSearchActions(
-                        search: { await model.teamSpaceCompanySearch(companyID: $0, term: $1, nextBatch: $2) },
+                        search: { await model.teamSpaceCompanySearch(companyID: $0, term: $1, continuation: $2) },
+                        eligibility: { _ in model.homeSearchEligibility() },
                         open: { await openTeamSpaceSearchResult($0) }),
                     openChannel: { roomID, companyID in await openTeamSpaceChannel(roomID, companyID: companyID) }
                 )

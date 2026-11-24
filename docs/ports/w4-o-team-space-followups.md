@@ -7,18 +7,25 @@ reference is `team-space/company-search.tsx` for the 25-result page and
 - Team Space reconfirms the chosen Matrix event and its company before opening
   the room. The room transcript or the reply's thread scrolls to the exact
   event and highlights its row. Older events use the existing bounded chat
-  history walk with the same cap as desktop, 40 pages of 50 events. If the
-  timeline cannot reach the event, the room stays open and the phone gives
-  error feedback.
+  history walk with the same cap as desktop, 40 pages of 50 events. A
+  timeline reattach, including a channel agent binding refresh, keeps the
+  selected event and resumes the walk on the replacement timeline. The
+  interrupted request counts toward the same 40-page cap. If the timeline
+  cannot reach the event, the room stays open and the phone gives error
+  feedback.
 - The search sheet accepts one result tap at a time. Dismissing it or changing
   the selected company cancels outstanding work. Home search keeps its existing
   room-only route and ten-result pages.
 - Team Space requests 25 messages from the selected company. Load more sends
-  Matrix's opaque `next_batch` token and appends unique results in server
-  order. A page failure shows the pinned company error and keeps prior pages
-  available for a retry. Submitting fewer than two code points clears results,
-  errors and the previous request. The desktop search-specific Show more key
-  is pending in the export. The phone uses the pinned Load more copy meanwhile.
+  Matrix's opaque `next_batch` token while the room bindings and resolved
+  senders match the previous request, then appends unique results in server
+  order. A change to either filter starts at page one and replaces prior
+  pages on success. The sheet filters all displayed results against current
+  room eligibility, including when a page fails. A failure shows the pinned
+  company error and keeps the eligible results available during a retry.
+  Submitting fewer than two code points clears results, errors and the
+  previous request. The desktop search-specific Show more key is pending in
+  the export. The phone uses the pinned Load more copy meanwhile.
 - Channel opens return `opened`, `failed` or `superseded`. Only a current
   failure shows Try again. A cancelled or overtaken open clears its own
   progress without changing a newer route.
@@ -32,11 +39,14 @@ existing lanes.
 ## Focused checks
 
 - The package suites `CompanySearchServiceTests`, `CompanyMessageSearchTests`,
-  `TeamSpaceRevampPolicyTests` and `ChatSearchTests` passed 62 tests with zero
-  failures. They cover the limit, the continuation token, transport failure
-  versus an empty result, stale pages, superseded opens and exact event
-  matching across history pages.
-- The copy pin check passed all seven tests.
+  `TeamSpaceRevampPolicyTests` and `ChatSearchTests` passed 66 tests with zero
+  failures in the review follow-up. They cover exact event matching after a
+  reattach, the shared 40-page limit, cursor reuse and restart, and the live
+  eligibility filter over previously loaded results.
+- The AppTests store fixture now replaces a timeline with a page in flight and
+  verifies the routed event remains selected and is found. The review
+  follow-up parsed that test source and ran the package suites and Debug build.
+- The initial copy pin check passed all seven tests.
 - The Debug app build passed for the iPhone 17 simulator. The package tests
   and build each used two jobs under the shared build lock
   `/Volumes/AtumTestFlight/.heavy-build.lock` and the task lock
@@ -48,3 +58,10 @@ existing lanes.
   UI execution to hosted CI.
 - Run `python3 scripts/public_guard.py --base origin/main --head HEAD` on
   the assembled branch before publishing it.
+
+## Follow-up coverage
+
+The scripted Team Space host uses a placeholder room destination. Its search
+walk covers tapping the result and navigating to the room. To cover production
+focus placement and highlighting in that walk, the host would need a
+scripted transcript and thread destination. That fixture remains deferred.

@@ -23,7 +23,7 @@ public enum TeamSpaceHeaderSearch {
 public struct TeamSpaceMessageSearchState: Equatable, Sendable {
     public struct Request: Equatable, Sendable {
         public let term: String
-        public let nextBatch: String?
+        public let continuation: CompanySearchCursor?
         fileprivate let serial: UInt64
     }
 
@@ -40,12 +40,12 @@ public struct TeamSpaceMessageSearchState: Equatable, Sendable {
         page = nil
         failed = false
         request = nil
-        if let term { begin(term: term, nextBatch: nil) }
+        if let term { begin(term: term, continuation: nil) }
     }
 
     public mutating func loadMore() {
-        guard request == nil, let term, let nextBatch = page?.nextBatch else { return }
-        begin(term: term, nextBatch: nextBatch)
+        guard request == nil, let term, let continuation = page?.continuation else { return }
+        begin(term: term, continuation: continuation)
     }
 
     public mutating func finish(_ request: Request, answer: CompanySearchPage?) {
@@ -53,16 +53,20 @@ public struct TeamSpaceMessageSearchState: Equatable, Sendable {
         self.request = nil
         failed = answer == nil
         guard let answer else { return }
-        let previous = page?.results ?? []
+        let previous = answer.replacesPreviousResults ? [] : (page?.results ?? [])
         var seen = Set(previous.map(\.id))
         page = CompanySearchPage(results: previous + answer.results.filter { seen.insert($0.id).inserted },
-                                 nextBatch: answer.nextBatch)
+                                 continuation: answer.continuation)
     }
 
-    private mutating func begin(term: String, nextBatch: String?) {
+    public func visibleResults(eligibility: CompanySearchEligibility) -> [CompanySearchResult] {
+        eligibility.retained(page?.results ?? [])
+    }
+
+    private mutating func begin(term: String, continuation: CompanySearchCursor?) {
         serial &+= 1
         failed = false
-        request = Request(term: term, nextBatch: nextBatch, serial: serial)
+        request = Request(term: term, continuation: continuation, serial: serial)
     }
 }
 

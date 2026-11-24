@@ -9,7 +9,8 @@ import SwiftUI
 
 /// Company message search for the open company, asked from the header box.
 struct TeamSpaceMessageSearchActions {
-    var search: @MainActor (_ companyID: String, _ query: String, _ nextBatch: String?) async -> CompanySearchPage?
+    var search: @MainActor (_ companyID: String, _ query: String, _ continuation: CompanySearchCursor?) async -> CompanySearchPage?
+    var eligibility: @MainActor (_ companyID: String) -> CompanySearchEligibility
     /// The message is checked again and its room opened (desktop `onOpenSearchResult`).
     var open: @MainActor (CompanySearchResult) async -> RoomOpenResult
 }
@@ -84,10 +85,11 @@ struct TeamSpaceMessageSearchSheet: View {
     var body: some View {
         let request = searchState.request
         let openingResult = opening
+        let results = searchState.visibleResults(eligibility: actions.eligibility(companyID))
         NavigationStack {
             List {
                 if let page = searchState.page {
-                    ForEach(page.results) { result in
+                    ForEach(results) { result in
                         Button { if opening == nil { opening = result } } label: {
                             HomeSearchEventRow(design: design, result: result, section: .messages)
                         }
@@ -96,7 +98,7 @@ struct TeamSpaceMessageSearchSheet: View {
                         .listRowBackground(Color.clear)
                         .accessibilityIdentifier("company.search.result." + result.eventID)
                     }
-                    if page.results.isEmpty, page.nextBatch == nil, !searchState.failed {
+                    if results.isEmpty, page.continuation == nil, !searchState.failed {
                         note(design.text("shared.matrix-company-copy.copy.searchNoResults"))
                             .accessibilityIdentifier("company.search.empty")
                     }
@@ -114,7 +116,7 @@ struct TeamSpaceMessageSearchSheet: View {
                     }
                     .listRowBackground(Color.clear)
                     .accessibilityIdentifier("company.search.loading")
-                } else if searchState.page?.nextBatch != nil {
+                } else if searchState.page?.continuation != nil {
                     Button {
                         searchState.loadMore()
                     } label: {
@@ -163,7 +165,7 @@ struct TeamSpaceMessageSearchSheet: View {
 
     private func search(_ request: TeamSpaceMessageSearchState.Request?) async {
         guard let request, !Task.isCancelled else { return }
-        let answer = await actions.search(companyID, request.term, request.nextBatch)
+        let answer = await actions.search(companyID, request.term, request.continuation)
         guard !Task.isCancelled else { return }
         searchState.finish(request, answer: answer)
     }

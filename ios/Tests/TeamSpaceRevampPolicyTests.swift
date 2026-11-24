@@ -23,7 +23,7 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
         state.submit(" launch ")
         let initial = try XCTUnwrap(state.request)
         XCTAssertEqual(initial.term, "launch")
-        state.finish(initial, answer: CompanySearchPage(results: [message("$first")], nextBatch: "next"))
+        state.finish(initial, answer: CompanySearchPage(results: [message("$first")], continuation: cursor))
         state.loadMore()
         let more = try XCTUnwrap(state.request)
 
@@ -48,7 +48,7 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
 
         let first = message("$first")
         state.submit("launch")
-        state.finish(try XCTUnwrap(state.request), answer: CompanySearchPage(results: [first], nextBatch: "next"))
+        state.finish(try XCTUnwrap(state.request), answer: CompanySearchPage(results: [first], continuation: cursor))
         state.loadMore()
         let more = try XCTUnwrap(state.request)
         state.loadMore()
@@ -59,11 +59,16 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
 
         state.loadMore()
         let retry = try XCTUnwrap(state.request)
-        XCTAssertEqual(retry.nextBatch, more.nextBatch)
+        XCTAssertEqual(retry.continuation, more.continuation)
         let second = message("$second")
         state.finish(retry, answer: CompanySearchPage(results: [first, second]))
         XCTAssertFalse(state.failed)
         XCTAssertEqual(state.page, CompanySearchPage(results: [first, second]))
+    }
+
+    private var cursor: CompanySearchCursor {
+        CompanySearchCursor(token: "next", companyID: "anka", query: .parse("launch"),
+                            channelsByRoom: ["!launch:atum.test": "launch"], senders: nil)
     }
 
     private func message(_ id: String) -> CompanySearchResult {

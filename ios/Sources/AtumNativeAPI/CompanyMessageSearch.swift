@@ -294,13 +294,28 @@ public struct CompanySearchResult: Equatable, Sendable, Identifiable {
     public var text: String { file?.name ?? snippet }
 }
 
+/// A Matrix continuation is valid for the company, query and filters that produced it.
+public struct CompanySearchCursor: Equatable, Sendable {
+    let token: String
+    let companyID: String
+    let query: CompanySearchQuery
+    let channelsByRoom: [String: String]
+    let senders: [String]?
+}
+
 public struct CompanySearchPage: Equatable, Sendable {
     public let results: [CompanySearchResult]
-    public let nextBatch: String?
+    public let continuation: CompanySearchCursor?
+    let replacesPreviousResults: Bool
 
-    public init(results: [CompanySearchResult] = [], nextBatch: String? = nil) {
+    public init(results: [CompanySearchResult] = []) {
+        self.init(results: results, continuation: nil)
+    }
+
+    init(results: [CompanySearchResult], continuation: CompanySearchCursor?, replacesPreviousResults: Bool = false) {
         self.results = results
-        self.nextBatch = nextBatch
+        self.continuation = continuation
+        self.replacesPreviousResults = replacesPreviousResults
     }
 }
 
@@ -384,7 +399,7 @@ public enum CompanyMessageSearch {
 
     static func page(responseJSON: Data, companyID: String, tab: CompanySearchTab,
                      query: CompanySearchQuery, targets: [CompanySearchTarget],
-                     limit: Int, timeZone: TimeZone = .current) -> CompanySearchPage? {
+                     limit: Int, timeZone: TimeZone = .current) -> (results: [CompanySearchResult], nextBatch: String?)? {
         guard let root = try? JSONSerialization.jsonObject(with: responseJSON) as? [String: Any],
               let categories = root["search_categories"] as? [String: Any],
               let page = categories["room_events"] as? [String: Any] else { return nil }
@@ -432,7 +447,7 @@ public enum CompanyMessageSearch {
             }
         }
         let nextBatch = (page["next_batch"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        return CompanySearchPage(results: results, nextBatch: nextBatch)
+        return (results, nextBatch)
     }
 
     /// Desktop `searchCompanies`: every company's page, companies in id order.

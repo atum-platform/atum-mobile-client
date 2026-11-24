@@ -142,14 +142,14 @@ final class CompanySearchServiceTests: XCTestCase {
         let env = environment()
         transport.nextBatch = "next+/="
         let first = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                       nextBatch: nil, environment: env)
-        let next = try XCTUnwrap(first?.nextBatch)
+                                                       continuation: nil, environment: env)
+        let next = try XCTUnwrap(first?.continuation)
         XCTAssertEqual(first?.results.map(\.roomID), [general.roomID, design.roomID])
-        XCTAssertEqual(next, "next+/=")
+        XCTAssertEqual(next.token, "next+/=")
         let second = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                        nextBatch: next, environment: env)
-        XCTAssertNil(second?.nextBatch, "a repeated token ends pagination")
-        XCTAssertEqual(transport.tokens, [nil, next])
+                                                        continuation: next, environment: env)
+        XCTAssertNil(second?.continuation, "a repeated token ends pagination")
+        XCTAssertEqual(transport.tokens, [nil, next.token])
         XCTAssertEqual(transport.allRooms, [general.roomID, design.roomID, general.roomID, design.roomID])
         for body in transport.bodies {
             let categories = body["search_categories"] as? [String: Any]
@@ -159,23 +159,91 @@ final class CompanySearchServiceTests: XCTestCase {
         }
     }
 
+    func testTeamSpaceRestartsWhenRoomsChangeAndHidesIneligibleResultsBeforeTheRetry() async throws {
+        eligibility = allEligible()
+        let search = service(limit: 1)
+        let env = environment()
+        var state = TeamSpaceMessageSearchState()
+        state.submit("launch")
+        let initial = try XCTUnwrap(state.request)
+        transport.nextBatch = "old-cursor"
+        let first = await search.searchCompanyMessages(companyID: companyA, term: initial.term,
+                                                        continuation: initial.continuation, environment: env)
+        state.finish(initial, answer: first)
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.roomID), [general.roomID, design.roomID])
+
+        eligibility = without(design)
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.roomID), [general.roomID])
+        state.loadMore()
+        let more = try XCTUnwrap(state.request)
+        transport.fails = true
+        let failed = await search.searchCompanyMessages(companyID: companyA, term: more.term,
+                                                         continuation: more.continuation, environment: env)
+        state.finish(more, answer: failed)
+        XCTAssertTrue(state.failed)
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.roomID), [general.roomID])
+
+        state.loadMore()
+        let retry = try XCTUnwrap(state.request)
+        transport.fails = false
+        transport.nextBatch = "new-cursor"
+        let restarted = await search.searchCompanyMessages(companyID: companyA, term: retry.term,
+                                                           continuation: retry.continuation, environment: env)
+        state.finish(retry, answer: restarted)
+        XCTAssertEqual(transport.tokens, [nil, nil, nil])
+        XCTAssertEqual(transport.rooms(1), [general.roomID])
+        XCTAssertEqual(state.page?.results.map(\.roomID), [general.roomID])
+        XCTAssertEqual(state.page?.continuation?.token, "new-cursor")
+    }
+
+    func testTeamSpaceRestartsWhenTheFromFilterResolvesToADifferentSender() async throws {
+        eligibility = allEligible()
+        let search = service(limit: 1)
+        let env = environment()
+        let term = "launch from:@minh"
+        let former = "@minh:atum.test"
+        let current = "@other-minh:atum.test"
+        transport.authors = [former, current]
+        membersRead = { _ in [CompanySearchMember(userID: former, names: ["Minh"], membership: "join")] }
+        transport.nextBatch = "first-cursor"
+
+        var state = TeamSpaceMessageSearchState()
+        state.submit(term)
+        let initial = try XCTUnwrap(state.request)
+        let first = await search.searchCompanyMessages(companyID: companyA, term: term,
+                                                        continuation: initial.continuation, environment: env)
+        state.finish(initial, answer: first)
+        XCTAssertEqual(Set(state.page?.results.map(\.sender) ?? []), [former])
+
+        state.loadMore()
+        let more = try XCTUnwrap(state.request)
+        membersRead = { _ in [CompanySearchMember(userID: current, names: ["Minh"], membership: "join")] }
+        transport.nextBatch = nil
+        let restarted = await search.searchCompanyMessages(companyID: companyA, term: term,
+                                                           continuation: more.continuation, environment: env)
+        state.finish(more, answer: restarted)
+        XCTAssertEqual(transport.tokens, [nil, nil])
+        XCTAssertEqual(transport.rooms(0), transport.rooms(1))
+        XCTAssertEqual(Set(state.page?.results.map(\.sender) ?? []), [current])
+    }
+
     func testTeamSpaceTransportAndMalformedResponsesFailButNoMatchesSucceed() async {
         eligibility = allEligible()
         let search = service(limit: 1)
         let env = environment()
         transport.fails = true
         let offline = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                         nextBatch: nil, environment: env)
+                                                         continuation: nil, environment: env)
         XCTAssertNil(offline)
         transport.fails = false
         transport.responseOverride = Data(#"{"search_categories":{"room_events":{"results":"invalid"}}}"#.utf8)
         let malformed = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                           nextBatch: nil, environment: env)
+                                                           continuation: nil, environment: env)
         XCTAssertNil(malformed)
         transport.responseOverride = nil
         transport.authors = []
         let empty = await search.searchCompanyMessages(companyID: companyA, term: "launch",
-                                                       nextBatch: nil, environment: env)
+                                                       continuation: nil, environment: env)
         XCTAssertEqual(empty, CompanySearchPage())
     }
 

@@ -486,6 +486,7 @@ struct ScriptedHomeHost: View {
                                         at: 1_792_540_800_000)
                 ])
             },
+            eligibility: { companyID in CompanySearchEligibility(bindings: [companyID: ["!launch:atum.test": "launch"]]) },
             open: { result in
                 UITestProbe.append("search-open \(result.eventID)", to: "team-actions.txt")
                 router.openTeamSpace(roomId: result.roomID)

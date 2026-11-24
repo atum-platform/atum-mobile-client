@@ -268,6 +268,8 @@ public enum ChatHistorySearch {
     /// What one older page did.
     public enum Page: Equatable, Sendable {
         case loaded(hasMore: Bool)
+        /// The store dropped this page when it replaced the timeline.
+        case timelineReplaced
         case failed
     }
 
@@ -327,7 +329,7 @@ public enum ChatHistorySearch {
                 catch { return report(.cancelled, pages) }
                 if matches(rows()) { return report(.found, pages) }
                 return report(.complete, pages)
-            case .loaded(hasMore: true): continue
+            case .loaded(hasMore: true), .timelineReplaced: continue
             }
         }
         return report(.capped, limit)
