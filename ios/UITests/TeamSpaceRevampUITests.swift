@@ -32,12 +32,13 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
     ]
 
     @MainActor
-    private func launch(language: String, dark: Bool) -> XCUIApplication {
+    private func launch(language: String, dark: Bool,
+                        contentSize: String = "UICTContentSizeCategoryL") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
             + ["-AtumDebugTeamSpace", "-AppleLanguages", "(\(language))",
                "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
-               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL",
+               "-UIPreferredContentSizeCategoryName", contentSize,
                // The app's own appearance setting: the simulator's appearance alone left the
                // first dark captures light.
                "-atum.appearance", dark ? "dark" : "light"]
@@ -45,6 +46,26 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         app.launch()
         XCTAssertTrue(element(app, "teamSpace.screen").waitForExistence(timeout: 15), "no Workplace")
         return app
+    }
+
+    @MainActor
+    func testBoardControlsHave44PointTargetsAtAccessibilityTextSize() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone list")
+        let app = launch(language: "vi", dark: false, contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        let page = app.buttons.matching(identifier: "company.page.board").firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 5), boundedHierarchy(app))
+        page.tap()
+        let board = app.buttons.matching(identifier: "company.board.view.board").firstMatch
+        let list = app.buttons.matching(identifier: "company.board.view.list").firstMatch
+        let mine = app.switches[words["vi"]!.mine]
+        XCTAssertTrue(mine.waitForExistence(timeout: 5), boundedHierarchy(app))
+        for control in [board, list, mine] {
+            XCTAssertTrue(control.isHittable, boundedHierarchy(app))
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.label)
+            XCTAssertTrue(app.frame.contains(control.frame), control.label)
+        }
+        mine.tap()
+        XCTAssertTrue(waitFor(3) { self.isOn(mine) })
     }
 
     @MainActor
@@ -131,6 +152,9 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         // screen's before, so it is found the way a person names it.
         let mine = app.switches[expected.mine]
         XCTAssertTrue(mine.waitForExistence(timeout: 3), boundedHierarchy(app))
+        for control in [board, list, mine] {
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.label)
+        }
         XCTAssertFalse(isOn(mine))
         mine.tap()
         XCTAssertTrue(waitFor(3) { self.isOn(mine) }, "Mine did not turn on: \(self.boundedHierarchy(app))")

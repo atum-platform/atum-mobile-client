@@ -116,6 +116,47 @@ final class ChatSearchTests: XCTestCase {
     }
 
     @MainActor
+    func testRoutedSearchMatchesTheEventIDEvenWhenTheTextIsIdentical() async {
+        var loaded = [F.text("new", from: F.agent, "launch")]
+        let result = await ChatHistorySearch.find(eventID: "$old", rows: { self.rows(loaded) }, loadPage: {
+            loaded.insert(F.text("old", from: F.agent, "launch", threadRoot: "$thread"), at: 0)
+            return .loaded(hasMore: true)
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 1)
+    }
+
+    @MainActor
+    func testRoutedSearchContinuesOnTheReplacementTimeline() async {
+        var loaded = [F.text("new", from: F.agent, "launch")]
+        var calls = 0
+        let result = await ChatHistorySearch.find(eventID: "$old", rows: { self.rows(loaded) }, loadPage: {
+            calls += 1
+            if calls == 1 {
+                loaded = [F.text("replacement", from: F.agent, "launch")]
+                return .timelineReplaced
+            }
+            loaded.insert(F.text("old", from: F.agent, "launch", threadRoot: "$thread"), at: 0)
+            return .loaded(hasMore: true)
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2)
+        XCTAssertEqual(calls, 2)
+    }
+
+    @MainActor
+    func testTimelineReplacementDoesNotResetTheRoutedSearchBudget() async {
+        var calls = 0
+        let result = await ChatHistorySearch.find(eventID: "$missing", rows: { [] }, loadPage: {
+            calls += 1
+            return calls.isMultiple(of: 2) ? .timelineReplaced : .loaded(hasMore: true)
+        })
+        XCTAssertEqual(result.phase, .capped)
+        XCTAssertEqual(result.pages, 40)
+        XCTAssertEqual(calls, 40)
+    }
+
+    @MainActor
     func testFinalPageIdleBeforeDiffsStillFindsOldestMatch() async {
         var loaded = [F.text("new", from: F.agent, "nothing")]
         var publication: Task<Void, Never>?

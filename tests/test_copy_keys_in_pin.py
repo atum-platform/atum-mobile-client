@@ -82,6 +82,7 @@ PENDING = {
     "src.matrix.team-space.saved-messages-copy.copy.unavailable",
     "src.matrix.team-space.saved-messages-copy.copy.unavailableBody",
     "src.matrix.team-space.saved-messages-copy.copy.you",
+    "shared.matrix-company-copy.copy.searchLoadMore",
 
     # Company and room threads
     "src.matrix.team-space.company-threads-copy.copy.actionFailed",

@@ -18,6 +18,58 @@ public enum TeamSpaceHeaderSearch {
     }
 }
 
+/// The submitted query and its pages. Replacing or clearing the query
+/// invalidates the old request, even when an async response arrives late.
+public struct TeamSpaceMessageSearchState: Equatable, Sendable {
+    public struct Request: Equatable, Sendable {
+        public let term: String
+        public let continuation: CompanySearchCursor?
+        fileprivate let serial: UInt64
+    }
+
+    public private(set) var request: Request?
+    public private(set) var page: CompanySearchPage?
+    public private(set) var failed = false
+    private var term: String?
+    private var serial: UInt64 = 0
+
+    public init() {}
+
+    public mutating func submit(_ raw: String) {
+        term = TeamSpaceHeaderSearch.messageQuery(raw)
+        page = nil
+        failed = false
+        request = nil
+        if let term { begin(term: term, continuation: nil) }
+    }
+
+    public mutating func loadMore() {
+        guard request == nil, let term, let continuation = page?.continuation else { return }
+        begin(term: term, continuation: continuation)
+    }
+
+    public mutating func finish(_ request: Request, answer: CompanySearchPage?) {
+        guard request == self.request else { return }
+        self.request = nil
+        failed = answer == nil
+        guard let answer else { return }
+        let previous = answer.replacesPreviousResults ? [] : (page?.results ?? [])
+        var seen = Set(previous.map(\.id))
+        page = CompanySearchPage(results: previous + answer.results.filter { seen.insert($0.id).inserted },
+                                 continuation: answer.continuation)
+    }
+
+    public func visibleResults(eligibility: CompanySearchEligibility) -> [CompanySearchResult] {
+        eligibility.retained(page?.results ?? [])
+    }
+
+    private mutating func begin(term: String, continuation: CompanySearchCursor?) {
+        serial &+= 1
+        failed = false
+        request = Request(term: term, continuation: continuation, serial: serial)
+    }
+}
+
 /// The one line the Channels section says when it lists nothing (desktop
 /// `team-space/channel-sections.tsx:152–156`): "No matches" while a query hides live
 /// channels, else "No channels". An Archived list still on screen keeps it quiet.
@@ -111,6 +163,10 @@ public struct CompanyBoardPreference: Equatable, Sendable {
 
 // MARK: Channel opening
 
+public enum RoomOpenResult: Equatable, Sendable {
+    case opened, failed, superseded
+}
+
 /// Opening a channel, and a failed open held with its company and room (desktop
 /// `channelOpenFailure`). It shows only while that company is on screen, Try again asks
 /// for exactly that room, and any successful navigation clears it. Only the latest
@@ -141,16 +197,11 @@ public struct CompanyChannelOpenState: Equatable, Sendable {
         return attempt
     }
 
-    /// The open's answer: true opened, false failed, nil no answer of its own (another
-    /// open replaced it). A stale attempt changes nothing.
-    public mutating func finish(_ attempt: UInt64, opened: Bool?) {
+    /// A stale attempt changes nothing. Only a current failure is shown.
+    public mutating func finish(_ attempt: UInt64, result: RoomOpenResult) {
         guard attempt == self.attempt, let target = opening else { return }
         opening = nil
-        switch opened {
-        case true?: failure = nil
-        case false?: failure = target
-        case nil: break
-        }
+        failure = result == .failed ? target : nil
     }
 
     /// Another room or company came on screen: the failure it replaced is gone, and an

@@ -181,19 +181,17 @@ extension LiveAppModel {
 
     /// Team Space header search (W4-E7, desktop #114): the same service and rules as
     /// Home search, asked of the open company only and its Messages tab.
-    func teamSpaceCompanySearch(companyID: String, term: String) async -> [CompanySearchResult] {
-        guard let liveMatrix else { return [] }
-        let targets = { [weak self] () -> [String: [CompanySearchTarget]] in
-            (self?.homeSearchTargets() ?? [:]).filter { $0.key == companyID }
-        }
+    func teamSpaceCompanySearch(companyID: String, term: String,
+                                continuation: CompanySearchCursor?) async -> CompanySearchPage? {
+        guard let liveMatrix, companyWorkspace.activeCompanyID == companyID else { return nil }
         let environment = CompanySearchService.Environment(
-            targets: targets,
+            targets: { [weak self] in self?.homeSearchTargets() ?? [:] },
             eligibility: { [weak self] in self?.homeSearchEligibility() ?? CompanySearchEligibility() },
             ownUserID: { try? liveMatrix.companyOwnUserID() },
             senders: { roomID, from in await liveMatrix.companySearchSenders(roomID: roomID, from: from) },
             endpoint: { try liveMatrix.companySearchEndpoint() })
-        let results = await Self.homeCompanySearchService.search(term, tab: .messages, environment: environment)
-        return homeSearchEligibility().retained(results.filter { $0.companyID == companyID })
+        return await Self.homeCompanySearchService.searchCompanyMessages(
+            companyID: companyID, term: term, continuation: continuation, environment: environment)
     }
 
     /// Desktop `openGlobalEvent` → `openCompanyMessage`: the room is still

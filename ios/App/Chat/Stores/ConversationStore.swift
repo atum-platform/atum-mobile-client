@@ -177,6 +177,8 @@ final class LiveConversationStore: ConversationStore {
     /// fill the composer (desktop `composer.edit`), the keyboard comes up, and
     /// nothing is sent.
     private(set) var composerFocusRequest: UInt64 = 0
+    /// The exact event selected in Team Space search, scoped to this open chat.
+    var searchTargetEventID: String?
 
     func pickStarter(_ text: String) {
         draft = text
@@ -395,6 +397,7 @@ final class LiveConversationStore: ConversationStore {
     // MARK: Protocol
 
     func handle(_ input: FollowInput) {
+        if case .jumpTapped = input { searchTargetEventID = nil }
         run(core.handle(input, now: clock()))
         // Follow state and scroll requests change on geometry alone (the
         // pill); the rows do not, so only these two are mirrored here.
@@ -551,19 +554,27 @@ final class LiveConversationStore: ConversationStore {
     /// scroll/background page finishes. Query cancellation never opens a
     /// second page slot while the first page is still reaching the rows.
     func loadOlderPageForSearch() async -> ChatHistorySearch.Page {
-        if let searchPage { return await searchPage.value }
         guard !Task.isCancelled, !isClosed else { return .failed }
         let generation = generation
-        let page = Task { [weak self] in
-            guard let self else { return ChatHistorySearch.Page.failed }
-            let result = await self.performSearchPage(generation: generation)
-            // Clear before releasing any waiter. A joined walk can resume before
-            // the original caller and immediately request its next page.
-            if generation == self.generation { self.searchPage = nil }
-            return result
+        let page: Task<ChatHistorySearch.Page, Never>
+        if let searchPage {
+            page = searchPage
+        } else {
+            page = Task { [weak self] in
+                guard let self else { return ChatHistorySearch.Page.failed }
+                let result = await self.performSearchPage(generation: generation)
+                // Clear before releasing any waiter. A joined walk can resume before
+                // the original caller and immediately request its next page.
+                if generation == self.generation { self.searchPage = nil }
+                return result
+            }
+            searchPage = page
         }
-        searchPage = page
-        return await page.value
+        let result = await page.value
+        guard !isClosed else { return .failed }
+        // A detached timeline's result is stale for every waiter. The same walk
+        // can claim its next page as soon as the replacement is attached.
+        return generation == self.generation ? result : .timelineReplaced
     }
 
     private func performSearchPage(generation: UInt64) async -> ChatHistorySearch.Page {
@@ -571,7 +582,7 @@ final class LiveConversationStore: ConversationStore {
         while true {
             guard generation == self.generation, !isClosed, !Task.isCancelled,
                   ContinuousClock.now < deadline else { return .failed }
-            if core.reachedTimelineStart { return .loaded(hasMore: false) }
+            if controller != nil, core.reachedTimelineStart { return .loaded(hasMore: false) }
             if core.startSearchPage(now: clock()) { break }
             try? await Task.sleep(for: .milliseconds(100))
         }

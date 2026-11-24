@@ -18,6 +18,7 @@ import SwiftUI
 struct CompanyThreadRoute: Identifiable, Equatable, Hashable, Sendable {
     let roomID: String
     let rootID: String?
+    var focusEventID: String? = nil
     var id: String { roomID + "\u{0}" + (rootID ?? "") }
 }
 
@@ -185,7 +186,7 @@ struct CompanyThreadPanel: View {
 
     private func detail(rootID: String, fromList: Bool) -> some View {
         CompanyThreadDetail(model: model, design: design, coordinator: coordinator, roomID: route.roomID,
-                            rootID: rootID,
+                            rootID: rootID, focusEventID: route.focusEventID,
                             initialFollowed: threads?.first(where: { $0.root.eventID == rootID })?.followed ?? false,
                             fromList: fromList)
     }
@@ -283,6 +284,7 @@ struct CompanyThreadDetail: View {
     let coordinator: CompanyThreadsCoordinator
     let roomID: String
     let rootID: String
+    let focusEventID: String?
     let fromList: Bool
 
     @Environment(\.dismiss) private var dismiss
@@ -296,12 +298,13 @@ struct CompanyThreadDetail: View {
     @State private var followLoaded: Bool
 
     init(model: LiveAppModel, design: LiveDesign, coordinator: CompanyThreadsCoordinator, roomID: String,
-         rootID: String, initialFollowed: Bool, fromList: Bool) {
+         rootID: String, focusEventID: String? = nil, initialFollowed: Bool, fromList: Bool) {
         self.model = model
         self.design = design
         self.coordinator = coordinator
         self.roomID = roomID
         self.rootID = rootID
+        self.focusEventID = focusEventID
         self.fromList = fromList
         _followed = State(initialValue: initialFollowed)
         _followLoaded = State(initialValue: fromList)
@@ -403,6 +406,7 @@ struct CompanyThreadDetail: View {
         if store == nil {
             store = model.companyThreadStore(roomID: roomID, rootID: rootID,
                                              draft: coordinator.drafts[draftKey] ?? "")
+            store?.searchTargetEventID = focusEventID
         }
         guard let store else { return }
         _ = store.updateChannelThreadBinding(nil)
