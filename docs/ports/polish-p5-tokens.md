@@ -59,6 +59,7 @@ screen's look.
 | Area | Files | Findings before → after |
 |---|---|---|
 | Store | `StoreScreen`, `StoreItemSheet`, `StorePurchasedScreen`, `ProtonTopUp` | 55 → 0 |
+| Drive | `DriveScreen`, `DriveGalleryView` | 40 → 0 |
 
 ## Verification
 

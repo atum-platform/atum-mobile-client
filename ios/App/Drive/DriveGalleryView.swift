@@ -25,6 +25,7 @@ struct DriveGalleryView: View {
     /// `sharing`, which is already nil by the time `onDismiss` runs.
     @State private var stagedShareURL: URL?
     @Environment(\.atum) private var atum
+    private var kit: AtumKit { design.kit }
     @Environment(\.colorScheme) private var scheme
 
     init(design: LiveDesign, model: DriveFeatureModel, gallery: DriveGallery) {
@@ -138,7 +139,7 @@ struct DriveGalleryView: View {
 
     /// Desktop's caption: the name, then kind · size · modified.
     private func caption(_ item: DriveItem) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: kit.space(.s1)) {
             Text(verbatim: item.name)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
@@ -149,8 +150,8 @@ struct DriveGalleryView: View {
                 .monospacedDigit()
                 .foregroundStyle(atum?.color(.muted, scheme: scheme) ?? .secondary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, kit.space(.s4))
+        .padding(.vertical, kit.space(.s3))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("drive.gallery.caption")
     }
@@ -168,18 +169,18 @@ struct DriveGalleryView: View {
     private var strip: some View {
         ScrollViewReader { reader in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 4) {
+                LazyHStack(spacing: kit.space(.s1)) {
                     ForEach(gallery.items) { item in
                         Button { selection = item.id } label: {
                             Image(design.symbol(DriveFileFamily.of(item).glyphAlias))
-                                .font(.system(size: 22, weight: .light))
+                                .font(.system(size: 22, weight: .light)) // design-lint: allow: glyph sized to its fixed 52 pt thumbnail
                                 .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
                                 .frame(width: 52, height: 52)
                                 .background(
                                     item.id == selection
                                         ? atum?.kitColor(.fillSelected, scheme: scheme) ?? Color.secondary.opacity(0.15)
                                         : .clear,
-                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous))
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -189,8 +190,8 @@ struct DriveGalleryView: View {
                         .accessibilityIdentifier("drive.gallery.strip." + item.id)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, kit.space(.s3))
+                .padding(.vertical, 6) // design-lint: allow: centres the 52 pt thumbnails in the 64 pt strip
             }
             .frame(height: 64)
             .overlay(alignment: .top) {
@@ -199,7 +200,7 @@ struct DriveGalleryView: View {
                     .frame(height: 0.5)
             }
             .onChange(of: selection, initial: true) { _, id in
-                withAnimation { reader.scrollTo(id, anchor: .center) }
+                withMotion(.standard) { reader.scrollTo(id, anchor: .center) }
             }
         }
     }
@@ -226,6 +227,7 @@ private struct DriveGalleryPage: View {
     @State private var zoomScale = 1.0
     @State private var controlsVisible = true
     @Environment(\.atum) private var atum
+    private var kit: AtumKit { design.kit }
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -234,7 +236,7 @@ private struct DriveGalleryPage: View {
                 Text(copy.stale)
                     .font(.footnote)
                     .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, kit.space(.s2))
             }
             ZStack {
                 switch file {
@@ -301,9 +303,9 @@ private struct DriveGalleryPage: View {
     }
 
     @ViewBuilder private func failure(_ message: String, retry: (() -> Void)?) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: kit.space(.s3)) {
             Image(design.symbol(DriveFileFamily.of(item).glyphAlias))
-                .font(.system(size: 48, weight: .light))
+                .font(.largeTitle.weight(.light)).imageScale(.large)
                 .foregroundStyle(atum?.color(.muted, scheme: scheme) ?? .secondary)
                 .accessibilityHidden(true)
             Text(message)
@@ -316,7 +318,7 @@ private struct DriveGalleryPage: View {
                     .buttonBorderShape(.capsule)
             }
         }
-        .padding(32)
+        .padding(kit.space(.s8))
         .accessibilityIdentifier("drive.gallery.failed")
     }
 
@@ -349,7 +351,7 @@ private struct DriveGalleryPage: View {
     }
 
     @ViewBuilder private var waiting: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: kit.space(.s3)) {
             if let progress = model.transferProgress[item.id] {
                 ProgressView(value: progress)
                     .progressViewStyle(.circular)

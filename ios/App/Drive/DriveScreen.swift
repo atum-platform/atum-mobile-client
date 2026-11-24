@@ -20,6 +20,7 @@ struct DriveScreen: View {
     let design: LiveDesign
     @Bindable var router: Router
     @Bindable var model: DriveFeatureModel
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         DriveDirectoryView(design: design, router: router, model: model, route: nil)
@@ -38,8 +39,8 @@ struct DriveScreen: View {
                                 Text(DriveCopy(design: design).stale)
                                     .font(.footnote)
                                     .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, kit.space(.s4))
+                                    .padding(.vertical, kit.space(.s3))
                             }
                             DriveQuickLook(url: preview.url, name: preview.name)
                     }
@@ -79,6 +80,7 @@ private struct DriveDirectoryView: View {
     let route: DriveFolderRoute?
 
     @Environment(\.atum) private var atum
+    private var kit: AtumKit { design.kit }
     @Environment(\.colorScheme) private var scheme
     /// Desktop Drive's two places; Recents is where it opens.
     @State private var destination = DriveDestination.recents
@@ -189,7 +191,7 @@ private struct DriveDirectoryView: View {
 
     private func gridBody(_ items: [DriveItem]) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: kit.space(.s3)) {
                 if searching {
                     scopeLine
                 } else {
@@ -199,7 +201,7 @@ private struct DriveDirectoryView: View {
                 }
                 if items.isEmpty { noMatches }
                 ForEach(groups(items)) { group in
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: kit.space(.s3)) {
                         if !group.label.isEmpty {
                             groupHeader(group)
                             Rectangle()
@@ -208,16 +210,16 @@ private struct DriveDirectoryView: View {
                                 .accessibilityHidden(true)
                         }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 140),
-                                                     spacing: 8, alignment: .top)],
-                                  alignment: .leading, spacing: 18) {
+                                                     spacing: kit.space(.s2), alignment: .top)],
+                                  alignment: .leading, spacing: kit.space(.s4)) {
                             ForEach(group.items) { cell($0) }
                         }
                     }
                     .padding(.top, group.label.isEmpty ? 0 : 6)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
+            .padding(.horizontal, kit.space(.s4))
+            .padding(.bottom, kit.space(.s6))
         }
         .accessibilityIdentifier("drive.grid")
     }
@@ -236,7 +238,7 @@ private struct DriveDirectoryView: View {
             .font(.subheadline)
             .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 24)
+            .padding(.vertical, kit.space(.s6))
             .accessibilityIdentifier("drive.search.empty")
     }
 
@@ -244,8 +246,8 @@ private struct DriveDirectoryView: View {
     /// for this folder, never the whole Drive, so there is one scope and no
     /// "This Drive" choice. Whole-Drive search waits on a platform route.
     private var scopeLine: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: kit.space(.s1)) {
+            HStack(spacing: kit.space(.s1)) {
                 Text(copy.searchScopeTitle)
                     .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
                 Text(verbatim: route?.current.name ?? copy.driveName)
@@ -373,7 +375,7 @@ private struct DriveDirectoryView: View {
     }
 
     @ViewBuilder private var emptyState: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: kit.space(.s4)) {
             switch DrivePresentationPolicy.emptyState(
                 connection: model.connection,
                 directory: presentation.condition
@@ -384,7 +386,7 @@ private struct DriveDirectoryView: View {
                 Text(copy.refreshing)
             case .connect:
                 Image(atum?.symbol(.folder) ?? "ph.folder-simple")
-                    .font(.system(size: 42))
+                    .font(.largeTitle).imageScale(.large)
                 Text(copy.connectTitle).font(.headline)
                 Text(copy.connectBody).font(.subheadline).multilineTextAlignment(.center)
                 Button(copy.connect) { Task { await model.connect() } }
@@ -407,7 +409,7 @@ private struct DriveDirectoryView: View {
                 if route == nil {
                     // The Drive itself, still empty: what it is for.
                     Image(design.symbol("Folder"))
-                        .font(.system(size: 40, weight: .light))
+                        .font(.largeTitle.weight(.light)).imageScale(.large)
                         .foregroundStyle(atum?.color(.muted, scheme: scheme) ?? .secondary)
                         .accessibilityHidden(true)
                     Text(copy.emptyRootTitle).font(.headline)
@@ -421,7 +423,7 @@ private struct DriveDirectoryView: View {
             }
         }
         .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
-        .padding(32)
+        .padding(kit.space(.s8))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("drive.empty")
@@ -459,7 +461,7 @@ private struct DriveDirectoryView: View {
             .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
             .accessibilityIdentifier("drive.status")
         } else if let message = statusMessage {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: kit.space(.s2)) {
                 Image(atum?.symbol(.alertCircle) ?? "ph.warning-circle")
                 Text(message).font(.footnote)
                 Spacer(minLength: 8)
@@ -502,7 +504,7 @@ private struct DriveDirectoryView: View {
 
     private var breadcrumbs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 7) {
+            HStack(spacing: kit.space(.s2)) {
                 Button(copy.title) { router.drivePath = NavigationPath() }
                 if let route {
                     ForEach(Array(route.path.enumerated()), id: \.offset) { index, crumb in
@@ -523,7 +525,7 @@ private struct DriveDirectoryView: View {
                 DriveFileRow(design: design, copy: copy, model: model, item: item)
             }
         } else {
-            HStack(spacing: 6) {
+            HStack(spacing: kit.space(.s2)) {
                 Button { open(item) } label: {
                     DriveFileRow(design: design, copy: copy, model: model, item: item)
                 }
@@ -589,19 +591,20 @@ private struct DriveGridCell: View {
     let item: DriveItem
 
     @Environment(\.atum) private var atum
+    private var kit: AtumKit { design.kit }
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: kit.space(.s2)) {
             Image(design.symbol(DriveFileFamily.of(item).glyphAlias))
-                .font(.system(size: 34, weight: .light))
+                .font(.system(size: 34, weight: .light)) // design-lint: allow: glyph sized to its fixed 88 x 76 tile
                 .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
                 .frame(width: 88, height: 76)
                 .background(atum?.color(.cell, scheme: scheme) ?? Color(uiColor: .secondarySystemBackground),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            in: RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous)
                     .strokeBorder(atum?.color(.frame, scheme: scheme) ?? .clear, lineWidth: 0.5))
-                .overlay(alignment: .bottomTrailing) { badge.padding(6) }
+                .overlay(alignment: .bottomTrailing) { badge.padding(kit.space(.s2)) }
             Text(verbatim: DriveArrangement.middleTruncated(item.name))
                 .font(.footnote)
                 .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
@@ -639,21 +642,22 @@ private struct DriveFileRow: View {
     let item: DriveItem
 
     @Environment(\.atum) private var atum
+    private var kit: AtumKit { design.kit }
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: kit.space(.s3)) {
             Image(design.symbol(DriveFileFamily.of(item).glyphAlias))
                 .font(.title3)
                 .foregroundStyle(atum?.color(.soft, scheme: scheme) ?? .secondary)
                 .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 Text(verbatim: item.name)
                     .font(.body)
                     .foregroundStyle(atum?.color(.ink, scheme: scheme) ?? .primary)
                     .lineLimit(2)
                 if item.kind == .file {
-                    HStack(spacing: 6) {
+                    HStack(spacing: kit.space(.s2)) {
                         Text(verbatim: ByteCountFormatter.string(
                             fromByteCount: item.size,
                             countStyle: .file
