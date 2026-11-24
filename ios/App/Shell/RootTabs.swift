@@ -105,6 +105,16 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
         let atum = AtumVisualSystem(design: design)
         let selected = router.selectedTab == kind
         let destination = content()
+            // The bar's bottom scroll edge is the system hard edge, not the
+            // default soft one. iOS 26's soft edge fades and dims list rows
+            // about 65 pt above the bar's top (a 148 pt pocket over an 83 pt
+            // bar on a 390 x 844 iPhone). Resting rows above the bar lost
+            // contrast there (CI fix, `testRosterAccessibilityAudit`). The
+            // hard edge stops at the bar. Rows still scroll beneath the glass,
+            // and the system inset still rests the last row above it. Views
+            // that set their own edge style, such as the chat transcript's
+            // soft edge over its composer, keep it.
+            .scrollEdgeEffectStyle(.hard, for: .bottom)
             .background(TabBarItemIdentifiers(identifiers: Router.Tab.barOrder.map { "phone.tab." + $0.identifier }))
         return Tab(value: kind) {
             destination

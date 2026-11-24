@@ -153,6 +153,62 @@ volume.
 The dark, Vietnamese and AX-L Home captures show the bar with its Team
 Space badge and the selected glyph filled.
 
+## CI fix (PR #95, hosted run 45455618841 on `ae84aad`)
+
+The hosted runner picks the last listed iPhone simulator. For this run that
+was an iPhone 16e (390 x 844, iOS 27). `main` `09850de` passed all three
+tests below on the same runner class.
+
+### `HomeShellUITests/testRosterAccessibilityAudit` (shard 0)
+
+- **Failure:** "Contrast failed" on the roster preview "Cảm ơn bạn." at
+  (80, 704, 86 x 20). The audit's tabbed-list bound was 757 (the
+  `phone.tab.chats` button's top, 765, less 8), so the text sat fully above
+  the bar.
+- **Root cause:** the hosted hierarchy shows the home list's bottom scroll
+  edge effect at (0, 696.2, 390 x 147.8), with an
+  `AdditionalDimmingOverlay` inside it. That is iOS 26's default soft edge
+  for the system tab bar. It fades and dims rows about 65 pt above the bar's
+  top, so a row resting above the bar lost contrast. The old capsule sat
+  outside the list (a `VStack` sibling), so no list had a bottom edge effect
+  before P1. A 390 x 844 screen puts a preview line in that band at rest. The
+  iPhone 17 used for the P1 runs does not, which is why P1's local run of the
+  roster audit passed.
+- **Fix:** `RootTabs` gives each tab's content the system hard bottom edge,
+  `.scrollEdgeEffectStyle(.hard, for: .bottom)`. The hard edge stops at the
+  bar. Rows still scroll beneath the Liquid Glass, and the system's automatic
+  safe-area inset still rests the last row above the bar. There is no manual
+  padding and the audit is unchanged. A view that sets its own style keeps it:
+  the chat transcript and the model picker keep their explicit soft bottom
+  edge over the composer.
+
+### `HomeShellUITests/testNewAssistantShowsCloudDisclosureAndKeepsTheSameSetupRunning` (shard 0)
+
+- **Failure:** `revealByScrolling(disclosure, in: form)` (line 391) failed
+  after six slow swipes on the sheet's form at (0, 47, 390 x 797), with the
+  name field focused and the keyboard up. The failure dump is capped at
+  12,000 characters and ends inside the Home list behind the sheet.
+- **Not pre-existing:** the "Verification" section above calls this failure
+  pre-existing. That is wrong. `docs/ci-ui-tests.md` records that the
+  14 Nov failure was fixed, with 3 of 3 passes and a pass in the full class,
+  and `main` passes it on the hosted runner. P1's own local run 2 hit the
+  regression.
+
+### `PhoneApprovalsUITests/testSetUpWithFaceIDThenRemove` (shard 3)
+
+- **Failure:** after Set up was tapped, the button stayed on screen with its
+  original label for the whole 3 s poll, and "Setting up…" never appeared.
+- **Scope:** this PR does not touch the flow. The scripted approvals host is
+  `S6ScriptedHost`, not `RootTabs`, and the PR has no Account or
+  `S6ScriptedHost` changes. Because the label never changed, the hosted
+  runner most likely dropped the tap.
+
+### Design lint
+
+`RootTabs.swift` now has fewer raw values than the baseline (the capsule's
+padding and glyph size are gone). The lower counts are locked in with
+`python3 scripts/design_lint.py --update`.
+
 ## Deferred
 
 - `.tabBarMinimizeBehavior` (see Decisions).
