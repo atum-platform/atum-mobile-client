@@ -179,6 +179,42 @@ final class ChatSearchTests: XCTestCase {
     }
 
     @MainActor
+    func testRoutedSearchWaitsForTheNewBindingWhenTheFirstProjectionArrivesDuringTheOldPage() async {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let binding = CompanyTurnBinding(companyID: "company", agentPrincipal: "agent", agentUserID: F.agent,
+                                         roomID: "!channel:example.test", audience: .channel(id: "channel"))
+        var context = RoomContext(kind: .group, ownUserID: F.me)
+        context.companyTurnScope = .channel(threadRoot: "$thread", binding: nil)
+        var core = ConversationCore(context: context)
+        _ = core.attached(now: now)
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+
+        var calls = 0
+        var focused: String?
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { core.snapshot }, loadPage: {
+            calls += 1
+            let projection = ProjectedTimeline(snapshot: Snapshot(rows: self.rows([reply]), change: .reset,
+                                                                  generation: UInt64(calls)),
+                                               nextNoAnswerChange: nil, sequence: 1)
+            if calls == 1 {
+                _ = core.receive(projection, now: now)
+                core.detached()
+                context.companyTurnScope = .channel(threadRoot: "$thread", binding: binding)
+                core.updateContext(context)
+                XCTAssertEqual(core.snapshot.rows.map(\.id), [reply.id], "the old row stays visible")
+                return .timelineReplaced
+            }
+            XCTAssertNil(focused)
+            _ = core.attached(now: now)
+            _ = core.receive(projection, now: now)
+            return .loaded(hasMore: true)
+        }, onFound: { focused = $0 })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2)
+        XCTAssertEqual(focused, reply.id)
+    }
+
+    @MainActor
     func testTimelineReplacementDoesNotResetTheRoutedSearchBudget() async {
         var calls = 0
         let result = await ChatHistorySearch.find(eventID: "$missing", snapshot: { .empty }, loadPage: {

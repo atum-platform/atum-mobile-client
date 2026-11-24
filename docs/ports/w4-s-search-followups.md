@@ -9,6 +9,8 @@ generation even if the old page published the selected reply just before the
 reattach. The interrupted page counts against the same 40-page limit. When the
 reply is found in the replacement projection, the transcript assigns the scroll
 and highlight row and consumes the selected event in the same main-actor turn.
+During a binding refresh the retained rows carry no current projection
+generation, including when the old timeline first projected during the page.
 
 The scripted Team Space host still opens a placeholder room. Exercising focus
 placement and highlighting in that walk requires a transcript and thread

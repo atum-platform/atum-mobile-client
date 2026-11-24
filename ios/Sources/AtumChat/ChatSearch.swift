@@ -302,7 +302,9 @@ public enum ChatHistorySearch {
             let current = snapshot()
             // The transcript keeps drawing the old rows until the replacement
             // projects. Those rows cannot complete the routed search.
-            return current.generation == replacedGeneration ? [] : current.rows
+            guard current.generation != Snapshot.empty.generation,
+                  current.generation != replacedGeneration else { return [] }
+            return current.rows
         }
         return await run(maximumPages: maximumPages, rows: currentRows,
                          matches: { $0.contains { $0.item.eventID == eventID } },
