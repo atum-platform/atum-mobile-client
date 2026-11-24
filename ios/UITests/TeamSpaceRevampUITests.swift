@@ -1,3 +1,4 @@
+import AtumChat
 import XCTest
 
 /// W4-E7: the Team Space revamp (desktop #114) on the real `TeamSpaceScreen` with
