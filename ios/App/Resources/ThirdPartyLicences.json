@@ -45,6 +45,16 @@
     "resource": "Prism-LICENSE.txt"
   },
   {
+    "title": "Provider marks — Simple Icons, Lobe Icons and T3 Code",
+    "bundle": "app",
+    "resource": "ProviderMarks-NOTICE.txt"
+  },
+  {
+    "title": "Provider marks — Simple Icons CC0 1.0",
+    "bundle": "app",
+    "resource": "ProviderMarks-SimpleIcons-CC0-1.0.txt"
+  },
+  {
     "title": "Math fonts — copyright and licence notices",
     "bundle": "app",
     "resource": "MathFonts-EmbeddedNotices.txt"
