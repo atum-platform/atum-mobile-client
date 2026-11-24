@@ -1,6 +1,6 @@
 # Team Space search and channel opening follow-ups
 
-Issue #86 items 5, 6 and 8 follow the Team Space revamp on iPhone. The desktop
+Issue #86 items 5, 6, 8 and 9 follow the Team Space revamp on iPhone. The desktop
 reference is `team-space/company-search.tsx` for the 25-result page and
 `workspace.tsx` for the room, event and optional thread target.
 
@@ -22,6 +22,9 @@ reference is `team-space/company-search.tsx` for the 25-result page and
 - Channel opens return `opened`, `failed` or `superseded`. Only a current
   failure shows Try again. A cancelled or overtaken open clears its own
   progress without changing a newer route.
+- Board, List and Mine each have a 44-point minimum hit area. A horizontal
+  fit check moves Mine below the segments when the controls need more width.
+  The board mode and owner filter keep their existing selection behavior.
 
 The Forward glyph, the Files search tab and board-card reads remain in their
 existing lanes.
@@ -34,3 +37,14 @@ existing lanes.
   versus an empty result, stale pages, superseded opens and exact event
   matching across history pages.
 - The copy pin check passed all seven tests.
+- The Debug app build passed for the iPhone 17 simulator. The package tests
+  and build each used two jobs under the shared build lock
+  `/Volumes/AtumTestFlight/.heavy-build.lock` and the task lock
+  `/tmp/atum-build.lock`. Build and test logs are under
+  `/Volumes/AtumTestFlight/dd-w4-o-team-space-followups`.
+- The hosted UI assertion checks the control heights and verifies that all
+  three targets fit and Mine can be toggled at the largest accessibility text
+  size in Vietnamese. Local verification parsed the UI test source and left
+  UI execution to hosted CI.
+- Run `python3 scripts/public_guard.py --base origin/main --head HEAD` on
+  the assembled branch before publishing it.

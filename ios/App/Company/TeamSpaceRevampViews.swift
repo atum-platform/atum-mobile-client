@@ -234,36 +234,67 @@ struct CompanyBoardControls: View {
     let viewer: String?
     @Binding var preference: CompanyBoardPreference
 
+    @Environment(\.colorScheme) private var scheme
     private var copy: TeamSpaceCopy { TeamSpaceCopy(design: design) }
+    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Picker(selection: Binding(get: { preference.view },
-                                      set: { preference = preference.selecting($0) })) {
-                ForEach(CompanyBoardView.allCases, id: \.self) { view in
-                    Text(verbatim: copy.boardView(view)).tag(view)
-                        .accessibilityIdentifier("company.board.view." + view.rawValue)
-                }
-            } label: {
-                Text(verbatim: copy.boardViews)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { views; mine }
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 8) {
+                views
+                mine
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .accessibilityIdentifier("company.board.views")
-            if viewer != nil {
-                Toggle(isOn: Binding(get: { preference.mineOn(viewer: viewer) },
-                                     set: { _ in preference = preference.togglingMine(viewer: viewer) })) {
-                    // The segmented control's size, so Mine reads as part of the same bar.
-                    Text(verbatim: copy.mine).font(.subheadline)
-                }
-                // On the Toggle itself: after the styles, the screen's identifier won.
-                .accessibilityIdentifier("company.board.mine")
-                .toggleStyle(.button)
-                .buttonStyle(.bordered)
-            }
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
+    }
+
+    private var views: some View {
+        HStack(spacing: 2) {
+            ForEach(CompanyBoardView.allCases, id: \.self) { view in
+                let selected = preference.view == view
+                Button {
+                    preference = preference.selecting(view)
+                } label: {
+                    Text(verbatim: copy.boardView(view))
+                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background {
+                            if selected {
+                                RoundedRectangle(cornerRadius: 8).fill(atum.color(.ground, scheme: scheme))
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("company.board.view." + view.rawValue)
+            }
+        }
+        .padding(2)
+        .background(atum.color(.cell, scheme: scheme), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: copy.boardViews))
+    }
+
+    @ViewBuilder private var mine: some View {
+        if viewer != nil {
+            Toggle(isOn: Binding(get: { preference.mineOn(viewer: viewer) },
+                                 set: { _ in preference = preference.togglingMine(viewer: viewer) })) {
+                Text(verbatim: copy.mine)
+                    .font(.subheadline)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("company.board.mine")
+            .toggleStyle(.button)
+            .buttonStyle(.bordered)
+        }
     }
 }
