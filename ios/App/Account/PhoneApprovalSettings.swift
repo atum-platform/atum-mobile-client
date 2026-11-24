@@ -153,6 +153,7 @@ struct PhoneApprovalSettingsPage: View {
     @State private var confirmsRemoval = false
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         List {
@@ -189,15 +190,15 @@ struct PhoneApprovalSettingsPage: View {
     // MARK: Rows
 
     private var statusRow: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(.shield))
-                .font(.system(size: 20, weight: .light))
+                .font(.title3.weight(.light))
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                 .frame(width: 28)
                 .accessibilityHidden(true)
             let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                : AnyLayout(HStackLayout(spacing: 8))
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: kit.space(.s1)))
+                : AnyLayout(HStackLayout(spacing: kit.space(.s2)))
             layout {
                 Text(copy(.settingsTitle))
                     .font(.body)
@@ -258,13 +259,13 @@ struct PhoneApprovalSettingsPage: View {
     }
 
     private func notice(glyph: AtumGlyph, title: String, help: String?, identifier: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: kit.space(.s3)) {
             Image(atum.symbol(glyph))
                 .font(.body)
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .frame(width: 28)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 Text(title)
                     .font(.body)
                     .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -278,7 +279,7 @@ struct PhoneApprovalSettingsPage: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, kit.space(.s2))
         .listRowBackground(atum.kitColor(.surface, scheme: scheme))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, help].compactMap { $0 }.joined(separator: ", "))
@@ -304,7 +305,7 @@ struct PhoneApprovalSettingsPage: View {
             Button {
                 Task { await model.setUp(reason: copy(.enrollReason)) }
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: kit.space(.s2)) {
                     if model.busy == .settingUp {
                         AtomWait().frame(width: 20, height: 20).accessibilityHidden(true)
                         Text(copy(.settingsSettingUp))
@@ -317,10 +318,10 @@ struct PhoneApprovalSettingsPage: View {
             .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
             .disabled(model.busy != nil)
             .accessibilityIdentifier("approvals.settings.setup")
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowInsets(EdgeInsets(top: kit.space(.s1), leading: 0, bottom: kit.space(.s1), trailing: 0))
         case .remove:
             Button { confirmsRemoval = true } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: kit.space(.s3)) {
                     Image(atum.symbol(.trash))
                         .font(.body)
                         .foregroundStyle(atum.color(.muted, scheme: scheme))

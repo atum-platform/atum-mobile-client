@@ -34,6 +34,7 @@ struct AccountProfileHeader: View {
     @State private var pendingArt: AtumAvatarArt?
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
     private var editsName: Bool { editable && actions.saveProfileName != nil }
     private var editsPhoto: Bool { editable && actions.saveProfilePhoto != nil }
     private var hasPhoto: Bool { presentation.avatarURL != nil }
@@ -53,7 +54,7 @@ struct AccountProfileHeader: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: kit.space(.s2)) {
             identity
             if let status {
                 Text(status.text)
@@ -90,9 +91,9 @@ struct AccountProfileHeader: View {
     /// combined label; editable, the name field is the heading and the photo
     /// and the handle stay their own elements.
     @ViewBuilder private var identity: some View {
-        let row = HStack(spacing: 14) {
+        let row = HStack(spacing: kit.space(.s4)) {
             avatarControl
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 nameControl
                 if let handleLine {
                     Text(verbatim: handleLine)
@@ -239,7 +240,7 @@ struct AccountProfileHeader: View {
 
     @ViewBuilder private var nameControl: some View {
         if editsName {
-            HStack(spacing: 6) {
+            HStack(spacing: kit.space(.s2)) {
                 TextField(copy("src.matrix.profile-copy.copies.displayName"),
                           text: Binding(get: { editor.draft }, set: { editor.edit($0) }),
                           axis: .vertical)

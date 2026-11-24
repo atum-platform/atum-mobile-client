@@ -28,6 +28,7 @@ struct IgnoredPeopleList: View {
     @State private var working: String?
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         List {
@@ -41,7 +42,7 @@ struct IgnoredPeopleList: View {
                     ForEach(people) { person in
                         let name = person.shownName(
                             unnamed: design.text("src.matrix.conversation-copy.copies.unnamed"))
-                        HStack(spacing: 12) {
+                        HStack(spacing: kit.space(.s3)) {
                             AtumAvatar(kind: .person, name: name, size: 32)
                             Text(verbatim: name)
                                 .foregroundStyle(atum.color(.ink, scheme: scheme))

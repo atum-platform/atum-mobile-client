@@ -48,7 +48,8 @@ W4-S), and the model picker, `Composer.swift` and
   `withMotion(.quick)`. Reduce Motion is handled by the tokens.
 - **Haptics** (audit rule: only `.sensoryFeedback`, one per action): a credited
   top-up pack and a finished Store purchase play `.success`, and a failure line
-  plays `.error`, through `StoreNotice.Tone.feedback`.
+  plays `.error`, through `StoreNotice.Tone.feedback`. The Appearance segmented
+  control plays `.selection`.
 
 Text styles such as `.font(.body)` were left as they are. Moving them to
 `kit.font(_:)` can change weight, so that belongs to the lanes that own each
@@ -60,6 +61,7 @@ screen's look.
 |---|---|---|
 | Store | `StoreScreen`, `StoreItemSheet`, `StorePurchasedScreen`, `ProtonTopUp` | 55 → 0 |
 | Drive | `DriveScreen`, `DriveGalleryView` | 40 → 0 |
+| Account | `AccountProfileHeader`, `AccountScreen`, `AccountSettingsDetail`, `DeleteAccountRequestSheet`, `IgnoredPeopleList`, `LegalScreens`, `PhoneApprovalSettings` | 56 → 0 |
 
 ## Verification
 
