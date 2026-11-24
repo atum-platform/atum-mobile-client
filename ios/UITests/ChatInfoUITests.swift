@@ -352,8 +352,14 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 3), "Info sheet did not appear")
         XCTAssertTrue(app.staticTexts["Nhóm thử"].exists)
         XCTAssertTrue(app.staticTexts["4 thành viên"].exists)
-        app.swipeUp()
-        let assistantAccess = app.descendants(matching: .any)
+        let scroll = sheet.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        // Give the medium sheet enough travel to expand. The drag starts
+        // inside its scroll view and can end above the medium detent.
+        let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
+        let assistantAccess = scroll.descendants(matching: .any)
             .matching(identifier: "info.assistant-access").firstMatch
         XCTAssertTrue(assistantAccess.waitForExistence(timeout: 3))
         XCTAssertTrue(assistantAccess.label.contains("Trợ lý của bạn có thể đọc"))
@@ -362,8 +368,6 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(assistantAccess.label.contains("ngừng đọc tin nhắn mới"))
         XCTAssertTrue(assistantAccess.label.contains("không hoàn tác"))
 
-        let scroll = sheet.scrollViews.firstMatch
-        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
         for id in ["info.pin", "info.mute"] {
             let toggle = scroll.switches.matching(identifier: id).firstMatch
             XCTAssertTrue(toggle.waitForExistence(timeout: 10), "missing \(id)")
@@ -372,8 +376,10 @@ final class ChatInfoUITests: TranscriptUITestCase {
             let target = hasKnob ? knob : toggle
             // XCTest can report a switch at the home indicator as hittable.
             // Scroll it inside the sheet before sending the coordinate tap.
-            XCTAssertTrue(revealByScrolling(target, in: scroll, verticalInset: 44),
-                          "\(id) did not scroll into view: \(boundedHierarchy(app))")
+            guard revealByScrolling(target, in: scroll, up: nil, verticalInset: 44) else {
+                XCTFail("\(id) did not scroll into the sheet's safe tap area: \(scroll.debugDescription.prefix(4_000))")
+                return
+            }
             XCTAssertTrue(waitFor(15) { target.exists && target.isHittable && toggle.value as? String == "0" },
                           "\(id) did not become tappable and off: \(boundedHierarchy(app))")
             let horizontalOffset: CGFloat = hasKnob ? 0.5 : 0.9

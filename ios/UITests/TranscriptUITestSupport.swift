@@ -30,7 +30,14 @@ struct ScriptedSendReceipt {
     }
 
     func releaseAndAssertSeen(_ message: (bubble: XCUIElement, face: XCUIElement), sent: String, seen: String) throws {
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let clock = folder.appendingPathComponent("clock.txt")
+        let held = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (try? String(contentsOf: clock, encoding: .utf8))?.contains(" send-receipt-held\n") == true
+        }, object: nil)
+        guard XCTWaiter.wait(for: [held], timeout: 15) == .completed else {
+            XCTFail("the scripted source did not hold the outgoing receipt")
+            return
+        }
         try Data().write(to: folder.appendingPathComponent("release-send-receipt"), options: .atomic)
 
         let read = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", seen),
@@ -157,16 +164,24 @@ class TranscriptUITestCase: AtumUITestCase {
     /// Reveal a control inside its own scroll container before tapping it.
     /// XCTest's implicit scroll during tap can consume the tap or dismiss a
     /// sheet. Existence alone also includes controls outside the viewport.
+    /// Pass `up: nil` to scroll toward the target's current position.
     @MainActor
     func revealByScrolling(_ target: XCUIElement, in container: XCUIElement,
-                           up: Bool = true, maxSwipes: Int = 6, verticalInset: CGFloat = 0) -> Bool {
+                           up: Bool? = true, maxSwipes: Int = 6, verticalInset: CGFloat = 0) -> Bool {
         func visible() -> Bool {
             target.exists && target.isHittable && !target.frame.isEmpty
                 && container.frame.insetBy(dx: 0, dy: verticalInset).contains(target.frame)
         }
         for _ in 0..<maxSwipes {
             if visible() { return true }
-            if up { container.swipeUp(velocity: .slow) }
+            let swipeUp: Bool
+            if let up {
+                swipeUp = up
+            } else {
+                guard target.exists && container.exists else { return false }
+                swipeUp = target.frame.midY >= container.frame.midY
+            }
+            if swipeUp { container.swipeUp(velocity: .slow) }
             else { container.swipeDown(velocity: .slow) }
         }
         return visible()

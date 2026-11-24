@@ -976,6 +976,9 @@ actor ScriptedSourceProbe: ChatTimelineSource {
                        && $0.receiptUserIDs.contains(ScriptedCast.atum)
                }
            }) {
+            if !FileManager.default.fileExists(atPath: release.path) {
+                UITestProbe.append("send-receipt-held", to: "clock.txt")
+            }
             return release
         }
         return nil
