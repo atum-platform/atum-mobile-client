@@ -31,6 +31,10 @@ jobs:
           python3 scripts/import-design-exports --verify
           python3 -m unittest discover -s tests -p test_import_design_exports.py
           python3 -m unittest tests.test_copy_keys_in_pin
+      - name: Design lint (no new raw spacing, radii, font sizes or curves)
+        run: |
+          python3 scripts/design_lint.py
+          python3 -m unittest tests.test_design_lint
       - name: Verify public push fixtures
         run: |
           python3 scripts/generate-native-push-fixtures.py --check
