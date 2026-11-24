@@ -86,4 +86,25 @@ insets.
 
 ## Verification
 
-To be filled in at the end of the lane.
+- `python3 scripts/design_lint.py`: exit 0 at 783 findings in 47 files.
+- `python3 -m unittest tests.test_design_lint`: 10 tests passed.
+- `python3 scripts/public_guard.py --base origin/main --head HEAD`: exit 0.
+- One run under the shared heavy-build lock:
+  - a Debug `build-for-testing` for the arm64 simulator, which succeeded
+  - then a capture-only UI test class, copied in for that run and removed
+    afterwards (never committed), which passed 4 of 4
+  - no full UI suite ran locally; no Swift package was touched, so no
+    `swift test`
+- **Before and after:** light and dark captures of Welcome, the Store
+  catalog and item sheet, the Drive root, the Settings index and Settings ›
+  General. They are named like the UX audit's shots, so they compare one to
+  one with the audit set (same source apart from P0, which moved no call
+  sites). What changed:
+  - **Store catalog:** each row is about 4 pt taller (vertical inset 10 →
+    12). Insets and dividers sit on the 16 pt margin.
+  - **Drive grid:** tiles have a 10 pt corner instead of 14, and names sit
+    2 pt lower.
+  - **Settings, item sheet and Welcome:** within 1–3 pt of before.
+  - Nothing was clipped or wrapped differently.
+- Haptics can't be seen in a capture. They follow the audit's rule and need
+  a device check in the wave's assembly pass.
