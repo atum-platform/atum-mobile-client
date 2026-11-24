@@ -155,6 +155,10 @@ final class Router: RouterOpening {
         }
     }
 
+    /// The room open in the selected tab. It routes presentation reports and
+    /// the same-room fast path; it no longer decides whether the tab bar is
+    /// shown (each chat destination hides the system bar itself, animated
+    /// with the push).
     var activeRoomID: String? {
         switch selectedTab {
         case .home: homeRoomID
