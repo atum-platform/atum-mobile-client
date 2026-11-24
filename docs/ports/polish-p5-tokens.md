@@ -69,9 +69,20 @@ screen's look.
 | Account | `AccountProfileHeader`, `AccountScreen`, `AccountSettingsDetail`, `DeleteAccountRequestSheet`, `IgnoredPeopleList`, `LegalScreens`, `PhoneApprovalSettings` | 56 → 0 |
 | Recovery | `RecoverySheets` | 15 → 0 |
 | AppBots | `AppBotViews`, `AppOnboardingViews` | 14 → 0 |
-| Auth and Onboarding | `S6AuthViews`, `FirstRunCards` | 20 → 2 allowed |
+| Auth and Onboarding | `S6AuthViews`, `FirstRunCards` | 20 → 0 |
 | Debug | `S6SystemGallery` | 14 → 0 |
 | Home side files | `AppCardSheet`, `AttentionBell`, `HomeGlobalSearch`, `ListingHireView` | 33 → 0 |
+
+Across the lane the baseline drops from 1,030 findings in 70 files to 783 in
+47 (247 removed). Eight lines keep a raw value with a `design-lint: allow`
+reason: the Store Get pill, two monograms, two fixed-tile glyphs, the Drive
+gallery strip inset and the first-run greeting's bubble inset (two lines).
+
+**Left for the chat lanes:** `ios/App/NativeRichText.swift` (9 findings). It sits
+outside `Chat/`, but only chat bubbles and notice rows render it, it has no
+`LiveDesign` in scope, and its spacing is part of the bubble layout that the
+G-scroll and bubble-width tests pin. P3 should migrate it with the bubble
+insets.
 
 ## Verification
 
