@@ -31,5 +31,4 @@ thread fixture.
 Focused verification covers `ChatSearchTests`, `ConversationCoreTests`,
 `CompanySearchServiceTests`, `CompanyMessageSearchTests` and
 `TeamSpaceRevampPolicyTests`, plus a Debug simulator build of `AtumMobile`.
-The SwiftPM and Xcode builds run under the shared heavy-build lock with
-artifacts under `/Volumes/AtumTestFlight/dd-w4-s`.
+The SwiftPM and Xcode builds run under the shared heavy-build lock.
