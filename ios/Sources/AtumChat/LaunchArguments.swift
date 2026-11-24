@@ -102,6 +102,9 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     /// The fold reader rules (owner, 2026-11-12): a long answer streams in
     /// while Atum types and folds once it is final.
     case chatBubblesLive = "chat.bubbles-live"
+    /// W4-E3: my assistant's chat for the agent's desk: a file it sent, then
+    /// a live working line with its checklist (the panel opens on the desk).
+    case chatAgentDesk = "chat.agent-desk"
 }
 
 #endif

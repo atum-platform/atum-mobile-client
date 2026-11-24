@@ -504,10 +504,17 @@ struct HomeScreen: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.protonTopUp) private var protonTopUp
+    @State private var protonTopUpPresented = false
 
     private let topID = "home.top"
 
     var body: some View {
+        homeBody
+            .protonTopUpSheet(design: design, isPresented: $protonTopUpPresented)
+    }
+
+    @ViewBuilder private var homeBody: some View {
         VStack(spacing: 0) {
             header
             if presentation.showsDomainReauthentication {
@@ -729,6 +736,7 @@ struct HomeScreen: View {
                 HStack(spacing: 10) {
                     accountButton
                     Spacer(minLength: 0)
+                    attentionBell
                     createButton
                 }
             }
@@ -743,6 +751,7 @@ struct HomeScreen: View {
                         .frame(minHeight: 44)
                         .accessibilityIdentifier("home.search.cancel")
                 } else if !accessible {
+                    attentionBell
                     createButton
                 }
             }
@@ -781,6 +790,22 @@ struct HomeScreen: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(verbatim: copy(.settings)))
         .accessibilityIdentifier("home.account")
+    }
+
+    /// Desktop #48's title-bar bell (W4-E3): what needs the person, from the
+    /// causes the phone itself knows (`AttentionBellPolicy`).
+    private var attentionBell: some View {
+        AttentionBell(design: design, items: attentionItems) { kind in
+            switch kind {
+            case .signIn: actions.reauthenticateDomain?()
+            case .protons: protonTopUpPresented = true
+            }
+        }
+    }
+
+    private var attentionItems: [AttentionBellPolicy.Kind] {
+        AttentionBellPolicy.items(.init(signInRequired: presentation.showsDomainReauthentication,
+                                        freshSpendable: protonTopUp?.balance()))
     }
 
     /// Desktop #48: New chat is the Kit's plus icon button to the right of
