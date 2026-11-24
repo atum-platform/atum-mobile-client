@@ -7,14 +7,14 @@ import XCTest
 /// folder search with its scope line, the swipeable preview and Share.
 final class DriveRevampUITests: AtumUITestCase {
     private struct Words {
-        let list, icons, group, kind, size, driveName, search: String
+        let list, icons, group, none, kind, size, driveName, search: String
     }
 
     private static let words: [String: Words] = [
-        "en": Words(list: "List", icons: "Icons", group: "Group", kind: "Kind", size: "Size",
+        "en": Words(list: "List", icons: "Icons", group: "Group", none: "None", kind: "Kind", size: "Size",
                     driveName: "Atum Drive", search: "Search Drive"),
-        "vi": Words(list: "Danh sách", icons: "Biểu tượng", group: "Nhóm", kind: "Loại",
-                    size: "Kích thước", driveName: "Atum Drive", search: "Tìm trong Drive"),
+        "vi": Words(list: "Danh sách", icons: "Biểu tượng", group: "Nhóm", none: "Không nhóm",
+                    kind: "Loại", size: "Kích thước", driveName: "Atum Drive", search: "Tìm trong Drive"),
     ]
 
     @MainActor
@@ -48,15 +48,37 @@ final class DriveRevampUITests: AtumUITestCase {
                                          label, label + ",")).firstMatch
     }
 
-    @MainActor private func choose(_ app: XCUIApplication, _ labels: String...) {
-        let options = element(app, "drive.viewOptions")
-        XCTAssertTrue(options.waitForExistence(timeout: 5), "no view options")
+    @MainActor private func openViewOptions(_ app: XCUIApplication) {
+        let options = app.buttons["drive.viewOptions"].firstMatch
+        XCTAssertTrue(options.wait(for: \.isHittable, toEqual: true, timeout: 15), "no tappable view options")
         options.tap()
-        for label in labels {
-            let button = menuItem(app, label)
-            XCTAssertTrue(button.waitForExistence(timeout: 3), "no menu item \(label)")
-            button.tap()
+    }
+
+    @MainActor private func choose(_ app: XCUIApplication, _ label: String) {
+        openViewOptions(app)
+        let button = menuItem(app, label)
+        XCTAssertTrue(button.wait(for: \.isHittable, toEqual: true, timeout: 15), "no tappable menu item \(label)")
+        button.tap()
+    }
+
+    @MainActor private func chooseGroup(_ app: XCUIApplication, _ label: String, words: Words) {
+        openViewOptions(app)
+        // iOS 27 exposes the submenu as a button with its localized title.
+        let group = menuItem(app, words.group)
+        XCTAssertTrue(group.wait(for: \.isHittable, toEqual: true, timeout: 15), "no tappable Group menu")
+        let submenuItem = menuItem(app, words.none)
+        group.tap()
+        if !submenuItem.wait(for: \.isHittable, toEqual: true, timeout: 8),
+           group.exists, group.isHittable {
+            // The parent menu is still open. A slow menu can miss this tap.
+            group.tap()
         }
+        // None is unique to the submenu. Size also exists in the parent menu.
+        XCTAssertTrue(submenuItem.wait(for: \.isHittable, toEqual: true, timeout: 15),
+                      "Group menu did not open")
+        let button = menuItem(app, label)
+        XCTAssertTrue(button.wait(for: \.isHittable, toEqual: true, timeout: 15), "no tappable group choice \(label)")
+        button.tap()
     }
 
     @MainActor private func above(_ first: XCUIElement, _ second: XCUIElement,
@@ -81,17 +103,19 @@ final class DriveRevampUITests: AtumUITestCase {
         above(item(app, "Archive 2024.zip"), item(app, "Budget 2026.xlsx"))
         choose(app, words.size)
         above(item(app, "Team offsite.mov"), item(app, "Archive 2024.zip"))
-        choose(app, words.group, words.kind)
-        XCTAssertTrue(element(app, "drive.group.kind:folder").waitForExistence(timeout: 3))
+        chooseGroup(app, words.kind, words: words)
+        let folderGroup = element(app, "drive.group.kind:folder")
+        XCTAssertTrue(folderGroup.waitForExistence(timeout: 15))
         XCTAssertTrue(element(app, "drive.group.kind:archive").exists)
         keepScreenshot("drive-behaviour-list-kind", of: app)
 
         app.terminate()
         app = launchDrive(keep: true)
-        XCTAssertTrue(element(app, "drive.list").waitForExistence(timeout: 3), "List was remembered")
-        XCTAssertTrue(element(app, "drive.group.kind:folder").exists, "Group By was remembered")
-        choose(app, words.group, "None")
-        XCTAssertFalse(element(app, "drive.group.kind:folder").waitForExistence(timeout: 1))
+        let restoredFolderGroup = element(app, "drive.group.kind:folder")
+        XCTAssertTrue(element(app, "drive.list").waitForExistence(timeout: 15), "List was remembered")
+        XCTAssertTrue(restoredFolderGroup.waitForExistence(timeout: 15), "Group By was remembered")
+        chooseGroup(app, words.none, words: words)
+        XCTAssertTrue(restoredFolderGroup.waitForNonExistence(timeout: 15), "None did not remove the Kind group")
         element(app, "drive.destination").buttons[words.driveName].tap()
         above(item(app, "Team offsite.mov"), item(app, "Archive 2024.zip"))
     }
@@ -241,7 +265,7 @@ final class DriveRevampUITests: AtumUITestCase {
         menuItem(app, words.list).tap()
 
         element(app, "drive.destination").buttons[words.driveName].tap()
-        choose(app, words.group, words.kind)
+        chooseGroup(app, words.kind, words: words)
         // Kind groups sort by their names, so which comes first depends on the language.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "drive.group.kind:"))
             .firstMatch.waitForExistence(timeout: 3))
@@ -249,7 +273,7 @@ final class DriveRevampUITests: AtumUITestCase {
         keepScreenshot(prefix + "-3-list-group-kind", of: app)
 
         choose(app, words.icons)
-        choose(app, words.group, words.size)
+        chooseGroup(app, words.size, words: words)
         Thread.sleep(forTimeInterval: 0.6)
         keepScreenshot(prefix + "-4-icons-group-size", of: app)
 
@@ -273,7 +297,7 @@ final class DriveRevampUITests: AtumUITestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 2), "no search close")
         close.tap()
 
-        choose(app, words.group, language == "vi" ? "Không nhóm" : "None")
+        chooseGroup(app, words.none, words: words)
         item(app, "Photos").tap()
         let photo = item(app, "Sunrise.jpg")
         XCTAssertTrue(photo.waitForExistence(timeout: 5))
