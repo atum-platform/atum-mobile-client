@@ -41,11 +41,12 @@ struct RecoveryKeySheet: View {
     @State private var detent: PresentationDetent = .medium
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: kit.space(.s4)) {
                     Text(lead)
                         .font(.body)
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -61,9 +62,9 @@ struct RecoveryKeySheet: View {
                     }
                     .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
                     .disabled(key == nil || busy)
-                    .padding(.top, 8)
+                    .padding(.top, kit.space(.s2))
                 }
-                .padding(16)
+                .padding(kit.space(.s4))
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -91,10 +92,10 @@ struct RecoveryKeySheet: View {
             Text(verbatim: displayed)
                 .font(.system(.body, design: .monospaced))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
-                .padding(16)
+                .padding(kit.space(.s4))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(atum.color(.bubble, scheme: scheme),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
                 .privacySensitive()
                 .textSelection(.disabled)
                 .accessibilityLabel(copy("src.matrix.security-copy.copies.key"))
@@ -102,7 +103,7 @@ struct RecoveryKeySheet: View {
                 .accessibilityHidden(scenePhase != .active)
                 .accessibilityIdentifier("account.recovery.key")
         } else if loadFailed {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: kit.space(.s2)) {
                 Text(copy("src.matrix.chat-copy.copies.errorGeneric"))
                     .font(.footnote)
                     .foregroundStyle(atum.color(.danger, scheme: scheme))
@@ -127,7 +128,6 @@ struct RecoveryKeySheet: View {
                     [[UTType.plainText.identifier: key]],
                     options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]
                 )
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 copied = true
                 AccessibilityNotification.Announcement(copy("src.matrix.chat-copy.copies.copied")).post()
                 Task { @MainActor in
@@ -142,6 +142,7 @@ struct RecoveryKeySheet: View {
             }
             .buttonStyle(AtumCompactButtonStyle(atum: atum, scheme: scheme,
                                                  size: .regular))
+            .sensoryFeedback(.success, trigger: copied) { _, copied in copied }
             .accessibilityIdentifier("account.recovery.copy")
         }
     }
@@ -193,6 +194,7 @@ struct RestoreMessagesSheet: View {
     @State private var detent: PresentationDetent = .medium
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         NavigationStack {
@@ -216,11 +218,18 @@ struct RestoreMessagesSheet: View {
         .onChange(of: dynamicTypeSize) { _, size in
             if size.isAccessibilitySize { detent = .large }
         }
+        .sensoryFeedback(trigger: state) { _, state in
+            switch state {
+            case .done: .success
+            case .rejected: .error
+            default: nil
+            }
+        }
         .accessibilityIdentifier("account.restore.sheet")
     }
 
     private var form: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: kit.space(.s4)) {
             Text(copy("shared.matrix-approval-copy.copies.noOtherDeviceHelp"))
                 .font(.body)
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -233,10 +242,10 @@ struct RestoreMessagesSheet: View {
                 .submitLabel(.go)
                 .onSubmit(runRestore)
                 .disabled(state == .working)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, kit.space(.s4))
                 .frame(minHeight: 48)
                 .background(atum.color(.bubble, scheme: scheme),
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous))
                 .accessibilityLabel(copy("src.matrix.security-copy.copies.key"))
                 .accessibilityIdentifier("account.restore.field")
             if state == .rejected || state == .failed {
@@ -260,15 +269,15 @@ struct RestoreMessagesSheet: View {
                 ? copy("src.matrix.chat-copy.copies.decryption.reasons.restoring")
                 : copy("src.matrix.security-copy.copies.unlock"))
             .accessibilityIdentifier("account.restore.submit")
-            .padding(.top, 8)
+            .padding(.top, kit.space(.s2))
         }
-        .padding(16)
+        .padding(kit.space(.s4))
     }
 
     private var doneContent: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(.checkCircle))
-                .font(.system(size: 44))
+                .font(.largeTitle).imageScale(.large)
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
             Text(copy("src.matrix.mobile-copy.mobilePhoneCopy.restoreDone"))
                 .font(.body)
@@ -279,10 +288,10 @@ struct RestoreMessagesSheet: View {
                 dismiss()
             }
             .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
-            .padding(.top, 12)
+            .padding(.top, kit.space(.s3))
         }
         .frame(maxWidth: .infinity)
-        .padding(24)
+        .padding(kit.space(.s6))
         .accessibilityIdentifier("account.restore.done")
     }
 
@@ -295,13 +304,11 @@ struct RestoreMessagesSheet: View {
             switch await restore(candidate) {
             case .restored:
                 state = .done
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 AccessibilityNotification.Announcement(
                     copy("src.matrix.mobile-copy.mobilePhoneCopy.restoreDone")
                 ).post()
             case .rejected:
                 state = .rejected
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
             case .failed:
                 state = .failed
             }

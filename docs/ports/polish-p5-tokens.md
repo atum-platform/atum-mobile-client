@@ -25,7 +25,7 @@ W4-S), and the model picker, `Composer.swift` and
 - **Off-grid values** snap to the nearest step where the change is a point or
   two:
   - 2 and 3 (title over subtitle, the Proton mark beside its amount) → `.s1` (4)
-  - 5, 6 and 7 between a glyph and its label → `.s2` (8); 6 under a title → `.s1`
+  - 5 → `.s1`; 6 and 7 → `.s2` (8)
   - 10 → `.s3` (12), the row inset from the audit rules
   - 14 → `.s4` (16) for horizontal row and card insets, so rows and their
     dividers line up with the 16 pt screen margin; 14 → `.s3` for vertical
@@ -48,7 +48,10 @@ W4-S), and the model picker, `Composer.swift` and
   `withMotion(.quick)`. Reduce Motion is handled by the tokens.
 - **Haptics** (audit rule: only `.sensoryFeedback`, one per action): a credited
   top-up pack and a finished Store purchase play `.success`, and a failure line
-  plays `.error`, through `StoreNotice.Tone.feedback`. The Appearance segmented
+  plays `.error`, through `StoreNotice.Tone.feedback`. The recovery sheets
+  move from `UINotificationFeedbackGenerator` to `.sensoryFeedback`: copying the
+  key plays `.success`, and a restore plays `.success` or, for a wrong key,
+  `.error`. The Appearance segmented
   control plays `.selection`.
 
 Text styles such as `.font(.body)` were left as they are. Moving them to
@@ -62,6 +65,7 @@ screen's look.
 | Store | `StoreScreen`, `StoreItemSheet`, `StorePurchasedScreen`, `ProtonTopUp` | 55 → 0 |
 | Drive | `DriveScreen`, `DriveGalleryView` | 40 → 0 |
 | Account | `AccountProfileHeader`, `AccountScreen`, `AccountSettingsDetail`, `DeleteAccountRequestSheet`, `IgnoredPeopleList`, `LegalScreens`, `PhoneApprovalSettings` | 56 → 0 |
+| Recovery | `RecoverySheets` | 15 → 0 |
 
 ## Verification
 
