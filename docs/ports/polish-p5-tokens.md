@@ -68,6 +68,7 @@ screen's look.
 | Recovery | `RecoverySheets` | 15 → 0 |
 | AppBots | `AppBotViews`, `AppOnboardingViews` | 14 → 0 |
 | Auth and Onboarding | `S6AuthViews`, `FirstRunCards` | 20 → 2 allowed |
+| Debug | `S6SystemGallery` | 14 → 0 |
 
 ## Verification
 
