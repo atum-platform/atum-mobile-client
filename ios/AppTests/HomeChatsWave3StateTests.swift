@@ -84,17 +84,28 @@ final class HomeChatsWave3StateTests: XCTestCase {
         XCTAssertEqual(session.focus?.rowID, "older-match")
     }
 
-    func testDetachingReleasesAnUnpublishedSearchPage() async throws {
+    func testReattachingResumesTheRoutedWalkAfterAnUnpublishedSearchPage() async throws {
         let source = GatedSearchSource()
+        let replacement = GatedSearchSource(releaseOnRequest: true)
         let store = searchStore()
         defer { store.close() }
         await store.attach(source: source)
         for _ in 0..<200 where store.snapshot.rows.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-        let page = Task { await store.loadOlderPageForSearch() }
+
+        let target = "$older-match"
+        store.searchTargetEventID = target
+        let walk = Task {
+            await ChatHistorySearch.find(eventID: target, rows: { store.snapshot.rows },
+                                         loadPage: { await store.loadOlderPageForSearch() })
+        }
         await source.waitForRequest()
-        store.detach()
-        let result = await page.value
-        XCTAssertEqual(result, .failed)
+        await store.attach(source: replacement)
+
+        let result = await walk.value
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 2)
+        XCTAssertEqual(store.searchTargetEventID, target, "the transcript still owns the selected event")
+        XCTAssertTrue(store.snapshot.rows.contains { $0.item.eventID == target })
     }
 
     func testUnreleasedSearchSlotFailsWithinTheDeadline() async {
@@ -231,9 +242,11 @@ private actor GatedSearchSource: ChatTimelineSource {
     private var requested: CheckedContinuation<Void, Never>?
     private(set) var calls = 0
     private let needsTwoPages: Bool
+    private let releaseOnRequest: Bool
 
-    init(needsTwoPages: Bool = false) {
+    init(needsTwoPages: Bool = false, releaseOnRequest: Bool = false) {
         self.needsTwoPages = needsTwoPages
+        self.releaseOnRequest = releaseOnRequest
         (outputs, continuation) = AsyncStream.makeStream(of: ChatTimelineOutput.self)
     }
     func start() {
@@ -254,6 +267,7 @@ private actor GatedSearchSource: ChatTimelineSource {
             return true
         }
         requested?.resume(); requested = nil
+        if releaseOnRequest { releasePage() }
         return !needsTwoPages
     }
     func waitForRequest() async {
@@ -265,7 +279,8 @@ private actor GatedSearchSource: ChatTimelineSource {
                  body: needsTwoPages ? "still no match" : "Đi Đà Lạt", hitStart: !needsTwoPages)
     }
     private func emitPage(id: String, body: String, hitStart: Bool) {
-        let item = ChatItem(id: id, kind: .message, sender: "@me:example.test", isOwn: true, body: body)
+        let item = ChatItem(id: id, kind: .message, sender: "@me:example.test", isOwn: true,
+                            eventOrTransactionId: .event("$" + id), body: body)
         continuation.yield(.batch(ChatTimelineBatch(diffs: [.pushFront(item)])))
         continuation.yield(.pagination(.idle(hitTimelineStart: hitStart)))
     }

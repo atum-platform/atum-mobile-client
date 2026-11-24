@@ -25,7 +25,7 @@ public struct CompanySearchEndpoint: Sendable {
 /// serves every Home search request.
 @MainActor
 public protocol CompanySearchTransport: AnyObject {
-    func search(body: Data, endpoint: CompanySearchEndpoint) async throws -> Data
+    func search(body: Data, endpoint: CompanySearchEndpoint, nextBatch: String?) async throws -> Data
 }
 
 /// `from:@name` over a room's members, every membership (desktop
@@ -103,7 +103,8 @@ public final class CompanySearchService {
             tasks.append((company, Task { @MainActor in
                 await self.limiter.run {
                     await self.page(companyID: company, admitted: admitted, query: query, tab: tab,
-                                    environment: environment)
+                                    limit: CompanyMessageSearch.limit, continuation: nil,
+                                    environment: environment)?.results ?? []
                 } ?? []
             }))
         }
@@ -116,38 +117,71 @@ public final class CompanySearchService {
         return CompanyMessageSearch.merged(pages)
     }
 
+    /// Team Space asks for 25 messages in the selected company. A nil page means the
+    /// request failed. An empty successful page can still have a continuation.
+    public func searchCompanyMessages(companyID: String, term: String, continuation: CompanySearchCursor?,
+                                      environment: Environment) async -> CompanySearchPage? {
+        guard let query = CompanyMessageSearch.query(term) else { return nil }
+        return await limiter.run {
+            let admitted = CompanyMessageSearch.admitted(environment.targets()[companyID] ?? [],
+                                                         query: query, companyID: companyID,
+                                                         eligibility: environment.eligibility())
+            return await page(companyID: companyID, admitted: admitted, query: query, tab: .messages,
+                              limit: 25, continuation: continuation, environment: environment)
+        } ?? nil
+    }
+
     private func page(companyID: String, admitted: [CompanySearchTarget], query: CompanySearchQuery,
-                      tab: CompanySearchTab, environment: Environment) async -> [CompanySearchResult] {
+                      tab: CompanySearchTab, limit: Int, continuation: CompanySearchCursor?,
+                      environment: Environment) async -> CompanySearchPage? {
+        let empty = CompanySearchPage(results: [], continuation: nil,
+                                      replacesPreviousResults: continuation != nil)
         // An operator-only query (`from:me`) is answered from the loaded
         // timeline on desktop; the phone has no such read yet.
-        guard !query.needsLoadedHistory else { return [] }
+        guard !query.needsLoadedHistory else { return empty }
         // The queue may have held this job while a room was left or encrypted.
         var rooms = Self.stillEligible(admitted, companyID: companyID, environment.eligibility())
-        guard !rooms.isEmpty else { return [] }
+        guard !rooms.isEmpty else { return empty }
         var senders: [String]?
         if let from = query.from {
             if from == "me" {
                 senders = environment.ownUserID().map { [$0] } ?? []
             } else {
-                var found = Set<String>()
+                var matchesByRoom = [String: [String]]()
                 for room in rooms {
-                    if Task.isCancelled { return [] }
-                    found.formUnion(await environment.senders(room.roomID, from))
+                    if Task.isCancelled { return nil }
+                    matchesByRoom[room.roomID] = await environment.senders(room.roomID, from)
                 }
-                senders = found.filter(CompanyMessageSearch.isUserID).sorted()
-                // The member reads were async too.
+                // Member reads await the SDK. Only rooms still eligible
+                // contribute to the final sender filter.
                 rooms = Self.stillEligible(rooms, companyID: companyID, environment.eligibility())
+                let found = Set(rooms.flatMap { matchesByRoom[$0.roomID] ?? [] })
+                senders = found.filter(CompanyMessageSearch.isUserID).sorted()
             }
         }
-        guard senders?.isEmpty != true, !rooms.isEmpty, !Task.isCancelled,
+        guard senders?.isEmpty != true, !rooms.isEmpty else { return empty }
+        let channelsByRoom = Dictionary(rooms.map { ($0.roomID, $0.channelID) }, uniquingKeysWith: { first, _ in first })
+        let nextBatch = continuation.flatMap { cursor in
+            cursor.companyID == companyID && cursor.query == query
+                && cursor.channelsByRoom == channelsByRoom && cursor.senders == senders ? cursor.token : nil
+        }
+        guard !Task.isCancelled,
               let body = try? CompanyMessageSearch.requestBody(query: query, tab: tab,
-                                                                roomIDs: rooms.map(\.roomID), senders: senders),
+                                                                roomIDs: rooms.map(\.roomID), senders: senders,
+                                                                limit: limit),
               let endpoint = try? environment.endpoint(),
-              let data = try? await transport.search(body: body, endpoint: endpoint),
-              let found = CompanyMessageSearch.results(responseJSON: data, companyID: companyID, tab: tab,
-                                                       query: query, targets: rooms) else { return [] }
+              let data = try? await transport.search(body: body, endpoint: endpoint, nextBatch: nextBatch),
+              !Task.isCancelled,
+              let found = CompanyMessageSearch.page(responseJSON: data, companyID: companyID, tab: tab,
+                                                    query: query, targets: rooms, limit: limit) else { return nil }
+        let cursor = found.nextBatch.flatMap { token -> CompanySearchCursor? in
+            guard token != nextBatch else { return nil }
+            return CompanySearchCursor(token: token, companyID: companyID, query: query,
+                                channelsByRoom: channelsByRoom, senders: senders)
+        }
         // Asked for the rooms eligible then; shown only for the rooms eligible now.
-        return environment.eligibility().retained(found)
+        return CompanySearchPage(results: environment.eligibility().retained(found.results),
+                                 continuation: cursor, replacesPreviousResults: continuation != nil && nextBatch == nil)
     }
 
     private static func stillEligible(_ rooms: [CompanySearchTarget], companyID: String,

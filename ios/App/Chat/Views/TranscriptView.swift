@@ -34,6 +34,7 @@ struct TranscriptView: View {
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -48,21 +49,28 @@ struct TranscriptView: View {
     /// Per-frame bookkeeping the body never reads (not observed).
     @State private var scratch = TranscriptScratch()
     @State private var tuning = TranscriptTuning.current
+    @State private var routedMatchRowID: String?
+    @State private var routeFocusFailed = 0
 
     var body: some View {
         let rows = heldRows ?? store.snapshot.rows
+        let target = store.searchTargetEventID
         // The scroll view is made when the first rows arrive, so its initial
         // offset is the bottom of real content (B1). Made earlier, it would
         // lay out empty, show the top of the first batch for a frame, and ask
         // for older history it does not need.
-        if rows.isEmpty {
-            Color.clear
-                .accessibilityElement()
-                .accessibilityIdentifier(AccessibilityID.transcript)
-                .accessibilityValue(AccessibilityID.transcriptValue(followState))
-        } else {
-            transcript(rows)
+        Group {
+            if rows.isEmpty {
+                Color.clear
+                    .accessibilityElement()
+                    .accessibilityIdentifier(AccessibilityID.transcript)
+                    .accessibilityValue(AccessibilityID.transcriptValue(followState))
+            } else {
+                transcript(rows)
+            }
         }
+        .task(id: target) { await focusRoutedMessage(target) }
+        .sensoryFeedback(.error, trigger: routeFocusFailed)
     }
 
     @ViewBuilder private func transcript(_ rows: [ChatRow]) -> some View {
@@ -73,7 +81,33 @@ struct TranscriptView: View {
             ? rows.last { $0.item.kind == .message && !$0.item.isOwn }?.id : nil
         // Messages the agent may still be writing never fold (`MessageFold`).
         let growing = MessageFold.growingIDs(in: rows)
-        ScrollView {
+        let scroll = scrollBody(rows, following: following, latestAnswerID: latestAnswerID, growing: growing)
+        let observed = observingChanges(scroll, rows: rows, growing: growing)
+        withRowInteractions(observed)
+    }
+
+    // The transcript's modifier chain is split into three functions so each
+    // type-checks quickly; one expression timed out on the hosted runners.
+    private func transcriptRow(_ row: ChatRow, latestAnswerID: String?, growing: Set<String>) -> some View {
+        let highlight: Color = routedMatchRowID == row.id
+            ? (theme?.color("ink", scheme).opacity(0.12) ?? .clear) : .clear
+        return ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
+                           parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
+                           searchHighlight: search?.highlights[row.id], isGrowing: growing.contains(row.id))
+            .equatable()
+            .background(RoundedRectangle(cornerRadius: 8).fill(highlight))
+            // Each row's top in the content (it changes only when
+            // something above it changes height, never on scroll).
+            .onGeometryChange(for: Double.self) { proxy in
+                TranscriptGeometry.half(proxy.frame(in: .named(Self.contentSpace)).minY)
+            } action: { minY in
+                rowMoved(row.id, minY: minY)
+            }
+    }
+
+    private func scrollBody(_ rows: [ChatRow], following: Bool, latestAnswerID: String?,
+                            growing: Set<String>) -> some View {
+        return ScrollView {
             // An eager stack: every loaded row is laid out. A lazy stack
             // estimates rows it has not laid out, and with rows as different
             // as one-liners and 40-line code blocks its estimates flip-flopped
@@ -81,17 +115,7 @@ struct TranscriptView: View {
             // main thread (G-scroll record).
             VStack(spacing: 0) {
                 ForEach(rows) { row in
-                    ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
-                                parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
-                                searchHighlight: search?.highlights[row.id], isGrowing: growing.contains(row.id))
-                        .equatable()
-                        // Each row's top in the content (it changes only when
-                        // something above it changes height, never on scroll).
-                        .onGeometryChange(for: Double.self) { proxy in
-                            TranscriptGeometry.half(proxy.frame(in: .named(Self.contentSpace)).minY)
-                        } action: { minY in
-                            rowMoved(row.id, minY: minY)
-                        }
+                    transcriptRow(row, latestAnswerID: latestAnswerID, growing: growing)
                 }
             }
             .scrollTargetLayout()
@@ -116,13 +140,20 @@ struct TranscriptView: View {
             if scratch.motion == .user {
                 scratch.pendingHold = nil
                 stopSearchPlacement()
+                routedMatchRowID = nil
+                store.searchTargetEventID = nil
             }
             updateHeldRows()
         }
         .onScrollGeometryChange(for: TranscriptGeometry.self) { TranscriptGeometry($0) } action: { old, new in
             geometryChanged(from: old, to: new)
         }
+    }
+
+    private func observingChanges(_ content: some View, rows: [ChatRow], growing: Set<String>) -> some View {
+        content
         .onChange(of: search?.focus) { _, focus in
+            routedMatchRowID = nil
             guard let focus else {
                 stopSearchPlacement()
                 // Find released its anchor: normal holds/following learn
@@ -132,6 +163,11 @@ struct TranscriptView: View {
             }
             showSearchMatch(focus.rowID)
         }
+        .onChange(of: routedMatchRowID) { _, rowID in
+            if let rowID { showSearchMatch(rowID) }
+            updateBottomVisible()
+        }
+        .onChange(of: store.searchTargetEventID) { _, _ in updateBottomVisible() }
         .onChange(of: store.scrollRequest) { _, request in
             apply(request.command)
             syncFollowState()
@@ -166,6 +202,7 @@ struct TranscriptView: View {
             updateBottomVisible()
             store.handle(.opened)
             syncFollowState()
+            if let routedMatchRowID { showSearchMatch(routedMatchRowID) }
             markMemory("chat.open")
         }
         .onDisappear {
@@ -174,6 +211,10 @@ struct TranscriptView: View {
             updateBottomVisible()
             noteReading()
         }
+    }
+
+    private func withRowInteractions(_ content: some View) -> some View {
+        content
         .environment(\.chatRowInteractions.showOriginal, { id in showOriginal(id) })
         .environment(\.chatRowInteractions.opening, { id in rowOpening(id) })
         .environment(\.chatRowInteractions.folded, { id in rowFolded(id) })
@@ -374,6 +415,7 @@ struct TranscriptView: View {
                 // placement, so the person's newer action still wins.
                 guard store.follow.isFollowing else { return }
                 stopSearchPlacement()
+                routedMatchRowID = nil
             }
             if animated {
                 withAnimation(.smooth(duration: 0.3)) { position.scrollTo(edge: .bottom) }
@@ -412,6 +454,7 @@ struct TranscriptView: View {
         let ids = Set(new)
         if let rowID = scratch.searchRowID, !ids.contains(rowID) {
             stopSearchPlacement()
+            if routedMatchRowID == rowID { routedMatchRowID = nil }
             scheduleSettle(after: Self.settleSeconds)
         }
         if let anchor = scratch.anchor, !ids.contains(anchor.id),
@@ -431,6 +474,7 @@ struct TranscriptView: View {
     private func updateBottomVisible() {
         let geometry = scratch.geometry
         let visible = scratch.isOnScreen && scenePhase == .active && !covered
+            && store.searchTargetEventID == nil && routedMatchRowID == nil
             && geometry.viewportHeight > 0 && geometry.distanceFromBottom <= FollowPolicy.nearBottomPoints
         if store.bottomVisible != visible { store.bottomVisible = visible }
     }
@@ -514,6 +558,20 @@ struct TranscriptView: View {
 
     // MARK: HC-6: bringing a search match into view
 
+    private func focusRoutedMessage(_ eventID: String?) async {
+        guard let eventID, !Task.isCancelled else { return }
+        let answer = await ChatHistorySearch.find(eventID: eventID, rows: { store.snapshot.rows },
+                                                  loadPage: { await store.loadOlderPageForSearch() })
+        guard !Task.isCancelled, store.searchTargetEventID == eventID else { return }
+        if answer.phase == .found,
+           let row = store.snapshot.rows.first(where: { $0.item.eventID == eventID }) {
+            routedMatchRowID = row.id
+        } else {
+            routeFocusFailed += 1
+        }
+        store.searchTargetEventID = nil
+    }
+
     /// The person asked for this match, so the chat leaves the bottom first
     /// (the follow rule would otherwise pin it back). One scroll is not
     /// enough: a walk's rows have only just landed, and they still change
@@ -560,8 +618,9 @@ struct TranscriptView: View {
 
     private func placeSearchMatch(_ rowID: String, generation: UInt64) {
         guard generation == scratch.searchGeneration else { return }
+        let isSearchMatch = search?.isOpen == true && search?.focus?.rowID == rowID
         guard scratch.isOnScreen, scratch.motion != .user,
-              search?.isOpen == true, search?.focus?.rowID == rowID else {
+              isSearchMatch || routedMatchRowID == rowID else {
             stopSearchPlacement()
             return
         }
