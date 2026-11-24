@@ -560,15 +560,15 @@ struct TranscriptView: View {
 
     private func focusRoutedMessage(_ eventID: String?) async {
         guard let eventID, !Task.isCancelled else { return }
-        let answer = await ChatHistorySearch.find(eventID: eventID, rows: { store.snapshot.rows },
-                                                  loadPage: { await store.loadOlderPageForSearch() })
-        guard !Task.isCancelled, store.searchTargetEventID == eventID else { return }
-        if answer.phase == .found,
-           let row = store.snapshot.rows.first(where: { $0.item.eventID == eventID }) {
-            routedMatchRowID = row.id
-        } else {
-            routeFocusFailed += 1
-        }
+        let answer = await ChatHistorySearch.find(eventID: eventID, snapshot: { store.snapshot },
+                                                  loadPage: { await store.loadOlderPageForSearch() },
+                                                  onFound: { rowID in
+            guard !Task.isCancelled, store.searchTargetEventID == eventID else { return }
+            routedMatchRowID = rowID
+            store.searchTargetEventID = nil
+        })
+        guard answer.phase != .found, !Task.isCancelled, store.searchTargetEventID == eventID else { return }
+        routeFocusFailed += 1
         store.searchTargetEventID = nil
     }
 

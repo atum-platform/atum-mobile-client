@@ -294,11 +294,31 @@ public enum ChatHistorySearch {
     /// A routed result names a Matrix event. It shares the history walk and its
     /// limits with in-chat search, without matching any other row's words.
     @MainActor
-    public static func find(eventID: String, rows: @MainActor () -> [ChatRow],
-                            loadPage: @MainActor () async -> Page) async -> Progress {
-        await run(maximumPages: maximumPages, rows: rows,
-                  matches: { $0.contains { $0.item.eventID == eventID } },
-                  loadPage: loadPage, progress: { _ in })
+    public static func find(eventID: String, snapshot: @MainActor () -> Snapshot,
+                            loadPage: @MainActor () async -> Page,
+                            onFound: @MainActor (String) -> Void = { _ in }) async -> Progress {
+        var replacedGeneration: UInt64?
+        func currentRows() -> [ChatRow] {
+            let current = snapshot()
+            // The transcript keeps drawing the old rows until the replacement
+            // projects. Those rows cannot complete the routed search.
+            return current.generation == replacedGeneration ? [] : current.rows
+        }
+        return await run(maximumPages: maximumPages, rows: currentRows,
+                         matches: { $0.contains { $0.item.eventID == eventID } },
+                         loadPage: {
+                             let generation = snapshot().generation
+                             let page = await loadPage()
+                             if page == .timelineReplaced { replacedGeneration = generation }
+                             return page
+                         }, progress: { result in
+                             // Commit the match on the same main-actor turn
+                             // that observed it, before another projection can land.
+                             if result.phase == .found,
+                                let row = currentRows().first(where: { $0.item.eventID == eventID }) {
+                                 onFound(row.id)
+                             }
+                         })
     }
 
     @MainActor

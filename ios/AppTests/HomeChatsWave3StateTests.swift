@@ -95,7 +95,7 @@ final class HomeChatsWave3StateTests: XCTestCase {
         let target = "$older-match"
         store.searchTargetEventID = target
         let walk = Task {
-            await ChatHistorySearch.find(eventID: target, rows: { store.snapshot.rows },
+            await ChatHistorySearch.find(eventID: target, snapshot: { store.snapshot },
                                          loadPage: { await store.loadOlderPageForSearch() })
         }
         await source.waitForRequest()
