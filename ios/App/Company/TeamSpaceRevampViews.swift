@@ -238,9 +238,10 @@ struct CompanyBoardControls: View {
                                      set: { _ in preference = preference.togglingMine(viewer: viewer) })) {
                     Text(verbatim: copy.mine)
                 }
+                // On the Toggle itself: after the styles, the screen's identifier won.
+                .accessibilityIdentifier("company.board.mine")
                 .toggleStyle(.button)
                 .buttonStyle(.bordered)
-                .accessibilityIdentifier("company.board.mine")
             }
             Spacer(minLength: 0)
         }

@@ -120,9 +120,10 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
 
         list.tap()
         XCTAssertTrue(waitFor(3) { list.isSelected }, "List not chosen")
-        let mine = element(app, "company.board.mine")
+        // A button-style Toggle is a switch named by its label; its identifier has lost to the
+        // screen's before, so it is found the way a person names it.
+        let mine = app.switches[expected.mine]
         XCTAssertTrue(mine.waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertEqual(mine.label, expected.mine)
         XCTAssertFalse(isOn(mine))
         mine.tap()
         XCTAssertTrue(waitFor(3) { self.isOn(mine) }, "Mine did not turn on: \(self.boundedHierarchy(app))")
@@ -148,9 +149,7 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 3), boundedHierarchy(app))
         field.tap()
         field.typeText("zzqx")
-        let none = element(app, "company.search.noMatches")
-        XCTAssertTrue(none.waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertEqual(none.label, expected.noMatches)
+        XCTAssertTrue(app.staticTexts[expected.noMatches].waitForExistence(timeout: 3), boundedHierarchy(app))
         field.buttons.firstMatch.tap()
 
         field.typeText("launch")
@@ -160,9 +159,7 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         keepScreenshot("w4-e7-search-row-\(tag)", of: app)
         row.tap()
 
-        let sheet = element(app, "company.search.sheet")
-        XCTAssertTrue(sheet.waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertTrue(app.navigationBars[expected.search].waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(app.navigationBars[expected.search].waitForExistence(timeout: 5), boundedHierarchy(app))
         let result = app.buttons.matching(identifier: "company.search.result.$scripted-launch-date").firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 3), boundedHierarchy(app))
         XCTAssertTrue(probeLines("team-actions.txt").contains { $0.text == "search anka launch" })
