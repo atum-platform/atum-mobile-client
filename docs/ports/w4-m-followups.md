@@ -15,6 +15,21 @@ response failed, two subsequent busy reads, and recovery through Refresh.
 The reopen regression counts read starts after the closed desk's original
 one-second retry deadline.
 
+### Review r1 fixes (coordinator)
+
+Review r1 (Sol, MERGE) raised two should-fix items, both fixed:
+
+- The schedule starts unconfirmed, so a failed entry read (for example a
+  desk reopened while the host is still unavailable) also offers Refresh
+  instead of showing neither the switches nor Refresh.
+- A successful manual Refresh clears the earlier "Couldn't change that"
+  problem, since the shown schedule is now the host's answer.
+
+`testFailedEntryReadOffersRefresh` covers the first; the existing Refresh
+test now asserts the problem clears. The review's nit (the Refresh test does
+not observe the in-flight read) is left as is. Locked rerun: Debug build-for-testing exit 0,
+`AgentDeskBellTests` 14 passed (exit 0); the package sources are unchanged.
+
 ## Stop
 
 Each room retains up to 32 terminal Stop attempts to preserve recent

@@ -319,6 +319,24 @@ final class AgentDeskBellTests: XCTestCase {
         XCTAssertFalse(model.canRefreshSchedule)
         XCTAssertEqual(host.scheduleReads, 4)
         XCTAssertEqual(host.controls, [.pause])
+        XCTAssertNil(model.problem, "the confirmed schedule replaces the earlier failure")
+    }
+
+    @MainActor
+    func testFailedEntryReadOffersRefresh() async {
+        let host = Host()
+        host.busyScheduleReads = 2
+        let model = AgentDeskModel(actions: host.actions(), readRetryDelay: .milliseconds(50))
+        model.appear()
+        defer { model.disappear() }
+        await until({ model.canRefreshSchedule }, "refresh was not offered after the entry read failed")
+        XCTAssertFalse(model.canControl)
+        XCTAssertEqual(host.scheduleReads, 2)
+
+        model.refreshSchedule()
+        await until({ model.canControl && !model.controlsDisabled }, "refresh did not load the schedule")
+        XCTAssertEqual(model.jobs, host.schedule.jobs)
+        XCTAssertFalse(model.canRefreshSchedule)
     }
 
     @MainActor

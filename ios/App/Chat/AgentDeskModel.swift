@@ -26,7 +26,8 @@ final class AgentDeskModel {
 
     private(set) var jobs: [HostAgentDesk.Job]?
     private(set) var problem: Problem?
-    private var scheduleState: ScheduleState = .confirmed
+    /// Nothing is confirmed until a host read lands, so a failed entry read also offers Refresh.
+    private var scheduleState: ScheduleState = .unconfirmed
     /// A control is on its way to the host: every schedule switch waits.
     private(set) var controlPending = false
     /// The folder whose listing is shown (nil: the agent's home).
@@ -144,16 +145,17 @@ final class AgentDeskModel {
 
     func refreshSchedule() {
         guard started, canRefreshSchedule else { return }
-        startScheduleRead()
+        startScheduleRead(manual: true)
     }
 
-    private func startScheduleRead() {
+    private func startScheduleRead(manual: Bool = false) {
         if scheduleState == .refreshAvailable { scheduleState = .unconfirmed }
-        scheduleTask = Task { [weak self] in await self?.readSchedule() }
+        scheduleTask = Task { [weak self] in await self?.readSchedule(clearingProblem: manual) }
     }
 
     /// An entry or reconciliation read can land inside the host's cooldown.
-    private func readSchedule() async {
+    /// A manual Refresh shows the host's schedule as the answer, so it clears the earlier failure.
+    private func readSchedule(clearingProblem: Bool = false) async {
         guard let read = actions.schedule else { return }
         defer {
             if !Task.isCancelled, scheduleState == .unconfirmed {
@@ -166,6 +168,7 @@ final class AgentDeskModel {
                 guard let schedule = try await read(), !Task.isCancelled else { return }
                 jobs = schedule.jobs
                 scheduleState = .confirmed
+                if clearingProblem { problem = nil }
                 return
             } catch is HostAgentDesk.ReadBusy where attempt == 0 {
                 do { try await Task.sleep(for: readRetryDelay) } catch { return }
