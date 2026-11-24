@@ -1154,3 +1154,83 @@ final class TurnStopUITests: WS3UITestCase {
         XCTAssertFalse(element(app, "composer.stop").exists, "never a dead button")
     }
 }
+
+/// W4-R: the model picker and the composer chip as the desktop draws them
+/// (#119): the chip is the current model's mark and name with no chevron;
+/// each row is the provider's mark, the name with the check beside it and
+/// Atum's line; the plans with nothing to pick keep their real marks.
+/// Synthetic scripted data (`-AtumScriptedSubscriptions ready`,
+/// `-AtumScriptedConnections plans`). Captures go to the run's
+/// `ATUM_UI_SCRATCH/ui-evidence` as `PhoneModelPickerVisualsUITests.*.png`.
+final class PhoneModelPickerVisualsUITests: WS3UITestCase {
+    private static let sheetWait: TimeInterval = 8
+    @MainActor
+    private func openPicker(language: String, dark: Bool,
+                            size: String = "UICTContentSizeCategoryL") -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = AtumLaunchArguments.arguments(scenario: .chatEmpty)
+            + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
+               "-atum.appearance", dark ? "dark" : "light", "-UIPreferredContentSizeCategoryName", size,
+               "-AtumScriptedSubscriptions", "ready", "-AtumScriptedConnections", "plans"]
+        app.launch()
+        XCTAssertTrue(element(app, AccessibilityID.transcript).waitForExistence(timeout: 15), "no transcript")
+        let chip = element(app, AccessibilityID.composerModel)
+        XCTAssertTrue(chip.waitForExistence(timeout: Self.sheetWait), "no model chip")
+        return app
+    }
+
+    @MainActor
+    private func scrollSheet(_ app: XCUIApplication, until target: XCUIElement, limit: Int = 8) {
+        var scrolls = 0
+        while !(target.exists && target.isHittable), scrolls < limit {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+            scrolls += 1
+        }
+    }
+
+    @MainActor
+    private func capture(language: String, dark: Bool) {
+        let tag = language + "-" + (dark ? "dark" : "light")
+        let app = openPicker(language: language, dark: dark)
+        let chip = element(app, AccessibilityID.composerModel)
+        XCTAssertFalse(chip.label.isEmpty, "the chip names the model")
+        keepEvidence("chip-\(tag)", of: app)
+        chip.tap()
+        XCTAssertTrue(element(app, "composer.model.close").waitForExistence(timeout: Self.sheetWait),
+                      "the model sheet did not open")
+        let current = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'phone.model.row.' AND isSelected == true"))
+            .firstMatch
+        XCTAssertTrue(current.waitForExistence(timeout: Self.sheetWait), "no current row")
+        keepEvidence("sheet-\(tag)", of: app)
+        let plan = element(app, "phone.model.plan.claude")
+        scrollSheet(app, until: plan)
+        XCTAssertTrue(plan.exists, "no Claude plan entry")
+        keepEvidence("sheet-plans-\(tag)", of: app)
+        app.terminate()
+    }
+
+    @MainActor
+    func testRowsAndChipInEnglishAndVietnameseLightAndDark() {
+        for language in ["en", "vi"] {
+            for dark in [false, true] { capture(language: language, dark: dark) }
+        }
+    }
+
+    /// The largest accessibility size: the chip and the rows still read, the
+    /// marks grow with the text, and the plans' Connect sits under the words.
+    @MainActor
+    func testTheLargestTextSize() {
+        let app = openPicker(language: "en", dark: false, size: "UICTContentSizeCategoryAccessibilityXXXL")
+        let chip = element(app, AccessibilityID.composerModel)
+        keepEvidence("chip-en-light-ax5", of: app)
+        chip.tap()
+        XCTAssertTrue(element(app, "composer.model.close").waitForExistence(timeout: Self.sheetWait))
+        keepEvidence("sheet-en-light-ax5", of: app)
+        let connect = app.buttons["phone.model.plan.claude.connect"]
+        scrollSheet(app, until: connect, limit: 14)
+        XCTAssertTrue(connect.exists && connect.isHittable, "Connect is not reachable at AX5")
+        keepEvidence("sheet-plans-en-light-ax5", of: app)
+    }
+}
