@@ -119,14 +119,9 @@ what the phone is. `file:line` is the phone code reused.
 4. **OpenCode Go key on the phone** (phone follow-up, not platform). The row
    shows the status. Connecting and managing the key stays on the desktop
    until a phone key sheet is ported.
-5. **Decoder parity with the desktop's zod schema** (phone follow-up, from
-   review r1). The phone counts a label's length in Unicode scalars; zod
-   counts UTF-16 code units (`apps/desktop/shared/account-connections.ts`
-   `label(max)`). The phone also refuses an integral JSON number written
-   with a fraction, such as `observedAt: 1.0`; zod's `.int()` accepts it.
-   So a device name made of astral characters near the bound, or a `1.0`,
-   can parse on the desktop and not on the phone. The phone then shows the
-   failed state, never a wrong row.
+5. **Decoder parity with the desktop's zod schema. Done.** Connections
+   labels count UTF-16 code units, and `observedAt` accepts integral JSON
+   numbers within the desktop's safe integer range. [W4-N follow-ups](w4-n-connections-followups.md)
 
 ## Tests
 
