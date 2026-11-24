@@ -55,6 +55,8 @@ struct LiveMatrixRoomRow: Equatable, Identifiable, Sendable {
     var memberProfiles: [LiveMatrixMemberRow] = []
     /// The standard `m.lowpriority` tag, from the SDK's room info.
     var isLowPriority: Bool = false
+    /// Matrix's explicit pin order, shared with the desktop.
+    var favouriteOrder: Double? = nil
     /// The room's `m.room.topic`, from the SDK's room info.
     var topic: String? = nil
     /// HC-7: your own name for this chat (`io.atum.title`, desktop's private
@@ -186,6 +188,8 @@ final class LiveMatrixSession {
     /// True after the first rooms have synced in this session epoch. Latches
     /// for the epoch; a replacement session starts false again.
     private(set) var hasCompletedInitialSync = false
+    /// During replacement, the display snapshot can still hold old rooms.
+    var hasPublishedRooms: Bool { latestRoomPublication != 0 }
     /// Sync, send queues and the scene phase for this session (B9, B30): the
     /// quiet connection glyph reads it. Nil until the session is established
     /// and after it is torn down.
@@ -1537,6 +1541,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
         async let roomTypeValue = roomTypeIfChatCandidate(from: room, isChatCandidate: true)
         async let botData = appBotAccountDataIfChatCandidate(from: room, isChatCandidate: isChatCandidate)
         async let privateTitleData = try? await room.accountDataRaw(eventType: ChatPrivateTitle.eventType)
+        async let tagData = info.isFavourite ? (try? await room.accountDataRaw(eventType: "m.tag")) : nil
         let preview = await rosterPreview(from: await latest, room: room)
         // A delivery-outcome notice is not something a person said. Keep the
         // row's last real message (the snapshot merge supplies it) instead of
@@ -1580,6 +1585,7 @@ private final class LiveMatrixRoomListListener: RoomListEntriesListener, @unchec
                                  legacyAppBotMove: bot.move,
                                  memberProfiles: members,
                                  isLowPriority: info.isLowPriority,
+                                 favouriteOrder: PersonalChatRestorePolicy.favouriteOrder(eventJSON: await tagData),
                                  topic: info.topic,
                                  privateTitle: ChatPrivateTitle.title(eventJSON: await privateTitleData))
     }

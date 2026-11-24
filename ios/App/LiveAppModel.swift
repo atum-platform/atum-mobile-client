@@ -3904,6 +3904,7 @@ final class LiveAppModel {
         conversationAvatar = row.avatar
         conversationOpenedRoom = row
         attachConversation()
+        rememberOpenedPersonalChat(roomID, accountID: info.context.ownUserID)
         if firstRunMarker == .unknown {
             Task { @MainActor [weak self] in await self?.refreshFirstRunMarker() }
         }
@@ -7092,6 +7093,48 @@ final class LiveAppModel {
 
     /// The signed-in Matrix account the notification room directory belongs to.
     var notificationOwnUserID: String? { context?.runtime.ticket.session.userID }
+
+    /// The shell calls this on launch or on an explicit Chats tap. It owns the
+    /// navigation generation and supplies any pending or claimed explicit route.
+    /// Opening and returning the canonical room ID happen without suspension.
+    @discardableResult
+    func restorePersonalChat(for entry: PersonalChatRestoreEntry, hasExplicitRoute: Bool,
+                             stillCurrent: @MainActor () -> Bool) -> String? {
+        guard !Task.isCancelled, stillCurrent(), !hasExplicitRoute,
+              case let .signedIn(account) = stage,
+              account.matrixUserID == context?.runtime.ticket.session.userID,
+              let liveMatrix, liveMatrix.isReady, liveMatrix.hasCompletedInitialSync,
+              liveMatrix.hasPublishedRooms, !liveMatrix.isLoadingRooms,
+              entry != .launch || (conversation == nil && appBotRoomOpening == nil) else { return nil }
+        let store = LastPersonalChatStore(matrixUserID: account.matrixUserID)
+        let row = PersonalChatRestorePolicy.destination(
+            for: entry, rememberedRoomID: store.roomID(), joinedRooms: liveMatrix.rooms,
+            rows: productRooms(), agents: personalChatAgents,
+            allowsUnclassified: companyWorkspace.phase == .hidden,
+            hasExplicitRoute: hasExplicitRoute, isCurrent: stillCurrent(),
+            classification: companyWorkspace.roomClassification
+        )
+        guard let row else { return nil }
+        openConversation(roomID: row.id, row: row)
+        return conversation?.roomID == row.id ? row.id : nil
+    }
+
+    private var personalChatAgents: [AgentsResponse.Agent]? {
+        let bindings = companyWorkspace.privateCosBindings
+        return agentsRead.value?.agents.filter {
+            !bindings.agentPrincipals.contains($0.principal.rawValue)
+                && !bindings.agentUserIDs.contains($0.matrixUser?.rawValue ?? "")
+        }
+    }
+
+    private func rememberOpenedPersonalChat(_ roomID: String, accountID: String) {
+        guard let room = liveMatrix?.rooms.first(where: { $0.roomID == roomID }),
+              PersonalChatRestorePolicy.isPersonal(
+                  room, classification: companyWorkspace.roomClassification(roomID),
+                  agents: personalChatAgents ?? [], allowsUnclassified: true
+              ) else { return }
+        LastPersonalChatStore(matrixUserID: accountID).remember(roomID)
+    }
 
     /// The chat list's rows (`LiveRosterRows`, pure) from the live values.
     private func productRooms() -> [LiveProductRoom] {

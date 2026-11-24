@@ -6,6 +6,146 @@ import UserNotifications
 import XCTest
 
 final class S2StateTests: XCTestCase {
+    func testPersonalChatRestoreSurvivesRelaunchAndIsAccountScoped() throws {
+        let name = "PersonalChatRestoreTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let account = "@owner:atum.test"
+        let other = "@another:atum.test"
+        let first = rosterRoom("!first:atum.test", userID: "@first:atum.test", latest: 1)
+        let last = rosterRoom("!last:atum.test", userID: "@last:atum.test", latest: 2)
+        LastPersonalChatStore(matrixUserID: account, defaults: defaults).remember(first.roomID)
+        LastPersonalChatStore(matrixUserID: account, defaults: defaults).remember(last.roomID)
+        LastPersonalChatStore(matrixUserID: account, defaults: defaults).remember("app:placeholder")
+
+        let relaunched = try XCTUnwrap(UserDefaults(suiteName: name))
+        let remembered = LastPersonalChatStore(matrixUserID: account, defaults: relaunched).roomID()
+        let otherRemembered = LastPersonalChatStore(matrixUserID: other, defaults: relaunched).roomID()
+        XCTAssertEqual(relaunched.persistentDomain(forName: name)?.values.compactMap { $0 as? String },
+                       [last.roomID])
+        XCTAssertEqual(restoreDestination(remembered: remembered, rooms: [first, last]), last.roomID)
+        XCTAssertNil(restoreDestination(remembered: otherRemembered, rooms: [first, last]))
+        LastPersonalChatStore(matrixUserID: other, defaults: relaunched).remember(first.roomID)
+        XCTAssertEqual(LastPersonalChatStore(matrixUserID: account, defaults: relaunched).roomID(), last.roomID)
+        XCTAssertEqual(LastPersonalChatStore(matrixUserID: other, defaults: relaunched).roomID(), first.roomID)
+    }
+
+    func testPersonalChatRestoreSkipsLeftInvitedAndReclassifiedRooms() throws {
+        let primary = try cloudPrimaryForRestore()
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let formerPersonal = rosterRoom("!company:atum.test", userID: "@person:atum.test", latest: 2)
+        let left = "!left:atum.test"
+        let invitation = LiveMatrixInvite(roomID: "!invite:atum.test", inviterID: "@person:atum.test")
+        XCTAssertEqual(restoreDestination(remembered: left, rooms: [main], agents: [primary]), main.roomID)
+        XCTAssertEqual(restoreDestination(remembered: invitation.roomID, rooms: [main],
+                                          invites: [invitation], agents: [primary]), main.roomID)
+        XCTAssertEqual(restoreDestination(remembered: formerPersonal.roomID, rooms: [main, formerPersonal],
+                                          agents: [primary]), formerPersonal.roomID)
+        XCTAssertNil(restoreDestination(remembered: formerPersonal.roomID, rooms: [main, formerPersonal],
+                                        agents: [primary]) {
+            $0 == formerPersonal.roomID ? .unknown : .personal
+        })
+        XCTAssertEqual(restoreDestination(remembered: formerPersonal.roomID, rooms: [main, formerPersonal],
+                                          agents: [primary]) {
+            $0 == formerPersonal.roomID ? .privateCos(companyID: "company") : .personal
+        }, main.roomID)
+        let claimed = rosterRoom("!claimed:atum.test", userID: "@person:atum.test", latest: 3,
+                                 roomType: ConversationRoomType.value)
+        XCTAssertEqual(restoreDestination(remembered: claimed.roomID, rooms: [main, claimed],
+                                          agents: [primary]), main.roomID)
+    }
+
+    func testPersonalChatRestoreChecksFormerAssistantIdentityEvenOnPeopleRow() throws {
+        let primary = try cloudPrimaryForRestore()
+        let old = rosterRoom("!old:atum.test", userID: "@former:atum.test", latest: 50,
+                             roomType: "io.atum.assistant")
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let people = rosterRoom("!person:atum.test", userID: "@person:atum.test", latest: 2)
+        let rows = LiveRosterRows.rows(.init(agents: [primary], apps: [], rooms: [old, main], invites: [],
+                                           pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "vi")).rows
+        let formerRow = try XCTUnwrap(rows.first { $0.id == old.roomID })
+        XCTAssertEqual(formerRow.kind, .people)
+        XCTAssertEqual(restoreDestination(remembered: old.roomID, rooms: [old, main], agents: [primary]),
+                       main.roomID)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, remembered: old.roomID, rooms: [old, people]),
+                       people.roomID)
+
+        let inactive = try decodeAgents([agentJSON(id: "00000000-0000-4000-8000-d09f929fabe6",
+            name: "Former", matrixUser: "@former:atum.test", status: "retired")])
+        let legacy = rosterRoom("!legacy:atum.test", userID: "@former:atum.test", latest: 99)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, remembered: legacy.roomID,
+                                          rooms: [legacy, people], agents: inactive), people.roomID)
+    }
+
+    func testPersonalChatRestoreFindsCloudOnlyPrimaryAndLeavesUnavailablePrimaryAlone() throws {
+        let primary = try cloudPrimaryForRestore()
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let person = rosterRoom("!person:atum.test", userID: "@person:atum.test", latest: 2)
+        XCTAssertEqual(primary.answering, .cloud)
+        XCTAssertEqual(restoreDestination(rooms: [person, main], agents: [primary]), main.roomID)
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: [person], agents: [primary]))
+    }
+
+    func testPersonalChatRestoreUsesDesktopOrderOnlyForChatsTapWithoutAgent() {
+        var low = rosterRoom("!low:atum.test", userID: "@person:atum.test", latest: 100)
+        low.isLowPriority = true
+        let older = rosterRoom("!older:atum.test", userID: "@person:atum.test", latest: 20)
+        let newer = rosterRoom("!newer:atum.test", userID: "@person:atum.test", latest: 30)
+        var firstPin = rosterRoom("!first-pin:atum.test", userID: "@person:atum.test", latest: 1, favourite: true)
+        firstPin.favouriteOrder = 0.1
+        var secondPin = rosterRoom("!second-pin:atum.test", userID: "@person:atum.test", latest: 2, favourite: true)
+        secondPin.favouriteOrder = 0.9
+        let unrankedPin = rosterRoom("!unranked-pin:atum.test", userID: "@person:atum.test",
+                                     latest: 3, favourite: true)
+        let rooms = [low, older, newer, secondPin, unrankedPin, firstPin]
+        XCTAssertNil(restoreDestination(rooms: rooms))
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: rooms, agents: nil))
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: rooms), firstPin.roomID)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: [low, older, newer]), newer.roomID)
+    }
+
+    func testPersonalChatRestoreYieldsToNotificationAndNewerNavigation() {
+        let last = rosterRoom("!last:atum.test", userID: "@person:atum.test", latest: 1)
+        for entry in [PersonalChatRestoreEntry.launch, .chatsTap] {
+            XCTAssertEqual(restoreDestination(entry: entry, remembered: last.roomID, rooms: [last]), last.roomID)
+            XCTAssertNil(restoreDestination(entry: entry, remembered: last.roomID, rooms: [last],
+                                            hasExplicitRoute: true))
+            XCTAssertNil(restoreDestination(entry: entry, remembered: last.roomID, rooms: [last], isCurrent: false))
+        }
+    }
+
+    func testPersonalChatRestoreReadsOnlyValidNumericPinOrder() {
+        XCTAssertEqual(PersonalChatRestorePolicy.favouriteOrder(eventJSON:
+            #"{"type":"m.tag","content":{"tags":{"m.favourite":{"order":0.25},"m.lowpriority":{}}}}"#), 0.25)
+        for invalid in ["2", #""0.25""#, "true"] {
+            let raw = #"{"type":"m.tag","content":{"tags":{"m.favourite":{"order":"# + invalid + "}}}}"
+            XCTAssertNil(PersonalChatRestorePolicy.favouriteOrder(eventJSON: raw))
+        }
+    }
+
+    private func restoreDestination(
+        entry: PersonalChatRestoreEntry = .launch, remembered: String? = nil,
+        rooms: [LiveMatrixRoomRow], invites: [LiveMatrixInvite] = [], agents: [AgentsResponse.Agent]? = [],
+        hasExplicitRoute: Bool = false, isCurrent: Bool = true,
+        classification: (String) -> CompanyRoomClassification = { _ in .personal }
+    ) -> String? {
+        let rows = LiveRosterRows.rows(.init(agents: agents ?? [], apps: [], rooms: rooms, invites: invites,
+                                            pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "vi")).rows
+        return PersonalChatRestorePolicy.destination(for: entry, rememberedRoomID: remembered,
+            joinedRooms: rooms, rows: rows, agents: agents, hasExplicitRoute: hasExplicitRoute,
+            isCurrent: isCurrent, classification: classification)?.id
+    }
+
+    private func cloudPrimaryForRestore() throws -> AgentsResponse.Agent {
+        var agent = agentJSON(id: "00000000-0000-4000-8000-064e196185a1", name: "Primary",
+                              matrixUser: "@primary:atum.test", isDefault: true)
+        agent["answering"] = "cloud"
+        return try XCTUnwrap(decodeAgents([agent]).first)
+    }
+
     func testRosterPreviewSkipsOnlyConfirmedClearedWorkingLines() {
         let agent = "@assistant:atum.test"
         let answer = LiveLatestEventPreview(text: "Here is the plan", content: .text("Here is the plan"),
