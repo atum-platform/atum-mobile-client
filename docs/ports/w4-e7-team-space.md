@@ -190,3 +190,5 @@ under `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, with derived data in
 | Search tasks | The sheet's search runs in `.task(id:)` keyed by each ask, so a new query or closing the sheet cancels the previous fan-out, which `CompanySearchService` already stops on (its limiter releases waiting jobs). A second result tap while one is opening is ignored. | Covered by the walk's search step |
 
 Left for the coordinator's follow-ups (not done here): focus on event, result limit and error state, the Forward glyph choice, an open-result token, 44 pt board controls.
+
+r2 verification (locked, head `98736a7`): `swift test --filter 'TeamSpaceRevampPolicyTests|CompanySpacePolicyTests|CompanyMessageSearchTests|CompanySearchServiceTests'` exit 0 (50 tests, 0 failures); Debug `build-for-testing` exit 0 (arm64); `TeamSpaceRevampUITests` exit 0 (1 test, 327 s, en/vi light/dark).
