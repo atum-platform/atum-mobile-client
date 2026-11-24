@@ -14,6 +14,8 @@ struct ChatPanelHost: View {
     let info: ChatInfoPresentation
     let actions: ChatInfoActions
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
+    /// The chat's own rows and media, for the agent's desk (W4-E3).
+    var deskChat: AgentDeskChat? = nil
     let close: () -> Void
 
     @State private var path: [ChatPanelPolicy.Page] = []
@@ -25,13 +27,18 @@ struct ChatPanelHost: View {
     @State private var shared = SharedCollectionsController()
 
     init(design: LiveDesign, info: ChatInfoPresentation, actions: ChatInfoActions,
-         loadMatrixThumbnail: ((String, Int) async -> Data?)?, close: @escaping () -> Void) {
+         loadMatrixThumbnail: ((String, Int) async -> Data?)?, deskChat: AgentDeskChat? = nil,
+         close: @escaping () -> Void) {
         self.design = design
         self.info = info
         self.actions = actions
         self.loadMatrixThumbnail = loadMatrixThumbnail
+        self.deskChat = deskChat
         self.close = close
-        _height = State(initialValue: Self.detent(ChatPanelPolicy.openingHeight(for: info.panelSurface)))
+        let opening = ChatPanelPolicy.openingPage(for: info.panelSurface, hasAgentDesk: actions.agentDesk != nil)
+        _path = State(initialValue: opening.map { [$0] } ?? [])
+        _height = State(initialValue: Self.detent(ChatPanelPolicy.openingHeight(for: info.panelSurface,
+                                                                                page: opening)))
     }
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -56,6 +63,12 @@ struct ChatPanelHost: View {
                         if let appPanel = actions.appPanel {
                             AppPanelPageView(design: design, actions: appPanel, routeID: routeID,
                                              close: close)
+                        }
+                    case .agentDesk:
+                        if let desk = actions.agentDesk {
+                            AgentDeskPage(design: design, info: info, actions: desk, chat: deskChat,
+                                          setMuted: actions.setMuted,
+                                          allSettings: { path.removeAll() }, close: close)
                         }
                     }
                 }

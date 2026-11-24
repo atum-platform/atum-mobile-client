@@ -847,6 +847,7 @@ struct AppRoot: View {
                         loadFacts: { await model.companyChannelFacts(roomID: $0) },
                         loadPinned: { await model.companyPinnedRows(roomID: $0) }),
                     appPanel: model.appPanelActions(roomID: roomID),
+                    agentDesk: model.agentDeskActions(roomID: roomID),
                     // HC-7: Rename from the panel (desktop conversation menu).
                     rename: model.offersPersonalExits(roomID: roomID)
                         ? ChatRenameActions(request: { await model.renameRequest(roomID: $0) },

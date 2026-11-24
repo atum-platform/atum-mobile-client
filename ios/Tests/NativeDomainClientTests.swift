@@ -3843,6 +3843,160 @@ extension NativeDomainClientTests {
     }
 }
 
+// MARK: - W4-E3 the agent's desk on the Shell's host routes (desktop #51)
+
+extension NativeDomainClientTests {
+    private var deskAgent: NativeID { get throws { try NativeID("7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e42") } }
+
+    func testHostDeskFilesPostsDesktopsExactRequestToTheShell() async throws {
+        let expected = try HostAgentDesk.deskBody(agent: deskAgent, read: .files(path: "home/reports"))
+        XCTAssertEqual(String(decoding: expected, as: UTF8.self),
+                       #"{"agent":"7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e42","path":"home/reports","read":"files"}"#)
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://api.atumplatform.com/api/host/desk")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(self.body(of: request), expected)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer desk-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: HostAgentDesk.bridgeHeader), HostAgentDesk.bridgeVersion)
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            return .json(Data(#"{"read":"files","root":"home","path":"reports","truncated":false,"rows":[{"name":"q3.md","kind":"file","size":10,"modifiedAt":1}]}"#.utf8))
+        }
+        let agent = try deskAgent
+        let files = try await client(TestAuthorization(first: "desk-token")).hostDeskFiles(agent: agent, path: "home/reports")
+        XCTAssertEqual(files.rows.map(\.name), ["q3.md"])
+        XCTAssertEqual(files.deskPath, "home/reports")
+    }
+
+    func testHostDeskRefusesAListingForAnotherFolder() async throws {
+        NativeDomainProtocol.state.handler = { _ in
+            .json(Data(#"{"read":"files","root":"work","path":"","truncated":false,"rows":[]}"#.utf8))
+        }
+        let agent = try deskAgent
+        do {
+            _ = try await client(TestAuthorization(first: "t")).hostDeskFiles(agent: agent, path: nil)
+            XCTFail("a listing of work answered a read of home")
+        } catch {
+            XCTAssertEqual(error as? NativeDomainClientFailure, .invalidResponse)
+        }
+    }
+
+    func testHostAgentControlNamesStoppedBusyAndChanged() async throws {
+        var status = 409
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/host/agent-control")
+            XCTAssertEqual(self.body(of: request).map { String(decoding: $0, as: UTF8.self) },
+                           #"{"action":"routine_off","agent":"7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e42","job":"job-1"}"#)
+            if status == 200 { return .json(Data(#"{"action":"routine_off","changed":1}"#.utf8)) }
+            return .init(status: status, chunks: [Data(#"{"error":"conflict"}"#.utf8)])
+        }
+        let value = client(TestAuthorization(first: "t"))
+        let agent = try deskAgent
+        let control = HostAgentDesk.Control.routineOff(job: "job-1")
+        let stopped = await value.hostAgentControl(agent: agent, control)
+        XCTAssertEqual(stopped, .stopped)
+        status = 429
+        let busy = await value.hostAgentControl(agent: agent, control)
+        XCTAssertEqual(busy, .busy)
+        status = 200
+        let changed = await value.hostAgentControl(agent: agent, control)
+        XCTAssertEqual(changed, .changed(1))
+    }
+
+    func testHostAgentPauseDoesNotSendWhenTheAgentChangesDuringAuthorization() async throws {
+        let agent = try deskAgent
+        let replacement = try NativeID("01234567-89ab-4def-8123-456789abcdef")
+        var currentAgent = agent
+        let gate = AuthorizationGate()
+        let client = NativeDomainClient(testAuthorization: { _ in
+            await gate.token()
+        }, protocolClasses: [NativeDomainProtocol.self])
+
+        let pending = Task { await client.hostAgentControl(agent: agent, .pause, canSend: { currentAgent == agent }) }
+        await gate.waitUntilStarted()
+        currentAgent = replacement
+        gate.release("desk-token")
+
+        let outcome = await pending.value
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
+    }
+
+    func testHostAgentResumeDoesNotRetry401WhenTheAgentChangesDuringRefresh() async throws {
+        let agent = try deskAgent
+        let replacement = try NativeID("01234567-89ab-4def-8123-456789abcdef")
+        var currentAgent = agent
+        let gate = AuthorizationGate()
+        NativeDomainProtocol.state.handler = { _ in .init(status: 401) }
+        let client = NativeDomainClient(testAuthorization: { forceRefresh in
+            if forceRefresh { return await gate.token() }
+            return "first-desk-token"
+        }, protocolClasses: [NativeDomainProtocol.self])
+
+        let pending = Task { await client.hostAgentControl(agent: agent, .resume, canSend: { currentAgent == agent }) }
+        await gate.waitUntilStarted()
+        currentAgent = replacement
+        gate.release("refreshed-desk-token")
+
+        let outcome = await pending.value
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.map { $0.value(forHTTPHeaderField: "Authorization") },
+                       ["Bearer first-desk-token"])
+    }
+
+    func testHostDeskScheduleAndFilesDoNotSendWhenTheContextIsStale() async throws {
+        let agent = try deskAgent
+        let client = client(TestAuthorization(first: "desk-token"))
+        do {
+            _ = try await client.hostDeskSchedule(agent: agent, canSend: { false })
+            XCTFail("Stale context sent a schedule read")
+        } catch NativeDomainClientFailure.cancelled {}
+        do {
+            _ = try await client.hostDeskFiles(agent: agent, path: nil, canSend: { false })
+            XCTFail("Stale context sent a file read")
+        } catch NativeDomainClientFailure.cancelled {}
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
+    }
+
+    func testHostDeskFilesNamesTheReadAdmissionBusy() async throws {
+        // Platform migration 0471: a second files read within 10 s is 429, not a broken folder.
+        NativeDomainProtocol.state.handler = { _ in .init(status: 429, chunks: [Data(#"{"error":"busy"}"#.utf8)]) }
+        let agent = try deskAgent
+        do {
+            _ = try await client(TestAuthorization(first: "t")).hostDeskFiles(agent: agent, path: "home/reports")
+            XCTFail("a busy read was a listing")
+        } catch {
+            XCTAssertEqual(error as? HostAgentDesk.ReadBusy, HostAgentDesk.ReadBusy())
+        }
+    }
+
+    func testHostDeskAndControlCapTheirRepliesAtTheContractLimits() async throws {
+        let agent = try deskAgent
+        // The desk: 64 KiB, refused by the transport before decoding.
+        NativeDomainProtocol.state.handler = { _ in
+            .init(headers: ["Content-Type": "application/json", "Content-Length": "65537"])
+        }
+        do {
+            _ = try await client(TestAuthorization(first: "t")).hostDeskSchedule(agent: agent)
+            XCTFail("an oversized desk reply was read")
+        } catch {
+            XCTAssertEqual(error as? NativeDomainClientFailure, .responseTooLarge)
+        }
+        // The control: 4 KiB, even on a 429 that would otherwise read as busy.
+        NativeDomainProtocol.state.handler = { _ in
+            .init(status: 429, headers: ["Content-Type": "application/json", "Content-Length": "4097"])
+        }
+        let outcome = await client(TestAuthorization(first: "t")).hostAgentControl(agent: agent, .pause)
+        XCTAssertEqual(outcome, .failed)
+    }
+
+    func testHostAgentControlRefusesAReplyForAnotherAction() async throws {
+        NativeDomainProtocol.state.handler = { _ in .json(Data(#"{"action":"resume","changed":1}"#.utf8)) }
+        let agent = try deskAgent
+        let outcome = await client(TestAuthorization(first: "t")).hostAgentControl(agent: agent, .pause)
+        XCTAssertEqual(outcome, .failed)
+    }
+}
+
 extension NativeDomainClientTests {
     func testScheduledStopUsesAuthenticatedShellAndReplaysTheExactBodyOn401() async throws {
         let agent = try stopAgent()

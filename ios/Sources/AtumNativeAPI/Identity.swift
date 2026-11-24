@@ -48,6 +48,10 @@ public struct AgentsResponse: Decodable, Equatable, Sendable {
         public let principal: NativeID
         public let matrixUser: NativeMatrixUser?
         public let retiredAgents: [RetiredAgent]?
+        /// `runtime: "hermes"`: a native Hermes agent in the cloud, the roster's
+        /// capability for the Shell's host routes (Stop, the agent's desk and its
+        /// controls). Any other value, or none, is not that capability.
+        public let runsOnHermes: Bool
         public var canOpenChat: Bool { status == .active && matrixUser != nil }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
@@ -89,6 +93,7 @@ public struct AgentsResponse: Decodable, Equatable, Sendable {
             let rawMatrixUser: String? = try c.nullable("matrixUser")
             matrixUser = rawMatrixUser.flatMap { try? NativeMatrixUser($0) }
             retiredAgents = c.lossyNullable("retired_agents")
+            runsOnHermes = c.lossyNullable("runtime", as: String.self) == "hermes"
             guard (retiredAgents?.count ?? 0) <= 1000 else { throw ContractViolation.invalidValue }
         }
     }

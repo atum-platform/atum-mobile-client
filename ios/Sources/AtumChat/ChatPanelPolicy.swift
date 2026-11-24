@@ -30,6 +30,9 @@ public enum ChatPanelPolicy {
         case shared(SharedSection)
         /// One of an app's declared pages, under Atum's bar (plan M5).
         case appPage(routeID: String)
+        /// The agent's own page in its 1:1 chat (desktop #51's agent tab): the
+        /// panel opens on it, with the agent's card one Back away.
+        case agentDesk
     }
 
     public enum SharedSection: String, Hashable, Sendable, CaseIterable {
@@ -43,6 +46,8 @@ public enum ChatPanelPolicy {
     /// chat still in view above it.
     public static func openingHeight(for surface: Surface, page: Page? = nil) -> Height {
         if case .appPage? = page { return .large }
+        // The desk opens with the chat still in view, so its work can be watched.
+        if case .agentDesk? = page { return .medium }
         return surface == .assistant ? .large : .medium
     }
 
@@ -51,6 +56,12 @@ public enum ChatPanelPolicy {
     public static func height(afterPushing page: Page, from current: Height) -> Height {
         if case .appPage = page { return .large }
         return current
+    }
+
+    /// The page the panel opens on, if not its home: an assistant chat with a
+    /// desk opens on it (desktop's side panel opens on the agent's own tab).
+    public static func openingPage(for surface: Surface, hasAgentDesk: Bool) -> Page? {
+        surface == .assistant && hasAgentDesk ? .agentDesk : nil
     }
 
     /// What the panel belongs to. A panel never outlives its chat or its account: a new room, a

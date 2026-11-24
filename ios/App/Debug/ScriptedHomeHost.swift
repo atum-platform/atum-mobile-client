@@ -101,6 +101,9 @@ struct ScriptedHomeHost: View {
         }
     }
 
+    /// `-AtumScriptedSignInAgain`: the native domain sign-in has ended (W4-E3 bell).
+    static var signInAgain: Bool { ProcessInfo.processInfo.arguments.contains("-AtumScriptedSignInAgain") }
+
     var body: some View {
         ZStack {
             design.color("ground", scheme: scheme).ignoresSafeArea()
@@ -112,7 +115,9 @@ struct ScriptedHomeHost: View {
                     router: router,
                     accountName: Self.accountName,
                     presentation: HomePresentation(state: rows.isEmpty ? .empty : .ready,
-                                                   rows: Self.workingRows(Self.testHomeRows(roster, productRows: rows))),
+                                                   rows: Self.workingRows(Self.testHomeRows(roster, productRows: rows)),
+                                                   // W4-E3: the bell's "Sign in again" item.
+                                                   showsDomainReauthentication: Self.signInAgain),
                     actions: personalMenu(HomeActions(
                         openRoom: { router.open(roomId: $0) },
                         joinInvitation: { roomID in
@@ -121,6 +126,9 @@ struct ScriptedHomeHost: View {
                             return true
                         },
                         refresh: {},
+                        reauthenticateDomain: Self.signInAgain ? {
+                            UITestProbe.append("reauthenticate", to: "home-actions.txt")
+                        } : nil,
                         setUnread: { roomID, value in
                             update(roomID) { $0.withRosterState(unreadOverride: value) }
                             UITestProbe.append("unread \(roomID) \(value)", to: "home-actions.txt")
