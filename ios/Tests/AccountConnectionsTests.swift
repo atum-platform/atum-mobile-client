@@ -68,6 +68,31 @@ final class AccountConnectionsTests: XCTestCase {
         }
     }
 
+    func testDisplayLabelsUseTheDesktopsUTF16Bounds() throws {
+        let deviceLabel = String(repeating: "🚀", count: 64)
+        let modelLabel = String(repeating: "🚀", count: 100)
+        let deviceField = #""displayName":"MacBook Pro""#
+        let modelField = #""displayName":"GPT-6""#
+        let deviceAnswer = try registry(mutated(deviceField, #""displayName":"\#(deviceLabel)""#))
+        let modelAnswer = try registry(mutated(modelField, #""displayName":"\#(modelLabel)""#))
+        XCTAssertEqual(deviceAnswer.connections[0].devices.first?.displayName, deviceLabel)
+        XCTAssertEqual(modelAnswer.connections[0].models.first?.displayName, modelLabel)
+        XCTAssertThrowsError(try registry(mutated(deviceField, #""displayName":"\#(deviceLabel)a""#)))
+        XCTAssertThrowsError(try registry(mutated(modelField, #""displayName":"\#(modelLabel)a""#)))
+    }
+
+    func testObservedAtAcceptsIntegralDecimalsWithinTheSafeIntegerRange() throws {
+        let field = #""observedAt":1795000000000"#
+        let accepted: [(String, Int64)] = [("1.0", 1), ("9007199254740991.0", 9_007_199_254_740_991)]
+        for (json, value) in accepted {
+            let answer = try registry(mutated(field, #""observedAt":\#(json)"#))
+            XCTAssertEqual(answer.connections[0].devices.first?.observedAt, value)
+        }
+        for json in ["1.5", "-1.0", "9007199254740992.0", "true", #""1.0""#] {
+            XCTAssertThrowsError(try registry(mutated(field, #""observedAt":\#(json)"#)), json)
+        }
+    }
+
     // MARK: Rows (desktop view.test.ts)
 
     func testItAlwaysListsTheThreePlansConnectedFirstThenLastSeenThenTheRest() throws {

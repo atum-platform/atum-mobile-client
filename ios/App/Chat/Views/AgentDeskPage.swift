@@ -31,6 +31,8 @@ struct AgentDeskChat {
 
 /// The desk's words, all from the pinned export (`shared/matrix-agent-desk-copy.ts`).
 enum AgentDeskCopy {
+    static let refresh = "desktop.common.refresh"
+
     static func key(_ name: String) -> String { "shared.matrix-agent-desk-copy.matrixAgentDeskCopy." + name }
 
     @MainActor static func text(_ design: LiveDesign, _ name: String, _ arguments: [AtumCopy.Argument] = []) -> String {
@@ -222,7 +224,7 @@ struct AgentDeskPage: View {
                     toggleRow(glyph: .clock, title: copy("pause"), id: "desk.pause",
                               isOn: Binding(get: { HostAgentDesk.isPaused(model.jobs) },
                                             set: { on in model.run(on ? .pause : .resume) }))
-                        .disabled(model.controlPending)
+                        .disabled(model.controlsDisabled)
                         .accessibilityHint(AgentDeskCopy.text(design, "pauseHint"))
                     AgentDeskDivider()
                 }
@@ -252,6 +254,12 @@ struct AgentDeskPage: View {
                     .padding(.leading, 4)
                     .accessibilityIdentifier("desk.problem")
                     .accessibilityAddTraits(.updatesFrequently)
+            }
+            if model.canRefreshSchedule {
+                Button(design.text(AgentDeskCopy.refresh)) { model.refreshSchedule() }
+                    .buttonStyle(.atumSecondary)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("desk.schedule.refresh")
             }
         }
         .accessibilityElement(children: .contain)
@@ -304,7 +312,7 @@ struct AgentDeskPage: View {
                     Text(verbatim: job.name)
                 }
                 .labelsHidden()
-                .disabled(model.controlPending)
+                .disabled(model.controlsDisabled)
                 .accessibilityIdentifier("desk.routine." + job.id)
             }
         }
