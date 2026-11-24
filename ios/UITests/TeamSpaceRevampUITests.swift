@@ -71,13 +71,17 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         XCTAssertTrue(channel.waitForExistence(timeout: 5), boundedHierarchy(app))
         for _ in 0..<6 where !channel.isHittable { app.swipeUp(velocity: .slow) }
         channel.tap()
-        let failed = element(app, "company.channel.failed")
-        XCTAssertTrue(failed.waitForExistence(timeout: 3), "no failed line: \(boundedHierarchy(app))")
-        XCTAssertTrue(app.staticTexts[expected.channelFailed].exists, boundedHierarchy(app))
+        XCTAssertTrue(waitFor(3) { designOpens() - before == 1 }, "the tap did not ask to open #design")
         XCTAssertFalse(element(app, "teamSpace.scripted.destination").exists, "a failed open pushed")
+        // #design is the last row on a 6.1" screen; the line under it is made once the List
+        // scrolls it on screen.
+        let retry = app.buttons.matching(identifier: "company.channel.retry").firstMatch
+        for _ in 0..<4 where !(retry.exists && retry.isHittable) { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(retry.waitForExistence(timeout: 3), "no failed line: \(boundedHierarchy(app))")
+        XCTAssertTrue(element(app, "company.channel.failed").exists, boundedHierarchy(app))
+        XCTAssertTrue(app.staticTexts[expected.channelFailed].exists, boundedHierarchy(app))
         keepScreenshot("w4-e7-channel-failed-\(tag)", of: app)
 
-        let retry = app.buttons.matching(identifier: "company.channel.retry").firstMatch
         XCTAssertEqual(retry.label, expected.tryAgain)
         retry.tap()
         XCTAssertTrue(element(app, "teamSpace.scripted.destination").waitForExistence(timeout: 3),
@@ -89,35 +93,46 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         app.swipeDown(velocity: .fast)
     }
 
+    /// A button-style toggle reads as selected, or as a toggle whose value is 1.
+    @MainActor
+    private func isOn(_ toggle: XCUIElement) -> Bool {
+        toggle.isSelected || (toggle.value as? String) == "1"
+    }
+
     /// Board · List and Mine over the board's unavailable state.
     @MainActor
     private func checkBoardViews(_ app: XCUIApplication, expected: Words, tag: String) {
-        let pages = app.segmentedControls["company.pages"]
-        XCTAssertTrue(pages.waitForExistence(timeout: 3), boundedHierarchy(app))
-        pages.buttons[expected.board].tap()
-        let views = app.segmentedControls["company.board.views"]
-        XCTAssertTrue(views.waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertTrue(views.buttons[expected.board].isSelected)
+        let chatPage = app.buttons.matching(identifier: "company.page.chat").firstMatch
+        let boardPage = app.buttons.matching(identifier: "company.page.board").firstMatch
+        XCTAssertTrue(boardPage.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertEqual(boardPage.label, expected.board)
+        boardPage.tap()
+        let board = app.buttons.matching(identifier: "company.board.view.board").firstMatch
+        let list = app.buttons.matching(identifier: "company.board.view.list").firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertEqual(board.label, expected.board)
+        XCTAssertEqual(list.label, expected.list)
+        XCTAssertTrue(board.isSelected)
         XCTAssertTrue(element(app, "company.board.unavailable").exists)
 
-        views.buttons[expected.list].tap()
-        XCTAssertTrue(waitFor(3) { views.buttons[expected.list].isSelected }, "List not chosen")
+        list.tap()
+        XCTAssertTrue(waitFor(3) { list.isSelected }, "List not chosen")
         let mine = element(app, "company.board.mine")
         XCTAssertTrue(mine.waitForExistence(timeout: 3), boundedHierarchy(app))
         XCTAssertEqual(mine.label, expected.mine)
-        XCTAssertFalse(mine.isSelected)
+        XCTAssertFalse(isOn(mine))
         mine.tap()
-        XCTAssertTrue(waitFor(3) { mine.isSelected }, "Mine did not turn on")
-        XCTAssertTrue(views.buttons[expected.list].isSelected, "Mine changed the view")
+        XCTAssertTrue(waitFor(3) { self.isOn(mine) }, "Mine did not turn on: \(self.boundedHierarchy(app))")
+        XCTAssertTrue(list.isSelected, "Mine changed the view")
         keepScreenshot("w4-e7-board-list-mine-\(tag)", of: app)
 
-        pages.buttons[expected.chat].tap()
+        XCTAssertEqual(chatPage.label, expected.chat)
+        chatPage.tap()
         XCTAssertTrue(element(app, "company.channel.general").waitForExistence(timeout: 3))
         // The page keeps its choices for the session.
-        pages.buttons[expected.board].tap()
-        XCTAssertTrue(waitFor(3) { views.buttons[expected.list].isSelected && mine.isSelected },
-                      "Board · List and Mine were not kept")
-        pages.buttons[expected.chat].tap()
+        boardPage.tap()
+        XCTAssertTrue(waitFor(3) { list.isSelected && self.isOn(mine) }, "Board · List and Mine were not kept")
+        chatPage.tap()
     }
 
     /// The header box: nothing matched says so; "Search “launch”" opens the results

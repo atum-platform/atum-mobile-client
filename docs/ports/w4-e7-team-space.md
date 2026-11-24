@@ -164,3 +164,4 @@ under `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, with derived data in
 3. The Team Space UI: header search, channel retry, Board · List and Mine, settings sections,
    the Private Chief of Staff label, the pending table, scripted data and the UI walk.
 4. UI walk imports `AtumChat` for its scripted scenarios (caught by the first locked build).
+5. UI walk scrolls the failed line on screen (the row under #design is lazily made on a 6.1" screen), and finds the page and view segments by identifier.
