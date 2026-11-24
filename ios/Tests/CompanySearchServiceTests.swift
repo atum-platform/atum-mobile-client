@@ -20,6 +20,10 @@ final class CompanySearchServiceTests: XCTestCase {
     @MainActor
     private final class FakeTransport: CompanySearchTransport {
         var bodies = [[String: Any]]()
+        var tokens = [String?]()
+        var nextBatch: String?
+        var responseOverride: Data?
+        var fails = false
         var active = 0
         var peak = 0
         /// Runs after the request is recorded, before the answer is returned.
@@ -27,14 +31,17 @@ final class CompanySearchServiceTests: XCTestCase {
         /// Senders whose messages the server holds (any membership now).
         var authors = ["@minh:atum.test"]
 
-        func search(body: Data, endpoint: CompanySearchEndpoint) async throws -> Data {
+        func search(body: Data, endpoint: CompanySearchEndpoint, nextBatch: String?) async throws -> Data {
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             bodies.append(object)
+            tokens.append(nextBatch)
             active += 1
             peak = max(peak, active)
             for _ in 0..<5 { await Task.yield() }
             active -= 1
             beforeAnswer()
+            if fails { throw URLError(.notConnectedToInternet) }
+            if let responseOverride { return responseOverride }
             let events = (object["search_categories"] as? [String: Any])?["room_events"] as? [String: Any]
             let filter = events?["filter"] as? [String: Any] ?? [:]
             let files = filter["contains_url"] as? Bool == true
@@ -52,8 +59,9 @@ final class CompanySearchServiceTests: XCTestCase {
                                                   "content": content]]
                 }
             }
-            return try JSONSerialization.data(withJSONObject: ["search_categories": ["room_events": [
-                "count": results.count, "results": results]]])
+            var page: [String: Any] = ["count": results.count, "results": results]
+            page["next_batch"] = self.nextBatch
+            return try JSONSerialization.data(withJSONObject: ["search_categories": ["room_events": page]])
         }
 
         func rooms(_ index: Int) -> [String] {
@@ -126,6 +134,117 @@ final class CompanySearchServiceTests: XCTestCase {
         XCTAssertEqual(foundMessages.map(\.roomID), [general.roomID, design.roomID, studio.roomID])
         XCTAssertEqual(foundFiles.map(\.text), ["launch-deck.pdf", "launch-deck.pdf", "launch-deck.pdf"])
         XCTAssertEqual(search.limiter.running, 0)
+    }
+
+    func testTeamSpaceAsksFor25InOneCompanyAndResumesWithItsToken() async throws {
+        eligibility = allEligible()
+        let search = service(limit: 1)
+        let env = environment()
+        transport.nextBatch = "next+/="
+        let first = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                       continuation: nil, environment: env)
+        let next = try XCTUnwrap(first?.continuation)
+        XCTAssertEqual(first?.results.map(\.roomID), [general.roomID, design.roomID])
+        XCTAssertEqual(next.token, "next+/=")
+        let second = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                        continuation: next, environment: env)
+        XCTAssertNil(second?.continuation, "a repeated token ends pagination")
+        XCTAssertEqual(transport.tokens, [nil, next.token])
+        XCTAssertEqual(transport.allRooms, [general.roomID, design.roomID, general.roomID, design.roomID])
+        for body in transport.bodies {
+            let categories = body["search_categories"] as? [String: Any]
+            let events = categories?["room_events"] as? [String: Any]
+            let filter = events?["filter"] as? [String: Any]
+            XCTAssertEqual(filter?["limit"] as? Int, 25)
+        }
+    }
+
+    func testTeamSpaceRestartsWhenRoomsChangeAndHidesIneligibleResultsBeforeTheRetry() async throws {
+        eligibility = allEligible()
+        let search = service(limit: 1)
+        let env = environment()
+        var state = TeamSpaceMessageSearchState()
+        state.submit("launch")
+        let initial = try XCTUnwrap(state.request)
+        transport.nextBatch = "old-cursor"
+        let first = await search.searchCompanyMessages(companyID: companyA, term: initial.term,
+                                                        continuation: initial.continuation, environment: env)
+        state.finish(initial, answer: first)
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.roomID), [general.roomID, design.roomID])
+
+        eligibility = without(design)
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.roomID), [general.roomID])
+        state.loadMore()
+        let more = try XCTUnwrap(state.request)
+        transport.fails = true
+        let failed = await search.searchCompanyMessages(companyID: companyA, term: more.term,
+                                                         continuation: more.continuation, environment: env)
+        state.finish(more, answer: failed)
+        XCTAssertTrue(state.failed)
+        XCTAssertEqual(state.visibleResults(eligibility: eligibility).map(\.roomID), [general.roomID])
+
+        state.loadMore()
+        let retry = try XCTUnwrap(state.request)
+        transport.fails = false
+        transport.nextBatch = "new-cursor"
+        let restarted = await search.searchCompanyMessages(companyID: companyA, term: retry.term,
+                                                           continuation: retry.continuation, environment: env)
+        state.finish(retry, answer: restarted)
+        XCTAssertEqual(transport.tokens, [nil, nil, nil])
+        XCTAssertEqual(transport.rooms(1), [general.roomID])
+        XCTAssertEqual(state.page?.results.map(\.roomID), [general.roomID])
+        XCTAssertEqual(state.page?.continuation?.token, "new-cursor")
+    }
+
+    func testTeamSpaceRestartsWhenTheFromFilterResolvesToADifferentSender() async throws {
+        eligibility = allEligible()
+        let search = service(limit: 1)
+        let env = environment()
+        let term = "launch from:@minh"
+        let former = "@minh:atum.test"
+        let current = "@other-minh:atum.test"
+        transport.authors = [former, current]
+        membersRead = { _ in [CompanySearchMember(userID: former, names: ["Minh"], membership: "join")] }
+        transport.nextBatch = "first-cursor"
+
+        var state = TeamSpaceMessageSearchState()
+        state.submit(term)
+        let initial = try XCTUnwrap(state.request)
+        let first = await search.searchCompanyMessages(companyID: companyA, term: term,
+                                                        continuation: initial.continuation, environment: env)
+        state.finish(initial, answer: first)
+        XCTAssertEqual(Set(state.page?.results.map(\.sender) ?? []), [former])
+
+        state.loadMore()
+        let more = try XCTUnwrap(state.request)
+        membersRead = { _ in [CompanySearchMember(userID: current, names: ["Minh"], membership: "join")] }
+        transport.nextBatch = nil
+        let restarted = await search.searchCompanyMessages(companyID: companyA, term: term,
+                                                           continuation: more.continuation, environment: env)
+        state.finish(more, answer: restarted)
+        XCTAssertEqual(transport.tokens, [nil, nil])
+        XCTAssertEqual(transport.rooms(0), transport.rooms(1))
+        XCTAssertEqual(Set(state.page?.results.map(\.sender) ?? []), [current])
+    }
+
+    func testTeamSpaceTransportAndMalformedResponsesFailButNoMatchesSucceed() async {
+        eligibility = allEligible()
+        let search = service(limit: 1)
+        let env = environment()
+        transport.fails = true
+        let offline = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                         continuation: nil, environment: env)
+        XCTAssertNil(offline)
+        transport.fails = false
+        transport.responseOverride = Data(#"{"search_categories":{"room_events":{"results":"invalid"}}}"#.utf8)
+        let malformed = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                           continuation: nil, environment: env)
+        XCTAssertNil(malformed)
+        transport.responseOverride = nil
+        transport.authors = []
+        let empty = await search.searchCompanyMessages(companyID: companyA, term: "launch",
+                                                       continuation: nil, environment: env)
+        XCTAssertEqual(empty, CompanySearchPage())
     }
 
     // MARK: Round 2, item 2: eligibility re-checked once the job has its slot

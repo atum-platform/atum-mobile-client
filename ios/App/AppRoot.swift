@@ -454,14 +454,10 @@ struct AppRoot: View {
                             routeFromRootDestination(roomID)
                         }),
                     messageSearch: model.liveMatrix == nil ? nil : TeamSpaceMessageSearchActions(
-                        search: { await model.teamSpaceCompanySearch(companyID: $0, term: $1) },
-                        open: { result in
-                            await HomeSearchRoute.open(
-                                result, workspace: model.companyWorkspace,
-                                confirm: { await model.openHomeSearchResult(result) },
-                                route: { await openRoomAndRoute($0, requiringCompany: $1) })
-                        }),
-                    openChannel: { roomID in await openTeamSpaceChannel(roomID) }
+                        search: { await model.teamSpaceCompanySearch(companyID: $0, term: $1, continuation: $2) },
+                        eligibility: { _ in model.homeSearchEligibility() },
+                        open: { await openTeamSpaceSearchResult($0) }),
+                    openChannel: { roomID, companyID in await openTeamSpaceChannel(roomID, companyID: companyID) }
                 )
             )
             .navigationDestination(for: String.self) { roomID in
@@ -579,7 +575,10 @@ struct AppRoot: View {
             if roomID == nil, router.selectedTab == .home { model.closeConversation() }
         }
         .onChange(of: router.teamSpaceRoomID) { _, roomID in
-            if roomID == nil, router.selectedTab == .teamSpace { model.closeConversation() }
+            if roomID == nil, router.selectedTab == .teamSpace {
+                if companyThreads.pending?.focusEventID != nil { companyThreads.pending = nil }
+                model.closeConversation()
+            }
         }
         .onChange(of: model.companyLeftToken) { _, _ in
             if CompanyRoomRemovalFence.closes(
@@ -1121,16 +1120,20 @@ struct AppRoot: View {
         Task { _ = await openRoomAndRoute(roomID, stagedCold: stagedCold, requiringCompany: requiringCompany) }
     }
 
-    /// A Team Space channel tap with its answer (W4-E7): true opened, false failed, nil when
-    /// another open replaced this one before it answered (desktop `openRoom`'s failure is
-    /// only for the open still on screen).
-    private func openTeamSpaceChannel(_ roomID: String) async -> Bool? {
-        let before = openRequestGeneration
-        if await openRoomAndRoute(roomID) { return true }
-        // This open bumped the generation once; a higher one means another open took over,
-        // and leaving Team Space meanwhile is the person's own navigation, not a failure.
-        guard openRequestGeneration &- before <= 1, router.selectedTab == .teamSpace else { return nil }
-        return false
+    private func openTeamSpaceChannel(_ roomID: String, companyID: String) async -> RoomOpenResult {
+        guard router.selectedTab == .teamSpace, model.companyWorkspace.activeCompanyID == companyID else {
+            return .superseded
+        }
+        return await routeRoom(roomID, requiringCompany: companyID)
+    }
+
+    private func openTeamSpaceSearchResult(_ result: CompanySearchResult) async -> RoomOpenResult {
+        let generation = openRequestGeneration
+        let confirmed = await model.openHomeSearchResult(result)
+        guard !Task.isCancelled, generation == openRequestGeneration, router.selectedTab == .teamSpace,
+              model.companyWorkspace.activeCompanyID == result.companyID else { return .superseded }
+        guard confirmed else { return .failed }
+        return await routeRoom(result.roomID, requiringCompany: result.companyID, message: result)
     }
 
     private func routeFromRootDestination(_ roomID: String) {
@@ -1150,11 +1153,16 @@ struct AppRoot: View {
         }
     }
 
-    /// `requiringCompany` is the company a person's own tap or action started in. It is checked
-    /// before anything is staged and again after every await, before navigating: if they have
-    /// moved to another company meanwhile, or the room is no longer that company's, nothing opens.
     private func openRoomAndRoute(_ roomID: String, stagedCold: Bool = false,
                                   requiringCompany: String? = nil) async -> Bool {
+        await routeRoom(roomID, stagedCold: stagedCold, requiringCompany: requiringCompany) == .opened
+    }
+
+    /// The company a tap started in must still be selected and own the room
+    /// before staging, during the open and at navigation.
+    private func routeRoom(_ roomID: String, stagedCold: Bool = false,
+                           requiringCompany: String? = nil,
+                           message: CompanySearchResult? = nil) async -> RoomOpenResult {
         func fenceHolds() -> Bool {
             guard let requiringCompany else { return true }
             return model.companyWorkspace.isSelected(companyID: requiringCompany, owning: roomID)
@@ -1162,51 +1170,59 @@ struct AppRoot: View {
         // A roster row for an app with no chat yet starts that app's flow (not a company room).
         if let slug = model.startableAppSlug(forRowID: roomID) {
             startAppChat(slug)
-            return false
+            return .failed
         }
-        guard fenceHolds() else { return false }
-        guard let requestedDestination = roomDestination(for: roomID) else { return false }
+        guard !Task.isCancelled, fenceHolds() else { return .superseded }
+        guard let requestedDestination = roomDestination(for: roomID) else { return .failed }
+        if companyThreads.pending?.focusEventID != nil { companyThreads.pending = nil }
         if requestedDestination == .teamSpace { model.companyWorkspace.activateCompany(owning: roomID) }
         prepareRoot(requestedDestination, roomID: roomID, stagedCold: stagedCold)
         openRequestGeneration &+= 1
         let request = openRequestGeneration
-        let openedRoomID = await model.openRoom(roomID) {
-            // The company and the room's owner are part of "still current", checked around every
-            // join, open and attach inside.
-            request == openRequestGeneration
-                && router.selectedTab == requestedDestination.tab
-                && fenceHolds()
+        func ownsRoute() -> Bool {
+            request == openRequestGeneration && router.selectedTab == requestedDestination.tab
         }
-        guard request == openRequestGeneration, let openedRoomID else {
-            if stagedCold { popRoot(requestedDestination) }
-            return false
+        func stillCurrent() -> Bool {
+            !Task.isCancelled && ownsRoute() && fenceHolds()
         }
-        guard fenceHolds() else {
-            // The chat the model opened internally closes with the failed fence.
-            if model.conversation?.roomID == openedRoomID { model.closeConversation() }
+        let openedRoomID = await model.openRoom(roomID, stillCurrent: stillCurrent)
+        guard stillCurrent() else {
+            // A newer request owns its own route and conversation.
+            if ownsRoute() {
+                if let openedRoomID, model.conversation?.roomID == openedRoomID { model.closeConversation() }
+                if stagedCold { popRoot(requestedDestination) }
+            }
+            return .superseded
+        }
+        guard let openedRoomID else {
             if stagedCold { popRoot(requestedDestination) }
-            return false
+            return .failed
         }
 
         // Canonical readback is classified again. The caller never supplies a
         // company scope; only the existing company directory can choose it.
         guard let authoritativeDestination = roomDestination(for: openedRoomID) else {
             popRoot(requestedDestination)
-            return false
+            return .failed
         }
         if router.selectedTab != authoritativeDestination.tab {
             prepareRoot(authoritativeDestination, roomID: openedRoomID, stagedCold: false)
         }
-        guard request == openRequestGeneration,
-              router.selectedTab == authoritativeDestination.tab else { return false }
-
         if authoritativeDestination == .teamSpace { model.companyWorkspace.activateCompany(owning: openedRoomID) }
+        if let message, message.roomID == openedRoomID {
+            if let rootID = message.threadRootID {
+                companyThreads.pending = CompanyThreadRoute(roomID: openedRoomID, rootID: rootID,
+                                                            focusEventID: message.eventID)
+            } else {
+                model.conversation?.searchTargetEventID = message.eventID
+            }
+        }
         let alreadyStaged = openRoomID(for: authoritativeDestination) == openedRoomID
         open(openedRoomID, in: authoritativeDestination)
         if !alreadyStaged {
             await LivePushRouting.removeDeliveredNotifications(for: openedRoomID)
         }
-        return true
+        return .opened
     }
 
     private func roomDestination(for roomID: String) -> RoomRootDestination? {

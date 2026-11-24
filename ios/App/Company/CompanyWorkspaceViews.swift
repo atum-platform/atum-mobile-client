@@ -112,7 +112,7 @@ struct TeamSpaceActions {
     var messageSearch: TeamSpaceMessageSearchActions?
     /// A channel tap with its answer: true opened, false failed, nil replaced by
     /// another open. Nil falls back to `openRoom`, with no failure line (W4-E7).
-    var openChannel: ((String) async -> Bool?)?
+    var openChannel: ((_ roomID: String, _ companyID: String) async -> RoomOpenResult)?
 }
 
 /// Workplace is a separate mode from Personal Home. It reuses the existing
@@ -866,10 +866,10 @@ struct TeamSpaceScreen: View {
         }
         let attempt = channelOpen.begin(.init(companyID: companyID, roomID: roomID))
         Task { @MainActor in
-            let opened = await open(roomID)
-            channelOpen.finish(attempt, opened: opened)
+            let result = await open(roomID, companyID)
+            channelOpen.finish(attempt, result: result)
             // Desktop's failed pane is `role="alert"`: VoiceOver hears the line when it lands.
-            if opened == false, channelOpen.failedRoom(companyID: companyID) == roomID {
+            if result == .failed, channelOpen.failedRoom(companyID: companyID) == roomID {
                 actionFailure += 1
                 AccessibilityNotification.Announcement(team.channelFailed).post()
             }
