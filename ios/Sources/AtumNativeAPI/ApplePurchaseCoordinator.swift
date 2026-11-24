@@ -59,7 +59,7 @@ public extension ApplePurchaseStore {
     @Published public private(set) var products: [AppleStoreProduct] = []
     public var canPurchase: Bool {
         guard checkoutOpen, let acceptedEnvironment, deviceEnvironment == acceptedEnvironment, !products.isEmpty,
-              !purchaseInProgress, pendingProductID == nil, unresolvedTransactions.isEmpty
+              !purchaseInProgress, awaitingPurchaseProductID == nil, unresolvedTransactions.isEmpty
         else { return false }
         switch state {
         case .ready, .cancelled, .succeeded, .needsSupport, .otherAccount, .revoked: return true
@@ -88,8 +88,9 @@ public extension ApplePurchaseStore {
     private var listener: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     @Published private var purchaseInProgress = false
-    private var pendingProductID: String?
-    private var unresolvedTransactions = Set<String>()
+    // Set before StoreKit can deliver an approval on either purchase path.
+    private var awaitingPurchaseProductID: String?
+    @Published private var unresolvedTransactions = Set<String>()
     private var submissions: [String: Task<Void, Never>] = [:]
     // Track credits for this account after the sheet drops their feedback.
     private var acknowledgedCredits = Set<String>()
@@ -123,7 +124,7 @@ public extension ApplePurchaseStore {
     public func bind(accountID: String?, api: (any ApplePurchasesAPI)?) {
         generation = UUID(); loadTask?.cancel()
         submissions.values.forEach { $0.cancel() }; submissions.removeAll()
-        purchaseInProgress = false; pendingProductID = nil; unresolvedTransactions.removeAll()
+        purchaseInProgress = false; awaitingPurchaseProductID = nil; unresolvedTransactions.removeAll()
         acknowledgedCredits.removeAll(); unresolvedRefunds.removeAll()
         let switchedAccount = self.accountID != accountID
         self.accountID = accountID; self.api = api
@@ -180,7 +181,14 @@ public extension ApplePurchaseStore {
               let environment = acceptedEnvironment else { return }
         let scope = generation
         purchaseInProgress = true
-        defer { if generation == scope { purchaseInProgress = false } }
+        awaitingPurchaseProductID = id
+        var awaitingApproval = false
+        defer {
+            if generation == scope {
+                if !awaitingApproval { awaitingPurchaseProductID = nil }
+                purchaseInProgress = false
+            }
+        }
         state = .purchasing; purchaseStates[id] = .purchasing
         do {
             let key = accountID + ":" + environment.rawValue
@@ -206,7 +214,9 @@ public extension ApplePurchaseStore {
                 }
                 enqueue(transaction)
             case .pending:
-                pendingProductID = id
+                // The listener or unfinished replay may already have admitted the approval.
+                guard awaitingPurchaseProductID == id else { return }
+                awaitingApproval = true
                 state = .pending; purchaseStates[id] = .pending
             case .cancelled: state = .cancelled; purchaseStates[id] = .cancelled
             case .unverified: state = .unavailable; purchaseStates[id] = .unavailable
@@ -283,7 +293,7 @@ public extension ApplePurchaseStore {
         guard !finished.contains(id) else { return }
         if transaction.isRevoked { unresolvedRefunds.insert(id) }
         guard submissions[id] == nil else { return }
-        if pendingProductID == transaction.productID { pendingProductID = nil }
+        if awaitingPurchaseProductID == transaction.productID { awaitingPurchaseProductID = nil }
         unresolvedTransactions.insert(id)
         state = .retrying; purchaseStates[transaction.productID] = .retrying
         submissions[id] = Task { [weak self] in
@@ -301,7 +311,10 @@ public extension ApplePurchaseStore {
                     await transaction.finish()
                     guard self.isCurrent(scope) else { return }
                     self.finished.insert(id)
-                    self.unresolvedTransactions.remove(id)
+                    // Keep Buy disabled until the wallet and row have settled.
+                    defer {
+                        if self.generation == scope { self.unresolvedTransactions.remove(id) }
+                    }
                     let terminalState: State
                     switch result.state {
                     case .credited, .alreadyCredited: terminalState = .succeeded

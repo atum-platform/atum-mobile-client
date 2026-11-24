@@ -147,6 +147,52 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
+    func testListenerApprovalBeforePendingResultDoesNotStrandBuy() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.blockPurchase = true
+        var finishes = 0
+        let approved = transaction { finishes += 1 }
+        let c = await make(store, api)
+        defer { c.bind(accountID: nil, api: nil) }
+
+        let purchase = Task { await c.purchase(id) }
+        await settled { store.purchaseBlocked != nil }
+        let result = try XCTUnwrap(store.purchaseBlocked)
+        store.continuation?.yield(approved)
+        await settled { c.transactionOutcomes[approved.id]?.isCredited == true }
+        XCTAssertFalse(c.canPurchase)
+
+        result.resume(returning: .pending)
+        await purchase.value
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+        XCTAssertTrue(c.canPurchase)
+
+        store.queue = [approved]
+        await c.restore()
+        XCTAssertTrue(c.canPurchase)
+        XCTAssertEqual(api.posts, 1)
+        XCTAssertEqual(finishes, 1)
+    }
+
+    func testRestoreClearsPendingOnlyWhenItFindsAnApproval() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        store.result = .pending
+        let c = await make(store, api)
+        defer { c.bind(accountID: nil, api: nil) }
+        await c.purchase(id)
+
+        await c.restore()
+        XCTAssertEqual(c.purchaseState(for: id), .pending)
+        XCTAssertFalse(c.canPurchase)
+
+        let approved = transaction {}
+        store.queue = [approved]
+        await c.restore()
+        await settled { c.transactionOutcomes[approved.id]?.isCredited == true }
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+        XCTAssertTrue(c.canPurchase)
+    }
+
     func testNeedsSupportFinishesAndCarriesTransactionID() async {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         api.sample = .transactionNeedsSupport
@@ -608,6 +654,35 @@ import XCTest
         XCTAssertEqual(api.posts, 1); XCTAssertEqual(finishes, 1)
     }
 
+    func testBuyStaysDisabledAfterFinishUntilWalletAndRowSettle() async throws {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        var finishes = 0
+        let original = transaction { finishes += 1 }
+        store.result = .verified(original)
+        var blockedRefresh: CheckedContinuation<Void, Never>?
+        let c = await make(store, api, refresh: {
+            await withCheckedContinuation { blockedRefresh = $0 }
+        })
+        defer { c.bind(accountID: nil, api: nil) }
+
+        await c.purchase(id)
+        await settled { blockedRefresh != nil }
+        let refresh = try XCTUnwrap(blockedRefresh)
+        XCTAssertEqual(finishes, 1)
+        XCTAssertEqual(c.purchaseState(for: id), .retrying)
+        XCTAssertFalse(c.canPurchase)
+        store.result = .cancelled
+        await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 1)
+
+        refresh.resume()
+        await settled { c.transactionOutcomes[original.id]?.isCredited == true }
+        XCTAssertEqual(c.purchaseState(for: id), .succeeded)
+        XCTAssertTrue(c.canPurchase)
+        await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 2)
+    }
+
     func testBuyStaysDisabledWhileNewerSamePackSubmissionIsUnresolved() async throws {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         let otherPack = "com.atum.mobile.protons.500k"
@@ -825,6 +900,8 @@ import XCTest
     var continuation: AsyncStream<AppleVerifiedTransaction>.Continuation?
     var queue: [AppleVerifiedTransaction] = []
     var result: AppleStorePurchaseResult = .cancelled
+    var blockPurchase = false
+    var purchaseBlocked: CheckedContinuation<AppleStorePurchaseResult, Never>?
     var tokens: [UUID] = []
     var purchaseCalls = 0; var productReads = 0; var failProducts = false
     var environment: ApplePurchaseEnvironment? = .sandbox
@@ -842,7 +919,9 @@ import XCTest
         return ids.map { .init(id: $0, displayPrice: "synthetic-price") }
     }
     func purchase(id: String, accountToken: UUID) async throws -> AppleStorePurchaseResult {
-        purchaseCalls += 1; tokens.append(accountToken); return result
+        purchaseCalls += 1; tokens.append(accountToken)
+        if blockPurchase { return await withCheckedContinuation { purchaseBlocked = $0 } }
+        return result
     }
     func updates() -> AsyncStream<AppleVerifiedTransaction> {
         AsyncStream { continuation = $0 }
