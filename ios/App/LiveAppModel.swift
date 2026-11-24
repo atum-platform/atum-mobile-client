@@ -1104,6 +1104,209 @@ final class LiveAppModel {
                                               generation: generation)
     }
 
+    // MARK: Open listing hire (desktop PR #100, D9 slice 1)
+
+    /// The open listings this person can hire, read each time the New
+    /// assistant sheet opens. Any failure is an empty shelf, and the sheet is
+    /// then exactly what it was before (desktop `useOpenListings`).
+    func openAgentListings() async -> [OpenAgentListing] {
+        guard canCreateAssistant, let client = domainClient else { return [] }
+        do {
+            let listings = try await client.openAgentListings()
+            guard domainClient === client else { return [] }
+            return listings
+        } catch {
+            LiveFlowLog.creation(.assistant, outcome: "listings_unread")
+            return []
+        }
+    }
+
+    /// The signed-in account a listing hire is picked under (its Matrix ID),
+    /// or nil when signed out. A hire belongs to this account alone.
+    var listingHireAccount: String? { context?.runtime.ticket.session.userID }
+
+    /// The names the catalog's apps go by (desktop `appCatalogNames`): each
+    /// app's name in every language, its bot's name and its slug as words.
+    var appCatalogNames: [String] {
+        var names: [String] = []
+        for app in appsRead.value?.apps ?? [] {
+            let candidates: [String?] = app.name.values.values.map { Optional($0) }
+                + [app.bot?.displayName, app.app.replacingOccurrences(of: "-", with: " ")]
+            for name in candidates {
+                if let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty,
+                   !names.contains(name) { names.append(name) }
+            }
+        }
+        return names
+    }
+
+    /// Whether a hired assistant's chat opens from Home: the roster's own
+    /// projection (`productRooms`, `LiveRosterRows.rows`) has an openable,
+    /// joined row for that assistant, the same test a pushed room uses
+    /// (`canOpenPushedRoom`). A room Home suppresses (a duplicate plain room,
+    /// a hidden or quarantined one) or the "getting ready" row doesn't count.
+    func hiredAssistantChatReady(_ assistantID: NativeID) -> Bool {
+        ListingHireChat.opens(assistantID, in: productRooms(),
+                              quarantined: { companyWorkspace.isQuarantinedConversation($0) })
+    }
+
+    /// Hires an open listing under `name` with `POST /agents` and its
+    /// `listingId` (the route desktop's `hireAgent` uses). An unfinished hire
+    /// of the same listing resumes under its stored request and name, so a
+    /// Retry, a confirmation or a relaunch never hires twice; a confirmation
+    /// given now carries over. The platform seeds the persona and skills and
+    /// always places it in the cloud, so no definition write follows.
+    ///
+    /// `account` is the account the hire was picked under: anything else
+    /// signed in now is refused before any request is read or sent. A
+    /// confirmed request (confirmed now or stored with it) can spend, so it
+    /// goes out only while Apple checkout is open (REL-15), checked here and
+    /// again inside the transport right before each send.
+    ///
+    /// The request ledger follows the Store journal (`StoreFileJournal`): an
+    /// unreadable ledger mints nothing and sends nothing, the request is
+    /// written before the POST (a failed write sends nothing), and a sent
+    /// request stays until Home opens its assistant's chat. A hire that
+    /// succeeded records its assistant there, so a later pick waits for that
+    /// chat instead of buying another seat.
+    func hireListing(_ listing: OpenAgentListing, name: String,
+                     hireConfirmed: Bool, account: String) async -> ListingHireResult {
+        guard let current = context, current.runtime.ticket.session.userID == account else {
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "account_changed")
+            return .refused(.account)
+        }
+        guard let client = domainClient, let session = liveMatrix, session.isReady else { return .refused(.retry) }
+        let store = LiveListingHireStore(matrixUserID: account)
+        var earlier: LiveListingHireStore.Pending?
+        do { earlier = try store.pending(listing.listingID) } catch {
+            // Unknown, not empty: a request may be in there.
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "ledger_unreadable")
+            return .refused(.retry)
+        }
+        if let stored = earlier, let hired = stored.assistantID.flatMap({ try? NativeID($0) }) {
+            // That hire succeeded. Until Home opens its chat, this pick is
+            // still that hire; once it does, this pick is a new one.
+            guard hiredAssistantChatReady(hired) else { return .settingUp(assistantID: hired) }
+            do { try store.clear(listing.listingID, requestID: stored.requestID) } catch {
+                LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "ledger_unwritable")
+                return .refused(.retry)
+            }
+            earlier = nil
+        }
+        let plan = ListingHireRequestPlan.make(
+            earlier: earlier, name: name, hireConfirmed: hireConfirmed,
+            checkoutOpen: applePurchases.checkoutOpen,
+            newRequestID: { (try? NativeID(UUID().uuidString.lowercased()))?.rawValue })
+        let pending: LiveListingHireStore.Pending
+        let fresh: Bool
+        switch plan {
+        case nil: return .refused(.retry)
+        case .checkoutClosed?:
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "checkout_closed")
+            return .checkoutClosed
+        case let .send(value, fresh: isFresh)?:
+            pending = value
+            fresh = isFresh
+        }
+        let request: AgentCreateRequest
+        do {
+            request = try AgentCreateRequest(
+                requestId: NativeID(pending.requestID), displayName: pending.name,
+                listingId: listing.listingID, hireConfirmed: pending.hireConfirmed,
+                disclosureVersion: assistantLifecycleCapability?.disclosureVersion)
+        } catch {
+            // Nothing was sent for a new request; a stored one may already
+            // have been charged, so it stays for the next try.
+            return fresh ? .refused(.name) : .refused(.retry)
+        }
+        // Written before the POST, so a lost answer or a relaunch resumes
+        // this request. A write that fails sends nothing.
+        do { try store.save(pending, for: listing.listingID) } catch {
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: "ledger_unwritable")
+            return .refused(.retry)
+        }
+        // Asked right before each send (the first and the resend after a 401
+        // refresh): the same client and account, and open checkout for a
+        // request that can spend. When it says no, nothing goes out and the
+        // request stays as stored.
+        let confirmed = pending.hireConfirmed
+        let gate: NativeDispatchGate = { [weak self] in
+            guard let self else { return false }
+            return self.domainClient === client
+                && self.context?.runtime.ticket.session.userID == account
+                && ListingHireGate.allowsRequest(confirmed: confirmed,
+                                                 checkoutOpen: self.applePurchases.checkoutOpen)
+        }
+        LiveFlowLog.creation(.assistant, outcome: "hire_begin")
+        let created: AgentCreateResponse
+        do {
+            created = try await client.createAgentPlaced(request, dispatchGate: gate)
+        } catch is NativeDispatchBlocked {
+            let sameAccount = domainClient === client && context?.runtime.ticket.session.userID == account
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused",
+                                 code: sameAccount ? "checkout_closed" : "account_changed")
+            return sameAccount ? .checkoutClosed : .refused(.retry)
+        } catch {
+            let refusal = OpenAgentHireRefusal.from(error)
+            // The request was sent, so it stays (it may have been charged).
+            // A name refusal lets the next try carry another name under it.
+            if refusal.letsNameChange {
+                var renamable = pending
+                renamable.nameRefused = true
+                try? store.save(renamable, for: listing.listingID)
+            }
+            LiveFlowLog.creation(.assistant, outcome: "hire_refused", code: refusal.logCode)
+            return .refused(refusal)
+        }
+        // The seat is bought: the request stays, now naming its assistant,
+        // until Home opens that assistant's chat. If this write fails the
+        // stored request still resolves to the same hire on its next send.
+        var hiredEntry = pending
+        hiredEntry.assistantID = created.agent.id.rawValue
+        try? store.save(hiredEntry, for: listing.listingID)
+        LiveFlowLog.creation(.assistant, outcome: "hired", code: created.placement?.rawValue)
+        guard domainClient === client, liveMatrix === session,
+              context?.runtime.ticket.session.userID == account else {
+            // Replaced mid-POST: nothing here has adopted it yet.
+            return .settingUp(assistantID: created.agent.id)
+        }
+        await adoptHiredAssistant(created.agent, name: pending.name, client: client, session: session)
+        // `capacity` and `pending_trust` come back before the room exists,
+        // and Home may not list a room it has yet: the sheet waits for an
+        // openable Home row instead of saying the chat is there.
+        if created.placement == .placed || created.placement == nil,
+           hiredAssistantChatReady(created.agent.id) {
+            try? store.clear(listing.listingID, requestID: pending.requestID)
+            return .hired
+        }
+        return .settingUp(assistantID: created.agent.id)
+    }
+
+    /// The hired assistant joins the roster as a made one does: `/agents` is
+    /// read again, its owner room's invite is accepted (an invite that came
+    /// before the roster knew the inviter is tried again), and its handle is
+    /// claimed in the background. Any failure is left to the assistant's card.
+    private func adoptHiredAssistant(_ agent: AgentsResponse.Agent, name: String,
+                                     client: NativeDomainClient, session: LiveMatrixSession) async {
+        if let response = try? await client.agents(), domainClient === client, liveMatrix === session {
+            agentsRead.receive(response)
+            refreshConversationIdentity()
+        }
+        guard liveMatrix === session else { return }
+        if let user = agent.matrixUser?.rawValue {
+            attemptedInvites.subtract(session.invites.filter { $0.inviterID == user }.map(\.roomID))
+        }
+        acceptKnownInvites(session.invites, session: session)
+        let handles = assistantHandleActions(assistantID: agent.id)
+        Task { @MainActor in
+            _ = await AgentHandleClaimWalk.run(
+                assistantID: handles.assistantID,
+                groups: AgentHandleRules.candidates(name: name),
+                calls: handles.directoryCalls,
+                requestID: { (try? NativeID(UUID().uuidString.lowercased()))! })
+        }
+    }
+
     private func finishAssistantLifecycle(_ first: AgentLifecycleSnapshot,
                                           requestID: NativeID,
                                           client: NativeDomainClient,
@@ -2664,6 +2867,14 @@ final class LiveAppModel {
             guard domainClient === client, agentForRoom(roomID)?.id == agent.id else { return .failed }
             return .value(value)
         } catch { return .failed }
+    }
+
+    /// W4-E3 read-only seam for the agent's desk (`Chat/AgentDeskLive.swift`):
+    /// the signed-in domain client and the roster agent of this room, if any.
+    func agentDeskContext(roomID: String) -> (client: NativeDomainClient, agent: AgentsResponse.Agent)? {
+        guard let client = domainClient, case .signedIn = stage,
+              let agent = agentForRoom(roomID), agent.canOpenChat else { return nil }
+        return (client, agent)
     }
 
     private func agentForRoom(_ roomID: String) -> AgentsResponse.Agent? {
@@ -7230,6 +7441,97 @@ struct LiveHiddenRoomStore {
     func save(_ ledger: MobileHiddenRoomLedger) {
         guard let data = try? JSONEncoder().encode(ledger) else { return }
         defaults.set(data, forKey: key)
+    }
+}
+
+/// The listing hires still unfinished, per account and listing: the request
+/// UUID, the name it was sent under, whether its price was confirmed, and,
+/// once the POST succeeded, the assistant it made. A hire resumes under
+/// exactly these, so it is never made twice.
+///
+/// It follows the Store journal (`StoreFileJournal`,
+/// `Sources/AtumNativeAPI/StoreAcquisition.swift`): one atomic, protected
+/// file per account, named by the full SHA-256 of its Matrix ID (never the
+/// 32-bit log fingerprint), so two accounts can't share a ledger. A missing
+/// file is empty; an unreadable one throws, and the caller then mints and
+/// sends nothing. Every write throws on failure. Sign-out never deletes it.
+struct LiveListingHireStore {
+    struct Pending: Codable, Equatable, Sendable {
+        let requestID: String
+        var name: String
+        var hireConfirmed: Bool
+        /// The platform refused `name`: the next try sends this request
+        /// under the name it is picked with then.
+        var nameRefused: Bool = false
+        /// Set once the POST succeeded: the hire is made, and only waits for
+        /// Home to open its chat.
+        var assistantID: String? = nil
+    }
+
+    private let file: URL
+
+    init(matrixUserID: String, directory: URL = Self.defaultDirectory) {
+        file = directory.appendingPathComponent(Self.fileName(matrixUserID: matrixUserID))
+    }
+
+    static var defaultDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ListingHires", isDirectory: true)
+    }
+
+    static func fileName(matrixUserID: String) -> String {
+        SHA256.hash(data: Data(matrixUserID.utf8)).map { String(format: "%02x", $0) }.joined() + ".json"
+    }
+
+    private func all() throws -> [String: Pending] {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
+        let data = try Data(contentsOf: file)
+        guard data.count <= 262_144 else { throw ContractViolation.invalidValue }
+        let value = try JSONDecoder().decode([String: Pending].self, from: data)
+        guard value.count <= 64 else { throw ContractViolation.invalidValue }
+        return value
+    }
+
+    private func write(_ value: [String: Pending]) throws {
+        guard value.count <= 64 else { throw ContractViolation.invalidValue }
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(value)
+        #if os(iOS)
+        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        #else
+        try data.write(to: file, options: .atomic)
+        #endif
+    }
+
+    func pending(_ listingID: String) throws -> Pending? { try all()[listingID] }
+
+    func save(_ pending: Pending, for listingID: String) throws {
+        var value = try all()
+        value[listingID] = pending
+        try write(value)
+    }
+
+    /// Clears only the request it observed, as the lifecycle store does.
+    func clear(_ listingID: String, requestID: String) throws {
+        var value = try all()
+        guard value[listingID]?.requestID == requestID else { return }
+        value[listingID] = nil
+        try write(value)
+    }
+}
+
+extension OpenAgentHireRefusal {
+    /// A closed code for `LiveFlowLog`.
+    var logCode: String {
+        switch self {
+        case .hireRequired: "hire_required"
+        case .short: "short"
+        case .name: "name"
+        case .limit: "limit"
+        case .account: "account"
+        case .retry: "retry"
+        }
     }
 }
 

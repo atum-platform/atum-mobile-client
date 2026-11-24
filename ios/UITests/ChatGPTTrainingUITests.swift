@@ -67,14 +67,16 @@ final class ChatGPTTrainingUITests: WS3UITestCase {
         XCTAssertTrue(card.waitForExistence(timeout: Self.waitSeconds), "the second pick did not ask")
         XCTAssertFalse(confirm.isEnabled)
         element(app, "chatgpt.training.checkbox").tap()
-        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: confirm)
-        wait(for: [enabled], timeout: Self.waitSeconds)
+        // The Confirm and selection accessibility queries took 1.26 s and
+        // 1.39 s on #73, compared with 0.20 s and 0.23 s on main.
+        XCTAssertTrue(confirm.wait(for: \.isEnabled, toEqual: true, timeout: Self.waitSeconds),
+                      "Confirm must enable after the tick")
         keepEvidence("training-card-ticked-\(tag)", of: app)
         confirm.tap()
         XCTAssertTrue(card.waitForNonExistence(timeout: Self.waitSeconds), "Confirm did not close the card")
         let picked = revealPlanModel(app)
-        let moved = expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: picked)
-        wait(for: [moved], timeout: Self.waitSeconds)
+        XCTAssertTrue(picked.wait(for: \.isSelected, toEqual: true, timeout: Self.waitSeconds),
+                      "Confirm must select the ChatGPT model")
         keepEvidence("training-confirmed-\(tag)", of: app)
     }
 

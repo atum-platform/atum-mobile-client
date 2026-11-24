@@ -18,17 +18,47 @@ struct AssistantNameRefusalResponse: Decodable {
 public struct AgentCreateRequest: Encodable, Equatable, Sendable {
     public let requestId: NativeID
     public let displayName: String
+    /// An open listing's hire (platform 0535): the platform seeds its persona
+    /// and skills and places it in the cloud, so no definition write follows.
+    public let listingId: String?
+    /// The confirmed seat fee the third+ assistant requires (0314). Sent only
+    /// as `true`, after the person saw the price.
+    public let hireConfirmed: Bool
+    /// The cloud disclosure the person was shown, when the phone read one.
+    public let disclosureVersion: Int?
 
     public init(requestId: NativeID, displayName: String) throws {
+        try self.init(requestId: requestId, displayName: displayName, listingId: nil)
+    }
+
+    public init(requestId: NativeID, displayName: String, listingId: String?,
+                hireConfirmed: Bool = false, disclosureVersion: Int? = nil) throws {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (1...40).contains(name.count),
-              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+              listingId.map(OpenAgentListing.validListingID) ?? true,
+              disclosureVersion.map({ (1...Int(Int32.max)).contains($0) }) ?? true
         else { throw ContractViolation.invalidValue }
         self.requestId = requestId
         self.displayName = name
+        self.listingId = listingId
+        self.hireConfirmed = hireConfirmed
+        self.disclosureVersion = disclosureVersion
     }
 
-    private enum CodingKeys: String, CodingKey { case requestId, displayName }
+    private enum CodingKeys: String, CodingKey {
+        case requestId, displayName, listingId, hireConfirmed, disclosureVersion
+    }
+
+    /// A plain create stays `{requestId, displayName}`, byte for byte.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(requestId, forKey: .requestId)
+        try c.encode(displayName, forKey: .displayName)
+        try c.encodeIfPresent(disclosureVersion, forKey: .disclosureVersion)
+        if hireConfirmed { try c.encode(true, forKey: .hireConfirmed) }
+        try c.encodeIfPresent(listingId, forKey: .listingId)
+    }
 }
 
 public enum PortableModelAlias: String, Codable, Sendable {

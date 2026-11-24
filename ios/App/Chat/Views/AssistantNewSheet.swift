@@ -22,9 +22,14 @@ struct AssistantCreateFollowUp {
 /// the photo, in that order. A step that fails keeps the sheet with Retry for
 /// that step only; Done opens the chat and leaves the rest to the card.
 /// Import a prepared profile is desktop-only (it reads the Mac's disk).
+///
+/// Open listings (desktop PR #100, D9 slice 1) sit above the form under
+/// "Ready to hire". Picking one gives the sheet to that hire alone
+/// (`ListingHireView`); with no listings the sheet is exactly as before.
 struct AssistantNewSheet: View {
     let design: LiveDesign
     let actions: HomeAssistantActions
+    var close: () -> Void = {}
     let openRoom: (String) -> Void
 
     private enum Phase: Equatable {
@@ -61,6 +66,7 @@ struct AssistantNewSheet: View {
     @State private var failedStep: Step?
     @State private var pendingClaim: AgentAliasClaimRequest?
     @State private var task: Task<Void, Never>?
+    @State private var listings: [OpenAgentListing] = []
     @FocusState private var nameFocused: Bool
     @Environment(\.colorScheme) private var scheme
 
@@ -85,11 +91,44 @@ struct AssistantNewSheet: View {
     }
 
     var body: some View {
+        Group {
+            if let flow = actions.hireFlow, let hire = flow.hire {
+                ListingHireView(design: design, hire: hire, flow: flow,
+                                chatReady: actions.chatReady ?? { _ in true }) {
+                    flow.reset()
+                    close()
+                }
+            } else {
+                form
+            }
+        }
+        // Read each time the sheet opens; none (or a failed read) hides the
+        // shelf. The name field takes focus only when there is nothing to
+        // hire: the keyboard would scroll the shelf out of sight.
+        .task {
+            guard let read = actions.listings else { return }
+            listings = await read()
+            if listings.isEmpty, !actions.pending, actions.hireFlow?.hire == nil { nameFocused = true }
+        }
+        .onDisappear { actions.hireFlow?.sheetClosed() }
+    }
+
+    private var introText: some View {
+        Text(copy("src.matrix.roster-create-copy.copies.assistantIntro"))
+            .foregroundStyle(atum.color(.muted, scheme: scheme))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var form: some View {
         Form {
+            if !listings.isEmpty {
+                // Desktop order: the intro under the title, the shelf, then
+                // "Make your own" over the sheet's own fields.
+                Section { introText }
+                listingShelf
+            }
             Section {
-                Text(copy("src.matrix.roster-create-copy.copies.assistantIntro"))
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .fixedSize(horizontal: false, vertical: true)
+                if listings.isEmpty { introText }
                 TextField(copy("desktop.atum.agents.namePlaceholder"), text: $name)
                     .focused($nameFocused)
                     .disabled(actions.pending || locked || phase == .starting)
@@ -103,7 +142,20 @@ struct AssistantNewSheet: View {
                         .accessibilityIdentifier("home.newAssistant.name.problem")
                 }
             } header: {
-                Text(copy(AssistantCardCopyKey.nameField.rawValue))
+                if listings.isEmpty {
+                    Text(copy(AssistantCardCopyKey.nameField.rawValue))
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        // Pending export: `roster-create-copy.makeYourOwn`
+                        // ("Make your own"); the nearest exported key stands in.
+                        Text(copy("src.matrix.roster-create-copy.copies.createAssistant"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(atum.color(.ink, scheme: scheme))
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("home.newAssistant.own")
+                        Text(copy(AssistantCardCopyKey.nameField.rawValue))
+                    }
+                }
             } footer: {
                 Text(copy(AssistantCardCopyKey.nameHelper.rawValue))
             }
@@ -159,7 +211,7 @@ struct AssistantNewSheet: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { primaryButton }
         .onAppear {
-            if actions.pending { phase = .starting } else { nameFocused = true }
+            if actions.pending { phase = .starting } else if actions.listings == nil { nameFocused = true }
         }
         .onChange(of: name) { _, _ in
             nameProblem = nil
@@ -173,6 +225,66 @@ struct AssistantNewSheet: View {
     }
 
     // MARK: Sections
+
+    /// The listings, above "make your own": a face, the title, one line and
+    /// Hire (desktop `ListingShelf`).
+    private var listingShelf: some View {
+        Section {
+            ForEach(listings) { listing in
+                let title = listing.title(locale: design.locale)
+                let summary = listing.summary(locale: design.locale)
+                HStack(spacing: 12) {
+                    ListingFace(design: design, glyph: listing.glyph)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: title)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(atum.color(.ink, scheme: scheme))
+                            .lineLimit(1)
+                        if !summary.isEmpty {
+                            Text(verbatim: summary)
+                                .font(.footnote)
+                                .foregroundStyle(atum.color(.muted, scheme: scheme))
+                                .lineLimit(2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(copy(ListingHireCopy.hire)) { pick(listing) }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .tint(atum.color(.ink, scheme: scheme))
+                        .disabled(shelfDisabled)
+                        .accessibilityLabel(Text(verbatim: copy(ListingHireCopy.hire) + " " + title))
+                        .accessibilityIdentifier("home.newAssistant.listing.hire")
+                }
+                .padding(.vertical, 2)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("home.newAssistant.listing")
+            }
+        } header: {
+            Text(copy(ListingHireCopy.readyToHire))
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("home.newAssistant.readyToHire")
+        }
+    }
+
+    private var shelfDisabled: Bool {
+        actions.hireFlow == nil || actions.hire == nil || actions.hireAccount == nil
+            || actions.pending || locked || phase == .starting
+    }
+
+    private func pick(_ listing: OpenAgentListing) {
+        guard !shelfDisabled, let flow = actions.hireFlow, let run = actions.hire,
+              let account = actions.hireAccount else { return }
+        nameFocused = false
+        guard let name = ListingAssistantName.name(for: listing, locale: design.locale,
+                                                   others: actions.names, apps: actions.appNames) else {
+            // Every name this listing could take is refused here: say so,
+            // and send nothing.
+            flow.refuseName(listing, shownAs: listing.title(locale: design.locale), account: account)
+            return
+        }
+        flow.pick(listing, name: name, account: account, run: run)
+    }
 
     private var handleSection: some View {
         Section {

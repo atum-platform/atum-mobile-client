@@ -326,7 +326,9 @@ struct ChatScreen: View {
             .sheet(isPresented: $infoPresented) {
                 if let info {
                     ChatPanelHost(design: design, info: info, actions: panelActions,
-                                  loadMatrixThumbnail: loadMatrixThumbnail) {
+                                  loadMatrixThumbnail: loadMatrixThumbnail,
+                                  deskChat: panelActions.agentDesk == nil ? nil
+                                      : AgentDeskChat(rows: store.snapshot.rows, media: mediaAccess)) {
                         infoPresented = false
                     }
                     // No `.id` here: the panel closes on a room change
