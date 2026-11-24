@@ -184,6 +184,26 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testModelPickerEffortLabelsUseDesktopCopyInAllLocales() throws {
+        let copy = try AtumCopy()
+        let prefix = "src.matrix.model-picker-copy.COPY.efforts."
+        let locales = ["en", "vi", "ja", "zh", "zh-Hant"]
+        let cases = [
+            ("none", ["Off", "Tắt", "オフ", "关闭", "關閉"]),
+            ("minimal", ["Instant", "Tức thì", "即答", "即时", "即時"]),
+            ("xhigh", ["Extra thorough", "Rất kỹ", "さらにじっくり", "更深入", "更深入"]),
+            ("max", ["Maximum", "Tối đa", "最大", "最大", "最大"]),
+        ]
+        XCTAssertEqual(copy.locales, Set(locales))
+        for (name, values) in cases {
+            let key = prefix + name
+            XCTAssertEqual(copy.parameterKinds(key), [], key)
+            for (locale, value) in zip(locales, values) {
+                XCTAssertEqual(try copy.text(key, locale: locale), value, "\(locale): \(key)")
+            }
+        }
+    }
+
     func testTeamSpaceHeaderSearchInterpolatesTheQueryInAllLocales() throws {
         let copy = try AtumCopy()
         let prefix = "src.matrix.team-space.revamp-copy.copy."
