@@ -37,6 +37,7 @@ struct RecoveryKeySheet: View {
     @State private var key: String?
     @State private var loadFailed = false
     @State private var copied = false
+    @State private var copyCount = 0
     @State private var busy = false
     @State private var detent: PresentationDetent = .medium
 
@@ -129,10 +130,12 @@ struct RecoveryKeySheet: View {
                     options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]
                 )
                 copied = true
+                copyCount += 1
+                let event = copyCount
                 AccessibilityNotification.Announcement(copy("src.matrix.chat-copy.copies.copied")).post()
                 Task { @MainActor in
                     do { try await Task.sleep(for: .milliseconds(1_500)) } catch { return }
-                    copied = false
+                    if copyCount == event { copied = false }
                 }
             } label: {
                 Label(copy(copied ? "src.matrix.chat-copy.copies.copied"
@@ -142,7 +145,7 @@ struct RecoveryKeySheet: View {
             }
             .buttonStyle(AtumCompactButtonStyle(atum: atum, scheme: scheme,
                                                  size: .regular))
-            .sensoryFeedback(.success, trigger: copied) { _, copied in copied }
+            .sensoryFeedback(.success, trigger: copyCount)
             .accessibilityIdentifier("account.recovery.copy")
         }
     }

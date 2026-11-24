@@ -592,7 +592,10 @@ private struct StoreReviewView: View {
             .padding(.bottom, kit.space(.s6))
             .motion(.quick, value: notice)
         }
-        .sensoryFeedback(trigger: notice) { _, value in value?.tone.feedback }
+        .sensoryFeedback(.success, trigger: !commerce.busy && StoreOutcomePresentation.completedPurchase(for: state)) {
+            _, completed in completed
+        }
+        .sensoryFeedback(.error, trigger: notice) { _, value in value?.tone == .danger }
         .accessibilityIdentifier("store.review")
         .scrollBounceBehavior(.basedOnSize)
         .background(kit.color(.ground, scheme: scheme).ignoresSafeArea())
@@ -850,15 +853,6 @@ extension StoreNotice.Tone {
         case .done, .neutral: .neutral
         case .warning: .warning
         case .danger: .danger
-        }
-    }
-
-    /// One haptic per outcome: success when it lands, error on a failure line.
-    var feedback: SensoryFeedback? {
-        switch self {
-        case .done: .success
-        case .danger: .error
-        case .neutral, .warning: nil
         }
     }
 }

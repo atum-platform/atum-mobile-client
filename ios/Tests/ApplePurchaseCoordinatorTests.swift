@@ -476,6 +476,61 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
+    func testConcurrentRestoreKeepsRevokedAndCreditedOutcomesWithTheirTransactions() async throws {
+        let store = PurchaseStoreStub()
+        let api = PurchaseAPIStub()
+        let creditedProductID = "com.atum.mobile.protons.500k"
+        let creditedID = "2000000123456790"
+        let creditedPayload = "synthetic.credited.signature"
+        var revokedFinishes = 0
+        var creditedFinishes = 0
+        var refreshes = 0
+        var revokedRefresh: CheckedContinuation<Void, Never>?
+        var creditedFinish: CheckedContinuation<Void, Never>?
+        let revoked = transaction { revokedFinishes += 1 }
+        let credited = AppleVerifiedTransaction(id: creditedID, productID: creditedProductID,
+                                                environment: .sandbox, accountToken: nil,
+                                                signedTransaction: creditedPayload) {
+            await withCheckedContinuation { creditedFinish = $0 }
+            creditedFinishes += 1
+        }
+        api.repliesBySignedTransaction[creditedPayload] = try api.reply(transactionID: creditedID)
+        api.replyState = .revoked
+        let c = await make(store, api, refresh: {
+            refreshes += 1
+            // Restore refreshes first. The credited pack is still waiting to finish.
+            if refreshes == 2 { await withCheckedContinuation { revokedRefresh = $0 } }
+        })
+        await settled { store.unfinishedReads == 1 }
+        defer {
+            c.bind(accountID: nil, api: nil)
+            creditedFinish?.resume()
+            revokedRefresh?.resume()
+        }
+
+        store.queue = [revoked, credited]
+        await c.restore()
+        await settled { revokedRefresh != nil && creditedFinish != nil }
+        XCTAssertEqual(c.state, .revoked)
+        XCTAssertEqual(c.purchaseState(for: id), .retrying)
+
+        creditedFinish?.resume(); creditedFinish = nil
+        await settled { c.purchaseState(for: creditedProductID) == .succeeded }
+        XCTAssertEqual(c.state, .succeeded)
+        XCTAssertEqual(c.transactionOutcome(for: creditedProductID)?.transactionID, creditedID)
+        XCTAssertEqual(c.transactionOutcome(for: creditedProductID)?.state, .succeeded)
+
+        revokedRefresh?.resume(); revokedRefresh = nil
+        await settled { c.purchaseState(for: self.id) != .retrying }
+        XCTAssertEqual(c.purchaseState(for: id), .revoked)
+        XCTAssertEqual(c.transactionOutcome(for: id)?.transactionID, revoked.id)
+        XCTAssertEqual(c.transactionOutcome(for: id)?.state, .revoked)
+        XCTAssertEqual(api.posts, 2)
+        XCTAssertEqual(revokedFinishes, 1)
+        XCTAssertEqual(creditedFinishes, 1)
+        XCTAssertEqual(refreshes, 3)
+    }
+
     func testWrongTransactionIDOrEnvironmentCannotFinish() async throws {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         var finishes = 0
@@ -571,6 +626,7 @@ import XCTest
 @MainActor private final class PurchaseStoreStub: ApplePurchaseStore {
     var continuation: AsyncStream<AppleVerifiedTransaction>.Continuation?
     var queue: [AppleVerifiedTransaction] = []
+    var unfinishedReads = 0
     var result: AppleStorePurchaseResult = .cancelled
     var tokens: [UUID] = []
     var purchaseCalls = 0; var productReads = 0; var failProducts = false
@@ -594,7 +650,10 @@ import XCTest
     func updates() -> AsyncStream<AppleVerifiedTransaction> {
         AsyncStream { continuation = $0 }
     }
-    func unfinished() async -> [AppleVerifiedTransaction] { queue }
+    func unfinished() async -> [AppleVerifiedTransaction] {
+        unfinishedReads += 1
+        return queue
+    }
 }
 
 @MainActor private final class PurchaseAPIStub: ApplePurchasesAPI {
@@ -611,6 +670,7 @@ import XCTest
     var replyState: AppleTransactionResponse.State?
     var postError: ApplePurchaseError?
     var replies: [AppleTransactionResponse?] = []
+    var repliesBySignedTransaction: [String: AppleTransactionResponse] = [:]
     var blockPost = false
     var blocked: CheckedContinuation<AppleTransactionResponse, Never>?
     func appleProducts() async throws -> AppleProductsResponse {
@@ -634,9 +694,10 @@ import XCTest
             guard let result = replies.removeFirst() else { throw NativeDomainClientFailure.transportUnavailable }
             return result
         }
+        if let result = repliesBySignedTransaction[request.signedTransaction] { return result }
         return try reply()
     }
-    func reply(finish: Bool = true) throws -> AppleTransactionResponse {
+    func reply(finish: Bool = true, transactionID: String? = nil) throws -> AppleTransactionResponse {
         if let replyData { return try NativeAPI.decode(AppleTransactionResponse.self, from: replyData) }
         var value = ApplePurchaseTestData.object(sample)
         if let replyState {
@@ -644,6 +705,7 @@ import XCTest
             if replyState != .credited { value["credited"] = NSNull(); value["balances"] = NSNull() }
         }
         value["finish"] = finish
+        if let transactionID { value["transactionId"] = transactionID }
         return try NativeAPI.decode(AppleTransactionResponse.self,
                                     from: JSONSerialization.data(withJSONObject: value))
     }

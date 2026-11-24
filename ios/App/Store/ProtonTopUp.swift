@@ -357,6 +357,8 @@ struct ProtonTopUpSheet: View {
         let total = ProtonAmountFormat.balance(row.totalMicroProtons, design: design)
         let label = copy(ProtonTopUpCopyKey.packLabel, [.text(total), .text(row.displayPrice)])
         let state = purchases.purchaseState(for: row.id)
+        let outcome = purchases.transactionOutcome(for: row.id)
+        let creditedTransactionID = outcome?.state == .succeeded ? outcome?.transactionID : nil
         let working = state == .purchasing
         return VStack(alignment: .leading, spacing: kit.space(.s2)) {
             HStack(alignment: .center, spacing: kit.space(.s3)) {
@@ -409,7 +411,10 @@ struct ProtonTopUpSheet: View {
         }
         .padding(.horizontal, kit.space(.s4))
         .padding(.vertical, kit.space(.s3))
-        .sensoryFeedback(trigger: state) { _, value in ProtonTopUpPresentation.notice(for: value)?.tone.feedback }
+        .sensoryFeedback(.success, trigger: creditedTransactionID) { _, transactionID in transactionID != nil }
+        .sensoryFeedback(.error, trigger: state) { _, value in
+            ProtonTopUpPresentation.notice(for: value)?.tone == .danger
+        }
         .onChange(of: state, initial: false) { _, value in
             guard let notice = ProtonTopUpPresentation.notice(for: value) else { return }
             AccessibilityNotification.Announcement(copy(notice.key)).post()

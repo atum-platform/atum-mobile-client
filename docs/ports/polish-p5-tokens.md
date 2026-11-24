@@ -48,7 +48,7 @@ W4-S), and the model picker, `Composer.swift` and
   `withMotion(.quick)`. Reduce Motion is handled by the tokens.
 - **Haptics** (audit rule: only `.sensoryFeedback`, one per action): a credited
   top-up pack and a finished Store purchase play `.success`, and a failure line
-  plays `.error`, through `StoreNotice.Tone.feedback`. The recovery sheets
+  plays `.error`. The recovery sheets
   move from `UINotificationFeedbackGenerator` to `.sensoryFeedback`: copying the
   key plays `.success`, and a restore plays `.success` or, for a wrong key,
   `.error`. A hire from a Store listing plays `.success` once it is hired and
@@ -108,3 +108,24 @@ insets.
   - Nothing was clipped or wrapped differently.
 - Haptics can't be seen in a capture. They follow the audit's rule and need
   a device check in the wave's assembly pass.
+
+## Review r1 fixes
+
+- Store confirmation plays success for a purchased item in the granted or
+  completed state. An already-owned result keeps its notice and is silent.
+  Failure notices play the error haptic.
+- Each top-up row gets its status from its own acknowledged transaction.
+  Success feedback is keyed to the credited transaction ID. The coordinator
+  keeps the terminal result across wallet refresh, so a revoked pack stays
+  revoked while another pack credits during Restore. The focused coordinator
+  test holds the revoked refresh open until the second pack settles.
+- Each recovery-key copy increments an event counter for haptic feedback. The
+  copied label resets 1.5 seconds after the latest copy.
+
+Follow-ups for the polish wave
+
+- Carry Drive Connect feedback through provisioning in `DriveScreen.swift`.
+- Add error feedback for the hire `.short` and local-name refusal paths in
+  `ListingHireView.swift` and `AssistantNewSheet.swift`.
+- Review Purchased glyph clipping in its fixed 36 pt circle at large Dynamic
+  Type in `StoreScreen.swift` in the Opus lane.
