@@ -35,22 +35,29 @@ struct CompanyPagesBar: View {
 
 /// The Board page. The phone has no board read yet (the platform's `board-*`
 /// native routes, TS later), so it shows the desktop board's own unavailable
-/// state rather than an empty board that would look real.
+/// state rather than an empty board that would look real. Board · List and Mine
+/// sit above it, as the desktop draws its header over the unavailable board (W4-E7).
 struct CompanyBoardPage: View {
     let design: LiveDesign
     let companyID: String
     /// The card a board link names (desktop `selectedCardId`).
     @Binding var selectedCardID: String?
+    /// The viewer's own member (desktop `viewerMemberRef`), for Mine.
+    var viewer: String?
+    @Binding var preference: CompanyBoardPreference
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        ContentUnavailableView {
-            Text(verbatim: TeamSpaceCopy(design: design).boardUnavailable)
-                .font(.body)
-                .foregroundStyle(atum.color(.soft, scheme: scheme))
+        VStack(spacing: 0) {
+            CompanyBoardControls(design: design, viewer: viewer, preference: $preference)
+            ContentUnavailableView {
+                Text(verbatim: TeamSpaceCopy(design: design).boardUnavailable)
+                    .font(.body)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+            }
+            .accessibilityIdentifier("company.board.unavailable")
         }
-        .accessibilityIdentifier("company.board.unavailable")
     }
 }
 
@@ -66,9 +73,14 @@ struct CompanyOverviewSheet: View {
     let logoURI: String?
     let viewerRole: String?
     let menu: CompanyMenuAllowed
+    /// Company settings asked for the sheet (it opens on Workspace, else the first section there).
+    var fromSettings = false
+    /// The Marketplace page is there; until then AI says hiring is being prepared.
+    var marketplaceAvailable = false
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
     let leave: () -> Void
 
+    @State private var chosenSection: CompanySettingsSection?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -77,6 +89,23 @@ struct CompanyOverviewSheet: View {
 
     private var activeMembers: Int {
         workspace.members.filter { $0.state == nil }.count
+    }
+
+    /// People, Workspace, AI and Billing, one at a time (desktop #114). The phone draws
+    /// no workspace settings (policy, logo, projects) or wallet yet, so it has People
+    /// (once the member snapshot is read) and AI.
+    private var sections: [CompanySettingsSection] {
+        CompanySettingsSections.available(people: menu.members, workspace: false, billing: false)
+    }
+
+    /// The chosen section while the viewer still has it, else the first one there.
+    private var section: CompanySettingsSection {
+        CompanySettingsSections.current(chosenSection ?? CompanySettingsSections.initial(fromSettings: fromSettings),
+                                        in: sections)
+    }
+
+    private var sectionSelection: Binding<CompanySettingsSection> {
+        Binding(get: { section }, set: { chosenSection = $0 })
     }
 
     var body: some View {
@@ -110,7 +139,24 @@ struct CompanyOverviewSheet: View {
                     .accessibilityIdentifier("company.overview.header")
                 }
 
-                if menu.members {
+                if CompanySettingsSections.showsPicker(sections) {
+                    Section {
+                        Picker(selection: sectionSelection) {
+                            ForEach(sections, id: \.self) { item in
+                                Text(verbatim: team.settingsSection(item)).tag(item)
+                                    .accessibilityIdentifier("company.settings.section." + item.rawValue)
+                            }
+                        } label: {
+                            Text(verbatim: team.settingsSections)
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .accessibilityIdentifier("company.settings.sections")
+                    }
+                }
+
+                if section == .people, menu.members {
                     Section {
                         NavigationLink {
                             CompanyMembersView(design: design, members: workspace.members,
@@ -131,7 +177,7 @@ struct CompanyOverviewSheet: View {
                     }
                 }
 
-                if let chief = workspace.directMessages.chief {
+                if section == .ai, let chief = workspace.directMessages.chief {
                     Section {
                         HStack(spacing: 12) {
                             MatrixFace(kind: .assistant, name: team.chiefOfStaff, matrixURI: nil, size: 28,
@@ -150,7 +196,20 @@ struct CompanyOverviewSheet: View {
                     }
                 }
 
-                if menu.leave {
+                // Desktop: one line under the AI status while the Marketplace is hidden.
+                if section == .ai, !marketplaceAvailable {
+                    Section {
+                        Text(verbatim: team.hiringPreparing)
+                            .font(.subheadline)
+                            .foregroundStyle(atum.color(.soft, scheme: scheme))
+                            .listRowBackground(Color.clear)
+                            .accessibilityIdentifier("company.settings.hiringPreparing")
+                    }
+                }
+
+                // Desktop puts Leave company on the viewer's own row under People; without
+                // People (no member snapshot yet) it stays reachable here.
+                if menu.leave, section == .people || !sections.contains(.people) {
                     Section {
                         Button(role: .destructive) {
                             dismiss()

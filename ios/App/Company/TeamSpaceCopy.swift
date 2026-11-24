@@ -51,6 +51,7 @@ struct TeamSpaceCopy {
     private static let activity = "src.matrix.team-space.activity-copy.copy."
     private static let saved = "src.matrix.team-space.saved-messages-copy.copy."
     private static let pinned = "src.matrix.team-space.pinned-copy.copy."
+    private static let revamp = "src.matrix.team-space.revamp-copy.copy."
 
     // MARK: Pages (TS-10)
 
@@ -63,6 +64,43 @@ struct TeamSpaceCopy {
         }
     }
     var boardUnavailable: String { text(Self.board + "unavailable") }
+
+    // MARK: Revamp pass 1 (W4-E7, desktop #114 `team-space/revamp-copy.ts`)
+
+    /// Header search: the results sheet's title, the row under the box and its spoken name.
+    var search: String { design.text(Self.revamp + "search") }
+    func searchFor(_ query: String) -> String { design.text(Self.revamp + "searchFor", words: [query]) }
+    func searchMessagesFor(_ query: String) -> String {
+        design.text(Self.revamp + "searchMessagesFor", words: [query])
+    }
+    /// The header box filtered everything out.
+    var noMatches: String { design.text(Self.revamp + "noMatches") }
+
+    /// Company settings, one section at a time.
+    var settingsSections: String { design.text(Self.revamp + "settingsSections") }
+    func settingsSection(_ section: CompanySettingsSection) -> String {
+        switch section {
+        case .people: design.text(Self.revamp + "people")
+        case .workspace: design.text(Self.revamp + "workspace")
+        case .ai: design.text(Self.revamp + "ai")
+        case .billing: design.text(Self.revamp + "billing")
+        }
+    }
+    var hiringPreparing: String { design.text(Self.revamp + "hiringPreparing") }
+
+    /// The channel open that failed, and its one action.
+    var channelFailed: String { design.text(Self.revamp + "channelFailed") }
+    var tryAgain: String { design.text(Self.revamp + "tryAgain") }
+
+    /// Board · List and Mine.
+    var boardViews: String { design.text(Self.revamp + "boardViews") }
+    func boardView(_ view: CompanyBoardView) -> String {
+        switch view {
+        case .board: design.text(Self.board + "board")
+        case .list: design.text(Self.board + "list")
+        }
+    }
+    var mine: String { design.text(Self.board + "mine") }
 
     // MARK: Company menu and overview (TS-8)
 

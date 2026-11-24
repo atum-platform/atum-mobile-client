@@ -179,6 +179,23 @@ extension LiveAppModel {
         return await Self.homeCompanySearchService.search(term, tab: tab, environment: environment)
     }
 
+    /// Team Space header search (W4-E7, desktop #114): the same service and rules as
+    /// Home search, asked of the open company only and its Messages tab.
+    func teamSpaceCompanySearch(companyID: String, term: String) async -> [CompanySearchResult] {
+        guard let liveMatrix else { return [] }
+        let targets = { [weak self] () -> [String: [CompanySearchTarget]] in
+            (self?.homeSearchTargets() ?? [:]).filter { $0.key == companyID }
+        }
+        let environment = CompanySearchService.Environment(
+            targets: targets,
+            eligibility: { [weak self] in self?.homeSearchEligibility() ?? CompanySearchEligibility() },
+            ownUserID: { try? liveMatrix.companyOwnUserID() },
+            senders: { roomID, from in await liveMatrix.companySearchSenders(roomID: roomID, from: from) },
+            endpoint: { try liveMatrix.companySearchEndpoint() })
+        let results = await Self.homeCompanySearchService.search(term, tab: .messages, environment: environment)
+        return homeSearchEligibility().retained(results.filter { $0.companyID == companyID })
+    }
+
     /// Desktop `openGlobalEvent` → `openCompanyMessage`: the room is still
     /// joined, unencrypted and bound to the same company and channel before
     /// and after the event is read, and it is the same message in the same

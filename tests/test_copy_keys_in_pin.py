@@ -150,6 +150,13 @@ def missing(pinned, literals):
 
 
 class CopyKeysInPinTests(unittest.TestCase):
+    def test_catalog_matches_the_copy_pin(self):
+        pin = json.loads((ROOT / "atum-design.lock").read_text())
+        strings, _ = pin_key_sets()
+        self.assertEqual(pin["revision"], "de08405bae1f208f891eb04d5a324b150a169c5c")
+        self.assertEqual(pin["manifestSha256"], "6defd148e9c09a4cb0f840212be145d3a18d9002c8d8e048a7633d75eefd663c")
+        self.assertEqual(len(strings), 4134)
+
     def test_every_copy_key_in_the_app_is_in_the_pinned_export(self):
         literals = list(key_literals())
         self.assertGreater(len(literals), 100, "found too few copy keys; is the pattern stale?")
