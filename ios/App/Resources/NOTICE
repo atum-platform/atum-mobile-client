@@ -48,6 +48,12 @@ ios/App/Resources/ThirdPartyNotices/Sentry-LICENSE.txt and
 Sentry-THIRD_PARTY_NOTICES.txt. Usage analytics uses no third-party SDK; the
 app posts directly to PostHog.
 
+Provider marks in the model picker and Settings are bundled to identify each
+provider only: Simple Icons paths (CC0-1.0), OpenAI and Grok from Lobe Icons
+(MIT, Copyright (c) 2023 LobeHub) and the Antigravity mark from T3 Code (MIT,
+Copyright (c) 2026 T3 Tools Inc.). Each brand keeps its trademark rights; see
+ios/App/Resources/ThirdPartyNotices/ProviderMarks-NOTICE.txt.
+
 Hermes-derived content throughout this tree, including modified files, remains
 subject to the preserved Nous Research MIT notice in LICENSES/Hermes-Agent-MIT.txt.
 An absent per-file provenance record does not assert Atum ownership.
