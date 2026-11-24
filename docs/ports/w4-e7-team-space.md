@@ -149,7 +149,18 @@ is ready when the export splices them.
 
 ## Verification
 
-See the session's final report for the locked run's exit codes. Its sections are:
+Results (all under the lock):
+
+- Run 1 (`5a762e7`): `swift test --filter …` exit 0, 57 tests, 0 failures (the 13 new policy tests
+  among them). `build-for-testing` exit 65: the UI walk lacked `import AtumChat`; no app errors.
+- Runs 2–5: build exit 0 (arm64). Each run fixed the walk itself (commits 4–7): the lazily made
+  failed line, `ContentUnavailableView`'s missing identifier, and Mine's identifier. Run 5
+  passed, but its "dark" captures were light.
+- Run 6 (`100e5c6`): `build-for-testing` exit 0, app arm64; the UI walk passed (1 test, 444 s, 0
+  failures) in en and vi, light and dark. Its 16 captures were copied by name to
+  `/Volumes/AtumTestFlight/dd-w4-e7/shots/named/` (local only, not committed).
+
+The locked runs were:
 `swift test --filter 'TeamSpaceRevampPolicyTests|CompanySpacePolicyTests|CompanyMessageSearchTests|StoreShelvesTests|AtumCopyTests'`,
 the Debug simulator `build-for-testing`, and one local UI test,
 `TeamSpaceRevampUITests/testRevampWalkInEnglishAndVietnameseLightAndDark`. That test walks
