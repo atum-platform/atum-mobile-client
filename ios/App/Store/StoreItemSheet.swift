@@ -85,10 +85,10 @@ struct StoreItemSheet: View {
                         .foregroundStyle(kit.color(.ink2, scheme: scheme))
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
+                        .padding(.horizontal, kit.space(.s4))
                         .padding(.vertical, kit.space(.s3))
                         .background(kit.color(.fillQuiet, scheme: scheme),
-                                    in: RoundedRectangle(cornerRadius: kit.radius(.lg), style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
                         .padding(.top, kit.space(.s5))
                 }
                 if showsRecipients { recipients.padding(.top, kit.space(.s6)) }
@@ -98,7 +98,7 @@ struct StoreItemSheet: View {
                         .accessibilityIdentifier("store.detail.status")
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, kit.space(.s5))
             .padding(.top, kit.space(.s2))
             .padding(.bottom, kit.space(.s6))
         }
@@ -123,7 +123,7 @@ struct StoreItemSheet: View {
     private var header: some View {
         HStack(alignment: .center, spacing: kit.space(.s4)) {
             StoreItemArt(item: item, base: 64)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 Text(verbatim: item.title)
                     .font(kit.font(.title))
                     .foregroundStyle(kit.color(.ink, scheme: scheme))
@@ -152,7 +152,7 @@ struct StoreItemSheet: View {
         // is not exported; the rows stand alone until it is.
         VStack(alignment: .leading, spacing: kit.space(.s2)) {
             ForEach(requirementKeys, id: \.self) { key in
-                HStack(spacing: 10) {
+                HStack(spacing: kit.space(.s3)) {
                     Image(atum.symbol(.check))
                         .font(kit.font(.callout))
                         .foregroundStyle(kit.color(.ink2, scheme: scheme))
@@ -201,12 +201,12 @@ struct StoreItemSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 0) {
                 ForEach(Array(eligible.enumerated()), id: \.element.id) { index, target in
-                    if index > 0 { Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, 52) }
+                    if index > 0 { Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, kit.space(.s4) + 28 + kit.space(.s3)) }
                     recipientRow(target)
                 }
             }
             .background(kit.color(.surface, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: kit.radius(.xl), style: .continuous))
+                        in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
             .padding(.top, kit.space(.s1))
         }
     }
@@ -234,7 +234,7 @@ struct StoreItemSheet: View {
                     .opacity(selected ? 1 : 0)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, kit.space(.s4))
             .frame(minHeight: 48)
             .contentShape(Rectangle())
         }
@@ -259,7 +259,7 @@ struct StoreItemSheet: View {
                 }
             }
             if let balance = freshBalance, phase.showsBalance {
-                Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, 14)
+                Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, kit.space(.s4))
                 StoreValueRow(design: design, label: copy(StoreCopyKey.walletLabel)) {
                     StoreProtonsText(design: design, microProtons: balance, emphasis: false, isBalance: true)
                 }
@@ -267,7 +267,7 @@ struct StoreItemSheet: View {
             }
         }
         .background(kit.color(.surface, scheme: scheme),
-                    in: RoundedRectangle(cornerRadius: kit.radius(.xl), style: .continuous))
+                    in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
     }
 
     /// Displayed only from this refresh: a saved balance never sits beside a price.
@@ -401,7 +401,7 @@ struct StoreItemSheet: View {
         let content = actionContent
         if let content {
             VStack(spacing: kit.space(.s2)) { content }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, kit.space(.s5))
                 .padding(.top, kit.space(.s3))
                 .padding(.bottom, kit.space(.s2))
                 .frame(maxWidth: .infinity)
@@ -587,11 +587,12 @@ private struct StoreReviewView: View {
                         .transition(reduceMotion ? .identity : .opacity)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, kit.space(.s5))
             .padding(.top, kit.space(.s2))
             .padding(.bottom, kit.space(.s6))
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: notice)
+            .motion(.quick, value: notice)
         }
+        .sensoryFeedback(trigger: notice) { _, value in value?.tone.feedback }
         .accessibilityIdentifier("store.review")
         .scrollBounceBehavior(.basedOnSize)
         .background(kit.color(.ground, scheme: scheme).ignoresSafeArea())
@@ -648,7 +649,7 @@ private struct StoreReviewView: View {
             // The export has no "balance after" label yet: the balance row shows
             // the current balance and, after the chevron, what remains.
             StoreValueRow(design: design, label: design.text(StoreCopyKey.walletLabel)) {
-                HStack(spacing: 6) {
+                HStack(spacing: kit.space(.s2)) {
                     StoreProtonsText(design: design, microProtons: quote.balance, emphasis: false, isBalance: true)
                     Image(atum.symbol(.chevronRight))
                         .font(kit.font(.caption))
@@ -660,11 +661,11 @@ private struct StoreReviewView: View {
             .accessibilityIdentifier("store.review.balance")
         }
         .background(kit.color(.surface, scheme: scheme),
-                    in: RoundedRectangle(cornerRadius: kit.radius(.xl), style: .continuous))
+                    in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
     }
 
     private var divider: some View {
-        Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, 14)
+        Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, kit.space(.s4))
     }
 
     private var actions: some View {
@@ -713,7 +714,7 @@ private struct StoreReviewView: View {
                 closeButton(.atumPrimary)
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, kit.space(.s5))
         .padding(.top, kit.space(.s3))
         .padding(.bottom, kit.space(.s2))
         .frame(maxWidth: .infinity)
@@ -768,7 +769,7 @@ struct StoreGetLabel: View {
             let marker = "\u{1}"
             let parts = design.text(StoreShelfCopyKey.getWithPrice, arguments: [.text(marker)])
                 .components(separatedBy: marker)
-            HStack(spacing: 4) {
+            HStack(spacing: design.kit.space(.s1)) {
                 if let lead = parts.first, !lead.isEmpty { Text(verbatim: lead) }
                 ProtonMark(.small)
                 Text(verbatim: amount).monospacedDigit()
@@ -793,8 +794,8 @@ struct StoreValueRow<Value: View>: View {
     var body: some View {
         let kit = design.kit
         let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: kit.space(.s1)))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: kit.space(.s3)))
         layout {
             Text(label)
                 .font(kit.font(.body))
@@ -805,8 +806,8 @@ struct StoreValueRow<Value: View>: View {
                 .foregroundStyle(kit.color(.ink, scheme: scheme))
                 .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, kit.space(.s4))
+        .padding(.vertical, kit.space(.s3))
         .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
     }
@@ -824,7 +825,7 @@ struct StoreProtonsText: View {
         let value = isBalance
             ? ProtonAmountFormat.balance(microProtons, design: design)
             : ProtonAmountFormat.price(microProtons, design: design)
-        HStack(spacing: 3) {
+        HStack(spacing: design.kit.space(.s1)) {
             ProtonMark(.small)
             Text(verbatim: value).monospacedDigit()
         }
@@ -849,6 +850,15 @@ extension StoreNotice.Tone {
         case .done, .neutral: .neutral
         case .warning: .warning
         case .danger: .danger
+        }
+    }
+
+    /// One haptic per outcome: success when it lands, error on a failure line.
+    var feedback: SensoryFeedback? {
+        switch self {
+        case .done: .success
+        case .danger: .error
+        case .neutral, .warning: nil
         }
     }
 }

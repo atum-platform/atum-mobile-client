@@ -126,8 +126,8 @@ struct ProtonTopUpChatNotice: View {
                 AtumNotice(glyph: .info, title: design.text(ProtonTopUpCopyKey.outOfProtons)) {
                     ProtonTopUpButton(design: design, present: { presented = true })
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 4)
+                .padding(.horizontal, design.kit.space(.s4))
+                .padding(.bottom, design.kit.space(.s1))
                 .accessibilityIdentifier("chat.protons.out")
             }
         }
@@ -261,7 +261,7 @@ struct ProtonTopUpSheet: View {
                     content
                     footer
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, kit.space(.s5))
                 .padding(.top, kit.space(.s2))
                 .padding(.bottom, kit.space(.s6))
             }
@@ -296,7 +296,7 @@ struct ProtonTopUpSheet: View {
     private func balanceRow(_ balance: Int64) -> some View {
         let value = ProtonAmountFormat.balance(balance, design: design)
         return StoreValueRow(design: design, label: copy(ProtonTopUpCopyKey.balanceLabel)) {
-            HStack(spacing: 3) {
+            HStack(spacing: kit.space(.s1)) {
                 ProtonMark(.small)
                 Text(verbatim: value).monospacedDigit()
             }
@@ -304,7 +304,7 @@ struct ProtonTopUpSheet: View {
             .accessibilityLabel(copy(ProtonTopUpCopyKey.protons, [.text(value)]))
         }
         .background(kit.color(.surface, scheme: scheme),
-                    in: RoundedRectangle(cornerRadius: kit.radius(.xl), style: .continuous))
+                    in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
         .accessibilityIdentifier("topup.balance")
     }
 
@@ -320,13 +320,13 @@ struct ProtonTopUpSheet: View {
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 {
-                        Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, 14)
+                        Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, kit.space(.s4))
                     }
                     packRow(row)
                 }
             }
             .background(kit.color(.surface, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: kit.radius(.xl), style: .continuous))
+                        in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
         case .loading:
             AtomWait()
                 .frame(width: 24, height: 24)
@@ -360,8 +360,8 @@ struct ProtonTopUpSheet: View {
         let working = state == .purchasing
         return VStack(alignment: .leading, spacing: kit.space(.s2)) {
             HStack(alignment: .center, spacing: kit.space(.s3)) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
+                    HStack(spacing: kit.space(.s2)) {
                         ProtonMark(.regular)
                         Text(verbatim: total)
                             .font(kit.font(.title))
@@ -393,7 +393,7 @@ struct ProtonTopUpSheet: View {
                 .accessibilityIdentifier("topup.buy.\(row.id)")
             }
             if let notice = ProtonTopUpPresentation.notice(for: state) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
                     AtumNotice(glyph: notice.tone.glyph, title: copy(notice.key), tone: notice.tone.kitTone)
                     if case let .needsSupport(transactionID) = state {
                         Text(verbatim: transactionID)
@@ -401,14 +401,15 @@ struct ProtonTopUpSheet: View {
                             .monospacedDigit()
                             .foregroundStyle(kit.color(.ink3, scheme: scheme))
                             .textSelection(.enabled)
-                            .padding(.leading, 14)
+                            .padding(.leading, kit.space(.s4))
                     }
                 }
                 .accessibilityIdentifier("topup.state.\(row.id)")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, kit.space(.s4))
+        .padding(.vertical, kit.space(.s3))
+        .sensoryFeedback(trigger: state) { _, value in ProtonTopUpPresentation.notice(for: value)?.tone.feedback }
         .onChange(of: state, initial: false) { _, value in
             guard let notice = ProtonTopUpPresentation.notice(for: value) else { return }
             AccessibilityNotification.Announcement(copy(notice.key)).post()
@@ -458,7 +459,7 @@ struct ProtonTopUpSheet: View {
             }
             .buttonStyle(.atumPrimary)
             .accessibilityIdentifier("topup.finish")
-            .padding(.horizontal, 20)
+            .padding(.horizontal, kit.space(.s5))
             .padding(.top, kit.space(.s3))
             .padding(.bottom, kit.space(.s2))
             .frame(maxWidth: .infinity)

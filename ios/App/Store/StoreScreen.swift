@@ -36,6 +36,7 @@ struct StoreScreen: View {
     @Environment(\.colorScheme) private var scheme
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         Group {
@@ -105,7 +106,7 @@ struct StoreScreen: View {
                         guard !Task.isCancelled else { return }
                     }
                     if let first = firstItemID(on: shelf) {
-                        withAnimation { proxy.scrollTo(first, anchor: .top) }
+                        withMotion(.standard) { proxy.scrollTo(first, anchor: .top) }
                     }
                     onShelfShown?()
                 }
@@ -171,8 +172,8 @@ struct StoreScreen: View {
                 .font(.subheadline)
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, kit.space(.s4))
+                .padding(.vertical, kit.space(.s3))
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 .accessibilityIdentifier("store.assistants.soon")
@@ -216,13 +217,13 @@ struct StoreScreen: View {
     /// reads "N Protons". With a top-up context and Apple checkout open it is
     /// the top-up button; otherwise only the balance (REL-15 follow-up).
     @ViewBuilder private func balanceChip(_ value: String) -> some View {
-        let label = HStack(spacing: 3) {
+        let label = HStack(spacing: kit.space(.s1)) {
             ProtonMark(.small)
             Text(verbatim: value).monospacedDigit()
         }
         .font(.subheadline.weight(.semibold))
         .lineLimit(1)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, kit.space(.s2))
         if topUp != nil, StorePurchaseGate.showsTopUpEntry(checkout) {
             ProtonTopUpEntry(design: design) { present in
                 Button(action: present) { label }
@@ -283,7 +284,7 @@ struct StoreScreen: View {
                 .font(.subheadline)
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                 .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 16)
+                .padding(.vertical, kit.space(.s4))
                 .listRowBackground(Color.clear)
         }
     }
@@ -325,7 +326,7 @@ struct StoreScreen: View {
 
     private var unavailable: some View {
         ContentUnavailableView {
-            VStack(spacing: 12) {
+            VStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(.compass))
                     .font(.largeTitle)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -403,9 +404,9 @@ private struct StoreRowLayout<Tile: View, Trailing: View>: View {
 
     var body: some View {
         let kit = design.kit
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: kit.space(.s3)) {
             tile()
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 AppNameWithSeal(tier: seal) {
                     Text(verbatim: title)
                         .font(kit.font(.bodyStrong))
@@ -424,14 +425,14 @@ private struct StoreRowLayout<Tile: View, Trailing: View>: View {
                         .font(.footnote)
                         .foregroundStyle(kit.color(.danger, scheme: scheme))
                 }
-                if dynamicTypeSize.isAccessibilitySize { trailing().padding(.top, 4) }
+                if dynamicTypeSize.isAccessibilitySize { trailing().padding(.top, kit.space(.s1)) }
             }
             Spacer(minLength: 8)
             if !dynamicTypeSize.isAccessibilitySize { trailing() }
         }
         .frame(minHeight: 60)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 16)
+        .padding(.vertical, kit.space(.s3))
+        .padding(.horizontal, kit.space(.s4))
         .contentShape(Rectangle())
     }
 }
@@ -461,8 +462,8 @@ private struct StoreRowPill<Label: View>: View {
             .font(design.kit.font(.callout).weight(.semibold))
             .foregroundStyle(design.kit.color(.ink, scheme: scheme))
             .lineLimit(1)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, design.kit.space(.s3))
+            .padding(.vertical, 6) // design-lint: allow: Get pill height matches the system App Store pill
             .background(design.kit.color(.fillQuiet, scheme: scheme), in: Capsule())
     }
 }
@@ -499,7 +500,7 @@ private struct StorePurchasedEntry: View {
             ZStack {
                 kit.color(.surface, scheme: scheme)
                 Image(atum.symbol(.history))
-                    .font(.system(size: 20, weight: .light))
+                    .font(.title3.weight(.light))
                     .foregroundStyle(kit.color(.ink, scheme: scheme))
             }
             .frame(width: 36, height: 36)
@@ -555,9 +556,9 @@ struct StoreItemRow: View {
                 .accessibilityHidden(true)
         case .price:
             if let amount = firstPrice {
-                VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: design.kit.space(.s1)) {
                     StoreRowPill(design: design) {
-                        HStack(spacing: 3) {
+                        HStack(spacing: design.kit.space(.s1)) {
                             ProtonMark(.small)
                             Text(verbatim: amount).monospacedDigit()
                         }
@@ -632,7 +633,7 @@ struct StoreItemArt: View {
                             .scaledToFill()
                     } else {
                         Image(atum.design.symbol(glyphAlias))
-                            .font(.system(size: size * 0.42, weight: .light))
+                            .font(.system(size: size * 0.42, weight: .light)) // design-lint: allow: monogram scales with the tile, not with text
                             .foregroundStyle(atum.color(.ink, scheme: scheme))
                     }
                 }
