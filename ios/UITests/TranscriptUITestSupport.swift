@@ -1,6 +1,47 @@
 import AtumChat
 import XCTest
 
+/// Holds the scripted send receipt until the test has checked the unread bubble.
+@MainActor
+struct ScriptedSendReceipt {
+    private let folder = TranscriptUITestCase.liveEvidence
+        .appendingPathComponent("probe/\(UUID().uuidString)", isDirectory: true)
+
+    var arguments: [String] { ["-AtumUITestProbeDir", folder.path, "-AtumScriptedHoldSendReceipt"] }
+
+    func assertUnread(in transcript: XCUIElement, text: String, sending: String, failed: String,
+                      sent: String, seen: String) -> (bubble: XCUIElement, face: XCUIElement) {
+        let prefix = "message.body."
+        let unread = transcript.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@ AND NOT (label CONTAINS %@) "
+                + "AND NOT (label CONTAINS %@) AND NOT (label CONTAINS %@)",
+            prefix, text, sending, failed, seen)).firstMatch
+        XCTAssertTrue(unread.waitForExistence(timeout: 10), "the sent bubble never settled unread")
+        XCTAssertFalse(unread.label.contains(sent), "the settled bubble has a Sent mark")
+
+        let displayID = String(unread.identifier.dropFirst(prefix.count))
+        let line = transcript.descendants(matching: .any)["delivery.line.\(displayID)"].firstMatch
+        let face = line.descendants(matching: .any)["delivery.seen"].firstMatch
+        XCTAssertFalse(line.descendants(matching: .any)["send.failed"].firstMatch.exists,
+                       "the settled bubble has a failed mark")
+        XCTAssertFalse(face.exists, "the reader's face appeared before the receipt")
+        let bubble = transcript.descendants(matching: .any).matching(identifier: prefix + displayID).firstMatch
+        return (bubble, face)
+    }
+
+    func releaseAndAssertSeen(_ message: (bubble: XCUIElement, face: XCUIElement), sent: String, seen: String) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data().write(to: folder.appendingPathComponent("release-send-receipt"), options: .atomic)
+
+        let read = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", seen),
+                                             object: message.bubble)
+        XCTAssertEqual(XCTWaiter.wait(for: [read], timeout: 15), .completed, "no Seen on the sent bubble")
+        XCTAssertFalse(message.bubble.label.contains(sent), "the faces are the only receipt")
+        XCTAssertTrue(message.face.waitForExistence(timeout: 5), "the reader's face is missing from the sent bubble's line")
+        XCTAssertEqual(message.face.label, seen)
+    }
+}
+
 /// Helpers for the transcript lane's UI tests (WS2: G-scroll and the U
 /// proofs). Scripted chats only, in Vietnamese (plan §0.2), animations off.
 class TranscriptUITestCase: AtumUITestCase {
@@ -118,10 +159,10 @@ class TranscriptUITestCase: AtumUITestCase {
     /// sheet. Existence alone also includes controls outside the viewport.
     @MainActor
     func revealByScrolling(_ target: XCUIElement, in container: XCUIElement,
-                           up: Bool = true, maxSwipes: Int = 6) -> Bool {
+                           up: Bool = true, maxSwipes: Int = 6, verticalInset: CGFloat = 0) -> Bool {
         func visible() -> Bool {
             target.exists && target.isHittable && !target.frame.isEmpty
-                && container.frame.contains(target.frame)
+                && container.frame.insetBy(dx: 0, dy: verticalInset).contains(target.frame)
         }
         for _ in 0..<maxSwipes {
             if visible() { return true }

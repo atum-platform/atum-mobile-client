@@ -362,22 +362,26 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(assistantAccess.label.contains("ngừng đọc tin nhắn mới"))
         XCTAssertTrue(assistantAccess.label.contains("không hoàn tác"))
 
-        let pin = app.descendants(matching: .any).matching(identifier: "info.pin").firstMatch
-        let mute = app.descendants(matching: .any).matching(identifier: "info.mute").firstMatch
-        XCTAssertTrue(pin.exists)
-        XCTAssertTrue(mute.exists)
-        XCTAssertEqual(pin.value as? String, "0")
-        // Each switch answers at once in the app; the 15 s covers a busy shared
-        // runner (a 24 s accessibility stall was seen on 2026-11-06; on 2026-11-15
-        // the pin read "1" just after a 5 s wait expired on a hosted shard).
-        pin.switches.firstMatch.exists ? pin.switches.firstMatch.tap() : pin.tap()
-        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "1"), object: pin)], timeout: 15) == .completed,
-                      "pin is \(String(describing: pin.value)): \(app.debugDescription.prefix(12_000))")
-        mute.switches.firstMatch.exists ? mute.switches.firstMatch.tap() : mute.tap()
-        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "1"), object: mute)], timeout: 15) == .completed,
-                      "mute is \(String(describing: mute.value)): \(app.debugDescription.prefix(12_000))")
+        let scroll = sheet.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        for id in ["info.pin", "info.mute"] {
+            let toggle = scroll.switches.matching(identifier: id).firstMatch
+            XCTAssertTrue(toggle.waitForExistence(timeout: 10), "missing \(id)")
+            let knob = toggle.switches.firstMatch
+            let hasKnob = knob.exists
+            let target = hasKnob ? knob : toggle
+            // XCTest can report a switch at the home indicator as hittable.
+            // Scroll it inside the sheet before sending the coordinate tap.
+            XCTAssertTrue(revealByScrolling(target, in: scroll, verticalInset: 44),
+                          "\(id) did not scroll into view: \(boundedHierarchy(app))")
+            XCTAssertTrue(waitFor(15) { target.exists && target.isHittable && toggle.value as? String == "0" },
+                          "\(id) did not become tappable and off: \(boundedHierarchy(app))")
+            let horizontalOffset: CGFloat = hasKnob ? 0.5 : 0.9
+            target.coordinate(withNormalizedOffset: CGVector(dx: horizontalOffset, dy: 0.5)).tap()
+
+            XCTAssertTrue(waitFor(15) { toggle.exists && toggle.value as? String == "1" },
+                          "\(id) did not turn on: \(boundedHierarchy(app))")
+        }
 
         keepScreenshot("s2-chat-info-group-light-vi", of: app)
     }
