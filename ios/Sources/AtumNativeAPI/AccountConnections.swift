@@ -91,7 +91,11 @@ public struct AccountConnectionDevice: Equatable, Sendable, Decodable {
         case "stale": stale = true
         default: throw ContractViolation.invalidValue
         }
-        observedAt = try c.integer("observedAt")
+        // The desktop validates a JavaScript number, including integral decimals.
+        let number = try c.value("observedAt", as: Double.self)
+        guard let timestamp = Int64(exactly: number), (0...NativeAPI.maximumInteger).contains(timestamp)
+        else { throw ContractViolation.invalidValue }
+        observedAt = timestamp
     }
 }
 
@@ -185,6 +189,9 @@ public struct AccountConnections: Equatable, Sendable, Decodable {
 
     /// A display label: no `@` (never an address) and no control character.
     static func label(_ value: String, maximum: Int) throws -> String {
-        try checkedString(value, minimum: 1, maximum: maximum, pattern: #"[^@\p{Cc}]+"#)
+        guard (1...maximum).contains(value.utf16.count),
+              value.range(of: #"\A[^@\p{Cc}]+\z"#, options: .regularExpression) != nil
+        else { throw ContractViolation.invalidValue }
+        return value
     }
 }
