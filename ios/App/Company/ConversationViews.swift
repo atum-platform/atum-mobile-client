@@ -120,8 +120,8 @@ struct ConversationSectionView: View {
     }
 
     private func showsChief(_ chief: ChiefOfStaffRowPresentation) -> Bool {
-        TeamSpaceSearch.matches([dmCopy.chiefOfStaff(platformName: chief.platformName),
-                                 dmCopy.line(chief.status) ?? ""], needle: needle, locale: locale)
+        TeamSpaceSearch.matches([dmCopy.privateChiefOfStaff, dmCopy.line(chief.status) ?? ""],
+                                needle: needle, locale: locale)
     }
 
     private func shown(_ rows: [ConversationListRow]) -> [ConversationListRow] {
@@ -263,7 +263,7 @@ struct ConversationSectionView: View {
     // MARK: Chief of Staff
 
     private func chiefRow(_ chief: ChiefOfStaffRowPresentation) -> some View {
-        let name = dmCopy.chiefOfStaff(platformName: chief.platformName)
+        let name = dmCopy.privateChiefOfStaff
         let retry = chief.status.offersRetry
         let line = openingChief && retry ? dmCopy.line(.settingUp) : dmCopy.line(chief.status)
         return VStack(alignment: .leading, spacing: 2) {

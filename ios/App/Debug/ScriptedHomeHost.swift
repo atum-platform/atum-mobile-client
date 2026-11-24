@@ -36,6 +36,8 @@ struct ScriptedHomeHost: View {
     /// Rooms the scripted account has left since launch (Home search's
     /// eligibility drops their results).
     @State private var scriptedLeftRooms = Set<String>()
+    /// W4-E7: #design fails to open once, so the walk sees the failed line and Try again.
+    @State private var scriptedChannelFailures: Set<String> = ["!design:atum.test"]
     /// `-AtumScriptedHire <free|paid|retry|short|capacity>`: the open Researcher
     /// listing on the New assistant sheet (desktop D9). Without it the sheet
     /// has no shelf, as for an account the platform offers none.
@@ -262,7 +264,14 @@ struct ScriptedHomeHost: View {
                             uri == Self.scriptedLogoURI
                                 ? try? AtumDesign.data(for: "app-icon/atum-app-icon-1024.png") : nil
                         },
-                        invites: scriptedInvites
+                        invites: scriptedInvites,
+                        messageSearch: scriptedMessageSearch,
+                        openChannel: { roomID in
+                            UITestProbe.append("open-channel \(roomID)", to: "team-actions.txt")
+                            if scriptedChannelFailures.remove(roomID) != nil { return false }
+                            router.openTeamSpace(roomId: roomID)
+                            return true
+                        }
                     )
                 )
                 .navigationDestination(for: String.self) { roomID in
@@ -394,7 +403,11 @@ struct ScriptedHomeHost: View {
             ],
             workspace: CompanyWorkspacePresentation(
                 id: scriptedCompany, title: scriptedCompany == "anka" ? "Anka" : "Studio",
-                channels: channels, members: [], channelsLoading: false, membersLoading: false,
+                channels: channels,
+                // The viewer's own member, so the Board page offers Mine (W4-E7).
+                members: [CompanyMemberRow(id: "member-me", name: Self.accountName, handle: "ban",
+                                           role: "owner", state: nil, isSelf: true, isAdmin: true)],
+                channelsLoading: false, membersLoading: false,
                 leavePending: false, notice: nil, error: nil),
             switcher: entries,
             canCreate: true,
@@ -406,7 +419,8 @@ struct ScriptedHomeHost: View {
                                                     revokeInviteLink: true),
             canCreateChannel: true,
             // The section captures show the desktop's C2 channels mode.
-            sectionsChannels: true)
+            sectionsChannels: true,
+            activeRoomID: router.teamSpaceRoomID)
     }
 
     /// TS-11/TS-13 with synthetic answers (the desktop public pack's fixture shapes): "@nobody"
@@ -459,6 +473,23 @@ struct ScriptedHomeHost: View {
     }
 
     static let scriptedLogoURI = "mxc://atum.test/studio-logo"
+
+    /// W4-E7 header search with one synthetic answer in #launch; every ask and open is probed.
+    private var scriptedMessageSearch: TeamSpaceMessageSearchActions {
+        TeamSpaceMessageSearchActions(
+            search: { companyID, query in
+                UITestProbe.append("search \(companyID) \(query)", to: "team-actions.txt")
+                return [CompanySearchResult(companyID: companyID, channelID: "launch", roomID: "!launch:atum.test",
+                                            channelName: "launch", eventID: "$scripted-launch-date",
+                                            sender: ScriptedCast.me, snippet: "Launch moves to Tuesday.",
+                                            at: 1_792_540_800_000)]
+            },
+            open: { result in
+                UITestProbe.append("search-open \(result.eventID)", to: "team-actions.txt")
+                router.openTeamSpace(roomId: result.roomID)
+                return true
+            })
+    }
 
     private var scriptedStore: LiveProductStoreRead {
         LiveProductStoreRead(

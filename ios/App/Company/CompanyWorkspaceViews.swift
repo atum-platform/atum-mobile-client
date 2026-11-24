@@ -24,6 +24,18 @@ import SwiftUI
 // server has links on), "Join with invite link" sits in the empty state and the
 // create form, and the channel list has Favorites, Channels with "+" (Create a
 // channel, for admins) and a collapsed Archived.
+//
+// Wave 4 W4-E7 (desktop revamp #114, docs/ports/w4-e7-team-space.md): the header
+// box offers "Search “…”" (company message search in a sheet) and says "No
+// matches"; a failed channel open says so under its row with Try again; the Board
+// page has Board · List and Mine; the overview shows People and AI one at a time.
+
+/// One ask of company message search from the header box (desktop `searchPane` with its serial).
+struct TeamSpaceMessageSearchRequest: Identifiable, Equatable {
+    let id = UUID()
+    let companyID: String
+    let query: String
+}
 
 struct TeamSpacePresentation: Equatable {
     var isLoading: Bool
@@ -58,6 +70,9 @@ struct TeamSpacePresentation: Equatable {
     var sectionsChannels = false
     /// A board link tapped in a chat, until this screen shows that board.
     var boardLinkRequest: CompanyBoardLinkRequest?
+    /// The room pushed over the list (the router's Team Space room), so a held channel
+    /// failure clears when another room comes on screen (W4-E7).
+    var activeRoomID: String?
 }
 
 struct TeamSpaceActions {
@@ -92,6 +107,12 @@ struct TeamSpaceActions {
     var clearBoardLink: ((CompanyBoardLinkRequest) -> Void)?
     /// The Threads row and its company list (TS-6b); nil keeps the row undrawn.
     var threads: CompanyThreadsActions?
+    /// Header search's company message search (W4-E7); nil keeps the row and the
+    /// keyboard's Search to filtering only.
+    var messageSearch: TeamSpaceMessageSearchActions?
+    /// A channel tap with its answer: true opened, false failed, nil replaced by
+    /// another open. Nil falls back to `openRoom`, with no failure line (W4-E7).
+    var openChannel: ((String) async -> Bool?)?
 }
 
 /// Workplace is a separate mode from Personal Home. It reuses the existing
@@ -124,6 +145,15 @@ struct TeamSpaceScreen: View {
     /// The open card per company (desktop `selectedCardId` in the company's space preferences).
     @State private var boardCards = [String: String]()
     @State private var query = ""
+    /// A channel being opened and a failed open, held with its company (W4-E7).
+    @State private var channelOpen = CompanyChannelOpenState()
+    /// Company message search asked from the header box; a new ask is a new sheet.
+    @State private var messageSearch: TeamSpaceMessageSearchRequest?
+    /// Board · List and Mine per company, for the session (desktop keeps them in the
+    /// company's space preferences, as the phone keeps the page).
+    @State private var boardPreferences = [String: CompanyBoardPreference]()
+    /// Company settings opens on Workspace, the overview on People (desktop `openSettings`).
+    @State private var overviewFromSettings = false
     /// Activity for one company: rows read for another company are never shown.
     @State private var activityRead: (companyID: String, rows: [CompanyActivityRow]?)?
     @State private var activityLoading = false
@@ -158,6 +188,20 @@ struct TeamSpaceScreen: View {
                 guard let id = presentation.workspace?.id else { return }
                 pages[id] = tab
             })
+    }
+
+    private var boardPreference: Binding<CompanyBoardPreference> {
+        Binding(
+            get: { presentation.workspace.flatMap { boardPreferences[$0.id] } ?? CompanyBoardPreference() },
+            set: { preference in
+                guard let id = presentation.workspace?.id else { return }
+                boardPreferences[id] = preference
+            })
+    }
+
+    /// The viewer's own member in the open company (desktop `viewerMemberRef`).
+    private var viewerMemberRef: String? {
+        presentation.workspace?.members.first(where: \.isSelf)?.id
     }
 
     private var boardCard: Binding<String?> {
@@ -219,7 +263,8 @@ struct TeamSpaceScreen: View {
                 emptyState
             } else if presentation.workspace != nil, page.wrappedValue == .board {
                 CompanyBoardPage(design: design, companyID: presentation.workspace?.id ?? "",
-                                 selectedCardID: boardCard)
+                                 selectedCardID: boardCard, viewer: viewerMemberRef,
+                                 preference: boardPreference)
                     .safeAreaInset(edge: .top, spacing: 0) {
                         CompanyPagesBar(design: design, tabs: pageTabs, selection: page)
                     }
@@ -239,6 +284,8 @@ struct TeamSpaceScreen: View {
                 CompanyOverviewSheet(design: design, workspace: workspace,
                                      logoURI: presentation.logos[workspace.id],
                                      viewerRole: presentation.viewerRole, menu: presentation.menu,
+                                     fromSettings: overviewFromSettings,
+                                     marketplaceAvailable: presentation.marketplaceAvailable,
                                      loadMatrixThumbnail: actions.loadMatrixThumbnail,
                                      leave: { confirmsLeave = true })
                     .atumDesign(visual: atum)
@@ -329,9 +376,24 @@ struct TeamSpaceScreen: View {
         .onChange(of: presentation.inviteAbilities.invite) { _, allowed in
             if !allowed { showsInvite = false }
         }
-        .onChange(of: presentation.workspace?.id) { _, _ in
+        .onChange(of: presentation.workspace?.id) { _, companyID in
             showsInvite = false
             showsCreateChannel = false
+            messageSearch = nil
+            channelOpen.navigated(toCompany: companyID)
+        }
+        // Any room coming on screen (or leaving it) is a successful navigation: desktop
+        // clears a held failure on `activeRoomId` as well as on the company.
+        .onChange(of: presentation.activeRoomID) { _, _ in
+            channelOpen.navigated(toCompany: presentation.workspace?.id)
+        }
+        .sheet(item: $messageSearch) { request in
+            if let search = actions.messageSearch {
+                TeamSpaceMessageSearchSheet(design: design, companyID: request.companyID,
+                                            initialQuery: request.query, actions: search,
+                                            opened: { messageSearch = nil })
+                    .atumDesign(visual: atum)
+            }
         }
         .sheet(isPresented: $showsJoin) {
             if let invites = actions.invites {
@@ -435,6 +497,7 @@ struct TeamSpaceScreen: View {
         List {
             if let workspace = presentation.workspace {
                 notices(workspace)
+                headerSearch(workspace)
             }
             if presentation.workspace != nil, sidebarEntries.threads || sidebarEntries.saved {
                 Section {
@@ -486,8 +549,14 @@ struct TeamSpaceScreen: View {
                 Section {
                     if workspace.channelsLoading {
                         note(copy.text(CompanyCopyKey("loadingChannels")))
-                    } else if workspace.channels.isEmpty {
-                        note(copy.text(CompanyCopyKey("noChannels")))
+                    } else if let empty = channelListNote(workspace, plan: plan) {
+                        // Desktop `channel-sections.tsx:152–156`: one line in Channels.
+                        switch empty {
+                        case .noMatches:
+                            note(team.noMatches).accessibilityIdentifier("company.search.noMatches")
+                        case .noChannels:
+                            note(copy.text(CompanyCopyKey("noChannels")))
+                        }
                     } else {
                         ForEach(plan.channels) { channel in channelListRow(channel) }
                     }
@@ -546,6 +615,8 @@ struct TeamSpaceScreen: View {
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: Text(verbatim: team.sidebarSearch(company: presentation.workspace?.title ?? "")))
+        // The box filters as you type; the keyboard's Search runs company message search.
+        .onSubmit(of: .search) { openMessageSearch() }
         .safeAreaInset(edge: .top, spacing: 0) {
             if presentation.workspace != nil {
                 CompanyPagesBar(design: design, tabs: pageTabs, selection: page)
@@ -693,7 +764,7 @@ struct TeamSpaceScreen: View {
         return Menu {
             Section {
                 if allowed.overview {
-                    Button { showsOverview = true } label: {
+                    Button { overviewFromSettings = false; showsOverview = true } label: {
                         Label { Text(verbatim: team.companyOverview) } icon: { Image(atum.symbol(.briefcase)) }
                     }
                     .accessibilityIdentifier("company.overview.open")
@@ -705,7 +776,7 @@ struct TeamSpaceScreen: View {
                     .accessibilityIdentifier("company.invite")
                 }
                 if allowed.settings {
-                    Button { showsOverview = true } label: {
+                    Button { overviewFromSettings = true; showsOverview = true } label: {
                         Label { Text(verbatim: team.companySettings) } icon: { Image(atum.symbol(.settings)) }
                     }
                     .accessibilityIdentifier("company.settings")
@@ -771,11 +842,72 @@ struct TeamSpaceScreen: View {
                sectioned: presentation.sectionsChannels)
     }
 
+    @ViewBuilder
     private func channelListRow(_ channel: CompanyChannelRow) -> some View {
         channelRow(channel)
             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+        if let roomID = channel.roomID,
+           channelOpen.failedRoom(companyID: presentation.workspace?.id) == roomID {
+            CompanyChannelFailedRow(design: design, retry: { openChannel(roomID) })
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    /// Desktop `openRoom` for a channel: one open at a time lands, a failure is held with
+    /// its company and room and says so under the row, a success clears it.
+    private func openChannel(_ roomID: String) {
+        guard let open = actions.openChannel, let companyID = presentation.workspace?.id else {
+            actions.openRoom(roomID)
+            return
+        }
+        let attempt = channelOpen.begin(.init(companyID: companyID, roomID: roomID))
+        Task { @MainActor in
+            let opened = await open(roomID)
+            channelOpen.finish(attempt, opened: opened)
+            // Desktop's failed pane is `role="alert"`: VoiceOver hears the line when it lands.
+            if opened == false, channelOpen.failedRoom(companyID: companyID) == roomID {
+                actionFailure += 1
+                AccessibilityNotification.Announcement(team.channelFailed).post()
+            }
+        }
+    }
+
+    // MARK: Header search (W4-E7)
+
+    /// "Search “…”" under the box once the query is long enough
+    /// (desktop `data-matrix-company-sidebar-search`).
+    @ViewBuilder
+    private func headerSearch(_ workspace: CompanyWorkspacePresentation) -> some View {
+        if actions.messageSearch != nil, let messageQuery = TeamSpaceHeaderSearch.messageQuery(query) {
+            Section {
+                TeamSpaceSearchMessagesRow(design: design, query: messageQuery) { openMessageSearch() }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+            .listSectionSeparator(.hidden)
+        }
+    }
+
+    /// What Channels says when it lists nothing: "No matches" while the box hides live
+    /// channels, else "No channels" (`CompanyChannelListNote`).
+    /// Desktop never filters Archived, so any archived channel keeps it quiet there; the
+    /// phone's box filters Archived too (wave 3), so only archived rows still shown count.
+    private func channelListNote(_ workspace: CompanyWorkspacePresentation,
+                                 plan: CompanyChannelSectionPlan<CompanyChannelRow>) -> CompanyChannelListNote? {
+        CompanyChannelListNote.note(query: query, shown: plan.favorites.count + plan.channels.count,
+                                    live: workspace.channels.filter { !$0.isArchived }.count,
+                                    archived: plan.archived.count)
+    }
+
+    private func openMessageSearch() {
+        guard actions.messageSearch != nil, let companyID = presentation.workspace?.id,
+              let term = TeamSpaceHeaderSearch.messageQuery(query) else { return }
+        messageSearch = TeamSpaceMessageSearchRequest(companyID: companyID, query: term)
     }
 
     /// "Channels" and, for those who may create one, the desktop's "+" Add channels menu.
@@ -832,7 +964,7 @@ struct TeamSpaceScreen: View {
     private func channelRow(_ channel: CompanyChannelRow) -> some View {
         Button {
             guard let roomID = channel.roomID, channel.canOpen else { return }
-            actions.openRoom(roomID)
+            openChannel(roomID)
         } label: {
             HStack(spacing: 8) {
                 // FlowPhone › Team: "#" in a 28 pt ink-3 column, the name in
@@ -857,6 +989,13 @@ struct TeamSpaceScreen: View {
                     Text(verbatim: channel.state)
                         .font(.footnote)
                         .foregroundStyle(atum.color(.muted, scheme: scheme))
+                }
+                if let roomID = channel.roomID,
+                   channelOpen.isOpening(roomID: roomID, companyID: presentation.workspace?.id) {
+                    // Desktop's opening state: a spinner where the channel will be, no words.
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityIdentifier("company.channel.opening." + channel.id)
                 }
                 HomeBadgeView(design: design, badge: channel.badge, pinned: false)
                     .accessibilityIdentifier("company.channel.badge." + channel.id)
