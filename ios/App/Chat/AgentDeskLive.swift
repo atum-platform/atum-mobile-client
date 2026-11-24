@@ -20,7 +20,7 @@ extension LiveAppModel {
             guard let now = self?.agentDeskContext(roomID: roomID) else { return false }
             return now.client === client && now.agent.principal == principal && now.agent.runsOnHermes
         }
-        actions.schedule = { try? await client.hostDeskSchedule(agent: principal, canSend: current) }
+        actions.schedule = AgentDeskActions.liveSchedule(client: client, agent: principal, current: current)
         actions.files = { (path: String?) async -> HostAgentDesk.FilesOutcome in
             do { return .listed(try await client.hostDeskFiles(agent: principal, path: path, canSend: current)) }
             catch is HostAgentDesk.ReadBusy { return .busy }
@@ -33,14 +33,25 @@ extension LiveAppModel {
 }
 
 extension AgentDeskActions {
+    static func liveSchedule(client: NativeDomainClient, agent: NativeID,
+                             current: @escaping NativeDomainClient.DeskSendCheck)
+        -> @MainActor () async throws -> HostAgentDesk.Schedule? {
+        { try await client.hostDeskSchedule(agent: agent, canSend: current) }
+    }
+
     /// Check the desk context before entering a host call and after it returns.
     func fenced(by current: @escaping @MainActor () -> Bool) -> AgentDeskActions {
         var fenced = self
         if let schedule {
             fenced.schedule = {
                 guard current() else { return nil }
-                let read = await schedule()
-                return current() ? read : nil
+                do {
+                    let read = try await schedule()
+                    return current() ? read : nil
+                } catch {
+                    guard current() else { return nil }
+                    throw error
+                }
             }
         }
         if let files {

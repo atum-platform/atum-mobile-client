@@ -15,6 +15,16 @@ import Foundation
 
 /// What the transcript shows about my assistant's work right now.
 public struct AssistantTurnSignal: Equatable, Sendable {
+    public struct Reply: Equatable, Sendable {
+        public let eventID: String
+        public let timestamp: Date
+
+        public init(eventID: String, timestamp: Date) {
+            self.eventID = eventID
+            self.timestamp = timestamp
+        }
+    }
+
     /// My newest top-level message the agent has not answered yet (its
     /// event ID), or nil.
     public var unanswered: String?
@@ -25,13 +35,17 @@ public struct AssistantTurnSignal: Equatable, Sendable {
     /// priority and must never fall back to stopping an unrelated question.
     public var scheduled: ChatScheduleExecution?
     public var hasScheduledWork: Bool
+    public var scheduledSince: Date?
+    public var latestReply: Reply?
 
     public init(unanswered: String?, working: Bool, scheduled: ChatScheduleExecution? = nil,
-                hasScheduledWork: Bool = false) {
+                hasScheduledWork: Bool = false, scheduledSince: Date? = nil, latestReply: Reply? = nil) {
         self.unanswered = unanswered
         self.working = working
         self.scheduled = scheduled
         self.hasScheduledWork = hasScheduledWork || scheduled != nil
+        self.scheduledSince = scheduledSince
+        self.latestReply = latestReply
     }
 
     public static let idle = AssistantTurnSignal(unanswered: nil, working: false)
@@ -40,6 +54,17 @@ public struct AssistantTurnSignal: Equatable, Sendable {
     /// other kind is idle.
     public static func read(_ rows: [ChatRow], kind: RoomKind) -> AssistantTurnSignal {
         guard kind == .assistant else { return .idle }
+        // Read this independently of the Stop target. A scheduled footer can
+        // hide the question, and a finished reply can leave no question at all.
+        let latestReply = rows.reversed().lazy.compactMap { row -> Reply? in
+            let item = row.item
+            guard !item.isOwn, !item.interim, !item.isProgressLine, item.threadRoot == nil,
+                  let eventID = item.eventID, eventID.hasPrefix("$") else { return nil }
+            switch item.kind {
+            case .message, .notice, .image, .file: return Reply(eventID: eventID, timestamp: item.timestamp)
+            default: return nil
+            }
+        }.first
         var working = false
         // Event IDs the agent has answered or ended with a status line.
         var ended = Set<String>()
@@ -53,7 +78,9 @@ public struct AssistantTurnSignal: Equatable, Sendable {
                 if item.companyTurn != nil { return .idle }
                 if let progress = item.progress, progress.isScheduled {
                     return AssistantTurnSignal(unanswered: nil, working: true,
-                                               scheduled: progress.schedule, hasScheduledWork: true)
+                                               scheduled: progress.schedule, hasScheduledWork: true,
+                                               scheduledSince: progress.schedule == nil ? nil : item.timestamp,
+                                               latestReply: latestReply)
                 }
                 working = true
                 continue
@@ -77,11 +104,11 @@ public struct AssistantTurnSignal: Equatable, Sendable {
             // My message: the newest top-level one decides.
             guard let eventID = item.eventID, eventID.hasPrefix("$"),
                   !ended.contains(eventID), !agentSpokeAfter else {
-                return AssistantTurnSignal(unanswered: nil, working: working)
+                return AssistantTurnSignal(unanswered: nil, working: working, latestReply: latestReply)
             }
-            return AssistantTurnSignal(unanswered: eventID, working: working)
+            return AssistantTurnSignal(unanswered: eventID, working: working, latestReply: latestReply)
         }
-        return AssistantTurnSignal(unanswered: nil, working: working)
+        return AssistantTurnSignal(unanswered: nil, working: working, latestReply: latestReply)
     }
 }
 
@@ -152,23 +179,42 @@ public struct AssistantTurnStop: Equatable, Sendable {
         case failed
     }
 
-    public private(set) var phase: Phase = .idle
+    private typealias Target = AssistantTurnStopIntent.Target
+
+    private struct Attempt: Equatable, Sendable {
+        let requestID: String
+        var phase: Phase = .stopping
+        var pending = false
+        let replyAtTap: AssistantTurnSignal.Reply?
+        let scheduledSince: Date?
+    }
+
+    // A projection may lose or replace a target while its request is active.
+    // Keep the request and its terminal state under the exact target.
+    private var attempts = [Target: Attempt]()
+    private var unavailableSchedule = false
+    private var clearedSchedule: ChatScheduleExecution?
+    private var confirmedSchedule: ChatScheduleExecution?
+    private var latestReply: AssistantTurnSignal.Reply?
+    private var scheduledSince: Date?
+
     public private(set) var selection: AssistantTurnStopIntent.Target?
+    public var phase: Phase {
+        if let selection { return attempts[selection]?.phase ?? .working }
+        if clearedSchedule != nil { return .stopping }
+        return unavailableSchedule ? .working : .idle
+    }
     public var target: String? {
         if case let .turn(eventID) = selection { return eventID }
         return nil
     }
     /// The key of this turn's stop request, kept for an idempotent retry.
-    public private(set) var requestID: String?
-    private var scheduledStopPending = false
-    /// A confirmed exact scheduled Stop leaves "Stopped." under the composer
-    /// after the run's marker clears, until another turn is named (desktop
-    /// `useMatrixCloudStop().stopped`).
-    public private(set) var scheduledStopConfirmed = false
-    /// The timeline cleared this scheduled run's marker while its Stop was
-    /// still in flight or pending. The exact attempt is kept so its receipt
-    /// still resolves; a new target replaces it.
-    public private(set) var scheduleMarkerCleared = false
+    public var requestID: String? {
+        let target = selection ?? clearedSchedule.map(Target.schedule)
+        return target.flatMap { attempts[$0]?.requestID }
+    }
+    public var scheduledStopConfirmed: Bool { confirmedSchedule != nil }
+    public var scheduleMarkerCleared: Bool { clearedSchedule != nil }
 
     public static let scheduledRetryDelay: Duration = .seconds(15)
     /// Desktop `MATRIX_STOP_SETTLE_MS`: how long an unconfirmed Stop keeps
@@ -184,111 +230,103 @@ public struct AssistantTurnStop: Equatable, Sendable {
 
     /// A new transcript reading.
     public mutating func observe(_ signal: AssistantTurnSignal) {
-        let selected = signal.hasScheduledWork
-            ? signal.scheduled.map(AssistantTurnStopIntent.Target.schedule)
-            : signal.unanswered.map { AssistantTurnStopIntent.Target.turn(eventID: $0) }
-        // Preserve an acknowledged interruption after its footer clears:
-        // the run is over (no Stop), and desktop's "Stopped." band stays
-        // until another turn is named (`scheduledStopConfirmed`).
-        if phase == .stopped, case .schedule = selection, !signal.hasScheduledWork, !signal.working {
-            self = AssistantTurnStop()
-            scheduledStopConfirmed = true
-            return
+        if let reply = signal.latestReply, latestReply.map({ reply.timestamp >= $0.timestamp }) ?? true {
+            latestReply = reply
         }
-        // Keep the exact in-flight scheduled attempt when its marker clears
-        // before the receipt: nothing else is named, so it is still the one
-        // this chat is waiting on (review r1). A new turn or run replaces it.
-        if selected == nil, !signal.hasScheduledWork, phase == .stopping, case .schedule = selection {
-            scheduleMarkerCleared = true
-            return
+        let previousSchedule: ChatScheduleExecution? = if case let .schedule(execution) = selection {
+            execution
+        } else {
+            clearedSchedule
         }
-        guard let selected else {
-            let keepsStopped = scheduledStopConfirmed && !signal.hasScheduledWork
-            self = AssistantTurnStop()
-            scheduledStopConfirmed = keepsStopped
-            // The composer can show an unavailable Stop while the exact
-            // cron target is missing. It stays disabled until a tuple arrives.
-            if signal.hasScheduledWork && signal.working { phase = .working }
-            return
+        let candidate = signal.hasScheduledWork
+            ? signal.scheduled.map(Target.schedule)
+            : signal.unanswered.map { Target.turn(eventID: $0) }
+        // Latch an identified turn through a typing lapse. A returning exact
+        // target can also recover its attempt before typing starts again.
+        selection = candidate.flatMap { target in
+            signal.working || target == selection || attempts[target] != nil ? target : nil
         }
-        if selected == selection {
-            // The latch: the same question stays the turn until it is
-            // answered, even after the typing signal lapses.
-            return
+        unavailableSchedule = signal.hasScheduledWork && signal.working && candidate == nil
+        scheduledSince = signal.scheduledSince
+
+        // A marker clearing on its own can still leave a confirmation. A
+        // different target or a finished reply takes over the composer.
+        clearedSchedule = nil
+        if candidate == nil, !signal.hasScheduledWork, let execution = previousSchedule,
+           let attempt = attempts[.schedule(execution)], attempt.phase == .stopping,
+           !hasNewerReply(than: attempt) {
+            clearedSchedule = execution
         }
-        guard signal.working else {
-            // Nothing is named yet, so a scheduled "Stopped." stays.
-            let keepsStopped = scheduledStopConfirmed && !signal.hasScheduledWork
-            self = AssistantTurnStop()
-            scheduledStopConfirmed = keepsStopped
-            return
+        if let execution = confirmedSchedule {
+            let target = Target.schedule(execution)
+            if selection != target && (selection != nil || signal.hasScheduledWork)
+                || attempts[target].map(hasNewerReply) == true {
+                confirmedSchedule = nil
+            }
         }
-        self = AssistantTurnStop()
-        selection = selected
-        phase = .working
+    }
+
+    private func hasNewerReply(than attempt: Attempt) -> Bool {
+        guard let latestReply, latestReply.eventID != attempt.replyAtTap?.eventID else { return false }
+        return attempt.scheduledSince.map { latestReply.timestamp >= $0 } ?? true
     }
 
     /// The person tapped Stop. Returns what to send, or nil when there is
     /// nothing to stop or a request is already out (a second tap is a no-op).
-    /// `newRequestID` is used only for this turn's first request; a retry
-    /// after a failure re-sends the same key.
+    /// A retry reuses the first request ID and its transcript baseline.
     public mutating func beginStop(newRequestID: String) -> AssistantTurnStopIntent? {
         guard offersStop, let selection else { return nil }
-        let key = requestID ?? newRequestID
-        requestID = key
-        phase = .stopping
-        return AssistantTurnStopIntent(target: selection, requestID: key)
+        var attempt = attempts[selection] ?? Attempt(
+            requestID: newRequestID, replyAtTap: latestReply, scheduledSince: scheduledSince
+        )
+        attempt.phase = .stopping
+        attempts[selection] = attempt
+        return AssistantTurnStopIntent(target: selection, requestID: attempt.requestID)
     }
 
-    /// The platform answered a request. An answer for a turn that is no
-    /// longer shown (the person moved on) changes nothing.
-    /// Returns whether the answer was accepted (it names the attempt shown).
+    /// Resolve the exact attempt even when it is hidden. The return value
+    /// tells the controller whether the receipt belongs to the composer.
     @discardableResult
     public mutating func resolve(_ result: AssistantTurnStopResult, for intent: AssistantTurnStopIntent) -> Bool {
-        guard intent.target == selection, intent.requestID == requestID, phase == .stopping else { return false }
-        if scheduleMarkerCleared {
-            // The run already left the timeline: only a confirmed stop leaves
-            // a word ("Stopped."); anything else settles quietly, as desktop
-            // drops a status whose key is gone.
-            let confirmed = result == .stopped
-            self = AssistantTurnStop()
-            scheduledStopConfirmed = confirmed
-            return true
+        guard var attempt = attempts[intent.target], attempt.requestID == intent.requestID,
+              attempt.phase == .stopping, !attempt.pending else { return false }
+        let markerCleared = clearedSchedule.map(Target.schedule) == intent.target
+        var visible = selection == intent.target || markerCleared
+        if case let .schedule(execution) = intent.target {
+            visible = visible && !hasNewerReply(than: attempt)
+            if markerCleared { clearedSchedule = nil }
+            if result == .stopped, visible { confirmedSchedule = execution }
         }
         switch result {
-        case .stopped:
-            phase = .stopped
-            if case .schedule = intent.target { scheduledStopConfirmed = true }
-        case .stopRequested:
-            if case .schedule = intent.target { scheduledStopPending = true }
-            phase = .stopping
-        case .completed: phase = .finishing
-        case .failed: phase = .failed
+        case .stopped: attempt.phase = .stopped
+        case .stopRequested: attempt.pending = true
+        case .completed: attempt.phase = .finishing
+        case .failed: attempt.phase = .failed
         }
-        return true
+        attempts[intent.target] = attempt
+        return visible
     }
 
     /// Desktop settles a turn's unconfirmed Stop after `settleDelay`: the
     /// "Stopping…" label goes, Stop stays disabled, nothing claims stopped.
     /// A scheduled Stop uses `retryPendingSchedule` instead.
     public mutating func settlePendingTurn(for intent: AssistantTurnStopIntent) {
-        guard case .turn = intent.target, phase == .stopping, intent.target == selection,
-              intent.requestID == requestID else { return }
-        phase = .settled
+        guard case .turn = intent.target, var attempt = attempts[intent.target],
+              attempt.requestID == intent.requestID, attempt.pending else { return }
+        attempt.pending = false
+        attempt.phase = .settled
+        attempts[intent.target] = attempt
     }
 
     /// Desktop re-offers Stop after a pending/unknown schedule receipt. This
     /// changes only availability. In-flight requests and other runs are untouched.
     public mutating func retryPendingSchedule(for intent: AssistantTurnStopIntent) {
-        guard scheduledStopPending, phase == .stopping, intent.target == selection,
-              intent.requestID == requestID else { return }
-        guard !scheduleMarkerCleared else {
-            // The run left the timeline while pending: nothing to re-offer.
-            self = AssistantTurnStop()
-            return
-        }
-        scheduledStopPending = false
-        phase = .working
+        guard case let .schedule(execution) = intent.target, var attempt = attempts[intent.target],
+              attempt.requestID == intent.requestID, attempt.pending else { return }
+        attempt.pending = false
+        attempt.phase = .working
+        attempts[intent.target] = attempt
+        if clearedSchedule == execution { clearedSchedule = nil }
     }
 
     /// What the composer draws for this state, as the desktop composer
@@ -318,6 +356,12 @@ public struct AssistantTurnStop: Equatable, Sendable {
         case .stopping: return .stopping
         case .settled, .stopped, .finishing: return .stop(enabled: false)
         }
+    }
+
+    /// A draft that can be sent takes the slot from a disabled Stop glyph.
+    public func control(canSend: Bool) -> Control {
+        if canSend, control == .stop(enabled: false) { return .hidden }
+        return control
     }
 
     public var notice: Notice? {

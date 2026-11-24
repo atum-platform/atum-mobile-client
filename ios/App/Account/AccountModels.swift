@@ -216,6 +216,9 @@ struct AccountActions {
     /// or a model whose server has not advertised phone registration, hides
     /// the row.
     var phoneApprovals: PhoneApprovalSettingsModel? = nil
+    /// Settings › Connections: the account's plans, OpenCode Go and data and
+    /// tools (`account_connections_read`). Nil keeps the "Not available yet" row.
+    var accountConnections: AccountConnectionsActions? = nil
 }
 
 /// The desktop's display-name rule (`matrixProfileDisplayName`,

@@ -87,18 +87,21 @@ final class AgentDeskModel {
     func open(_ path: String?) {
         // The same folder already on its way keeps its place in the cooldown.
         if ownTask != nil, path == ownTarget { return }
+        load(path)
+    }
+
+    func back() {
+        let path = HostAgentDesk.parent(of: ownPath)
         if let cached = ownCache[Self.key(path)] {
             ownTask?.cancel()
             ownTask = nil
             ownTarget = path
             ownPath = path
             ownView = cached
-            return
+        } else {
+            open(path)
         }
-        load(path)
     }
-
-    func back() { open(HostAgentDesk.parent(of: ownPath)) }
 
     private func load(_ path: String?) {
         ownTask?.cancel()
@@ -134,15 +137,29 @@ final class AgentDeskModel {
 
     // MARK: Schedule
 
+    /// An entry or reconciliation read can land inside the host's cooldown.
     private func readSchedule() async {
-        guard let read = actions.schedule, let schedule = await read(), !Task.isCancelled else { return }
-        jobs = schedule.jobs
+        guard let read = actions.schedule else { return }
+        for attempt in 0...1 {
+            guard !Task.isCancelled else { return }
+            do {
+                guard let schedule = try await read(), !Task.isCancelled else { return }
+                jobs = schedule.jobs
+                return
+            } catch is HostAgentDesk.ReadBusy where attempt == 0 {
+                do { try await Task.sleep(for: readRetryDelay) } catch { return }
+            } catch {
+                return
+            }
+        }
     }
 
     /// Optimistic: the switch moves at once and rolls back if the host refuses
     /// or changes nothing; a busy reply (the shared cooldown) is retried once.
     func run(_ control: HostAgentDesk.Control) {
         guard !controlPending, let send = actions.control, let before = jobs else { return }
+        // An entry read from a previous schedule must not overwrite this control.
+        scheduleTask?.cancel()
         problem = nil
         controlPending = true
         jobs = HostAgentDesk.optimistic(control, before)

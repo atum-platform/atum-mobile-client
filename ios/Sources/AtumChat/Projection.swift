@@ -262,7 +262,7 @@ public enum Projection {
             previousForQuote = item
         }
         // Desktop's loadingIndicator: one stable synthetic row, never the
-        // progress event itself (no quote, delivery, timestamp or edited mark).
+        // progress event itself (no quote, delivery, or edited mark).
         if working != nil || (personalAssistant && !typingNames.isEmpty) {
             var footer = ChatItem(id: typingRowID, kind: .typing(names: typingNames), body: working?.body ?? "",
                                   progress: working?.progress)
@@ -272,6 +272,10 @@ public enum Projection {
                 case .remote, .sent:
                     if working.eventID?.hasPrefix("$") != true || working.sender != context.workingLineSenderID {
                         footer.progress?.schedule = nil
+                    } else {
+                        // Stop uses this event time to distinguish newly
+                        // finished replies from older history loaded later.
+                        footer.timestamp = working.timestamp
                     }
                 case .sending, .failed:
                     footer.progress?.schedule = nil
