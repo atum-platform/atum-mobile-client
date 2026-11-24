@@ -283,21 +283,41 @@ public enum ChatHistorySearch {
                            rows: @MainActor () -> [ChatRow],
                            loadPage: @MainActor () async -> Page,
                            progress: @MainActor (Progress) -> Void = { _ in }) async -> Progress {
+        var index = ChatSearchIndex()
+        return await run(maximumPages: maximumPages, rows: rows,
+                         matches: { !index.matches(in: $0, query: query).isEmpty },
+                         loadPage: loadPage, progress: progress)
+    }
+
+    /// A routed result names a Matrix event. It shares the history walk and its
+    /// limits with in-chat search, without matching any other row's words.
+    @MainActor
+    public static func find(eventID: String, rows: @MainActor () -> [ChatRow],
+                            loadPage: @MainActor () async -> Page) async -> Progress {
+        await run(maximumPages: maximumPages, rows: rows,
+                  matches: { $0.contains { $0.item.eventID == eventID } },
+                  loadPage: loadPage, progress: { _ in })
+    }
+
+    @MainActor
+    private static func run(maximumPages: Int, rows: @MainActor () -> [ChatRow],
+                            matches: @MainActor ([ChatRow]) -> Bool,
+                            loadPage: @MainActor () async -> Page,
+                            progress: @MainActor (Progress) -> Void) async -> Progress {
         let limit = max(0, min(maximumPages, Self.maximumPages))
         func report(_ phase: Phase, _ pages: Int) -> Progress {
             let value = Progress(phase: phase, pages: pages, searched: searched(rows()))
             progress(value)
             return value
         }
-        var index = ChatSearchIndex()
-        if !index.matches(in: rows(), query: query).isEmpty { return report(.found, 0) }
+        if matches(rows()) { return report(.found, 0) }
         guard limit > 0 else { return report(.capped, 0) }
         for pages in 1...limit {
             if Task.isCancelled { return report(.cancelled, pages - 1) }
             _ = report(.searching, pages - 1)
             let page = await loadPage()
             if Task.isCancelled { return report(.cancelled, pages) }
-            if !index.matches(in: rows(), query: query).isEmpty { return report(.found, pages) }
+            if matches(rows()) { return report(.found, pages) }
             switch page {
             case .failed: return report(.failed, pages)
             case .loaded(hasMore: false):
@@ -305,7 +325,7 @@ public enum ChatHistorySearch {
                 // projection a short grace period before declaring no results.
                 do { try await Task.sleep(for: .milliseconds(300)) }
                 catch { return report(.cancelled, pages) }
-                if !index.matches(in: rows(), query: query).isEmpty { return report(.found, pages) }
+                if matches(rows()) { return report(.found, pages) }
                 return report(.complete, pages)
             case .loaded(hasMore: true): continue
             }

@@ -294,6 +294,16 @@ public struct CompanySearchResult: Equatable, Sendable, Identifiable {
     public var text: String { file?.name ?? snippet }
 }
 
+public struct CompanySearchPage: Equatable, Sendable {
+    public let results: [CompanySearchResult]
+    public let nextBatch: String?
+
+    public init(results: [CompanySearchResult] = [], nextBatch: String? = nil) {
+        self.results = results
+        self.nextBatch = nextBatch
+    }
+}
+
 public enum CompanyMessageSearch {
     /// `searchCompanies` asks each company for ten of each.
     public static let limit = 10
@@ -368,9 +378,17 @@ public enum CompanyMessageSearch {
     public static func results(responseJSON: Data, companyID: String, tab: CompanySearchTab,
                                query: CompanySearchQuery, targets: [CompanySearchTarget],
                                limit: Int = limit, timeZone: TimeZone = .current) -> [CompanySearchResult]? {
+        page(responseJSON: responseJSON, companyID: companyID, tab: tab, query: query,
+             targets: targets, limit: limit, timeZone: timeZone)?.results
+    }
+
+    static func page(responseJSON: Data, companyID: String, tab: CompanySearchTab,
+                     query: CompanySearchQuery, targets: [CompanySearchTarget],
+                     limit: Int, timeZone: TimeZone = .current) -> CompanySearchPage? {
         guard let root = try? JSONSerialization.jsonObject(with: responseJSON) as? [String: Any],
               let categories = root["search_categories"] as? [String: Any],
               let page = categories["room_events"] as? [String: Any] else { return nil }
+        if let rawResults = page["results"], !(rawResults is [Any]) { return nil }
         let found = (page["results"] as? [Any] ?? []).compactMap { ($0 as? [String: Any])?["result"] }
         let byRoom = Dictionary(targets.map { ($0.roomID, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
@@ -413,7 +431,8 @@ public enum CompanyMessageSearch {
                     isConversation: target.isConversation))
             }
         }
-        return results
+        let nextBatch = (page["next_batch"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return CompanySearchPage(results: results, nextBatch: nextBatch)
     }
 
     /// Desktop `searchCompanies`: every company's page, companies in id order.

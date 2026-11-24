@@ -266,11 +266,11 @@ struct ScriptedHomeHost: View {
                         },
                         invites: scriptedInvites,
                         messageSearch: scriptedMessageSearch,
-                        openChannel: { roomID in
+                        openChannel: { roomID, _ in
                             UITestProbe.append("open-channel \(roomID)", to: "team-actions.txt")
-                            if scriptedChannelFailures.remove(roomID) != nil { return false }
+                            if scriptedChannelFailures.remove(roomID) != nil { return .failed }
                             router.openTeamSpace(roomId: roomID)
-                            return true
+                            return .opened
                         }
                     )
                 )
@@ -477,17 +477,19 @@ struct ScriptedHomeHost: View {
     /// W4-E7 header search with one synthetic answer in #launch; every ask and open is probed.
     private var scriptedMessageSearch: TeamSpaceMessageSearchActions {
         TeamSpaceMessageSearchActions(
-            search: { companyID, query in
+            search: { companyID, query, _ in
                 UITestProbe.append("search \(companyID) \(query)", to: "team-actions.txt")
-                return [CompanySearchResult(companyID: companyID, channelID: "launch", roomID: "!launch:atum.test",
-                                            channelName: "launch", eventID: "$scripted-launch-date",
-                                            sender: ScriptedCast.me, snippet: "Launch moves to Tuesday.",
-                                            at: 1_792_540_800_000)]
+                return CompanySearchPage(results: [
+                    CompanySearchResult(companyID: companyID, channelID: "launch", roomID: "!launch:atum.test",
+                                        channelName: "launch", eventID: "$scripted-launch-date",
+                                        sender: ScriptedCast.me, snippet: "Launch moves to Tuesday.",
+                                        at: 1_792_540_800_000)
+                ])
             },
             open: { result in
                 UITestProbe.append("search-open \(result.eventID)", to: "team-actions.txt")
                 router.openTeamSpace(roomId: result.roomID)
-                return true
+                return .opened
             })
     }
 

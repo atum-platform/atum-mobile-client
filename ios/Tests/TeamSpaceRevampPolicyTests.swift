@@ -18,6 +18,60 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
         XCTAssertNil(TeamSpaceHeaderSearch.messageQuery("\u{1EAF}"))
     }
 
+    func testShortSearchClearsResultsAndDropsALatePage() throws {
+        var state = TeamSpaceMessageSearchState()
+        state.submit(" launch ")
+        let initial = try XCTUnwrap(state.request)
+        XCTAssertEqual(initial.term, "launch")
+        state.finish(initial, answer: CompanySearchPage(results: [message("$first")], nextBatch: "next"))
+        state.loadMore()
+        let more = try XCTUnwrap(state.request)
+
+        state.submit(" a ")
+        state.finish(more, answer: CompanySearchPage(results: [message("$late")]))
+        XCTAssertNil(state.request)
+        XCTAssertNil(state.page)
+        XCTAssertFalse(state.failed)
+    }
+
+    func testSearchFailureIsDistinctFromEmptyAndAnAppendCanRetry() throws {
+        var state = TeamSpaceMessageSearchState()
+        state.submit("launch")
+        state.finish(try XCTUnwrap(state.request), answer: nil)
+        XCTAssertTrue(state.failed)
+        XCTAssertNil(state.page)
+
+        state.submit("launch")
+        state.finish(try XCTUnwrap(state.request), answer: CompanySearchPage())
+        XCTAssertFalse(state.failed)
+        XCTAssertEqual(state.page, CompanySearchPage())
+
+        let first = message("$first")
+        state.submit("launch")
+        state.finish(try XCTUnwrap(state.request), answer: CompanySearchPage(results: [first], nextBatch: "next"))
+        state.loadMore()
+        let more = try XCTUnwrap(state.request)
+        state.loadMore()
+        XCTAssertEqual(state.request, more, "only one page request at a time")
+        state.finish(more, answer: nil)
+        XCTAssertTrue(state.failed)
+        XCTAssertEqual(state.page?.results, [first])
+
+        state.loadMore()
+        let retry = try XCTUnwrap(state.request)
+        XCTAssertEqual(retry.nextBatch, more.nextBatch)
+        let second = message("$second")
+        state.finish(retry, answer: CompanySearchPage(results: [first, second]))
+        XCTAssertFalse(state.failed)
+        XCTAssertEqual(state.page, CompanySearchPage(results: [first, second]))
+    }
+
+    private func message(_ id: String) -> CompanySearchResult {
+        CompanySearchResult(companyID: "anka", channelID: "launch", roomID: "!launch:atum.test",
+                            channelName: "launch", eventID: id, sender: "@me:atum.test",
+                            snippet: "launch", at: 0)
+    }
+
     func testChannelsSaysNoMatchesOnlyWhileAQueryHidesLiveChannels() {
         XCTAssertEqual(CompanyChannelListNote.note(query: "zz", shown: 0, live: 3, archived: 0), .noMatches)
         XCTAssertEqual(CompanyChannelListNote.note(query: "  ", shown: 0, live: 3, archived: 0), .noChannels,
@@ -102,7 +156,7 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
         var state = CompanyChannelOpenState()
         let attempt = state.begin(launch)
         XCTAssertTrue(state.isOpening(roomID: launch.roomID, companyID: "anka"))
-        state.finish(attempt, opened: false)
+        state.finish(attempt, result: .failed)
         XCTAssertFalse(state.isOpening(roomID: launch.roomID, companyID: "anka"))
         XCTAssertEqual(state.failedRoom(companyID: "anka"), launch.roomID)
         XCTAssertNil(state.failedRoom(companyID: "studio"), "shown only for its own company")
@@ -110,10 +164,10 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
 
     func testTryAgainClearsTheFailureAndASuccessKeepsItClear() {
         var state = CompanyChannelOpenState()
-        state.finish(state.begin(launch), opened: false)
+        state.finish(state.begin(launch), result: .failed)
         let retry = state.begin(launch)
         XCTAssertNil(state.failedRoom(companyID: "anka"), "the line goes while the room opens again")
-        state.finish(retry, opened: true)
+        state.finish(retry, result: .opened)
         XCTAssertNil(state.failedRoom(companyID: "anka"))
         XCTAssertNil(state.opening)
     }
@@ -122,23 +176,33 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
         var state = CompanyChannelOpenState()
         let first = state.begin(launch)
         let second = state.begin(design)
-        state.finish(first, opened: false)
+        state.finish(first, result: .failed)
         XCTAssertNil(state.failedRoom(companyID: "anka"), "a replaced open cannot fail on screen")
         XCTAssertTrue(state.isOpening(roomID: design.roomID, companyID: "anka"))
-        state.finish(second, opened: nil)
+        state.finish(second, result: .superseded)
         XCTAssertNil(state.failedRoom(companyID: "anka"), "no answer of its own is not a failure")
         XCTAssertNil(state.opening)
     }
 
+    func testASupersededOpenClearsTheSpinnerAndAllowsARetry() {
+        var state = CompanyChannelOpenState()
+        state.finish(state.begin(launch), result: .superseded)
+        XCTAssertNil(state.opening)
+        XCTAssertNil(state.failure)
+
+        state.finish(state.begin(launch), result: .failed)
+        XCTAssertEqual(state.failure, launch)
+    }
+
     func testAnotherCompanyOnScreenClearsTheFailureAndDropsItsOpen() {
         var state = CompanyChannelOpenState()
-        state.finish(state.begin(launch), opened: false)
+        state.finish(state.begin(launch), result: .failed)
         state.navigated(toCompany: "studio")
         XCTAssertNil(state.failedRoom(companyID: "anka"))
 
         let pending = state.begin(launch)
         state.navigated(toCompany: "studio")
-        state.finish(pending, opened: false)
+        state.finish(pending, result: .failed)
         XCTAssertNil(state.failedRoom(companyID: "anka"), "an open for a company no longer shown cannot land")
         XCTAssertNil(state.opening)
     }
@@ -147,7 +211,7 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
         // Desktop clears it on `activeRoomId` as well as on the company: a push or a
         // search result opening another room is a successful navigation.
         var state = CompanyChannelOpenState()
-        state.finish(state.begin(design), opened: false)
+        state.finish(state.begin(design), result: .failed)
         XCTAssertEqual(state.failedRoom(companyID: "anka"), design.roomID)
         state.navigated(toCompany: "anka")
         XCTAssertNil(state.failedRoom(companyID: "anka"))
@@ -156,11 +220,11 @@ final class TeamSpaceRevampPolicyTests: XCTestCase {
 
     func testAnotherRoomOnScreenInTheSameCompanyKeepsItsOpen() {
         var state = CompanyChannelOpenState()
-        state.finish(state.begin(design), opened: false)
+        state.finish(state.begin(design), result: .failed)
         let pending = state.begin(launch)
         state.navigated(toCompany: "anka")
         XCTAssertNil(state.failedRoom(companyID: "anka"))
-        state.finish(pending, opened: false)
+        state.finish(pending, result: .failed)
         XCTAssertEqual(state.failedRoom(companyID: "anka"), launch.roomID)
     }
 }

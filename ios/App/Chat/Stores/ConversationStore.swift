@@ -177,6 +177,8 @@ final class LiveConversationStore: ConversationStore {
     /// fill the composer (desktop `composer.edit`), the keyboard comes up, and
     /// nothing is sent.
     private(set) var composerFocusRequest: UInt64 = 0
+    /// The exact event selected in Team Space search, scoped to this open chat.
+    var searchTargetEventID: String?
 
     func pickStarter(_ text: String) {
         draft = text
@@ -395,6 +397,7 @@ final class LiveConversationStore: ConversationStore {
     // MARK: Protocol
 
     func handle(_ input: FollowInput) {
+        if case .jumpTapped = input { searchTargetEventID = nil }
         run(core.handle(input, now: clock()))
         // Follow state and scroll requests change on geometry alone (the
         // pill); the rows do not, so only these two are mirrored here.

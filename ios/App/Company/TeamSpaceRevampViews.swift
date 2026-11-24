@@ -9,11 +9,9 @@ import SwiftUI
 
 /// Company message search for the open company, asked from the header box.
 struct TeamSpaceMessageSearchActions {
-    /// One company's Messages tab (desktop `bridge.search`, `tab: 'messages'`). The phone's
-    /// search service answers a failure with nothing, as Home search does.
-    var search: @MainActor (_ companyID: String, _ query: String) async -> [CompanySearchResult]
+    var search: @MainActor (_ companyID: String, _ query: String, _ nextBatch: String?) async -> CompanySearchPage?
     /// The message is checked again and its room opened (desktop `onOpenSearchResult`).
-    var open: @MainActor (CompanySearchResult) async -> Bool
+    var open: @MainActor (CompanySearchResult) async -> RoomOpenResult
 }
 
 // MARK: Header search
@@ -58,24 +56,13 @@ struct TeamSpaceSearchMessagesRow: View {
 struct TeamSpaceMessageSearchSheet: View {
     let design: LiveDesign
     let companyID: String
-    let initialQuery: String
     let actions: TeamSpaceMessageSearchActions
     let opened: () -> Void
 
-    /// One ask of the search: a new one (or the sheet closing) cancels the one before,
-    /// so a replaced fan-out stops holding the shared search queue's slots.
-    private struct Ask: Equatable {
-        let term: String
-        let serial: Int
-    }
-
     @State private var query: String
-    @State private var ask: Ask?
-    @State private var searched: String?
-    @State private var results: [CompanySearchResult] = []
-    @State private var searching = false
-    /// A result is being opened; a second tap waits for it.
-    @State private var opening = false
+    @State private var searchState: TeamSpaceMessageSearchState
+    /// Tied to the sheet so dismissing it also cancels the open.
+    @State private var opening: CompanySearchResult?
     @State private var openFailed = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
@@ -86,17 +73,39 @@ struct TeamSpaceMessageSearchSheet: View {
          actions: TeamSpaceMessageSearchActions, opened: @escaping () -> Void) {
         self.design = design
         self.companyID = companyID
-        self.initialQuery = initialQuery
         self.actions = actions
         self.opened = opened
         _query = State(initialValue: initialQuery)
-        _ask = State(initialValue: TeamSpaceHeaderSearch.messageQuery(initialQuery).map { Ask(term: $0, serial: 0) })
+        var state = TeamSpaceMessageSearchState()
+        state.submit(initialQuery)
+        _searchState = State(initialValue: state)
     }
 
     var body: some View {
+        let request = searchState.request
+        let openingResult = opening
         NavigationStack {
             List {
-                if searching {
+                if let page = searchState.page {
+                    ForEach(page.results) { result in
+                        Button { if opening == nil { opening = result } } label: {
+                            HomeSearchEventRow(design: design, result: result, section: .messages)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(opening != nil)
+                        .listRowBackground(Color.clear)
+                        .accessibilityIdentifier("company.search.result." + result.eventID)
+                    }
+                    if page.results.isEmpty, page.nextBatch == nil, !searchState.failed {
+                        note(design.text("shared.matrix-company-copy.copy.searchNoResults"))
+                            .accessibilityIdentifier("company.search.empty")
+                    }
+                }
+                if searchState.failed {
+                    note(design.text("shared.matrix-company-copy.copy.unavailable"))
+                        .accessibilityIdentifier("company.search.failed")
+                }
+                if request != nil {
                     HStack {
                         Spacer()
                         ProgressView()
@@ -105,18 +114,15 @@ struct TeamSpaceMessageSearchSheet: View {
                     }
                     .listRowBackground(Color.clear)
                     .accessibilityIdentifier("company.search.loading")
-                } else if searched != nil, results.isEmpty {
-                    note(design.text("shared.matrix-company-copy.copy.searchNoResults"))
-                        .accessibilityIdentifier("company.search.empty")
-                } else {
-                    ForEach(results) { result in
-                        Button { open(result) } label: {
-                            HomeSearchEventRow(design: design, result: result, section: .messages)
-                        }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Color.clear)
-                        .accessibilityIdentifier("company.search.result." + result.eventID)
+                } else if searchState.page?.nextBatch != nil {
+                    Button {
+                        searchState.loadMore()
+                    } label: {
+                        Text(verbatim: searchState.failed ? copy.tryAgain : loadMore)
+                            .frame(minHeight: 44)
                     }
+                    .listRowBackground(Color.clear)
+                    .accessibilityIdentifier("company.search.more")
                 }
             }
             .listStyle(.plain)
@@ -124,7 +130,7 @@ struct TeamSpaceMessageSearchSheet: View {
             .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
                         prompt: Text(verbatim: design.text("shared.matrix-company-copy.copy.searchPlaceholder")))
-            .onSubmit(of: .search) { run(query) }
+            .onSubmit(of: .search) { searchState.submit(query) }
             .navigationTitle(copy.search)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -135,9 +141,16 @@ struct TeamSpaceMessageSearchSheet: View {
                 }
             }
         }
-        .task(id: ask) { await search(ask) }
+        .task(id: request) { await search(request) }
+        .task(id: openingResult) { await open(openingResult) }
         .sensoryFeedback(.error, trigger: openFailed)
         .accessibilityIdentifier("company.search.sheet")
+    }
+
+    private var loadMore: String {
+        let key = "shared.matrix-company-copy.copy.searchLoadMore"
+        return design.copy.contains(key) ? design.text(key)
+            : design.text("src.matrix.mobile-copy.mobileScreensCopy.teamSpace.activity.loadMore")
     }
 
     private func note(_ text: String) -> some View {
@@ -148,34 +161,22 @@ struct TeamSpaceMessageSearchSheet: View {
             .listRowSeparator(.hidden)
     }
 
-    /// Desktop asks once the query has two characters. Each ask replaces the last.
-    private func run(_ raw: String) {
-        guard let term = TeamSpaceHeaderSearch.messageQuery(raw) else { return }
-        ask = Ask(term: term, serial: (ask?.serial ?? 0) + 1)
-    }
-
-    /// Runs in `.task(id: ask)`: SwiftUI cancels it when the ask changes or the sheet goes,
-    /// and a cancelled search lands nothing.
-    private func search(_ ask: Ask?) async {
-        guard let ask else { return }
-        searching = true
-        let answer = await actions.search(companyID, ask.term)
+    private func search(_ request: TeamSpaceMessageSearchState.Request?) async {
+        guard let request, !Task.isCancelled else { return }
+        let answer = await actions.search(companyID, request.term, request.nextBatch)
         guard !Task.isCancelled else { return }
-        searching = false
-        searched = ask.term
-        results = answer
+        searchState.finish(request, answer: answer)
     }
 
-    private func open(_ result: CompanySearchResult) {
-        guard !opening else { return }
-        opening = true
-        Task { @MainActor in
-            defer { opening = false }
-            if await actions.open(result) {
-                opened()
-            } else {
-                openFailed += 1
-            }
+    private func open(_ result: CompanySearchResult?) async {
+        guard let result, !Task.isCancelled else { return }
+        let outcome = await actions.open(result)
+        guard !Task.isCancelled else { return }
+        opening = nil
+        switch outcome {
+        case .opened: opened()
+        case .failed: openFailed += 1
+        case .superseded: break
         }
     }
 }

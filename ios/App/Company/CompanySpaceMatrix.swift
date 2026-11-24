@@ -143,8 +143,19 @@ final class LiveCompanySearchTransport: CompanySearchTransport {
         return URLSession(configuration: configuration, delegate: CompanySpaceNoRedirect(), delegateQueue: nil)
     }()
 
-    func search(body: Data, endpoint: CompanySearchEndpoint) async throws -> Data {
-        var request = URLRequest(url: endpoint.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+    func search(body: Data, endpoint: CompanySearchEndpoint, nextBatch: String?) async throws -> Data {
+        var url = endpoint.url
+        if let nextBatch {
+            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                throw CompanySpaceMatrixFailure.refused
+            }
+            components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "next_batch", value: nextBatch)]
+            // Matrix tokens are opaque. Keep '+' from becoming a form-encoded space.
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+            guard let pageURL = components.url else { throw CompanySpaceMatrixFailure.refused }
+            url = pageURL
+        }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.httpShouldHandleCookies = false
         request.setValue("Bearer " + endpoint.bearer, forHTTPHeaderField: "Authorization")

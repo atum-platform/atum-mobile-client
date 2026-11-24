@@ -116,6 +116,17 @@ final class ChatSearchTests: XCTestCase {
     }
 
     @MainActor
+    func testRoutedSearchMatchesTheEventIDEvenWhenTheTextIsIdentical() async {
+        var loaded = [F.text("new", from: F.agent, "launch")]
+        let result = await ChatHistorySearch.find(eventID: "$old", rows: { self.rows(loaded) }, loadPage: {
+            loaded.insert(F.text("old", from: F.agent, "launch", threadRoot: "$thread"), at: 0)
+            return .loaded(hasMore: true)
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 1)
+    }
+
+    @MainActor
     func testFinalPageIdleBeforeDiffsStillFindsOldestMatch() async {
         var loaded = [F.text("new", from: F.agent, "nothing")]
         var publication: Task<Void, Never>?
