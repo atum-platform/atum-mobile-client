@@ -20,8 +20,9 @@ geometry that is not spacing, such as a 1 pt hairline or an ambient loop.
 
 Counts are compared per file and kind with `scripts/design-lint-baseline.json`, the
 counts on the day the lint landed. A count above its baseline fails (new drift; a new
-file starts at zero). A count below its baseline also fails until `--update` locks the
-progress in, so a migrated file cannot quietly drift back.
+file starts at zero). A count below its baseline only prints a reminder to run
+`--update`, so parallel lanes that remove raw values or delete files don't fail CI; the
+lanes lock their progress in when they migrate.
 
   python3 scripts/design_lint.py            # check (exit 1 on new drift)
   python3 scripts/design_lint.py --update   # rewrite the baseline to today's counts
@@ -202,10 +203,10 @@ def check(root: Path, baseline_path: Path, out=sys.stdout) -> int:
               f"'// {ALLOW}: <reason>'.", file=out)
         print("\n".join(drift), file=out)
     if stale:
-        print("design lint: fewer raw values than the baseline. Lock the progress in with "
+        print("design lint (note): fewer raw values than the baseline. Lock the progress in with "
               "`python3 scripts/design_lint.py --update` and commit the baseline.", file=out)
         print("\n".join(stale), file=out)
-    if drift or stale:
+    if drift:
         return 1
     total = sum(sum(row.values()) for row in current.values())
     print(f"design lint: OK ({total} baseline findings in {len(current)} files)", file=out)

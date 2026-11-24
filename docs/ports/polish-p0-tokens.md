@@ -87,9 +87,10 @@ files.
 - **A count above its baseline fails.** This is new drift. A new file starts at
   zero. The failure lists every line of that kind in the file, and the new one
   is among them.
-- **A count below its baseline also fails** until the baseline is updated. This
-  locks in progress, so a migrated file cannot quietly drift back. The same
-  applies to a deleted or renamed file.
+- **A count below its baseline passes with a reminder** to run `--update`
+  (coordinator decision, 24 Nov: several lanes edit these files in parallel, and
+  a strict ratchet would fail CI on every removal, deletion or rename). Lanes
+  that migrate a file run `--update` to lock their progress in.
 - **For a real exception**, such as a 1 pt hairline or an ambient loop like the
   atom mark's breathing, put `// design-lint: allow: <reason>` on the line.
 

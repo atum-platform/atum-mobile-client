@@ -124,11 +124,11 @@ class CheckTests(unittest.TestCase):
         code, out = self.run_check(over)
         self.assertEqual(code, 1)
         self.assertIn("padding 2 > baseline 1", out)
-        # Fewer than the baseline (a migration, a deleted file) fails until --update.
+        # Fewer than the baseline (a migration, a deleted file) passes with a reminder.
         under = self.repo(files, baseline={"ios/App/Chat/Bubble.swift": {"padding": 3},
                                            "ios/App/Chat/Gone.swift": {"radius": 1}})
         code, out = self.run_check(under)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0)
         self.assertIn("padding 2 < baseline 3", out)
         self.assertIn("ios/App/Chat/Gone.swift: radius 0 < baseline 1", out)
         self.assertIn("--update", out)
