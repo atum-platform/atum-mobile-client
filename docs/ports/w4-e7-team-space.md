@@ -156,3 +156,8 @@ the Debug simulator `build-for-testing`, and one local UI test,
 channel retry, Board · List · Mine and header search in en and vi, light and dark. All of it ran
 under `lockf -k /Volumes/AtumTestFlight/.heavy-build.lock`, with derived data in
 `/Volumes/AtumTestFlight/dd-w4-e7` and packages in `/Volumes/AtumTestFlight/spm`.
+
+## Commits
+
+1. State rules (`TeamSpaceRevampPolicy.swift`) with their tests, and this document.
+2. The six glyph mappings (`phosphor-map.json`, regenerated `PhosphorSymbols.swift`).
