@@ -684,8 +684,9 @@ struct TranscriptView: View {
                                        distanceFromTop: geometry.distanceFromTop,
                                        viewportHeight: geometry.viewportHeight, motion: scratch.motion))
                 syncFollowState()
-                if let placement = scratch.routedPlacement {
-                    guard case .enqueued = placement.completion.yield(()) else { return }
+                // A timed-out waiter has already failed; its cleanup clears the placement.
+                if let placement = scratch.routedPlacement,
+                   case .enqueued = placement.completion.yield(()) {
                     scratch.routedPlacement = nil
                     store.searchTargetEventID = nil
                     placement.completion.finish()

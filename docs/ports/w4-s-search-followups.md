@@ -41,3 +41,5 @@ allows time for a late layout pass. If confirmation never arrives, the walk
 fails, clears the pending event, and resumes bottom visibility tracking from
 the last geometry. A replaced projection can still retry within the original
 40-page walk and its 300 ms end-of-history grace period.
+
+Coordinator follow-up: when layout confirms after the waiter already timed out, the callback no longer returns early, so `updateBottomVisible()` still runs on that tick.
