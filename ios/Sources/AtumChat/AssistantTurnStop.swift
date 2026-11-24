@@ -185,8 +185,8 @@ public struct AssistantTurnStop: Equatable, Sendable {
         let requestID: String
         var phase: Phase = .stopping
         var pending = false
-        var replyAtTap: AssistantTurnSignal.Reply?
-        var scheduledSince: Date?
+        let replyAtTap: AssistantTurnSignal.Reply?
+        let scheduledSince: Date?
     }
 
     // A projection may lose or replace a target while its request is active.
@@ -273,13 +273,15 @@ public struct AssistantTurnStop: Equatable, Sendable {
 
     /// The person tapped Stop. Returns what to send, or nil when there is
     /// nothing to stop or a request is already out (a second tap is a no-op).
-    /// `newRequestID` is used only for this turn's first request; a retry
-    /// after a failure re-sends the same key.
+    /// A retry reuses the first request ID and its transcript baseline.
     public mutating func beginStop(newRequestID: String) -> AssistantTurnStopIntent? {
         guard offersStop, let selection else { return nil }
-        let key = attempts[selection]?.requestID ?? newRequestID
-        attempts[selection] = Attempt(requestID: key, replyAtTap: latestReply, scheduledSince: scheduledSince)
-        return AssistantTurnStopIntent(target: selection, requestID: key)
+        var attempt = attempts[selection] ?? Attempt(
+            requestID: newRequestID, replyAtTap: latestReply, scheduledSince: scheduledSince
+        )
+        attempt.phase = .stopping
+        attempts[selection] = attempt
+        return AssistantTurnStopIntent(target: selection, requestID: attempt.requestID)
     }
 
     /// Resolve the exact attempt even when it is hidden. The return value

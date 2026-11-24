@@ -681,6 +681,36 @@ final class AssistantTurnStopControllerTests: XCTestCase {
         XCTAssertEqual(route.sent.map(\.requestID), ["r1", "r1"])
     }
 
+    func testScheduledRetryDoesNotAnnounceStoppedAfterANewerReplyFinished() async throws {
+        let run = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run"))
+        let controller = AssistantTurnStopController(sleep: { _ in })
+        let route = Route()
+        var heard = [AssistantTurnStopController.Announcement]()
+        controller.announce = { heard.append($0) }
+        controller.observe(.init(unanswered: nil, working: true, scheduled: run, scheduledSince: F.at(1)))
+        let first = try XCTUnwrap(controller.tap(newRequestID: "original", send: route.send))
+        await route.waitForRequest()
+        route.answer(.stopRequested)
+        await first.value
+        XCTAssertTrue(controller.stop.offersStop, "the pending Stop timed out")
+
+        let newer = AssistantTurnSignal.Reply(eventID: "$finished", timestamp: F.at(2))
+        controller.observe(.init(unanswered: nil, working: true, scheduled: run,
+                                 scheduledSince: F.at(1), latestReply: newer))
+        let retry = try XCTUnwrap(controller.tap(newRequestID: "retry", send: route.send))
+        await route.waitForRequest()
+        controller.observe(.init(unanswered: nil, working: false, latestReply: newer))
+        route.answer(.stopped)
+        await retry.value
+
+        let intent = AssistantTurnStopIntent(target: .schedule(run), requestID: "original")
+        XCTAssertEqual(route.sent, [intent, intent])
+        XCTAssertEqual(controller.settledSchedules, [run])
+        XCTAssertEqual(controller.stop.control, .hidden)
+        XCTAssertNil(controller.stop.notice)
+        XCTAssertEqual(heard, [.stopping, .stopping])
+    }
+
     func testOnlyAcceptedTransitionsAreAnnounced() async throws {
         let run = try XCTUnwrap(ChatScheduleExecution(job: "job", execution: "run-a"))
         var heard = [AssistantTurnStopController.Announcement]()

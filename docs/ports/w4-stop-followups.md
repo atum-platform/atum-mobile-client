@@ -51,3 +51,15 @@ finished before the old receipt arrives.
 The review follow-up passed all 78 filtered package tests (exit 0), the
 Debug build-for-testing (exit 0), and all three
 `ConversationStopStateTests` cases (exit 0) in one locked run.
+
+## Scheduled retry follow-up
+
+Retrying a scheduled Stop retains the reply baseline and marker time from
+the first request. The controller test expires a pending Stop, publishes a
+newer finished reply while the marker is visible, and retries with the same
+request ID. After the marker clears, the terminal receipt settles the
+execution without a “Stopped.” notice or announcement.
+
+The locked run passed all 79 focused package tests (exit 0), the Debug
+build-for-testing (exit 0), and all three `ConversationStopStateTests`
+cases (exit 0).
