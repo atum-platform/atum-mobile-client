@@ -113,6 +113,20 @@ struct HomeAssistantActions {
     var checkHandle: (@MainActor (NativeHandle) async throws -> AgentAliasCheck)?
     /// The persona, handle and photo writes for the new assistant's room.
     var followUp: (@MainActor (String) -> AssistantCreateFollowUp?)?
+    /// Open listings (desktop D9): read each time the sheet opens; nil or an
+    /// empty answer hides the "Ready to hire" shelf.
+    var listings: (@MainActor () async -> [OpenAgentListing])?
+    /// One listing hire, under its persisted request (`hireListing`).
+    var hire: ListingHireFlow.Run?
+    /// The hire in progress, owned above the sheet so leaving it never drops one.
+    var hireFlow: ListingHireFlow?
+    /// The signed-in account (its Matrix ID) a pick belongs to; nil hides the shelf.
+    var hireAccount: String?
+    /// The names the catalog's apps go by, so a hired assistant is never named
+    /// as an app (desktop `appCatalogNames`).
+    var appNames: [String] = []
+    /// Whether a hired assistant's chat is open on this phone yet.
+    var chatReady: (@MainActor (NativeID) -> Bool)?
 }
 
 /// The lifecycle endpoint identifies the operation, assistant and canonical
