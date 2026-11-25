@@ -16,37 +16,68 @@ struct EmptyChatGreeting<Face: View>: View {
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// The space the greeting may fill (the transcript's, above the composer),
+    /// so the scrolling fallback still centres a greeting that fits.
+    @State private var available: CGFloat = 0
 
     var body: some View {
         if let theme {
             // The hour is read when the chat draws, as desktop does on render.
             let period = EmptyChatPolicy.period(hour: Calendar.current.component(.hour, from: Date()))
-            VStack(spacing: 0) {
-                face
-                    .accessibilityHidden(true)
-                Text(theme.copy.text(EmptyChatPolicy.greetingKey(period)))
-                    .font(.system(.title, weight: .semibold))
-                    .foregroundStyle(theme.color("ink", scheme))
-                    // Never compressed to a clipped line at the largest sizes.
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 16)
-                    .accessibilityAddTraits(.isHeader)
-                Text(theme.copy.text(.greetingPrompt))
-                    .font(.body)
-                    .foregroundStyle(theme.quiet(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-                if let onPickStarter {
-                    StarterChips(theme: theme, onPick: onPickStarter)
-                        .padding(.top, 24)
+            // Polish P3 (audit issue 9): at the largest text sizes, with the
+            // keyboard up, the fixed stack ran under the title bar and behind
+            // the composer. Now the first of these that fits is drawn: the
+            // whole greeting, centred; at an accessibility size, the greeting
+            // without the face (it is decoration, hidden from VoiceOver);
+            // else the greeting scrolls, centred while it fits.
+            ViewThatFits(in: .vertical) {
+                greeting(theme, period: period, showsFace: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if dynamicTypeSize.isAccessibilitySize {
+                    greeting(theme, period: period, showsFace: false)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                ScrollView {
+                    greeting(theme, period: period, showsFace: !dynamicTypeSize.isAccessibilitySize)
+                        .padding(.vertical, theme.design.kit.space(.s4))
+                        .frame(maxWidth: .infinity, minHeight: available)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { available = $0 }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier(AccessibilityID.chatGreeting)
         }
+    }
+
+    private func greeting(_ theme: ChatTheme, period: EmptyChatPolicy.Period, showsFace: Bool) -> some View {
+        let kit = theme.design.kit
+        return VStack(spacing: 0) {
+            if showsFace {
+                face
+                    .accessibilityHidden(true)
+                    .padding(.bottom, kit.space(.s4))
+            }
+            Text(theme.copy.text(EmptyChatPolicy.greetingKey(period)))
+                .font(.system(.title, weight: .semibold))
+                .foregroundStyle(theme.color("ink", scheme))
+                // Never compressed to a clipped line at the largest sizes.
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text(theme.copy.text(.greetingPrompt))
+                .font(.body)
+                .foregroundStyle(theme.quiet(scheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, kit.space(.s2))
+            if let onPickStarter {
+                StarterChips(theme: theme, onPick: onPickStarter)
+                    .padding(.top, kit.space(.s6))
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, kit.space(.s6))
     }
 }
 
@@ -74,9 +105,10 @@ private struct StarterChips: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .frame(minHeight: 36)
-                        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(theme.color("frame", scheme), lineWidth: 1))
-                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        // Desktop `rounded-full`: a capsule, also when a long
+                        // translation wraps at the largest sizes.
+                        .overlay(Capsule().strokeBorder(theme.color("frame", scheme), lineWidth: 1))
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("chat.starter.\(index)")

@@ -629,6 +629,48 @@ final class MessageMenuUITests: WS3UITestCase {
         keepScreenshot("actions-7-reply-quote", of: app)
     }
 
+    /// Polish P3 (audit issue 5): one press, as the system's context menus
+    /// work. A press released in place leaves the menu open and runs
+    /// nothing, even with a part under the finger. Then: hold the later
+    /// answer, keep the finger down, slide on to the first reaction (👍) and
+    /// let go: the reaction is added, with no second tap.
+    @MainActor
+    func testPressAndSlideOntoAReactionRunsItWithoutASecondTap() {
+        let app = launchChat(.chatActions)
+        let row = element(app, laterAnswer)
+        XCTAssertTrue(row.waitForExistence(timeout: Self.waitSeconds))
+        let bubble = labelContains(row, "Kết luận")
+        XCTAssertTrue(bubble.waitForExistence(timeout: Self.waitSeconds))
+        XCTAssertTrue(bubble.isHittable, "the answer is on screen")
+        let start = bubble.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+
+        // Held and released in place: the menu stays for a tap, and where
+        // its 👍 sits is read from the screen (`MessageMenuLayout` may move
+        // the copy up to fit the menu, so it is not computed from the row).
+        start.press(forDuration: 1.2)
+        let palette = paletteButton(app, "👍")
+        XCTAssertTrue(palette.waitForExistence(timeout: Self.waitSeconds), "the menu opened")
+        XCTAssertTrue(menuButton(app, "Trả lời").exists, "a press without a slide keeps the menu open")
+        XCTAssertFalse(row.descendants(matching: .any)["reaction.👍"].exists, "and runs nothing")
+        keepScreenshot("p3-press-menu-open", of: app)
+        let target = palette.frame
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+        waitForAbsence(menuButton(app, "Trả lời"))
+
+        // Held well past the 0.35 s threshold: on a simulator driven by
+        // XCUITest the menu is on screen about 1 s after the touch begins
+        // (before and after P3 alike). The finger rests on 👍 before it
+        // lifts; the lift is hit-tested where it happens.
+        let thumbs = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: target.midX, dy: target.midY))
+        start.press(forDuration: 1.6, thenDragTo: thumbs, withVelocity: .slow, thenHoldForDuration: 1.0)
+        let chip = row.descendants(matching: .any)["reaction.👍"].firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: Self.waitSeconds), "the slide added 👍")
+        XCTAssertTrue(chip.isSelected, "mine")
+        waitForAbsence(menuButton(app, "Trả lời"))
+        keepScreenshot("p3-slide-reaction-added", of: app)
+    }
+
     /// B22: the palette adds my reaction; tapping a chip toggles mine.
     @MainActor
     func testReactionsToggleFromThePaletteAndTheChips() {

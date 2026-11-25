@@ -89,22 +89,20 @@
       "font-size": 1
     },
     "ios/App/Chat/Views/Composer.swift": {
-      "padding": 19,
+      "padding": 15,
       "spacing": 8,
-      "font-size": 6,
-      "animation": 1
+      "font-size": 1
     },
     "ios/App/Chat/Views/DayDividerRow.swift": {
       "padding": 3
     },
     "ios/App/Chat/Views/DeliveryLine.swift": {
-      "padding": 7,
+      "padding": 6,
       "spacing": 2
     },
     "ios/App/Chat/Views/EmptyChatGreeting.swift": {
-      "padding": 7,
-      "spacing": 1,
-      "radius": 2
+      "padding": 3,
+      "spacing": 1
     },
     "ios/App/Chat/Views/FailedSendSheet.swift": {
       "padding": 4,
@@ -122,11 +120,10 @@
       "spacing": 10
     },
     "ios/App/Chat/Views/MessageMenu.swift": {
-      "padding": 10,
-      "spacing": 6,
+      "padding": 5,
+      "spacing": 5,
       "radius": 3,
-      "font-size": 1,
-      "animation": 2
+      "font-size": 1
     },
     "ios/App/Chat/Views/NoticeRow.swift": {
       "padding": 1,

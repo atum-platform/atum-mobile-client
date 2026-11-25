@@ -111,6 +111,59 @@ private struct ChatRowMenu: ViewModifier {
     }
 }
 
+// MARK: - Motion (polish P3)
+
+extension ChatMotion {
+    /// A motion token's curve inside the chat: none under the UI-test flag (XCUITest must
+    /// see the screen settle at once), the token's Reduce Motion ease when `reduceMotion`
+    /// (`\.chatReducesMotion`, which folds both in), else the token itself.
+    static func animation(_ motion: Motion, reduceMotion: Bool) -> Animation? {
+        disabledForUITests ? nil : motion.animation(reduceMotion: reduceMotion)
+    }
+
+    /// An insert or removal transition inside the chat: `base`, or a plain fade under
+    /// Reduce Motion, so nothing slides or scales.
+    static func transition(_ base: AnyTransition, reduceMotion: Bool) -> AnyTransition {
+        Motion.transition(base, reduceMotion: reduceMotion)
+    }
+
+    /// How a control the composer swaps in and out (send, Stop, Stopping…) appears:
+    /// it grows out of its own centre while it fades, as the system's buttons do.
+    static var controlSwap: AnyTransition { .scale(scale: 0.6).combined(with: .opacity) }
+}
+
+extension View {
+    /// Animates changes to `value` with a motion token, honouring the chat's reduce
+    /// flag (`\.chatReducesMotion`) and the UI-test flag. The chat's own `.motion`.
+    func chatMotion<Value: Equatable>(_ motion: Motion, value: Value) -> some View {
+        modifier(ChatMotionModifier(motion: motion, value: value))
+    }
+
+    /// Inserts and removes this view with `base`, or a fade under the chat's reduce flag.
+    func chatMotionTransition(_ base: AnyTransition) -> some View {
+        modifier(ChatMotionTransitionModifier(base: base))
+    }
+}
+
+private struct ChatMotionModifier<Value: Equatable>: ViewModifier {
+    let motion: Motion
+    let value: Value
+    @Environment(\.chatReducesMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(ChatMotion.animation(motion, reduceMotion: reduceMotion), value: value)
+    }
+}
+
+private struct ChatMotionTransitionModifier: ViewModifier {
+    let base: AnyTransition
+    @Environment(\.chatReducesMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.transition(ChatMotion.transition(base, reduceMotion: reduceMotion))
+    }
+}
+
 /// Which look an event row gets (§9.1: agent chat like a person's).
 enum ChatRowStyle {
     /// Flipped by the owner's 2026-10-20 direction: agent and bot messages
