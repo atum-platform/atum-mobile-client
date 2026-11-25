@@ -176,10 +176,15 @@ public enum OIDCVerifier {
 public struct OIDCMe: Decodable, Sendable, Equatable {
     public let issuer, subject: String
     public let principal: NativeID
+    /// Platform #946 adds `betaFeatures` to the native `/me` read (true for an
+    /// internal-audience account). Absent on older servers, so it defaults to
+    /// false; the closed field set still rejects anything else.
+    public let betaFeatures: Bool
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: Field.self); try c.closed(["issuer", "subject", "principal"])
+        let c = try decoder.container(keyedBy: Field.self); try c.closed(["issuer", "subject", "principal", "betaFeatures"])
         issuer = try c.string("issuer", minimum: 9, maximum: 2048, pattern: "https://[!-~]+")
         subject = try c.string("subject", minimum: 1, maximum: 1024); principal = try c.value("principal")
+        betaFeatures = try c.optional("betaFeatures", as: Bool.self) ?? false
     }
 }
 
