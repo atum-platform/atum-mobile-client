@@ -96,8 +96,7 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         // Atum's line-up is listed, greyed and with no check: neither the 1.1
         // offer nor a cached snapshot may stand in for the failed readback.
         for model in ["nguyet-thuc", "nhat-thuc"] {
-            let row = element(app, "phone.model.row.\(model)")
-            XCTAssertTrue(row.waitForExistence(timeout: Self.waitSeconds), "missing \(model)")
+            let row = reveal(app, "phone.model.row.\(model)")
             XCTAssertFalse(row.isEnabled, "\(model) must be read-only without a destination readback")
             XCTAssertFalse(row.isSelected, "\(model) must not be checked without a destination readback")
             XCTAssertEqual(row.value as? String ?? "", "", "\(model) must not read as current")
@@ -136,12 +135,15 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
     }
 
     /// The sheet opens at the medium detent and the list is lazy: scroll inside
-    /// it until `identifier` is on screen.
+    /// it until `identifier` is on screen and clear of the search bar at the
+    /// foot (XCUITest calls a row under that bar hittable, but a tap lands on the bar).
     @MainActor
     private func reveal(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
         let target = element(app, identifier)
+        let barTop = app.frame.maxY * 0.86
         var scrolls = 0
-        while !target.waitForExistence(timeout: 1) || !target.isHittable, scrolls < 10 {
+        while !target.waitForExistence(timeout: 1) || !target.isHittable || target.frame.maxY > barTop,
+              scrolls < 10 {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
             scrolls += 1

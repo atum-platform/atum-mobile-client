@@ -144,5 +144,15 @@ destination test asserts that Nguyệt Thực and Nhật Thực are disabled, un
 current value. The ChatGPT test asserts that the saved GPT-6.1 row carries the failed words, the line
 does not repeat them, and no `openai-codex` hand-off exists.
 
-Verification (fix round r2): pending the locked run `/Volumes/AtumTestFlight/w4-x2/verify-fix-r2.sh`.
+Test fixes found in the first locked run (`85d96f7`):
+- Once the ChatGPT hand-off was gone, the list was shorter. Claude's "Works in Work for now" row then
+  sat under the bottom search bar. XCUITest still calls that row hittable, but in dark-en the tap
+  landed on the bar. At AccessibilityXL, the Atum rows sat below the lazily drawn area. `reveal` now
+  scrolls until the target exists, is hittable and ends above the bar (86% of the window), and the
+  destination test uses it for the Atum rows.
+- `PhoneModelPickerVisualsUITests` (W4-R) still looked up `phone.model.plan.claude`. The view has
+  used the plan's picker ID, `claude-plan`, since `AccountPlan.pickerID`, and main has the same stale
+  ID. Both of its tests failed for that reason alone, so the IDs are corrected here. The change is test-only.
+
+Verification (fix round r2): pending the locked rerun `/Volumes/AtumTestFlight/w4-x2/verify-fix-r2b.sh`.
 
