@@ -29,20 +29,8 @@ struct JumpPillButton: View {
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: Capsule())
             .accessibilityIdentifier(AccessibilityID.pillLatest)
-            .modifier(PillLabel(pill: pill, theme: theme))
-        }
-    }
-}
-
-private struct PillLabel: ViewModifier {
-    let pill: JumpPill
-    let theme: ChatTheme
-
-    func body(content: Content) -> some View {
-        if pill == .arrow {
-            content.accessibilityLabel(theme.copy.text(.jumpToLatest))
-        } else {
-            content.accessibilityHint(theme.copy.text(.jumpToLatest))
+            .accessibilityLabel(theme.copy.text(.jumpToLatest), isEnabled: pill == .arrow)
+            .accessibilityHint(theme.copy.text(.jumpToLatest), isEnabled: pill != .arrow)
         }
     }
 }
