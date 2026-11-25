@@ -72,6 +72,8 @@ struct PhoneConversationModelPicker: View {
     /// What the account's subscriptions can run in the cloud now; nil until read.
     @State private var accountState: PhoneModelPickerAccount
     private var account: PhoneSubscriptionAccount? { accountState.value }
+    /// Plans Work reports on a Mac, drawn read-only with their hand-off (W4-X2).
+    private var handoffs: [PhoneModelPickerProjection.WorkPlanHandoff] { account?.workPlanHandoffs ?? [] }
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
     /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
     @State private var confirming: PendingChatGPTTraining?
@@ -139,7 +141,7 @@ struct PhoneConversationModelPicker: View {
                                            isSelectionCurrent: { lifetime.isCurrent(confirming.selection) },
                                            onConfirmed: { confirmed(confirming, status: $0) },
                                            onKeep: { self.confirming = nil })
-            } else if !rows.isEmpty {
+            } else if !rows.isEmpty || !handoffs.isEmpty {
                 PhoneModelPickerList(
                     design: design,
                     matrixAccountID: actions?.matrixAccountID ?? destinations?.matrixAccountID ?? "",
@@ -158,6 +160,13 @@ struct PhoneConversationModelPicker: View {
                     onConnectionsChanged: { registry in
                         if destinations?.subscriptions?.read.isCurrent() == true { accountState.landed(registry) }
                     },
+                    destinationStatus: PhoneModelPickerStatus.destination(destinationReadState),
+                    providerStatuses: PhoneModelPickerStatus.providers(account),
+                    handoffs: handoffs,
+                    // A destination retry reads everything again; an account
+                    // source's retry re-reads the account sources (and the
+                    // destination too when it has not answered yet).
+                    retry: { source in Task { await load(force: source == .destination) } },
                     select: choose
                 )
             } else if unavailable {
@@ -480,6 +489,8 @@ struct PhoneModelDestinationsPicker: View {
     @State private var writes = ModelWriteRequests<DestinationModelWrite>()
     @State private var accountState = PhoneModelPickerAccount()
     private var account: PhoneSubscriptionAccount? { accountState.value }
+    /// Plans Work reports on a Mac, drawn read-only with their hand-off (W4-X2).
+    private var handoffs: [PhoneModelPickerProjection.WorkPlanHandoff] { account?.workPlanHandoffs ?? [] }
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
     /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
     @State private var confirming: PendingChatGPTTraining?
@@ -508,7 +519,7 @@ struct PhoneModelDestinationsPicker: View {
                                            isSelectionCurrent: { lifetime.isCurrent(confirming.selection) },
                                            onConfirmed: { confirmed(confirming, status: $0) },
                                            onKeep: { self.confirming = nil })
-            } else if !rows.isEmpty {
+            } else if !rows.isEmpty || !handoffs.isEmpty {
                 PhoneModelPickerList(
                     design: design,
                     matrixAccountID: actions.matrixAccountID,
@@ -522,6 +533,10 @@ struct PhoneModelDestinationsPicker: View {
                     onConnectionsChanged: { registry in
                         if actions.subscriptions?.read.isCurrent() == true { accountState.landed(registry) }
                     },
+                    destinationStatus: PhoneModelPickerStatus.destination(destinationReadState),
+                    providerStatuses: PhoneModelPickerStatus.providers(account),
+                    handoffs: handoffs,
+                    retry: { _ in Task { await load() } },
                     select: choose
                 )
             } else if destinationReadState == .unavailable {
