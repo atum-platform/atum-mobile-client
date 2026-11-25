@@ -67,6 +67,15 @@ struct S6SystemGallery: View {
                     }
                 }
             }
+            // Atum's face as Home's chat-list rows draw it: the logo inset (64%),
+            // as the desktop's chat-list rows pass `inset`; the row above is 70%.
+            HStack(alignment: .center, spacing: 8) {
+                ForEach(sizes, id: \.self) { size in
+                    AtumAvatar(kind: .atum, name: "Atum", size: size)
+                }
+            }
+            .environment(\.atumAvatarBrandInset, true)
+            .accessibilityIdentifier("system.gallery.atum-inset")
             HStack(spacing: atum.kit.space(.s3)) {
                 AppSeal(tier: .official)
                 AppSeal(tier: .verified)

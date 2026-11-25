@@ -58,20 +58,86 @@ screens. `AtumBrandTile` reuses `LiveEclipseMark`, so there is one copy of the
 logo, it re-pins with the design export, and there is no question of whether
 Xcode's SVG rasteriser handles the radial gradient. No imageset was added.
 
-## Not changed (follow-up)
+## Round 2: the Atum assistant's face
 
-`AtumAvatar`'s crescent (`AtumCrescentFace`) is still the Atum assistant's
-face in the chat title, roster and other assistant avatars. The desktop does
-not draw a crescent there either: `apps/desktop/src/app/atum/assistant-avatar.tsx`
-`AtumAssistantAvatar` with `brand` (the master assistant, used by
-`chat-header.tsx:62`, `roster-panel.tsx:1206`, `start-chat-dialog.tsx`,
-`matrix/app.tsx`, `member-avatar.tsx`, `profile-avatar.tsx` and others) draws
-the same `atum-mark.svg` on the `--atum-brand-tile` (#141311) at 70%, or 64%
-when `inset` (the chat list's rows). Its comment records the owner's call on
-2026-10-31: "The real Atum logo file: a redrawn crescent read as a moon." So
-the phone's crescent avatar is a parity gap too. This lane keeps its scope to
-the picker and chip marks; replacing `AtumCrescentFace` with the brand tile
-(circle frame, 70% / 64%) is the next concrete step, in its own lane.
+Round 1 left `AtumAvatar`'s crescent (`AtumCrescentFace`) as the main
+assistant's face everywhere outside the picker. The desktop never draws a
+crescent there either, so round 2 replaces it.
+
+### Desktop (source of truth, atum-desktop `d83d6f40`)
+
+- `apps/desktop/src/app/atum/assistant-avatar.tsx:82-103`
+  `AtumAssistantAvatar` with `brand` (the master assistant, no photo): a span
+  on `--atum-brand-tile` (`styles.css:14`, `#141311`, both themes) holding
+  `atum-mark.svg` at `size-[70%]`, or `size-[64%]` when `inset`
+  (`assistant-avatar.tsx:98`). The comment at `:94` records the owner's call
+  on 2026-10-31: "The real Atum logo file: a redrawn crescent read as a moon."
+- Shape: the span is `.atum-avatar` (`styles.css:3676-3682`), unlayered, so
+  `border-radius: 9999px` beats any Tailwind `rounded-*` a call site adds
+  (`rounded-md` at `matrix/app.tsx:8481` still renders a circle), and
+  `box-shadow: none`, so no hairline. The call sites' own radius tokens are
+  circles too (`--atum-r-avatar` and `--atum-r-avatar-sm`: 9999px,
+  `styles.css:2215-2216`).
+- `inset` is passed by one surface only: the chat list's rows,
+  `matrix/roster-conversations.tsx:1166-1171` (`MatrixProfileAvatar ... inset`).
+  Every other `brand` face is 70%: `chat-header.tsx:60-63` (chat title),
+  `roster-panel.tsx:1206`, `start-chat-dialog.tsx:93`, `matrix/start-chat.tsx:175`,
+  `member-avatar.tsx:68` (message and member faces), `greeting.tsx:39` (the
+  empty chat's large face), `settings-revamp.tsx:276`, `workplace.tsx:336`,
+  `group-picker.tsx:274`, `first-run-card.tsx:63`.
+
+### What changed
+
+- `ios/App/DesignSystem/ProviderMark.swift` `AtumBrandTile`: a `Cut`
+  (`.pickerMark`, `.avatar`, `.avatarInset`). `.pickerMark` is round 1
+  unchanged (64%, 0.5 pt `line-2` hairline, corner side×4/16). `.avatar` is a
+  circle, no hairline, the mark at 70%; `.avatarInset` the same at 64%. Same
+  `#141311` tile and the same `LiveEclipseMark`, so the logo still has one
+  copy (`marks/eclipse.json`).
+- `ios/App/DesignSystem/AtumAvatar.swift`: the `.atum` kind's treatment is now
+  `.brand` (was `.crescent`) and draws `AtumBrandTile` at the face's size,
+  inside `AtumAvatar`'s own circle mask; `.avatarInset` when the new
+  environment value `\.atumAvatarBrandInset` is set. `AtumCrescentFace` is
+  deleted (no other user). Only the rendering case changed: art loading,
+  caching and the `ChatFaceView` / title-capsule state are untouched, so this
+  merges cleanly with the `fix/chat-open-avatar-blip` lane.
+- `ios/App/Home/HomeScreen.swift` `HomeRowView` (compact and accessibility
+  layouts): sets `\.atumAvatarBrandInset` on the row's 52 pt `HomeAvatar`, as
+  the desktop's chat-list rows pass `inset`. The `HomeAvatar` loader itself is
+  untouched.
+- Surfaces that pick this up with no edits, because they all draw
+  `AtumAvatar(kind: .atum)`: the chat title capsule and the empty chat's
+  greeting face (`ChatFaces.swift` `ChatFaceView`, `ChatScreen.swift`
+  `greetingFace`), message rows' sender face and the Seen marks
+  (`MessageBubbleRow.swift:509`, `ChatFaceView`), the info sheet
+  (`ChatInfoSheet.swift` `ChatInfoAvatar`, `.eclipse` → `.atum`), the
+  start-chat sheet (`HomeScreen.swift` 36 pt list), Settings > Assistants
+  (`AccountSettingsDetail.swift:782`), the assistant card
+  (`AssistantCard.swift:375`) and the notification face bitmap
+  (`NotificationRoomPublisher.swift:123`, rendered with `ImageRenderer`). All
+  at 70% except Home's chat-list rows (64%), as on desktop.
+- Comments that said "crescent" (`HomeScreen.swift`, `ChatScreen.swift`,
+  `PhoneModelPickerList.swift`) now say "logo".
+- `ios/App/Debug/S6SystemGallery.swift` (Debug only): an inset Atum row under
+  the avatar grid (whose Atum row now shows the 70% face), id
+  `system.gallery.atum-inset`.
+- Tests: `AvatarArtTests.testAvatarTreatmentFollowsDesktopOrder` expects
+  `.brand`; `ProviderMarkTests` adds
+  `testAtumAssistantFaceWearsTheDesktopsBrandAvatar` (70% / 64%, circle, no
+  hairline; the picker cut unchanged) and
+  `testRenderedAtumFaceIsTheDarkBrandCircle` (pixels: `#141311` above the mark
+  in light mode, and clear at 12% in from a corner, so a circle).
+
+### Decisions
+
+- Tile colour: the desktop's `#141311`, not the phone export's `eclipseTile`
+  role (`#0E0F11` light / `#1B1D22` dark), which no view used. Parity with
+  the desktop as rendered wins; `eclipseTile` stays exported and unused.
+- No phone surface keeps the crescent, including ones whose FlowPhone spec
+  drew it (Home rows, the title capsule): owner rule, parity is the desktop as
+  rendered.
+- The inset is an environment value, not an `AtumAvatar` parameter, so no
+  call site in the loader code (owned by the parallel avatar lane) changes.
 
 ## Verification
 

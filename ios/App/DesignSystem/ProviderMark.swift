@@ -107,33 +107,69 @@ struct ProviderMark: View {
     }
 }
 
-/// The desktop's inset `BrandMark` (`components/brand-mark.tsx`): Atum's mark
-/// (`marks/eclipse.json`, the same file as the desktop's `atum-mark.svg`) at
-/// 64% of a dark `#141311` tile, the tile's edge kept by a 0.5 pt inset
-/// hairline of `line-2` (the desktop's `--atum-line-strong`). The tile is the
-/// brand's own colour, so it stays dark in light mode too. Its corner is the
-/// desktop picker's 0.25rem on a 16 px mark, kept in proportion as it grows.
+/// Atum's real logo on its dark tile: the mark (`marks/eclipse.json`, the
+/// same file as the desktop's `atum-mark.svg`) on the brand's own `#141311`
+/// (`--atum-brand-tile`), which stays dark in light mode too. The one place
+/// the phone draws the logo at mark and avatar sizes; there is no second copy.
+///
+/// - `.pickerMark`: the desktop's inset `BrandMark`
+///   (`components/brand-mark.tsx`, `PickerRouteMark` in
+///   `model-picker-list.tsx`): the mark at 64%, a 0.5 pt inset hairline of
+///   `line-2` (the desktop's `--atum-line-strong`), and the picker's 0.25rem
+///   corner on a 16 px mark, kept in proportion as it grows.
+/// - `.avatar` / `.avatarInset`: the main assistant's face, the desktop's
+///   `AtumAssistantAvatar` with `brand` (`app/atum/assistant-avatar.tsx`): a
+///   circle (`.atum-avatar`, `--atum-r-avatar: 9999px`) with no hairline
+///   (`.atum-avatar` sets `box-shadow: none`), the mark at 70%, or 64% when
+///   `inset` (only the chat list's rows, `roster-conversations.tsx`). The owner
+///   chose the real logo there on 2026-10-31: "a redrawn crescent read as a
+///   moon".
 struct AtumBrandTile: View {
+    enum Cut: Equatable {
+        case pickerMark
+        case avatar
+        case avatarInset
+    }
+
     let design: LiveDesign
     let side: CGFloat
+    var cut: Cut = .pickerMark
 
     @Environment(\.colorScheme) private var scheme
 
     static let tile = Color(.sRGB, red: 0x14 / 255, green: 0x13 / 255, blue: 0x11 / 255, opacity: 1)
+    /// The picker mark's (and the inset avatar's) mark over the side.
     static let markScale: CGFloat = 0.64
     static let cornerScale: CGFloat = 4.0 / 16
 
+    /// The mark's side over the tile's for each cut (desktop `size-[64%]` /
+    /// `size-[70%]`).
+    static func markScale(for cut: Cut) -> CGFloat {
+        cut == .avatar ? 0.70 : markScale
+    }
+
+    /// The tile's corner: the picker's 4 pt on 16, or a full circle for a face.
+    static func cornerRadius(for cut: Cut, side: CGFloat) -> CGFloat {
+        cut == .pickerMark ? side * cornerScale : side / 2
+    }
+
+    /// Only the picker mark draws the hairline; a face has none on desktop.
+    static func hasHairline(_ cut: Cut) -> Bool { cut == .pickerMark }
+
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: side * Self.cornerScale)
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius(for: cut, side: side))
+        let mark = side * Self.markScale(for: cut)
         ZStack {
             shape.fill(Self.tile)
             LiveEclipseMark(design: design)
-                .frame(width: side * Self.markScale, height: side * Self.markScale)
+                .frame(width: mark, height: mark)
         }
         .frame(width: side, height: side)
         .clipShape(shape)
         .overlay {
-            shape.strokeBorder(design.kit.color(.line2, scheme: scheme), lineWidth: 0.5)
+            if Self.hasHairline(cut) {
+                shape.strokeBorder(design.kit.color(.line2, scheme: scheme), lineWidth: 0.5)
+            }
         }
     }
 }

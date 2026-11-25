@@ -18,8 +18,10 @@ typealias AtumAvatarKind = AvatarKind
 /// intentionally has no URL or loader API: Matrix and catalog clients own
 /// their fetch, caching and 3x thumbnail requests, then hand the result to the
 /// renderer. The image fills the frame edge to edge. Without art:
-/// - Atum is an ink circle with the eclipse crescent cut by a ground disc
-///   (FlowPhone: a 41 pt disc at (15, 4) in the 52 pt face);
+/// - Atum (the main assistant) wears its real logo on the dark brand tile,
+///   as the desktop's `AtumAssistantAvatar` `brand` does (`AtumBrandTile`
+///   `.avatar`, 70%; `.avatarInset`, 64%, where `\.atumAvatarBrandInset` is
+///   set: Home's chat-list rows, the desktop's `roster-conversations.tsx`);
 /// - everyone else is the Kit monogram: the grey `monogram` gradient with a
 ///   white semibold initial. A photo that has not loaded (or never loads) shows
 ///   the monogram too, so no face is ever left blank.
@@ -46,6 +48,7 @@ struct AtumAvatar: View {
     @Environment(\.atum) private var atum
     @Environment(\.atumKit) private var kit
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.atumAvatarBrandInset) private var brandInset
 
     init(kind: AtumAvatarKind, name: String, art: AtumAvatarArt? = nil,
          mark: AgentMark? = nil, placeholder: Placeholder = .monogram, size: CGFloat) {
@@ -104,11 +107,12 @@ struct AtumAvatar: View {
         Int((pointSize * 3).rounded(.up))
     }
 
-    /// What the face draws, in desktop's order: the photo, Atum's crescent,
-    /// an assistant's mark, then the initial. An app never wears a mark.
+    /// What the face draws, in desktop's order: the photo, Atum's logo on its
+    /// brand tile, an assistant's mark, then the initial. An app never wears a
+    /// mark.
     enum Treatment: Equatable {
         case image
-        case crescent
+        case brand
         case mark(AgentMark)
         case monogram(String)
     }
@@ -118,7 +122,7 @@ struct AtumAvatar: View {
         switch AvatarFacePolicy.face(hasImage: hasArt, name: name) {
         case .image: return .image
         case let .monogram(value):
-            if kind == .atum { return .crescent }
+            if kind == .atum { return .brand }
             if let mark, kind != .app { return .mark(mark) }
             return .monogram(value)
         }
@@ -140,8 +144,11 @@ struct AtumAvatar: View {
                     .scaledToFill()
                     .frame(width: size, height: size)
             }
-        case .crescent:
-            AtumCrescentFace(size: size)
+        case .brand:
+            if let design = atum?.design {
+                AtumBrandTile(design: design, side: size, cut: brandInset ? .avatarInset : .avatar)
+                    .accessibilityIdentifier("avatar.brand")
+            }
         case let .mark(mark):
             ZStack {
                 kit.color(.fillQuiet, scheme: scheme)
@@ -168,33 +175,11 @@ struct AtumAvatar: View {
     static let monogramScale: CGFloat = 0.37
 }
 
-/// Atum's face (FlowPhone): an ink circle with the eclipse crescent, cut by a
-/// disc of the page colour. The disc is 41/52 of the side, set 15/52 in from
-/// the left and 4/52 down, so the ink crescent shows on the left.
-struct AtumCrescentFace: View {
-    let size: CGFloat
-    /// What the disc is cut from: the page by default, `surface` on a card.
-    var cut: AtumKit.ColorRole = .ground
-
-    @Environment(\.atumKit) private var environmentKit
-    @Environment(\.atum) private var atum
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        if let kit = environmentKit ?? atum?.kit {
-            Circle()
-                .fill(kit.color(.ink, scheme: scheme))
-                .overlay(alignment: .topLeading) {
-                    Circle()
-                        .fill(kit.color(cut, scheme: scheme))
-                        .frame(width: size * 41 / 52, height: size * 41 / 52)
-                        .offset(x: size * 15 / 52, y: size * 4 / 52)
-                }
-                .frame(width: size, height: size)
-                .clipShape(Circle())
-                .accessibilityHidden(true)
-        }
-    }
+extension EnvironmentValues {
+    /// Draw Atum's face with the logo inset (64% instead of 70%), as the
+    /// desktop's chat-list rows pass `inset` (`roster-conversations.tsx`).
+    /// Set only by Home's chat-list rows; every other face keeps 70%.
+    @Entry var atumAvatarBrandInset: Bool = false
 }
 
 /// A decoded avatar thumbnail and, when its artwork is a cut-out (a disc or

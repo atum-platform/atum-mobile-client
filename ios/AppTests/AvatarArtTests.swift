@@ -382,7 +382,7 @@ final class RosterAvatarKindTests: XCTestCase {
             id: "!atum:atum.test", kind: .agent, title: "Atum", avatar: .eclipse,
             assistant: LiveProductAssistantMetadata(id: "atum", isDefault: true, order: 0)), locale: locale)
         XCTAssertEqual(primary.kind, .atum)
-        XCTAssertNil(primary.mark, "the main assistant wears the crescent, never a mark")
+        XCTAssertNil(primary.mark, "the main assistant wears Atum's logo, never a mark")
         XCTAssertTrue(primary.showsMainAssistantBadge)
         XCTAssertFalse(marked.showsMainAssistantBadge)
 
@@ -414,7 +414,7 @@ final class RosterAvatarKindTests: XCTestCase {
         XCTAssertEqual(AtumAvatar.treatment(kind: .assistant, hasArt: false, mark: violetStar, name: "Nova"),
                        .mark(violetStar))
         XCTAssertEqual(AtumAvatar.treatment(kind: .atum, hasArt: false, mark: violetStar, name: "Atum"),
-                       .crescent)
+                       .brand)
         XCTAssertEqual(AtumAvatar.treatment(kind: .assistant, hasArt: false, mark: nil, name: "Nova"),
                        .monogram("N"))
         XCTAssertEqual(AtumAvatar.treatment(kind: .app, hasArt: false, mark: violetStar, name: "Moon"),
