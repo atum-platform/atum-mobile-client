@@ -379,7 +379,7 @@ Logs and bundles: `/Volumes/AtumTestFlight/polish-p3/ci109*` and
   run (`locked-r2.sh`, which got the lock at 13:11 ICT): build, 3 UI tests and
   1 capture, all green. No push, no PR.
 - **25 Nov 2026, CI fix for PR #109 (Opus sub-agent):** diagnosed hosted
-  shard 2 (see "CI fix: PR #109 hosted UI shard 2"). Seven locked rounds on
+  shard 2 (see "CI fix: PR #109 hosted UI shard 2"). Eight locked rounds on
   iPhone 17 / iOS 27, with derived data in `/Volumes/AtumTestFlight/polish-p3/dd-*`:
   1. Head and main rerun.
   2. Head against main.
