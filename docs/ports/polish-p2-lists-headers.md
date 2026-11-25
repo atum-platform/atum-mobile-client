@@ -78,6 +78,11 @@ The same card is used in the chat panel and in Settings › Assistants.
   - The expanded skills and "Find more skills" are rows of their own, not a
     nested stack in one row.
   - Delete {name}… is its own section, and its failure line is the footer.
+    When a delete fails, the list scrolls the delete row to the middle and
+    VoiceOver announces the line (see "PR #110 hosted UI shard 3" below).
+- **Keyboard bar:** Undo and Done show only while one of the card's own
+  fields (name, purpose, instructions, personality) has focus. The handle
+  editor's field has its own focus, Cancel, Save and return key.
 - **Motion:** Personality and Skills expand with `Motion.standard`. They were
   bare `easeInOut(0.18)` curves before.
 - **Tokens:** the name field's radius is `kit.phoneRadius(.sm)`. Spacing uses
@@ -287,6 +292,60 @@ and no tested logic changed, so no `swift test` and no new AppTests ran.
   `AppSidePanelUITests`, `HomeChatsWave3UITests`, `SharedCollectionsUITests`,
   `AssistantsWave3UITests` and `TeamSpaceRevampUITests`.
 
+## PR #110 hosted UI shard 3
+
+Hosted UI shard 3 (run `45566872605`, head `c7223dd`)
+failed two `AssistantsWave3UITests` cases on the card. The cause came from the
+shard's `ui-3` xcresult: the failure hierarchy, screenshots and recording.
+
+- **`testAFailedDeleteChangesNothingAndSaysSo` (line 190):**
+  - Cause: at large, the card's list ends with Delete {name}… on the bottom
+    edge. That row counts as hittable, so the test's scroll loop never swiped
+    and the list never moved. The failure line is the delete group's footer,
+    and a `List` builds only what is on screen. The footer was added below the
+    fold, so it never existed for the test, and a person never saw it either.
+    The old `ScrollView` built every line, whether it was seen or not.
+  - Fix (app): the card's `List` sits in a `ScrollViewReader`. The delete row
+    has an `id`. When `retireFailed` turns true, the list scrolls that row to
+    the centre with `Motion.standard`, which brings its footer on screen.
+    VoiceOver announces the same line.
+- **`testChoosingABotHandleChecksConfirmsAndClaims` (line 229):**
+  - Cause: Save did become enabled. Line 229 is the wait for the confirmation
+    alert, which never opened. The card's keyboard bar (`ToolbarItemGroup`,
+    `.keyboard`) drew Done for every field in the card, including the handle
+    editor's field. On iOS 26 that bar floats above the keyboard, and in the
+    list layout its Done (`{{307, 494}, {62, 36}}`) sat over the editor's Save
+    (`{{305, 491}, {53, 36}}`). The tap landed on Done. For this field Done
+    also did nothing: it cleared the card's own focus, but the handle field
+    has its own `@FocusState`.
+  - Fix (app): the card's keyboard bar shows Undo and Done only while one of
+    the card's own fields has focus. The handle field keeps its Cancel, Save
+    and return key, and Save is no longer covered.
+- No test changed. Neither test relied on a layout detail that P2 changed
+  legitimately: both found real defects in the list layout.
+- **Verification:**
+  - Script: `polish-p2/ci110-run.sh`, run under the heavy-build lock with
+    derived data in `dd-polish-p2`, on simulator `CB24FAE2-…` (iPhone 16e).
+    Logs: `polish-p2/logs/ci110*.log`, and result bundles
+    `ci110-run{1,2}.xcresult`.
+  - Debug `build-for-testing`: exit 0. The only warnings in
+    `AssistantCard.swift` are the existing `PhotosPicker` label isolation
+    ones.
+  - Each run had 7 tests, and the run was done twice: both runs exit 0, 7 of
+    7 passed. The tests were:
+    - from `AssistantsWave3UITests`: `testAFailedDeleteChangesNothingAndSaysSo`,
+      `testChoosingABotHandleChecksConfirmsAndClaims`,
+      `testThePrimaryCardHasNoDeleteRow`,
+      `testDeletingAnAssistantAsksWithDesktopsWordsThenLeaves` and
+      `testTheCardWithDeleteFitsAtTheLargestTextSize`;
+    - from `ChatInfoUITests`, the two that use the card's keyboard Done:
+      `testAssistantPurposeSavesWhenLeavingTheField` and
+      `testAssistantPersonalityExpandsAndSavesInTheCard`.
+  - `python3 scripts/design_lint.py`: exit 0.
+  - `python3 scripts/public_guard.py --base origin/main --head HEAD`: exit 0,
+    by its own exit code, after the commit.
+  - The hosted shards still have to confirm.
+
 ## Known gaps
 
 - **Lazy rows in the UI tests:** the test changes above were reasoned from
@@ -312,3 +371,11 @@ and no tested logic changed, so no `swift test` and no new AppTests ran.
   - Stayed out of P3's files (Composer, MessageMenu, MessageBubbleRow,
     DeliveryLine, ChatRowView, EmptyChatGreeting, ChatScreen), the avatar views
     (`ChatInfoAvatar`, `HomeAvatar`), `AtumAvatar.swift` and `RootTabs.swift`.
+- **25 Nov 2026, PR #110 CI-fix sub-agent (Opus):**
+  - Hosted UI shard 3 failed two card tests. The cause came from the shard's
+    xcresult, not from guessing. It was not a lost identifier.
+  - In one test the delete-failure footer was below the fold. In the other,
+    the keyboard bar's Done covered Save.
+  - Both were fixed in `AssistantCard.swift`, and no test changed. The fixes
+    were verified locally twice (above).
+  - Local commit only: no push, no CI rerun.

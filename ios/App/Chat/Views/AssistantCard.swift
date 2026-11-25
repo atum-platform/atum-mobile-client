@@ -226,30 +226,45 @@ struct AssistantCard: View {
         // One system inset-grouped list, as Settings draws its pages (UX polish
         // P2, audit issue 6): the face and name head it on the ground, then
         // the card's groups with system headers, footers and row highlights.
-        List {
-            Section {
-                header
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 0, leading: kit.space(.s4), bottom: 0, trailing: kit.space(.s4)))
-            } footer: {
-                offlineCaption
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    header
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: kit.space(.s4), bottom: 0, trailing: kit.space(.s4)))
+                } footer: {
+                    offlineCaption
+                }
+                band
+                handleSection
+                personaSection
+                rowsSection
+                retireSection
             }
-            band
-            handleSection
-            personaSection
-            rowsSection
-            retireSection
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
+            .contentMargins(.horizontal, kit.space(.s4), for: .scrollContent)
+            .onChange(of: retireFailed) { _, failed in
+                // The failure line is the delete group's footer. A list builds
+                // only what is on screen, and the confirmation leaves the delete
+                // row wherever it was (often the last thing above the fold), so
+                // bring its group to the middle: the line is then seen, not
+                // just written below the fold.
+                guard failed else { return }
+                withMotion(.standard) { proxy.scrollTo(Self.retireRowID, anchor: .center) }
+                AccessibilityNotification.Announcement(retireCopy.text(.agentRetireFailed)).post()
+            }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(.compact)
-        .contentMargins(.horizontal, kit.space(.s4), for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(atum.color(.ground, scheme: scheme))
         .navigationTitle(entry == .settingsRoster
                          ? copy.text(.sheetLabel, [.text(identity.name)]) : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // Only for the card's own fields. The handle editor's field has
+            // its own focus, Cancel and Save, and return; this Done could not
+            // end its editing, and on iOS 26 the floating bar sat over Save.
             ToolbarItemGroup(placement: .keyboard) {
                 if let focused {
                     Button(copy.text(.undo)) {
@@ -257,10 +272,10 @@ struct AssistantCard: View {
                         self.focused = nil
                     }
                     .accessibilityIdentifier("assistant.card.keyboard.revert")
+                    Spacer()
+                    Button(copy.text(.done)) { self.focused = nil }
+                        .accessibilityIdentifier("assistant.card.keyboard.done")
                 }
-                Spacer()
-                Button(copy.text(.done)) { focused = nil }
-                    .accessibilityIdentifier("assistant.card.keyboard.done")
             }
         }
         .task { await load() }
@@ -932,6 +947,7 @@ struct AssistantCard: View {
     // MARK: Retire (AS-4)
 
     private var retireCopy: AssistantRetireCopy { AssistantRetireCopy(design: design) }
+    private static let retireRowID = "assistant.card.retire.row"
 
     /// Desktop's delete section: its own group after the rows, the one
     /// destructive line, and a confirmation that says it is final. Nothing
@@ -956,6 +972,7 @@ struct AssistantCard: View {
                 }
                 .disabled(retiring || offline)
                 .accessibilityIdentifier("assistant.card.retire")
+                .id(Self.retireRowID)
             } footer: {
                 if retireFailed {
                     Text(retireCopy.text(.agentRetireFailed))
