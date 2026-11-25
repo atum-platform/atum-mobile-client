@@ -477,6 +477,10 @@ public enum PhoneModelPickerProjection {
             self.levels = levels
             self.current = current
         }
+
+        public func canChange(to level: ManagedModelEffort) -> Bool {
+            levels.contains(level) && level != current
+        }
     }
 
     /// Show recognized levels the model can accept. A single option remains
@@ -489,12 +493,20 @@ public enum PhoneModelPickerProjection {
         return Thinking(model: offer.alias, levels: levels, current: snapshot.currentEffort)
     }
 
+    /// The offer can drive thinking only when its choice agrees with the
+    /// selected Atum row. The offer and destination have separate revisions.
+    public static func conversationThinking(offer: ManagedModelSnapshot,
+                                            rows: [Row]) -> Thinking? {
+        guard rows.contains(where: { $0.selected && $0.source == .atum && $0.model == offer.choice.model })
+        else { return nil }
+        return thinking(offer)
+    }
+
     /// The write boundary for a thinking change, as `canSelectAtumModel` is for a
     /// model: the same model, a level it offers, and not the level already saved.
     public static func canChangeThinking(to level: ManagedModelEffort,
                                          snapshot: ManagedModelSnapshot) -> Bool {
-        guard let thinking = thinking(snapshot) else { return false }
-        return thinking.levels.contains(level) && level != thinking.current
+        thinking(snapshot)?.canChange(to: level) == true
     }
 
     /// The Atum model a Mac returns to when its saved choice is a connection's

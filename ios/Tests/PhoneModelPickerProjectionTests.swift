@@ -218,7 +218,8 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
 
     /// A cloud offer whose current model is ready, with the levels it accepts.
     private func readySnapshot(model: String = "nguyet-thuc", effort: String? = "medium",
-                               efforts: [Any] = ["low", "medium", "high"]) throws -> ManagedModelSnapshot {
+                               efforts: [Any] = ["low", "medium", "high"],
+                               revision: Int = 1) throws -> ManagedModelSnapshot {
         let digest = String(repeating: "a", count: 64)
         let ids = efforts.compactMap { $0 as? String }
         let defaultEffort = ids.contains("medium") ? "medium" : ids.first ?? "medium"
@@ -230,7 +231,7 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         let object: [String: Any] = [
             "profile": "atum.model-choice/1.1",
             "agentPrincipal": "00000000-0000-4000-8000-bd7662a5eeb4",
-            "revision": 1, "source": "saved", "policyVersion": "2026-10-17.1", "policyDigest": digest,
+            "revision": revision, "source": "saved", "policyVersion": "2026-10-17.1", "policyDigest": digest,
             "choice": choice, "models": [current], "runtimes": [["runtime": "cloud"]],
             "grant": [
                 "profile": "atum.model-grant/1", "state": "active", "alias": model, "model": model,
@@ -350,6 +351,40 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertThrowsError(try ManagedModelWrite(
             requestId: try NativeID(UUID().uuidString.lowercased()),
             snapshot: try readySnapshot(efforts: ["low", "medium"]), model: "nguyet-thuc", effort: .high))
+    }
+
+    func testLateOfferCannotChangeThinkingForThePreviousDestinationModel() throws {
+        let cloud = try ManagedModelDestinationID("cloud")
+        let savedDefault = try destinationSnapshot()
+        var before = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("destination.snapshot")) as? [String: Any])
+        before["revision"] = savedDefault.revision - 1
+        before["choices"] = [["destination": "cloud", "source": "atum", "model": "nhat-thuc", "effort": "medium"]]
+        let prior = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                         from: JSONSerialization.data(withJSONObject: before))
+        let pending = PhoneModelPickerProjection.conversation(offer: nil, destination: prior, destinationID: cloud)
+        XCTAssertEqual(pending.filter(\.selected).map(\.model), [ManagedModelLineup.hardAlias])
+        XCTAssertEqual(pending.filter { $0.selectable && !$0.selected }.map(\.model), [ManagedModelLineup.defaultAlias])
+
+        // The destination fallback saves the default while the offer read is pending.
+        let late = try readySnapshot(model: ManagedModelLineup.hardAlias, revision: 1)
+        let withLateOffer = PhoneModelPickerProjection.conversation(
+            offer: late, destination: savedDefault, destinationID: cloud
+        )
+        XCTAssertEqual(withLateOffer.filter(\.selected).map(\.model), [ManagedModelLineup.defaultAlias])
+        XCTAssertNil(PhoneModelPickerProjection.conversationThinking(offer: late, rows: withLateOffer))
+
+        // The post-write offer read restores thinking with its own revision fence.
+        let current = try readySnapshot(revision: 2)
+        let rows = PhoneModelPickerProjection.conversation(offer: current, destination: savedDefault, destinationID: cloud)
+        let thinking = try XCTUnwrap(PhoneModelPickerProjection.conversationThinking(offer: current, rows: rows))
+        XCTAssertEqual([thinking.model], rows.filter(\.selected).map(\.model))
+        XCTAssertTrue(thinking.canChange(to: .high))
+        let requestID = try NativeID("00000000-0000-4000-8000-303617b97304")
+        let write = try ManagedModelWrite(requestId: requestID, snapshot: current,
+                                          model: thinking.model, effort: .high)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? [String: Any])
+        XCTAssertEqual((body["choice"] as? [String: Any])?["model"] as? String, ManagedModelLineup.defaultAlias)
+        XCTAssertEqual(body["expectedRevision"] as? Int, 2)
     }
 
     func testSwitchBackNamesTheRecommendationForAMacOnAConnection() throws {
