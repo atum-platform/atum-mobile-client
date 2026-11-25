@@ -110,6 +110,9 @@ final class MessageActionsPresenter {
         commitTarget = nil
         let after = afterOverlay
         afterOverlay = nil
+        #if DEBUG
+        UITestProbe.append("overlay dismissed pendingAction=\(after != nil)", to: "menu-press.txt")
+        #endif
         after?()
     }
     /// A link tapped in the select-text sheet (B17): the sheet closes first
@@ -512,6 +515,9 @@ enum MessageMenuActions {
         case .selectText:
             presenter.selectText = SelectTextRequest(itemID: row.id, body: row.item.markdownBody,
                                                      parsed: parsedBody)
+            #if DEBUG
+            UITestProbe.append("select text requested row=\(row.id)", to: "menu-press.txt")
+            #endif
         case .edit: actions.edit(row.id)
         case .report: presenter.reportRequest = ReportMessageRequest(itemID: row.id)
         case .delete:
@@ -775,6 +781,9 @@ struct MessageActionsOverlay: View {
         presenter.highlighted = nil
         presenter.commitTarget = nil
         if let after { presenter.afterOverlay = after }
+        #if DEBUG
+        UITestProbe.append("overlay closing pendingAction=\(after != nil)", to: "menu-press.txt")
+        #endif
         let presenter = presenter
         let finish = {
             var transaction = Transaction()

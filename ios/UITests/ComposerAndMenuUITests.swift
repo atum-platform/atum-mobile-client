@@ -748,7 +748,9 @@ final class MessageMenuUITests: WS3UITestCase {
     /// page.
     @MainActor
     func testLinksInTheSelectTextSheetGoThroughLinkPolicy() {
-        let app = launchChat(.botMoonNotice)
+        let probe = TranscriptUITestCase.scratch.appendingPathComponent("menu-links-\(UUID().uuidString)")
+        print("MEASURE menu.linkProbe=\(probe.path)")
+        let app = launchChat(.botMoonNotice, extra: ["-AtumUITestProbeDir", probe.path])
         // Moon's later answer lands at 5 s; open the menu after it.
         XCTAssertTrue(labelContains(element(app, AccessibilityID.transcript), "ngày tốt").waitForExistence(timeout: 8))
         openSelectText(app)
