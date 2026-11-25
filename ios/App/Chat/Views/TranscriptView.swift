@@ -18,6 +18,7 @@ struct TranscriptView: View {
             covered: covered, pagination: store.pagination, generation: store.timelineGeneration,
             route: store.searchTargetEventID, focus: search?.focus, highlights: search?.highlights ?? [:]
         )
+        .gesture(TranscriptKeyboardDismissal.Tap())
     }
 }
 
@@ -138,18 +139,56 @@ private struct TranscriptHostedRow: View {
         let environment = presentation.environment
         let highlight = presentation.routeHighlight == row.id
             ? (environment.chatTheme?.color("ink", environment.colorScheme).opacity(0.12) ?? .clear) : .clear
-        ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
-                    parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == presentation.latestAnswer,
-                    searchHighlight: presentation.highlights[row.id], isGrowing: presentation.growing.contains(row.id))
+        let content = ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
+                                  parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == presentation.latestAnswer,
+                                  searchHighlight: presentation.highlights[row.id],
+                                  isGrowing: presentation.growing.contains(row.id))
             .equatable()
             .background(RoundedRectangle(cornerRadius: 8).fill(highlight))
-            .environment(\.self, environment)
-            .id(row.id)
+        rowMediaEnvironment(rowChatEnvironment(content, environment), environment).id(row.id)
+    }
+
+    // The hosting cell owns its own SwiftUI view graph. Forward the values
+    // chat rows use while letting each graph keep its own gesture machinery.
+    private func rowChatEnvironment(_ content: some View, _ environment: EnvironmentValues) -> some View {
+        content
+            .environment(\.atum, environment.atum)
+            .environment(\.atumKit, environment.atumKit)
+            .environment(\.chatTheme, environment.chatTheme)
+            .environment(\.chatActions, environment.chatActions)
+            .environment(\.messageActions, environment.messageActions)
+            .environment(\.chatOwnUserID, environment.chatOwnUserID)
+            .environment(\.chatRoomAvatar, environment.chatRoomAvatar)
+            .environment(\.chatRoomFace, environment.chatRoomFace)
+            .environment(\.chatMembers, environment.chatMembers)
+            .environment(\.chatToday, environment.chatToday)
+            .environment(\.chatReducesMotion, environment.chatReducesMotion)
+            .environment(\.chatFlatRuns, environment.chatFlatRuns)
+            .environment(\.chatRowInteractions, environment.chatRowInteractions)
+            .environment(\.colorScheme, environment.colorScheme)
+            .environment(\.dynamicTypeSize, environment.dynamicTypeSize)
+            .environment(\.locale, environment.locale)
+            .environment(\.layoutDirection, environment.layoutDirection)
+            .environment(\.openURL, environment.openURL)
+    }
+
+    private func rowMediaEnvironment(_ content: some View, _ environment: EnvironmentValues) -> some View {
+        content
+            .environment(\.chatLoadMatrixThumbnail, environment.chatLoadMatrixThumbnail)
+            .environment(\.appBotPresentation, environment.appBotPresentation)
+            .environment(\.appBotPresenter, environment.appBotPresenter)
+            .environment(\.appBotNoticeDisplays, environment.appBotNoticeDisplays)
+            .environment(\.chatMediaAccess, environment.chatMediaAccess)
+            .environment(\.chatAttachmentsClosedReason, environment.chatAttachmentsClosedReason)
+            .environment(\.chatMediaPresenter, environment.chatMediaPresenter)
+            .environment(\.chatLocalMediaFiles, environment.chatLocalMediaFiles)
+            .environment(\.chatMediaRetryGeneration, environment.chatMediaRetryGeneration)
+            .environment(\.chatMediaNamespace, environment.chatMediaNamespace)
     }
 }
 
 @MainActor
-private final class TranscriptEngine: NSObject, UICollectionViewDelegate, UIGestureRecognizerDelegate {
+private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private struct Anchor {
         let id: String
         let viewportY: CGFloat
@@ -207,16 +246,11 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate, UIGest
         list.backgroundColor = .clear
         list.alwaysBounceVertical = true
         list.allowsSelection = false
+        list.delaysContentTouches = false
         list.keyboardDismissMode = .interactive
         list.bottomEdgeEffect.style = .soft
         list.accessibilityIdentifier = AccessibilityID.transcript
         list.delegate = self
-        let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
-        tap.delegate = self
-        tap.cancelsTouchesInView = false
-        tap.delaysTouchesBegan = false
-        tap.delaysTouchesEnded = false
-        list.addGestureRecognizer(tap)
         list.panGestureRecognizer.addTarget(self, action: #selector(handleKeyboardDrag(_:)))
         let cells = UICollectionView.CellRegistration<UICollectionViewCell, String> { [weak self] cell, _, id in
             guard let self, let row = self.rows[id] else { return }
@@ -441,22 +475,13 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate, UIGest
 
     // MARK: Scroll input, visibility and message folds
 
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        true
-    }
-
-    @objc private func dismissKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-
     // As in Messages, dragging towards older messages dismisses the
     // keyboard even if the finger has yet to reach it.
     @objc private func handleKeyboardDrag(_ pan: UIPanGestureRecognizer) {
         if pan.state == .began { dismissedKeyboardOnDrag = false }
         guard pan.state == .changed, !dismissedKeyboardOnDrag, pan.translation(in: pan.view).y > 24 else { return }
         dismissedKeyboardOnDrag = true
-        dismissKeyboard()
+        TranscriptKeyboardDismissal.dismiss()
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -785,5 +810,35 @@ private struct TranscriptGeometry: Equatable {
         viewportHeight = half(max(0, list.bounds.height - insets.top - insets.bottom))
         distanceFromTop = half(list.contentOffset.y + insets.top)
         distanceFromBottom = half(list.contentSize.height - list.contentOffset.y - list.bounds.height + insets.bottom)
+    }
+}
+
+/// A tap on the transcript resigns the composer's first responder, while
+/// the touched row's buttons, links and long presses receive their touches.
+private enum TranscriptKeyboardDismissal {
+    @MainActor static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    struct Tap: UIGestureRecognizerRepresentable {
+        final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+            func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                                   shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+        }
+
+        func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+        func makeUIGestureRecognizer(context: Context) -> UITapGestureRecognizer {
+            let recognizer = UITapGestureRecognizer()
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delaysTouchesEnded = false
+            recognizer.delegate = context.coordinator
+            return recognizer
+        }
+
+        func handleUIGestureRecognizerAction(_ recognizer: UITapGestureRecognizer, context: Context) {
+            if recognizer.state == .ended { TranscriptKeyboardDismissal.dismiss() }
+        }
     }
 }

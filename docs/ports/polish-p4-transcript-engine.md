@@ -15,7 +15,7 @@
 
 ## Design
 
-The representable hosts a transparent, single-column collection with the transcript's 16-point side margins and 8-point top and 12-point bottom padding. Diffable snapshots use existing stable row IDs and reconfigure changed rows in place. Each self-sizing cell hosts the existing `ChatRowView` with the chat's SwiftUI environment and its fold and reply callbacks. P3's send entrance animates the bubble inside the SwiftUI row, so the hosting cell can use the existing modifier and its Reduce Motion behavior.
+The representable hosts a transparent, single-column collection with the transcript's 16-point side margins and 8-point top and 12-point bottom padding. Diffable snapshots use existing stable row IDs and reconfigure changed rows in place. Each self-sizing cell hosts the existing `ChatRowView` and receives the chat, design, and media environment values it needs. Its hosting graph manages its own gestures. P3's send entrance animates the bubble inside the SwiftUI row, so the hosting cell can use the existing modifier and its Reduce Motion behavior.
 
 The adapter captures the top visible surviving row before a detached snapshot and restores its distance from the viewport top after the diff. Native layout invalidation supplies offset adjustments for later self-sizing of cells above the reading row. A following chat uses the bottom edge during layout. The adapter feeds UIKit scroll motion and rounded geometry to the existing follow, pagination and read-visibility rules. The store can apply incoming rows during drag and deceleration.
 
@@ -32,7 +32,14 @@ The original audit used `simctl io recordVideo` with animations enabled and scri
 | Long scroll | 9 | 39/720 (5.4%) | 233 ms |
 | Paging older history | 12 | 60/546 (11.0%) | 243 ms |
 
+## Local verification
+
+- Swift package tests passed on the Mac. AtumChat passed 821, AtumDesign passed 1,045, AtumDrive passed 48 and AtumTelemetry passed 16, for 1,930 total.
+- Debug build-for-testing passed on iOS 27.0 at the first implementation and after the interaction changes.
+- Two attempts to start a dedicated simulator on the external volume stalled in LaunchServices migration. The existing audit iPhone 17 booted successfully. Derived data, test scratch, result bundles and recordings use `/Volumes/AtumTestFlight/dd-polish-p4`, and the build, test and capture scripts take the shared heavy-build lock.
+
 ## Session log
 
 - 2026-11-26. Started P4 from `80968a9`, inventoried native APIs and existing behavior before changing the transcript.
 - 2026-11-26. Implemented the collection adapter and recovered the audit's baseline from the original two recordings. The transcript type-checked against local iOS Simulator modules with the current routed-search API, and design lint passed. The Debug build and Swift package run were queued on the shared build lock.
+- 2026-11-26. The initial smoke run reached the latest row and reported three failures. The press-and-slide menu and keyboard dismissal failed, and the day-divider check queried a recycled offscreen row. Limited environment forwarding to the values used by the row, restored the original simultaneous tap recognizer, and made the divider assertion scroll the row into view after checking the initial position. The superseded smoke run was interrupted during pagination.

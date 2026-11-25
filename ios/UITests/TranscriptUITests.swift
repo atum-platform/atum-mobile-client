@@ -16,10 +16,17 @@ final class TranscriptUITests: TranscriptUITestCase {
         XCTAssertTrue(spoken.exists, "U1: the newest row's label does not start with its sender")
         record("u1.latestLabel", spoken.label)
         XCTAssertEqual(followValue(app), "following")
-        XCTAssertTrue(app.staticTexts["Hôm nay"].exists || app.staticTexts["Hôm qua"].exists, "U1: no day divider")
         XCTAssertFalse(pill(app).exists)
         assertNoBannedWords(app)
         keepScreenshot("u1-open", of: app)
+
+        // A day divider above the viewport may not have a cell until it
+        // scrolls into view. Check it after verifying the initial position.
+        let dividers = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Hôm nay", "Hôm qua"]))
+        for _ in 0..<4 where !dividers.firstMatch.exists {
+            transcript(app).swipeDown(velocity: .slow)
+        }
+        XCTAssertTrue(dividers.firstMatch.exists, "U1: no day divider")
     }
 
     /// U2: typing dots, then the answer, fully visible; still following.
