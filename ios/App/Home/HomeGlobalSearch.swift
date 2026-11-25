@@ -128,9 +128,10 @@ struct HomeSearchChannelRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 28
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(.hash))
                 .font(.body)
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -158,15 +159,16 @@ struct HomeSearchEventRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 28
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: kit.space(.s3)) {
             Image(atum.symbol(section == .files ? .files : .messages))
                 .font(.body)
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
                 .frame(width: glyphColumn)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 Text(verbatim: result.channelName)
                     .font(.footnote)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))

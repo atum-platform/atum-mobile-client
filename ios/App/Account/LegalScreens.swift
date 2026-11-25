@@ -8,6 +8,7 @@ struct LegalScreen: View {
 
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         List {
@@ -49,7 +50,7 @@ struct LegalScreen: View {
     }
 
     private func rowLabel(_ title: String, indicator: AtumGlyph) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: kit.space(.s3)) {
             Text(title)
                 .font(.body)
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -70,6 +71,7 @@ struct LicencesScreen: View {
     let design: LiveDesign
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         ScrollView {
@@ -78,7 +80,7 @@ struct LicencesScreen: View {
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
+                .padding(kit.space(.s4))
         }
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
         .navigationTitle(design.text("src.matrix.legal-copy.copy.openSourceLicences"))

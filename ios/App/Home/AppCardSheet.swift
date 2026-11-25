@@ -83,6 +83,7 @@ struct AppCardSheet: View {
 
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         NavigationStack {
@@ -94,17 +95,17 @@ struct AppCardSheet: View {
                             .font(.body)
                             .foregroundStyle(atum.color(.soft, scheme: scheme))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
+                            .padding(.horizontal, kit.space(.s4))
+                            .padding(.vertical, kit.space(.s3))
                             .background(atum.color(.cell, scheme: scheme),
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .padding(.horizontal, 16)
-                            .padding(.top, 24)
+                                        in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
+                            .padding(.horizontal, kit.space(.s4))
+                            .padding(.top, kit.space(.s6))
                             .accessibilityIdentifier("app.card.about")
                     }
                 }
-                .padding(.top, 24)
-                .padding(.bottom, 32)
+                .padding(.top, kit.space(.s6))
+                .padding(.bottom, kit.space(.s8))
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -120,10 +121,10 @@ struct AppCardSheet: View {
     }
 
     private var header: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: kit.space(.s2)) {
             ChatInfoAvatar(info: card.avatarInfo, size: 88, loadMatrixThumbnail: loadMatrixThumbnail)
                 .accessibilityHidden(true)
-            HStack(spacing: 6) {
+            HStack(spacing: kit.space(.s2)) {
                 Text(verbatim: card.name)
                     .font(.title2.weight(.semibold))
                     .lineLimit(1)
@@ -144,10 +145,10 @@ struct AppCardSheet: View {
                           image: atum.symbol(.arrowUpRight))
                 }
                 .buttonStyle(.atumSecondary)
-                .padding(.top, 8)
+                .padding(.top, kit.space(.s2))
                 .accessibilityIdentifier("app.card.open")
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, kit.space(.s6))
     }
 }
