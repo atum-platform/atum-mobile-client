@@ -122,7 +122,7 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
             // No title text in the bar: FlowPhone2's phone shell is four icon
             // tabs. A `.fill` custom symbol must not be picked up by the bar's
             // automatic fill variant, so variants are pinned off.
-            Image(atum.symbol(glyph(for: kind, selected: selected)))
+            tabIcon(atum.symbol(glyph(for: kind, selected: selected)))
                 .environment(\.symbolVariants, .none)
         }
         .badge(badgeText(for: kind))
@@ -130,6 +130,24 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
         .accessibilityValue(Text(verbatim: isAvailable(kind) ? badgeDescription(for: kind)
                                                  : design.text("desktop.atum.discover.comingSoon")))
         .accessibilityIdentifier("phone.tab." + kind.identifier)
+    }
+
+    /// The tab glyph at the Kit's `icon.xl` (24 pt), the size the pre-P1 bar
+    /// drew. The system bar draws a bare custom symbol at its own default
+    /// (about 17 pt) and ignores `.font`, and `.imageScale(.large)` blanks it.
+    /// A symbol image that already carries a point size keeps it, and stays a
+    /// vector template symbol, so the system selection tint and dark mode
+    /// still apply and the large-content viewer can still scale it
+    /// (docs/ports/tabbar-icon-size.md).
+    /// The Phosphor symbols are Regular-M only, so `.light` matches the old
+    /// bar's font without changing the stroke.
+    private func tabIcon(_ name: String) -> Image {
+        let size = CGFloat(design.kit.tokens.icon["xl"] ?? 24)
+        guard let image = UIImage(named: name)?
+            .applyingSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: size, weight: .light)) else {
+            return Image(name)
+        }
+        return Image(uiImage: image)
     }
 
     private func badgeText(for tab: Router.Tab) -> Text? {
