@@ -47,7 +47,12 @@ struct PhoneConversationModelPicker: View {
     var initialDestination: ManagedModelDestinationSnapshot?
     var onSnapshot: (ManagedModelSnapshot) -> Void = { _ in }
     var onDestination: (ManagedModelDestinationSnapshot) -> Void = { _ in }
-    var onPick: (String) -> Void = { _ in }
+    /// The account's subscription status each time a read lands, so the
+    /// composer chip names a subscription model as this list does.
+    var onAccount: (PhoneSubscriptionAccount) -> Void = { _ in }
+    /// The row a successful write made current. Nil clears the chip's
+    /// cached pick so it follows the returned destination.
+    var onPick: (PhoneModelPickerProjection.Row?) -> Void = { _ in }
 
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destination: ManagedModelDestinationSnapshot?
@@ -95,7 +100,8 @@ struct PhoneConversationModelPicker: View {
          initialDestination: ManagedModelDestinationSnapshot? = nil,
          onSnapshot: @escaping (ManagedModelSnapshot) -> Void = { _ in },
          onDestination: @escaping (ManagedModelDestinationSnapshot) -> Void = { _ in },
-         onPick: @escaping (String) -> Void = { _ in }) {
+         onAccount: @escaping (PhoneSubscriptionAccount) -> Void = { _ in },
+         onPick: @escaping (PhoneModelPickerProjection.Row?) -> Void = { _ in }) {
         self.design = design
         self.actions = actions
         self.destinations = destinations
@@ -103,6 +109,7 @@ struct PhoneConversationModelPicker: View {
         self.initialDestination = initialDestination
         self.onSnapshot = onSnapshot
         self.onDestination = onDestination
+        self.onAccount = onAccount
         self.onPick = onPick
         _snapshot = State(initialValue: initialSnapshot)
         _destination = State(initialValue: initialDestination)
@@ -126,6 +133,9 @@ struct PhoneConversationModelPicker: View {
         // the list giving way to the training card.
         ZStack { content }
             .onDisappear(perform: retire)
+            .onChange(of: accountState.value) { _, value in
+                if let value { onAccount(value) }
+            }
     }
 
     private var content: some View {
@@ -254,8 +264,8 @@ struct PhoneConversationModelPicker: View {
             savingEffort = nil
             switch result {
             case let .saved(value):
-                pickedAtumModel = model
-                onPick(model)
+                pickedAtumModel = value.choice.model
+                reportAtumPick(value.choice.model)
                 apply(value)
                 writes.settled()
             case let .conflict(latest):
@@ -284,9 +294,9 @@ struct PhoneConversationModelPicker: View {
             savingRowID = nil
             switch result {
             case let .saved(value):
-                pickedAtumModel = model
-                onPick(model)
+                pickedAtumModel = nil
                 applyDestination(value)
+                onPick(nil)
                 destinationWrites.settled()
             case .cancelled: break
             case let .refused(latest), let .consentRequired(_, latest):
@@ -375,9 +385,8 @@ struct PhoneConversationModelPicker: View {
             switch result {
             case let .saved(value):
                 pickedAtumModel = nil
-                // The chip names the subscription model as it names a saved one.
-                onPick(row.model)
                 applyDestination(value)
+                onPick(PhoneModelPickerProjection.settledDestinationPick(row, destination: value))
                 subscriptionWrites.settled()
             case .cancelled: break
             case let .consentRequired(status, latest):
@@ -396,6 +405,12 @@ struct PhoneConversationModelPicker: View {
                 if let read = destinations?.subscriptions?.read { await accountState.reload(read) }
             }
         }
+    }
+
+    /// The chip's row for an Atum write: the line-up row the list now checks.
+    private func reportAtumPick(_ model: String) {
+        guard let row = rows.first(where: { $0.source == .atum && $0.model == model }) else { return }
+        onPick(row)
     }
 
     /// The cloud answers with a subscription's model, so no Atum level applies.

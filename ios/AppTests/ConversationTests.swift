@@ -1038,4 +1038,89 @@ extension ConversationTests {
         XCTAssertEqual(RoomRootDestination.authoritative(roomKind: .group, classification: .personal), .personal)
         XCTAssertNil(RoomRootDestination.authoritative(roomKind: .group, classification: .unknown))
     }
+
+    /// W4-V2 r3: a cold notification for a two-person company DM, validated
+    /// behind the boot screen while its directory record is still loading.
+    @MainActor
+    func testAColdNotificationForACompanyTypedDMWaitsForTheDirectoryAndNeverOpensUnderChats() async throws {
+        let subject = try model(try api())
+        let router = Router()
+        router.holdDeepLink(roomID: dmRoom, cold: true)
+        var staged = [String]()
+        router.onValidatedColdRoom = { roomID in
+            staged.append(roomID)
+            router.stageColdTeamSpaceRoom(roomID: roomID)
+        }
+        // AppRoot's decision, with the room's Matrix kind (`.people`).
+        func decide(_ workspace: CompanyWorkspaceModel) -> (String) -> Router.PendingRoomDecision {
+            { roomID in
+                RoomPushDecision.decide(
+                    canOpen: !workspace.isQuarantinedConversation(roomID),
+                    destination: RoomRootDestination.authoritative(
+                        roomKind: .people, classification: workspace.roomClassification(roomID)),
+                    awaitsDirectory: workspace.awaitsConversationDirectory(roomID))
+            }
+        }
+
+        // The failure mode: without the claim registered, the DM reads as a person's chat.
+        XCTAssertEqual(RoomRootDestination.authoritative(
+            roomKind: .people, classification: subject.roomClassification(dmRoom)), .personal)
+
+        // The shell's claim registration runs before validation, mounted or not.
+        subject.reconcileMatrixRooms([dmRoom], conversationTypeClaims: [dmRoom])
+        XCTAssertFalse(subject.classificationComplete, "the directory is still loading")
+        XCTAssertEqual(subject.roomClassification(dmRoom), .quarantined)
+        XCTAssertTrue(subject.awaitsConversationDirectory(dmRoom))
+        XCTAssertFalse(router.validatePendingDeepLink(sessionAndRosterAreReady: true,
+                                                      decision: decide(subject)))
+        XCTAssertEqual(router.pendingDeepLinkRoomID, dmRoom, "held, not denied, while the directory loads")
+        XCTAssertNil(router.homeRoomID)
+        XCTAssertTrue(staged.isEmpty)
+
+        // The cold hold expires: the shell mounts; still nothing opens under Chats.
+        router.releaseColdDeepLinkHold()
+        XCTAssertFalse(router.validatePendingDeepLink(sessionAndRosterAreReady: true,
+                                                      decision: decide(subject)))
+        XCTAssertNil(router.homeRoomID)
+
+        // The directory lands: the record routes it to Team Space.
+        await subject.refresh()
+        subject.reconcileMatrixRooms([dmRoom], conversationTypeClaims: [dmRoom])
+        XCTAssertFalse(subject.awaitsConversationDirectory(dmRoom))
+        var routed = [String]()
+        router.onValidatedRoom = { roomID in
+            routed.append(roomID)
+            router.openTeamSpace(roomId: roomID)
+        }
+        XCTAssertTrue(router.validatePendingDeepLink(sessionAndRosterAreReady: true,
+                                                     decision: decide(subject)))
+        XCTAssertEqual(routed, [dmRoom])
+        XCTAssertEqual(router.selectedTab, .teamSpace)
+        XCTAssertEqual(router.teamSpaceRoomID, dmRoom)
+        XCTAssertNil(router.homeRoomID)
+
+        // Cold and still covered when the directory lands: staged in Team Space.
+        let coldRouter = Router()
+        coldRouter.holdDeepLink(roomID: dmRoom, cold: true)
+        coldRouter.onValidatedColdRoom = { coldRouter.stageColdTeamSpaceRoom(roomID: $0) }
+        XCTAssertTrue(coldRouter.validatePendingDeepLink(sessionAndRosterAreReady: true,
+                                                         decision: decide(subject)))
+        XCTAssertEqual(coldRouter.teamSpaceRoomID, dmRoom)
+        XCTAssertNil(coldRouter.homeRoomID)
+
+        // A directory that settles without the record denies it: the list, never Chats.
+        let unlisted = try model(try api(items: []))
+        await unlisted.refresh()
+        unlisted.reconcileMatrixRooms([dmRoom], conversationTypeClaims: [dmRoom])
+        XCTAssertTrue(unlisted.classificationComplete)
+        XCTAssertFalse(unlisted.awaitsConversationDirectory(dmRoom))
+        let deniedRouter = Router()
+        deniedRouter.holdDeepLink(roomID: dmRoom, cold: true)
+        XCTAssertFalse(deniedRouter.validatePendingDeepLink(sessionAndRosterAreReady: true,
+                                                            decision: decide(unlisted)))
+        XCTAssertNil(deniedRouter.pendingDeepLinkRoomID)
+        XCTAssertFalse(deniedRouter.pendingDeepLinkIsCold, "a denial mounts the shell at once")
+        XCTAssertNil(deniedRouter.homeRoomID)
+        XCTAssertNil(deniedRouter.teamSpaceRoomID)
+    }
 }
