@@ -277,7 +277,7 @@ struct ChatScreen: View {
                     }
                 }
             }
-            .toolbar(.hidden, for: .tabBar)
+            .toolbarVisibility(.hidden, for: .tabBar)
             .environment(\.chatTheme, theme)
             .atumDesign(design)
             .environment(\.chatActions, actions)
