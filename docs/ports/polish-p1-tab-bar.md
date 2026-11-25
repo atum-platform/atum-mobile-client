@@ -193,6 +193,25 @@ tests below on the same runner class.
   14 Nov failure was fixed, with 3 of 3 passes and a pass in the full class,
   and `main` passes it on the hosted runner. P1's own local run 2 hit the
   regression.
+- **Root cause (the test's swipe point, not the layout):** a temporary,
+  uncommitted diagnostic logged the form after each swipe. The disclosure
+  stayed at (16, 810, 358 x 76) through all six swipes, so the form never
+  scrolled. The screenshots show the keyboard up, the pinned Create button
+  just above it, and the form's visible rows between the navigation bar and
+  about 422 pt. `XCUIElement.swipeUp()` starts at the element's centre. The
+  form is (0, 47, 390 x 797), so its centre (y ≈ 445) is on the Create button,
+  which does not scroll. On `main`, `app.collectionViews` index 0 resolved to
+  `home.list`. The passing hosted log reads "Check for interrupting elements
+  affecting "home.list"", and that list's centre happened to fall on the
+  form's visible rows. Under the system `TabView`, index 0 is the sheet's
+  form itself, and the swipe lands on the button. The sheet's layout (the
+  keyboard, a pinned primary action, and rows scrolling between them) is the
+  intended native layout, so it stays unchanged.
+- **Fix:** `revealByScrolling` takes an optional `above:` ceiling. When it is
+  given, each drag starts and ends inside the visible band between the
+  container's top and the ceiling's top. The test passes the Create button
+  for both the reveal and the scroll back to the name field. Other callers
+  keep the centre swipe. Every assertion in the test is unchanged.
 
 ### `PhoneApprovalsUITests/testSetUpWithFaceIDThenRemove` (shard 3)
 
@@ -202,6 +221,28 @@ tests below on the same runner class.
   `S6ScriptedHost`, not `RootTabs`, and the PR has no Account or
   `S6ScriptedHost` changes. Because the label never changed, the hosted
   runner most likely dropped the tap.
+- **Local rerun:** passed (37.1 s on run 2, below), so it is left unchanged.
+
+### Local evidence
+
+All runs used the shared heavy-build lock, `-jobs 2`, the `dd-polish-p0`
+derived data and package directories, and one Atum iPhone 16e simulator
+(390 x 844, iOS 27.0, Xcode 27.0), the hosted runner's device class. Each
+script ended with `xcrun simctl shutdown all`. Run 1 hit the 2-hour
+background limit before its first build finished: the build volume's USB
+drive was saturated by unrelated traffic. It produced no results.
+
+| Run | Code | Build | `testRosterAccessibilityAudit` | `testNewAssistantShows…` | `testSetUpWithFaceIDThenRemove` |
+| --- | --- | --- | --- | --- | --- |
+| 2 | `b4e44fd` (edge fix) | `0` | passed, 83.4 s | failed at line 391 (63.5 s) | passed, 37.1 s |
+| diagnostic | run 2 + temporary logging | `0` | not run | failed; the form never scrolled (above) | not run |
+| 3 | `b4e44fd` + the `above:` test fix (this commit) | `0` | passed, 45.2 s, no contrast failure | passed, 57.0 s | passed, 69.0 s |
+
+`MotionTests` and `AtumKitTests` did not run, because no token changed.
+
+In run 2, the roster audit no longer reported "Cảm ơn bạn." Its only
+contrast exemptions were rows whose frames reach under the bar (from
+"Chị Mai" at y 751.8 down), the same edge rule as before.
 
 ### Design lint
 

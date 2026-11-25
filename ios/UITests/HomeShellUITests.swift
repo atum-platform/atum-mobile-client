@@ -388,14 +388,16 @@ final class HomeShellUITests: TranscriptUITestCase {
             XCTFail("no new-assistant form\n\(boundedHierarchy(app))")
             return
         }
-        XCTAssertTrue(revealByScrolling(disclosure, in: form), boundedHierarchy(app))
-        XCTAssertTrue(revealByScrolling(name, in: form, up: false), boundedHierarchy(app))
+        // The form runs under the keyboard and the pinned Create button, so
+        // its centre is on that button. Drag in the visible rows above it.
+        let submit = app.buttons.matching(identifier: "home.newAssistant.create").firstMatch
+        XCTAssertTrue(revealByScrolling(disclosure, in: form, above: submit), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(name, in: form, up: false, above: submit), boundedHierarchy(app))
         name.tap()
         // Not "Alfred": the scripted roster already has one, and the sheet
         // refuses a duplicate before anything is created (AS-3, desktop
         // `isDuplicateAssistantName`).
         name.typeText("Mây")
-        let submit = app.buttons.matching(identifier: "home.newAssistant.create").firstMatch
         XCTAssertTrue(submit.isEnabled)
         submit.tap()
         XCTAssertTrue(waitFor(3) { submit.label == "Thử lại" && !name.isEnabled })
