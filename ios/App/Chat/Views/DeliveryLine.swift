@@ -71,7 +71,11 @@ struct DeliveryLine: View {
                     LatestAnswerCopyRow(itemID: row.id)
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, theme.design.kit.space(.s1))
+            // Polish P3: the clock gives way to the readers' faces (or to
+            // nothing) with a quick fade instead of a pop. The line's height
+            // never changes with its mark, so the transcript does not move.
+            .chatMotion(.quick, value: row.delivery)
             // `.contain` keeps the line's identifier on the line itself, so the
             // Copy button and Seen faces inside keep their own (`answer.copy`,
             // `delivery.seen`); without it SwiftUI stamps this ID on each child.

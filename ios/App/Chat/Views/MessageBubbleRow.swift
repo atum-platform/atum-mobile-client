@@ -104,6 +104,7 @@ struct MessageBubbleRow: View {
             .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier(row.accessibilityID)
+            .modifier(SendEntrance(row: row))
         }
     }
 
@@ -147,6 +148,7 @@ struct MessageBubbleRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(row.accessibilityID)
+        .modifier(SendEntrance(row: row))
     }
 
     /// The run's name: the member's own name (mine too), as Slack shows it.
@@ -569,6 +571,48 @@ struct BubbleWithAvatarLayout: Layout {
         let width = BubbleGeometry.maxWidth(row: Double(row), gutter: Double(inset),
                                             margin: Double(ChatLayout.sideMargin))
         return ProposedViewSize(width: CGFloat(width).rounded(.down), height: nil)
+    }
+}
+
+/// Polish P3 (audit issue 2): my message rises out of the composer when its row
+/// lands, instead of popping in at its final place: Messages and Telegram move
+/// the bubble out of the field in a 0.3 s spring. The bubble, its chips and its
+/// delivery line move together, so the clock never pops in after the bubble.
+///
+/// Only a row that is mine, still sending and stamped in the last few seconds
+/// plays it: a fresh local echo. History, a reopened chat and incoming rows
+/// never do. The row's layout is final from the first frame and only its
+/// drawing moves (offset and opacity), so the transcript's follow and anchor
+/// logic sees one insert, as before. Under Reduce Motion the row only fades in;
+/// under the UI-test flag it appears at once.
+private struct SendEntrance: ViewModifier {
+    let row: ChatRow
+
+    @Environment(\.chatReducesMotion) private var reduceMotion
+    @State private var landed = false
+
+    /// How far below its place the bubble starts: about the composer's
+    /// field-to-transcript gap, so it reads as leaving the field.
+    static let rise: CGFloat = 28
+    /// How recent a sending row must be to count as just sent.
+    static let freshSeconds: TimeInterval = 3
+
+    private var plays: Bool {
+        !ChatMotion.disabledForUITests && row.item.isOwn && row.delivery == .sending
+            && abs(row.item.timestamp.timeIntervalSinceNow) < Self.freshSeconds
+    }
+
+    func body(content: Content) -> some View {
+        // Read once, when the row first draws: a later state (sent, seen) never
+        // moves a row that has already landed.
+        let pending = plays && !landed
+        content
+            .offset(y: pending && !reduceMotion ? Self.rise : 0)
+            .opacity(pending ? 0 : 1)
+            .onAppear {
+                guard plays, !landed else { return }
+                withAnimation(ChatMotion.animation(.send, reduceMotion: reduceMotion)) { landed = true }
+            }
     }
 }
 
