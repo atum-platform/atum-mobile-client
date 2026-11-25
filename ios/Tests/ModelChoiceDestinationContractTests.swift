@@ -107,6 +107,56 @@ final class ModelChoiceDestinationContractTests: XCTestCase {
         ), "1.4 keeps ChatGPT-plan and own-key Mac choices; OpenCode Go is account-wide and cloud-only")
     }
 
+    func testFutureDestinationEffortDoesNotHideTheSavedModel() throws {
+        let bytes = try fixture("destination.snapshot")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        var recommended = try XCTUnwrap(object["recommended"] as? [String: Any])
+        recommended["effort"] = "maximum"
+        object["recommended"] = recommended
+        var choices = try XCTUnwrap(object["choices"] as? [[String: Any]])
+        choices[0]["effort"] = "future"
+        object["choices"] = choices
+
+        let snapshot = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                            from: JSONSerialization.data(withJSONObject: object))
+        let saved = try XCTUnwrap(snapshot.choice(for: ManagedModelDestinationID("cloud")))
+        XCTAssertEqual(saved.model, choices[0]["model"] as? String)
+        XCTAssertNil(saved.managedEffort)
+        XCTAssertEqual(snapshot.recommended.effort, .max)
+    }
+
+    func testAnUnsupportedRecommendationCannotEnableOrWriteAnotherAtumModel() throws {
+        let bytes = try fixture("destination.snapshot")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        let requestID = try NativeID("00000000-0000-4000-8000-303617b97302")
+        let cloud = try ManagedModelDestinationID("cloud")
+        let mac = try ManagedModelDestinationID("mac:mini-b")
+        let eligible = Set(ManagedModelLineup.servedAliases)
+
+        for unsupported in ["maximum", "max"] {
+            object["recommended"] = ["source": "atum", "model": "nguyet-thuc", "effort": unsupported]
+            let snapshot = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                                from: JSONSerialization.data(withJSONObject: object))
+            XCTAssertFalse(PhoneModelPickerProjection.canSelectAtumModel(
+                "nhat-thuc", snapshot: snapshot, destination: cloud, cloudEligibleAliases: eligible))
+            XCTAssertFalse(PhoneModelPickerProjection.canSelectAtumModel(
+                "nguyet-thuc", snapshot: snapshot, destination: mac, cloudEligibleAliases: []))
+            let fallbackRows = PhoneModelPickerProjection.conversation(
+                offer: nil, destination: snapshot, destinationID: cloud, cloudEligibleAliases: eligible)
+            XCTAssertEqual(fallbackRows.first { $0.model == "nhat-thuc" }?.selectable, false)
+            XCTAssertThrowsError(try ManagedModelDestinationWrite(
+                requestId: requestID, snapshot: snapshot, destination: cloud, model: "nhat-thuc"))
+
+            // A compatible saved effort for the exact model still produces a valid payload.
+            let write = try ManagedModelDestinationWrite(
+                requestId: requestID, snapshot: snapshot, destination: cloud, model: "nguyet-thuc")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? [String: Any])
+            XCTAssertEqual(body["choice"] as? [String: String], [
+                "destination": "cloud", "source": "atum", "model": "nguyet-thuc", "effort": "medium",
+            ])
+        }
+    }
+
     func testDestinationWriteMatchesFrozenRequestShapeAndNeverCarriesSecrets() throws {
         let bytes = try fixture("destination.snapshot")
         var raw = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])

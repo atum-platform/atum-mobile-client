@@ -73,15 +73,23 @@ final class PhoneApprovalsUITests: TranscriptUITestCase {
         XCTAssertTrue(setUp.waitForExistence(timeout: 5))
         XCTAssertEqual(setUp.label, "Set up with Face ID")
         setUp.tap()
-        XCTAssertTrue(waitFor(3) { setUp.label.contains("Setting up") }, "no Setting up…")
+        // "Setting up…" is transient: on a slow hosted runner the scripted set-up can
+        // finish between polls, so seeing either the progress label or the finished
+        // state proves the tap started set-up.
+        XCTAssertTrue(waitFor(5) {
+            (setUp.exists && setUp.label.contains("Setting up")) || self.status(app).contains("On · since")
+        }, "no Setting up…")
         keepScreenshot("approvals-setting-up-en-light", of: app)
         XCTAssertTrue(waitFor(10) { self.status(app).contains("On · since") }, "not on: \(status(app))")
         XCTAssertFalse(setUp.exists, "set up stays offered once on")
         let remove = element(app, "approvals.settings.remove")
         XCTAssertTrue(remove.waitForExistence(timeout: 3))
+        // Remove stays disabled while the model is still busy after set-up; a tap on
+        // the disabled row opens nothing.
+        XCTAssertTrue(waitFor(10) { remove.isEnabled }, "remove stays disabled")
         remove.tap()
         let confirm = element(app, "approvals.settings.confirm-remove")
-        XCTAssertTrue(confirm.waitForExistence(timeout: 3))
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Remove approvals from this iPhone?"].exists)
         XCTAssertTrue(app.staticTexts["This iPhone will no longer be able to approve. You can still answer on your other devices."].exists)
         keepScreenshot("approvals-remove-confirm-en-light", of: app)

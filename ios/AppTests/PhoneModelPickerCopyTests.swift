@@ -106,9 +106,11 @@ final class PhoneModelPickerCopyTests: XCTestCase {
     func testAnUnavailableSubscriptionSaysWhyFromThePin() throws {
         let design = try LiveDesign()
         let copy = PhoneModelPickerCopy(design: design)
-        let notReadyKey = PhonePickerCopyKey.chatgptInWork.rawValue
+        let notReadyKey = PhonePickerCopyKey.modelsUnavailable.rawValue
+        let loadingKey = PhonePickerCopyKey.modelsLoading.rawValue
         let signedOutKey = PhonePickerCopyKey.modelsSignedOut.rawValue
         XCTAssertEqual(copy.unavailable(.notReady), try design.copy.text(notReadyKey, locale: design.locale))
+        XCTAssertEqual(copy.unavailable(.loading), try design.copy.text(loadingKey, locale: design.locale))
         XCTAssertEqual(copy.unavailable(.signedOut), try design.copy.text(signedOutKey, locale: design.locale))
     }
 
@@ -122,10 +124,12 @@ final class PhoneModelPickerCopyTests: XCTestCase {
         for key in PhoneModelPickerStateCopyKey.allCases {
             XCTAssertFalse(copy.state(key).isEmpty, "\(key)")
         }
-        // The thinking levels, named and explained, in the pin's own words.
+        // Every Thinking level has a name. The pin includes help for Atum's levels.
         for level in ManagedModelEffort.allCases {
             XCTAssertFalse(copy.effortName(level).isEmpty, "\(level)")
-            XCTAssertFalse(copy.effortHelp(level).isEmpty, "\(level)")
+        }
+        for level in [ManagedModelEffort.low, .medium, .high] {
+            XCTAssertFalse(try XCTUnwrap(copy.effortHelp(level)).isEmpty, "\(level)")
         }
         // The words the section headers and read-only rows borrow from the pin.
         for key in ["desktop.common.expand", "desktop.common.collapse",

@@ -21,6 +21,8 @@ SOURCES = [
     ("SwiftUI Math", NOTICES + "SwiftUIMath-LICENSE.txt"),
     ("Swift Concurrency Extras", NOTICES + "ConcurrencyExtras-LICENSE.txt"),
     ("Prism", NOTICES + "Prism-LICENSE.txt"),
+    ("Provider marks — Simple Icons, Lobe Icons and T3 Code", NOTICES + "ProviderMarks-NOTICE.txt"),
+    ("Provider marks — Simple Icons CC0 1.0", NOTICES + "ProviderMarks-SimpleIcons-CC0-1.0.txt"),
     ("Math fonts — copyright and licence notices", NOTICES + "MathFonts-EmbeddedNotices.txt"),
     ("Math fonts — MIT License", NOTICES + "MathFonts-MIT-LICENSE.txt"),
     ("Math fonts — SIL Open Font License", NOTICES + "MathFonts-OFL.txt"),

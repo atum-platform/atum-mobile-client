@@ -227,11 +227,14 @@ public struct ConversationCore: Sendable {
         let base = projected?.snapshot ?? .empty
         let held = heldRows
         var rows = mergedRows ?? base.rows
+        // Identity changes keep the old rows visible until the new mapper
+        // publishes, but those rows have no current projection generation.
+        let generation = replacesIdentityProjection ? Snapshot.empty.generation : base.generation
         // Keep the transcript during attachment, but a previous company
         // binding cannot continue to authorize its synthetic footer.
         let hasStaleCompanyFooter = replacesIdentityProjection
             && rows.last?.id == Projection.typingRowID && rows.last?.item.companyTurn != nil
-        guard mergedRows != nil || !held.isEmpty || localChange != nil
+        guard generation != base.generation || mergedRows != nil || !held.isEmpty || localChange != nil
                 || !retryingIDs.isEmpty || hasStaleCompanyFooter else { return base }
         if hasStaleCompanyFooter { rows.removeLast() }
         if !retryingIDs.isEmpty {
@@ -248,7 +251,7 @@ public struct ConversationCore: Sendable {
             rows = Grouping.apply(to: rows, context: context, groupsRuns: false)
         }
         return Snapshot(rows: rows, change: localChange ?? (mergedRows != nil || hasStaleCompanyFooter ? .inPlace : base.change),
-                        generation: base.generation)
+                        generation: generation)
     }
 
     /// The display row for an ID, if it is on screen (handover rows and held

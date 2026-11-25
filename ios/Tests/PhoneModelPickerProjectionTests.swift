@@ -216,9 +216,10 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
 
     /// A cloud offer whose current model is ready, with the levels it accepts.
     private func readySnapshot(model: String = "nguyet-thuc", effort: String? = "medium",
-                               efforts: [String] = ["low", "medium", "high"]) throws -> ManagedModelSnapshot {
+                               efforts: [Any] = ["low", "medium", "high"]) throws -> ManagedModelSnapshot {
         let digest = String(repeating: "a", count: 64)
-        let defaultEffort = efforts.contains("medium") ? "medium" : efforts[0]
+        let ids = efforts.compactMap { $0 as? String }
+        let defaultEffort = ids.contains("medium") ? "medium" : ids.first ?? "medium"
         var choice: [String: Any] = ["v": 2, "source": "atum", "model": model]
         if let effort { choice["effort"] = effort }
         var current = offer(alias: model, name: "Current", eligibility: ["state": "ready"])
@@ -252,6 +253,68 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
             try readySnapshot(effort: nil, efforts: ["low", "high"])))
         XCTAssertEqual(thinking.levels, [.low, .high])
         XCTAssertEqual(thinking.current, .low, "the offer's default; nothing was saved")
+    }
+
+    func testThinkingReadsAllDesktopLevelsAndIgnoresFutureLevels() throws {
+        let snapshot = try readySnapshot(effort: "maximum", efforts: [
+            "off", "minimal", "low", "medium", "high", "extra-high", "extra_high", "max", "future"
+        ])
+        let thinking = try XCTUnwrap(PhoneModelPickerProjection.thinking(snapshot))
+        XCTAssertEqual(thinking.levels, [.none, .minimal, .low, .medium, .high, .xhigh, .max])
+        XCTAssertEqual(thinking.current, .max)
+        XCTAssertTrue(PhoneModelPickerProjection.canChangeThinking(to: .none, snapshot: snapshot))
+
+        let write = try ManagedModelWrite(requestId: try NativeID(UUID().uuidString.lowercased()),
+                                          snapshot: snapshot, model: "nguyet-thuc", effort: .xhigh)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? [String: Any])
+        XCTAssertEqual((body["choice"] as? [String: Any])?["effort"] as? String, "extra-high")
+    }
+
+    func testAFutureSavedLevelIsNotMarkedAsTheDefault() throws {
+        let snapshot = try readySnapshot(effort: "future", efforts: ["future", "medium"])
+        let thinking = try XCTUnwrap(PhoneModelPickerProjection.thinking(snapshot))
+        XCTAssertEqual(thinking.levels, [.medium])
+        XCTAssertNil(thinking.current)
+        XCTAssertTrue(PhoneModelPickerProjection.canChangeThinking(to: .medium, snapshot: snapshot))
+
+        let unknownDefault = try readySnapshot(effort: nil, efforts: ["future", "high"])
+        XCTAssertNil(unknownDefault.currentEffort)
+        XCTAssertEqual(unknownDefault.models[0].selectionEffort, .high)
+
+        let onlyFuture = try readySnapshot(effort: nil, efforts: ["future"])
+        XCTAssertNil(PhoneModelPickerProjection.thinking(onlyFuture))
+        XCTAssertFalse(PhoneModelPickerProjection.cloud(onlyFuture)[0].selectable)
+    }
+
+    func testAssistantHomeKeepsAUsableOfferWhenEffortEntriesAreMalformedOrDuplicated() throws {
+        for entries: [Any] in [["medium", 7], ["medium", "future", "future"], ["medium", "medium"]] {
+            let snapshot = try readySnapshot(efforts: entries)
+            let offer = try XCTUnwrap(snapshot.models.first)
+            XCTAssertEqual(offer.efforts, [.medium])
+            XCTAssertTrue(AgentHomeModelRows.cloud(snapshot, selected: nil)[0].selectable)
+            XCTAssertEqual(AgentHomeModelRows.cloudChoice(for: offer)?.effort, .medium)
+        }
+    }
+
+    func testConversationCanUseAnOfferWhenTheDestinationRecommendationCannotBeWritten() throws {
+        let bytes = try fixture("destination.snapshot")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        object["recommended"] = ["source": "atum", "model": "nguyet-thuc", "effort": "maximum"]
+        let destination = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                               from: JSONSerialization.data(withJSONObject: object))
+        let offer = try readySnapshot(model: "nhat-thuc", efforts: ["medium"])
+        let rows = PhoneModelPickerProjection.conversation(
+            offer: offer, destination: destination, destinationID: try ManagedModelDestinationID("cloud"))
+        XCTAssertEqual(rows.filter { $0.selectable && !$0.selected }.map(\.model), ["nhat-thuc"])
+    }
+
+    func testAssistantHomeUsesOnlyLevelsItsCloudWriteAccepts() throws {
+        let snapshot = try readySnapshot(effort: nil, efforts: ["xhigh", "max", "high"])
+        XCTAssertTrue(AgentHomeModelRows.cloud(snapshot, selected: nil)[0].selectable)
+        XCTAssertEqual(AgentHomeModelRows.cloudChoice(for: snapshot.models[0])?.effort, .high)
+
+        let unsupported = try readySnapshot(effort: nil, efforts: ["xhigh", "max", "future"])
+        XCTAssertFalse(AgentHomeModelRows.cloud(unsupported, selected: nil)[0].selectable)
     }
 
     func testThereIsNoThinkingControlForOneLevelOrAModelThatCannotBeWritten() throws {

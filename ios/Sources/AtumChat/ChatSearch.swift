@@ -287,47 +287,96 @@ public enum ChatHistorySearch {
                            progress: @MainActor (Progress) -> Void = { _ in }) async -> Progress {
         var index = ChatSearchIndex()
         return await run(maximumPages: maximumPages, rows: rows,
-                         matches: { !index.matches(in: $0, query: query).isEmpty },
+                         acceptMatch: { !index.matches(in: rows(), query: query).isEmpty },
                          loadPage: loadPage, progress: progress)
     }
 
-    /// A routed result names a Matrix event. It shares the history walk and its
-    /// limits with in-chat search, without matching any other row's words.
+    public struct RoutedMatch: Equatable, Sendable {
+        public let rowID: String
+        public let eventID: String
+        fileprivate let generation: UInt64
+
+        public func isCurrent(in snapshot: Snapshot) -> Bool {
+            snapshot.generation == generation
+                && snapshot.rows.contains { $0.id == rowID && $0.item.eventID == eventID }
+        }
+    }
+
+    /// A routed result names a Matrix event. The same walk keeps its page
+    /// budget while the transcript tries to place a match in the current projection.
     @MainActor
-    public static func find(eventID: String, rows: @MainActor () -> [ChatRow],
-                            loadPage: @MainActor () async -> Page) async -> Progress {
-        await run(maximumPages: maximumPages, rows: rows,
-                  matches: { $0.contains { $0.item.eventID == eventID } },
-                  loadPage: loadPage, progress: { _ in })
+    public static func find(eventID: String, snapshot: @MainActor () -> Snapshot,
+                            timelineGeneration: (@MainActor () -> UInt64)? = nil,
+                            loadPage: @MainActor () async -> Page,
+                            placeMatch: @MainActor (RoutedMatch) async -> Bool = { _ in true }) async -> Progress {
+        var replacedGeneration: UInt64?
+        func currentProjection() -> Snapshot {
+            let current = snapshot()
+            // The transcript keeps drawing the old rows until the replacement
+            // projects. Those rows cannot complete the routed search.
+            guard current.generation != Snapshot.empty.generation,
+                  current.generation != replacedGeneration else { return .empty }
+            return current
+        }
+        return await run(maximumPages: maximumPages,
+                         rows: { currentProjection().rows },
+                         generation: { timelineGeneration?() ?? snapshot().generation },
+                         acceptMatch: {
+                             while !Task.isCancelled {
+                                 let current = currentProjection()
+                                 guard current.generation != Snapshot.empty.generation,
+                                       let row = current.rows.first(where: { $0.item.eventID == eventID })
+                                 else { return false }
+                                 let match = RoutedMatch(rowID: row.id, eventID: eventID,
+                                                         generation: current.generation)
+                                 if await placeMatch(match) { return true }
+                                 // If the replacement already contains the reply,
+                                 // try it before spending another page.
+                                 if match.isCurrent(in: currentProjection()) { return false }
+                             }
+                             return false
+                         }, loadPage: {
+                             let generation = snapshot().generation
+                             let page = await loadPage()
+                             if page == .timelineReplaced { replacedGeneration = generation }
+                             return page
+                         })
     }
 
     @MainActor
     private static func run(maximumPages: Int, rows: @MainActor () -> [ChatRow],
-                            matches: @MainActor ([ChatRow]) -> Bool,
+                            generation: @MainActor () -> UInt64 = { 0 },
+                            acceptMatch: @MainActor () async -> Bool,
                             loadPage: @MainActor () async -> Page,
-                            progress: @MainActor (Progress) -> Void) async -> Progress {
+                            progress: @MainActor (Progress) -> Void = { _ in }) async -> Progress {
         let limit = max(0, min(maximumPages, Self.maximumPages))
         func report(_ phase: Phase, _ pages: Int) -> Progress {
             let value = Progress(phase: phase, pages: pages, searched: searched(rows()))
             progress(value)
             return value
         }
-        if matches(rows()) { return report(.found, 0) }
+        if Task.isCancelled { return report(.cancelled, 0) }
+        if await acceptMatch() { return report(.found, 0) }
+        if Task.isCancelled { return report(.cancelled, 0) }
         guard limit > 0 else { return report(.capped, 0) }
         for pages in 1...limit {
-            if Task.isCancelled { return report(.cancelled, pages - 1) }
             _ = report(.searching, pages - 1)
             let page = await loadPage()
+            let pageGeneration = generation()
             if Task.isCancelled { return report(.cancelled, pages) }
-            if matches(rows()) { return report(.found, pages) }
+            if await acceptMatch() { return report(.found, pages) }
+            if Task.isCancelled { return report(.cancelled, pages) }
             switch page {
             case .failed: return report(.failed, pages)
             case .loaded(hasMore: false):
                 // SDK status and diffs have separate listeners. Give the final
                 // projection a short grace period before declaring no results.
+                if generation() != pageGeneration { continue }
                 do { try await Task.sleep(for: .milliseconds(300)) }
                 catch { return report(.cancelled, pages) }
-                if matches(rows()) { return report(.found, pages) }
+                if await acceptMatch() { return report(.found, pages) }
+                if Task.isCancelled { return report(.cancelled, pages) }
+                if generation() != pageGeneration { continue }
                 return report(.complete, pages)
             case .loaded(hasMore: true), .timelineReplaced: continue
             }

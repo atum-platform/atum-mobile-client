@@ -41,3 +41,16 @@ The first verification attempt after the initial fixes exited `73` at `lockf` wh
 the build volume detached. The existing disk image was reattached.
 The simulator shutdown exited `0` after each completed verification attempt.
 All four send tests in the final two runs recorded a hold before release.
+
+## PhoneApprovalsUITests set-up/remove flake (24 Nov, coordinator)
+
+`testSetUpWithFaceIDThenRemove` failed on two unrelated hosted heads at two different points:
+- PR #95 `ae84aad`, line 76: the transient "Setting up…" label wasn't seen within 3 s.
+- PR #97 `3e16c86`, line 84: the Remove confirmation never opened.
+
+Neither PR touches approvals code. Remove is `.disabled(model.busy != nil)`, so on a slow runner a tap right after set-up finishes can land on a disabled row and open nothing. The test now:
+- accepts either the progress label or the finished "On · since" state as proof that set-up started;
+- waits up to 10 s for Remove to be enabled before tapping it;
+- gives the confirmation 5 s.
+
+The test-only change is syntax-checked with `swiftc -parse`. The hosted PR shard is the evidence.

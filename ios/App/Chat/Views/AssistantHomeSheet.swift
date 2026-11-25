@@ -29,8 +29,8 @@ struct AssistantHomeValue: Equatable {
     func legacyChoice(for home: AgentHomeLocation) throws -> AgentHomeModelChoice? {
         let destination = try ManagedModelDestinationID(home.destinationID)
         guard let choice = destinations.choice(for: destination) else { return nil }
-        guard home == .cloud, choice.source == .atum,
-              let effort = AgentHomeModelEffort(rawValue: choice.effort) else { return nil }
+        guard home == .cloud, let level = choice.managedEffort,
+              let effort = AgentHomeModelEffort(rawValue: level.rawValue) else { return nil }
         return try AgentHomeModelChoice(home: .cloud, source: .atum,
                                         connectionRef: AgentHomeContract.managedConnectionRef,
                                         model: choice.model, effort: effort)
@@ -496,10 +496,7 @@ private struct AssistantHomeMoveSheet: View {
         let choice: AgentHomeModelChoice?
         if home == .cloud {
             guard let offer = value.cloudModels.models.first(where: { $0.alias == row.model }) else { return }
-            choice = try? AgentHomeModelChoice(home: .cloud, source: .atum,
-                                               connectionRef: AgentHomeContract.managedConnectionRef,
-                                               model: offer.alias,
-                                               effort: AgentHomeModelEffort(rawValue: offer.defaultEffort.rawValue)!)
+            choice = AgentHomeModelRows.cloudChoice(for: offer)
         } else {
             choice = try? catalog?.choice(connectionRef: row.connectionID, model: row.model)
         }

@@ -10,7 +10,7 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         try NativeAPI.decode(type, from: JSONSerialization.data(withJSONObject: object))
     }
 
-    private func model(_ id: String, _ name: String, efforts: [String] = ["low", "medium", "high"],
+    private func model(_ id: String, _ name: String, efforts: [Any] = ["low", "medium", "high"],
                        defaultEffort: String = "medium") -> [String: Any] {
         ["id": id, "displayName": name, "efforts": efforts, "defaultEffort": defaultEffort,
          "contextBudget": 200_000, "outputBudget": 32_000]
@@ -106,6 +106,27 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         XCTAssertEqual(relayStatus.models.map(\.writeEffort), [.medium, .high, .low])
     }
 
+    func testFutureEffortsKeepTheCatalogAndTheKnownWritableModels() throws {
+        let relayStatus = try decode(ChatGPTRelayStatus.self, relay(enabled: true, models: [
+            model("a", "A", efforts: ["future", "extra_high", "maximum", "low"], defaultEffort: "future"),
+            model("b", "B", efforts: ["future"], defaultEffort: "medium"),
+        ]))
+        XCTAssertEqual(relayStatus.models[0].efforts, [.xhigh, .max, .low])
+        XCTAssertEqual(relayStatus.models[0].writeEffort, .low)
+        XCTAssertNil(relayStatus.models[1].writeEffort)
+    }
+
+    func testMalformedAndDuplicatedEffortsKeepTheSubscriptionCatalogUsable() throws {
+        let relayStatus = try decode(ChatGPTRelayStatus.self, relay(enabled: true, models: [
+            model("a", "A", efforts: ["medium", 7]),
+            model("b", "B", efforts: ["medium", "future", "future"]),
+            model("c", "C", efforts: ["medium", "medium"]),
+            model("d", "D", efforts: [7, NSNull(), [:] as [String: String]]),
+        ]))
+        XCTAssertEqual(relayStatus.models.map(\.efforts), [[.medium], [.medium], [.medium], []])
+        XCTAssertEqual(relayStatus.models.map(\.writeEffort), [.medium, .medium, .medium, nil])
+    }
+
     // MARK: The write
 
     func testAPlanPickIs15AndAnOpencodePickIs14OnTheCloud() throws {
@@ -129,6 +150,8 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         }
         XCTAssertThrowsError(try ManagedModelSubscriptionWrite(requestId: id, snapshot: saved, source: .atum,
                                                                model: "nguyet-thuc", effort: .medium))
+        XCTAssertThrowsError(try ManagedModelSubscriptionWrite(requestId: id, snapshot: saved, source: .chatGPTPlan,
+                                                               model: "gpt-6.1", effort: .max))
     }
 
     // MARK: The picker rows
@@ -194,6 +217,76 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
             XCTAssertFalse(rows[0].selectable)
             XCTAssertNil(rows[0].unavailable)
         }
+    }
+
+    func testASavedPlanShowsLoadingOnlyWhileItsStatusIsBeingRead() throws {
+        let saved = try snapshot(cloudChoice: ["destination": "cloud", "source": "chatgpt_plan",
+                                               "model": "gpt-6.1", "effort": "medium"])
+        let rows = PhoneModelPickerProjection.subscriptions(saved, destination: cloud, loading: true)
+        XCTAssertEqual(rows.map(\.unavailable), [.loading])
+        XCTAssertEqual(rows.map(\.selectable), [false])
+        XCTAssertTrue(rows[0].selected)
+    }
+
+    @available(macOS 14.0, *)
+    @MainActor
+    func testRefusalRefreshDisablesCachedPlanRowsAndShowsLoadingUntilTheRelayAnswers() async throws {
+        let saved = try snapshot(cloudChoice: ["destination": "cloud", "source": "chatgpt_plan",
+                                               "model": "gpt-6.1", "effort": "medium"])
+        let enabled = try account(relay: relay(enabled: true), connections: connections(connected: true))
+        let disabled = try account(relay: relay(enabled: false), connections: connections(connected: true))
+        let state = PhoneModelPickerAccount()
+        func rows() -> [PhoneModelPickerProjection.Row] {
+            PhoneModelPickerProjection.subscriptions(saved, destination: cloud, account: state.value,
+                                                     loading: state.loading)
+        }
+
+        await state.reload { enabled }
+        let alternate = try XCTUnwrap(rows().first { $0.model == "gpt-6.1-mini" })
+        XCTAssertTrue(alternate.selectable)
+        XCTAssertEqual(rows().first?.selected, true)
+        XCTAssertNil(rows().first?.unavailable)
+
+        await state.reload {
+            XCTAssertEqual(state.value?.chatGPT?.state, .enabled)
+            XCTAssertEqual(rows().map(\.model), ["gpt-6.1", "gpt-6.1-mini", "glm-5.2"])
+            XCTAssertEqual(rows().map(\.selectable), [false, false, true])
+            XCTAssertEqual(rows().first?.unavailable, .loading)
+            XCTAssertEqual(rows().first?.selected, true)
+            XCTAssertNil(PhoneModelPickerProjection.canSelectSubscription(
+                alternate, snapshot: saved, account: state.value, loading: state.loading))
+            return disabled
+        }
+
+        XCTAssertFalse(state.loading)
+        XCTAssertEqual(rows().map(\.model), ["gpt-6.1", "glm-5.2"])
+        XCTAssertEqual(rows().first?.unavailable, .notReady)
+        XCTAssertEqual(rows().first?.selected, false)
+        XCTAssertEqual(rows().first?.selectable, false)
+    }
+
+    @available(macOS 14.0, *)
+    @MainActor
+    func testOverlappingRefusalRefreshesIgnoreTheOlderEnabledReply() async throws {
+        let enabled = try account(relay: relay(enabled: true), connections: nil)
+        let disabled = try account(relay: relay(enabled: false), connections: nil)
+        let state = PhoneModelPickerAccount()
+        await state.reload { enabled }
+
+        await state.reload {
+            XCTAssertTrue(state.loading)
+            await state.reload {
+                XCTAssertTrue(state.loading)
+                XCTAssertEqual(state.value?.chatGPT?.state, .enabled)
+                return disabled
+            }
+            XCTAssertFalse(state.loading)
+            XCTAssertEqual(state.value?.chatGPT?.state, .disabled)
+            return enabled
+        }
+
+        XCTAssertFalse(state.loading)
+        XCTAssertEqual(state.value?.chatGPT?.state, .disabled)
     }
 
     func testAMacDestinationsPlanStaysReadOnly() throws {
