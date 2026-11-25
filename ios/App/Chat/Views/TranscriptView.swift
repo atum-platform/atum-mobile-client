@@ -242,6 +242,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private var applyingSnapshot = false
     private var layingOut = false
     private var readingAnchor: Anchor?
+    private var resizedReadingAnchor: Anchor?
     private var foldingAnchor: Anchor?
     private var measuredAnchor: Anchor?
     private var lastGeometry: TranscriptGeometry?
@@ -306,9 +307,9 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
 
         let sizeChanged = dynamicTypeSize != input.dynamicTypeSize
         dynamicTypeSize = input.dynamicTypeSize
-        if sizeChanged, !store.follow.isFollowing {
-            if readingAnchor == nil { readingAnchor = captureAnchor() }
-            traceAnchor(readingAnchor)
+        if sizeChanged, !store.follow.isFollowing, placement == nil {
+            resizedReadingAnchor = resizedReadingAnchor ?? readingAnchor ?? captureAnchor()
+            traceAnchor(resizedReadingAnchor)
             updateSizingPin()
         }
         var rowEnvironment = environment
@@ -357,6 +358,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
             if case let .scrollToBottom(animated) = request.command, store.follow.isFollowing {
                 stopPlacement()
                 replyJumpID = nil
+                resizedReadingAnchor = nil
                 scrollToBottom(animated: animated)
             }
         }
@@ -379,8 +381,12 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private func applySnapshot() {
         guard let list, let dataSource else { return }
         let nextRows = Dictionary(uniqueKeysWithValues: snapshot.rows.map { ($0.id, $0) })
+        if let resizedReadingAnchor, nextRows[resizedReadingAnchor.id] == nil {
+            self.resizedReadingAnchor = nil
+        }
         let keepsBottom = store.follow.isFollowing && motion != .user
-        let anchor = keepsBottom || placement != nil ? nil : captureAnchor(keeping: nextRows)
+        let anchor = keepsBottom || placement != nil
+            ? nil : resizedReadingAnchor ?? captureAnchor(keeping: nextRows)
         let ids = snapshot.rows.map(\.id)
         let previousIDs = dataSource.snapshot().itemIdentifiers
         let changed = ids.filter { id in
@@ -455,7 +461,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
             layout.pin = .none
         } else if store.follow.isFollowing, motion != .user, placement == nil, !reportKeyboardPanEnd {
             layout.pin = .bottom
-        } else if let id = placement?.rowID ?? foldingAnchor?.id ?? readingAnchor?.id,
+        } else if let id = placement?.rowID ?? foldingAnchor?.id ?? resizedReadingAnchor?.id ?? readingAnchor?.id,
                   let path = dataSource?.indexPath(for: id) {
             layout.pin = .row(path)
         } else {
@@ -467,7 +473,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         guard !layingOut, !applyingSnapshot else { return }
         // Keep the last reported anchor through asynchronous self-sizing
         // invalidations and use the current one for the next layout.
-        measuredAnchor = foldingAnchor ?? readingAnchor
+        measuredAnchor = foldingAnchor ?? resizedReadingAnchor ?? readingAnchor
         updateSizingPin()
     }
 
@@ -535,6 +541,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         motion = .user
         foldingAnchor = nil
         replyJumpID = nil
+        resizedReadingAnchor = nil
         stopPlacement()
         cancelRouteOnReport = true
         keyboardPull = candidateKeyboardPull(in: scrollView)
@@ -589,6 +596,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
 
     func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
         stopPlacement()
+        resizedReadingAnchor = nil
         motion = .animating
         return true
     }
@@ -622,6 +630,11 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
             store.searchTargetEventID = nil
         }
         let geometry = TranscriptGeometry(list)
+        // The collection can briefly estimate a new content end at the
+        // reading row as cells resize. A typography change is not a request
+        // to reattach; the retained row still owns the reading position.
+        let resizeAtEstimatedEnd = resizedReadingAnchor != nil && motion == .idle
+            && geometry.distanceFromBottom <= FollowPolicy.nearBottomPoints
         let onScreen = list.window != nil && geometry.viewportHeight > 0 && !rows.isEmpty
         if onScreen {
             if !opened {
@@ -630,7 +643,8 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
                 markMemory("chat.open")
             }
             let clampedToSearch = placement != nil
-            if keyboardPull == nil, geometry != lastGeometry || detachOnReport || reportKeyboardPanEnd {
+            if keyboardPull == nil, !resizeAtEstimatedEnd,
+               geometry != lastGeometry || detachOnReport || reportKeyboardPanEnd {
                 lastGeometry = geometry
                 let reportedMotion = detachOnReport || reportKeyboardPanEnd ? .user : motion
                 detachOnReport = false
@@ -651,6 +665,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         }
         let visible = onScreen && sceneActive && !covered
             && store.searchTargetEventID == nil
+            && !resizeAtEstimatedEnd
             && geometry.distanceFromBottom <= FollowPolicy.nearBottomPoints
         if store.bottomVisible != visible { store.bottomVisible = visible }
         if chrome.pill != store.follow.pill { chrome.pill = store.follow.pill }
@@ -684,6 +699,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private func showOriginal(_ eventID: String) {
         guard let row = snapshot.rows.first(where: { $0.item.eventID == eventID }) else { return }
         stopPlacement()
+        resizedReadingAnchor = nil
         replyJumpID = row.id
         readingAnchor = nil
         centerReply(row.id, animated: true)
@@ -708,6 +724,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
 
     private func rowOpening(_ id: String) {
         guard let list, let frame = rowFrame(id) else { return }
+        resizedReadingAnchor = nil
         if store.follow.isFollowing { detach() }
         let top = list.contentOffset.y + list.adjustedContentInset.top
         foldingAnchor = Anchor(id: id, viewportY: frame.minY - top)
@@ -718,6 +735,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         guard !store.follow.isFollowing, let list, let frame = rowFrame(id),
               frame.minY < list.contentOffset.y + list.adjustedContentInset.top else { return }
         foldingAnchor = Anchor(id: id, viewportY: 0)
+        resizedReadingAnchor = nil
         readingAnchor = nil
         setOffset(frame.minY - list.adjustedContentInset.top, animated: true)
     }
@@ -744,6 +762,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         stopPlacement()
         guard store.snapshot.rows.contains(where: { $0.id == rowID }) else { return }
         placement = SearchPlacement(rowID: rowID)
+        resizedReadingAnchor = nil
         replyJumpID = nil
         detachOnReport = true
         traceSearch("request", rowID: rowID)

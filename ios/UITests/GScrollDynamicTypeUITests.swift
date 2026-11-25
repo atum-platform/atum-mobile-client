@@ -37,7 +37,11 @@ final class GScrollDynamicTypeUITests: TranscriptUITestCase {
         keepScreenshot("g6-axxxl-bottom", of: app)
 
         let screen = visibleBottom(app) - visibleTop(app)
-        for _ in 0..<8 where topVisibleRowDistance(app) < screen * 2 {
+        // At AX XXL a few messages can span several screens and then fit
+        // inside one viewport at the default size. Leave room after shrinking
+        // so the requested anchor is still inside the legal scroll range.
+        let readingDistance = screen * 4
+        for _ in 0..<12 where topVisibleRowDistance(app) < readingDistance {
             drag(app, by: screen * 0.8)
             wait(0.5)
         }
@@ -53,7 +57,7 @@ final class GScrollDynamicTypeUITests: TranscriptUITestCase {
         }
         keepScreenshot("g6-axxxl-detached", of: app)
         XCTAssertTrue(followValue(app).hasPrefix("detached"), "check 6: not detached after scrolling up (\(followValue(app)))")
-        XCTAssertGreaterThanOrEqual(topVisibleRowDistance(app), screen * 2,
+        XCTAssertGreaterThanOrEqual(topVisibleRowDistance(app), readingDistance,
                                    "check 6: not far enough from the bottom to hold a shrinking row")
         XCTAssertGreaterThanOrEqual(readingRow(app)?.frame.minY ?? -.infinity, visibleTop(app) - 0.5,
                                     "check 6: the anchor row still starts above the viewport")
