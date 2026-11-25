@@ -1504,7 +1504,7 @@ private struct HomeStartChatSheet: View {
                         }
                     } label: {
                         HStack(spacing: 12) {
-                            // Home's own face: photos, marks, the crescent,
+                            // Home's own face: photos, marks, Atum's logo,
                             // the raven and app tiles (desktop `start-chat.tsx`).
                             HomeAvatar(row: row, size: 36,
                                        loadMatrixThumbnail: actions.loadMatrixThumbnail)
@@ -2337,7 +2337,10 @@ private struct HomeRowView: View {
 
     private var compactLayout: some View {
         HStack(spacing: 12) {
+            // The chat list's rows draw Atum's logo inset, as the desktop's
+            // `roster-conversations.tsx` rows pass `inset`.
             HomeAvatar(row: row, size: 52, loadMatrixThumbnail: loadMatrixThumbnail)
+                .environment(\.atumAvatarBrandInset, true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(verbatim: row.name)
@@ -2381,6 +2384,7 @@ private struct HomeRowView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 HomeAvatar(row: row, size: 52, loadMatrixThumbnail: loadMatrixThumbnail)
+                    .environment(\.atumAvatarBrandInset, true)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(verbatim: row.name)
                         .font(nameFont)
