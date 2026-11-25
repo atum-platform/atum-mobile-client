@@ -6,47 +6,6 @@
       "spacing": 7,
       "animation": 1
     },
-    "ios/App/Account/AccountProfileHeader.swift": {
-      "spacing": 4
-    },
-    "ios/App/Account/AccountScreen.swift": {
-      "spacing": 1,
-      "font-size": 1
-    },
-    "ios/App/Account/AccountSettingsDetail.swift": {
-      "padding": 8,
-      "spacing": 22,
-      "font-size": 2
-    },
-    "ios/App/Account/DeleteAccountRequestSheet.swift": {
-      "padding": 2,
-      "spacing": 2
-    },
-    "ios/App/Account/IgnoredPeopleList.swift": {
-      "spacing": 1
-    },
-    "ios/App/Account/LegalScreens.swift": {
-      "padding": 1,
-      "spacing": 1
-    },
-    "ios/App/Account/PhoneApprovalSettings.swift": {
-      "padding": 3,
-      "spacing": 7,
-      "font-size": 1
-    },
-    "ios/App/AppBots/AppBotViews.swift": {
-      "padding": 6,
-      "spacing": 3
-    },
-    "ios/App/AppBots/AppOnboardingViews.swift": {
-      "padding": 2,
-      "spacing": 3
-    },
-    "ios/App/Auth/S6AuthViews.swift": {
-      "padding": 11,
-      "spacing": 2,
-      "animation": 1
-    },
     "ios/App/Chat/Media/AttachSheet.swift": {
       "padding": 4,
       "spacing": 3,
@@ -132,7 +91,7 @@
     "ios/App/Chat/Views/Composer.swift": {
       "padding": 19,
       "spacing": 8,
-      "font-size": 7,
+      "font-size": 6,
       "animation": 1
     },
     "ios/App/Chat/Views/DayDividerRow.swift": {
@@ -234,84 +193,20 @@
       "padding": 2,
       "spacing": 3
     },
-    "ios/App/Debug/S6SystemGallery.swift": {
-      "padding": 1,
-      "spacing": 11,
-      "radius": 2
-    },
-    "ios/App/Drive/DriveGalleryView.swift": {
-      "padding": 6,
-      "spacing": 4,
-      "radius": 1,
-      "font-size": 2,
-      "animation": 1
-    },
-    "ios/App/Drive/DriveScreen.swift": {
-      "padding": 7,
-      "spacing": 14,
-      "radius": 2,
-      "font-size": 3
-    },
-    "ios/App/Home/AppCardSheet.swift": {
-      "padding": 8,
-      "spacing": 2,
-      "radius": 1
-    },
-    "ios/App/Home/AttentionBell.swift": {
-      "padding": 7,
-      "spacing": 2,
-      "font-size": 1
-    },
-    "ios/App/Home/HomeGlobalSearch.swift": {
-      "spacing": 3
-    },
     "ios/App/Home/HomeScreen.swift": {
       "padding": 51,
       "spacing": 36,
       "radius": 2,
       "animation": 1
     },
-    "ios/App/Home/ListingHireView.swift": {
-      "padding": 3,
-      "spacing": 5,
-      "font-size": 1
-    },
     "ios/App/NativeRichText.swift": {
       "padding": 1,
       "spacing": 5,
       "radius": 3
     },
-    "ios/App/Onboarding/FirstRunCards.swift": {
-      "padding": 4,
-      "radius": 2
-    },
-    "ios/App/Recovery/RecoverySheets.swift": {
-      "padding": 8,
-      "spacing": 4,
-      "radius": 2,
-      "font-size": 1
-    },
     "ios/App/Shell/RootTabs.swift": {
       "spacing": 1,
       "font-size": 1
-    },
-    "ios/App/Store/ProtonTopUp.swift": {
-      "padding": 8,
-      "spacing": 4
-    },
-    "ios/App/Store/StoreItemSheet.swift": {
-      "padding": 11,
-      "spacing": 7,
-      "animation": 1
-    },
-    "ios/App/Store/StorePurchasedScreen.swift": {
-      "spacing": 6
-    },
-    "ios/App/Store/StoreScreen.swift": {
-      "padding": 9,
-      "spacing": 6,
-      "font-size": 2,
-      "animation": 1
     }
   }
 }

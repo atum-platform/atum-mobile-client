@@ -199,11 +199,11 @@ struct StorePurchasedScreen: View {
     private func renewal(_ entitlement: StoreEntitlement, _ subscription: StoreSubscription) -> some View {
         let state = cancellation(for: entitlement.id)
         HStack(alignment: .firstTextBaseline, spacing: kit.space(.s3)) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 Text(copy(StoreCopyKey.renewal))
                     .font(kit.font(.bodyStrong))
                     .foregroundStyle(kit.color(.ink, scheme: scheme))
-                HStack(spacing: 4) {
+                HStack(spacing: kit.space(.s1)) {
                     if let day = day(subscription.renewAt) { Text(verbatim: day) }
                     StoreProtonsText(design: design, microProtons: subscription.priceMicroProtons,
                                      emphasis: false)
@@ -244,8 +244,8 @@ struct StorePurchasedScreen: View {
 
     private func purchaseRow(_ purchase: StorePurchase) -> some View {
         let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: kit.space(.s1)))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: kit.space(.s3)))
         return VStack(alignment: .leading, spacing: kit.space(.s1)) {
             layout {
                 rowTitle(purchase.itemID, assistant: purchase.assistantID)
@@ -253,7 +253,7 @@ struct StorePurchasedScreen: View {
                 StoreProtonsText(design: design, microProtons: purchase.amountMicroProtons)
                     .font(kit.font(.bodyStrong))
             }
-            HStack(spacing: 4) {
+            HStack(spacing: kit.space(.s1)) {
                 if let day = day(purchase.createdAt) { Text(verbatim: day) }
                 Text(copy(StoreOutcomePresentation.purchaseKey(purchase.state)))
             }
@@ -268,7 +268,7 @@ struct StorePurchasedScreen: View {
     }
 
     private func rowTitle(_ itemID: String, assistant: NativeID?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: kit.space(.s1)) {
             Text(verbatim: title(itemID))
                 .font(kit.font(.bodyStrong))
                 .foregroundStyle(kit.color(.ink, scheme: scheme))

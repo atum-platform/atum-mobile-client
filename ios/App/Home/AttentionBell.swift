@@ -18,11 +18,12 @@ struct AttentionBell: View {
     @State private var announced: Set<AttentionBellPolicy.Kind>?
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         Button { presented = true } label: {
             Image(atum.symbol(.bell))
-                .font(.system(size: 19, weight: .light))
+                .font(.title3.weight(.light))
                 .frame(width: 44, height: 44)
                 .overlay(alignment: .topTrailing) {
                     if !items.isEmpty {
@@ -78,20 +79,20 @@ struct AttentionBell: View {
     }
 
     private var list: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: kit.space(.s1)) {
             Text(design.text(AttentionBellPolicy.notificationsKey))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
+                .padding(.horizontal, kit.space(.s3))
+                .padding(.top, kit.space(.s3))
+                .padding(.bottom, kit.space(.s2))
                 .accessibilityAddTraits(.isHeader)
             if items.isEmpty {
                 Text(design.text(AttentionBellPolicy.nothingKey))
                     .font(.subheadline)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 14)
+                    .padding(.horizontal, kit.space(.s3))
+                    .padding(.bottom, kit.space(.s3))
                     .accessibilityIdentifier("home.bell.nothing")
             } else {
                 ForEach(items, id: \.self) { kind in
@@ -99,7 +100,7 @@ struct AttentionBell: View {
                         presented = false
                         open(kind)
                     } label: {
-                        HStack(spacing: 10) {
+                        HStack(spacing: kit.space(.s2)) {
                             Circle().fill(badgeColor).frame(width: 8, height: 8).accessibilityHidden(true)
                             Text(verbatim: label(kind))
                                 .font(.subheadline)
@@ -111,14 +112,14 @@ struct AttentionBell: View {
                                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                                 .accessibilityHidden(true)
                         }
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, kit.space(.s3))
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home.bell.item." + kind.rawValue)
                 }
-                .padding(.bottom, 6)
+                .padding(.bottom, kit.space(.s2))
             }
         }
         .frame(width: 300, alignment: .leading)

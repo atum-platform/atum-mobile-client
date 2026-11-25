@@ -45,7 +45,7 @@ struct ListingFace: View {
         ZStack {
             atum.kitColor(.surface, scheme: scheme)
             Image(design.symbol(StoreGlyphs.alias(glyph: glyph ?? "", kind: .agent)))
-                .font(.system(size: size * 0.42, weight: .light))
+                .font(.system(size: size * 0.42, weight: .light)) // design-lint: allow: monogram scales with the tile, not with text
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
         }
         .frame(width: size, height: size)
@@ -72,6 +72,7 @@ struct ListingHireView: View {
     @State private var checkout: StorePurchaseGate.Checkout = .closed
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
     private func copy(_ key: String, _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key, arguments: arguments)
     }
@@ -105,9 +106,9 @@ struct ListingHireView: View {
     var body: some View {
         Form {
             Section {
-                HStack(spacing: 12) {
+                HStack(spacing: kit.space(.s3)) {
                     ListingFace(design: design, glyph: hire.listing.glyph)
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: kit.space(.s1)) {
                         Text(verbatim: hire.name)
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -120,7 +121,7 @@ struct ListingHireView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, kit.space(.s1))
             }
             Section { line }
         }
@@ -163,7 +164,7 @@ struct ListingHireView: View {
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
                 .accessibilityIdentifier("home.newAssistant.hire.status")
         case .settingUp:
-            HStack(spacing: 10) {
+            HStack(spacing: kit.space(.s2)) {
                 ProgressView().accessibilityHidden(true)
                 Text(verbatim: copy(ListingHireCopy.settingUp, [.text(hire.name)]))
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -211,7 +212,7 @@ struct ListingHireView: View {
     // MARK: Actions
 
     private var actionBar: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: kit.space(.s2)) {
             switch hire.phase {
             case .done, .settingUp:
                 Button(action: done) { primaryLabel(copy(ListingHireCopy.done)) }
@@ -233,7 +234,7 @@ struct ListingHireView: View {
             case .confirm, .hiring:
                 if hireAllowed || hire.phase == .hiring {
                     Button { flow.confirm() } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: kit.space(.s2)) {
                             if hire.phase == .hiring {
                                 ProgressView().tint(atum.color(.onInk, scheme: scheme))
                             }
@@ -248,9 +249,17 @@ struct ListingHireView: View {
                 backButton
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, kit.space(.s4))
+        .padding(.vertical, kit.space(.s3))
         .background(atum.color(.ground, scheme: scheme))
+        // One haptic per hire: success once it is hired, error on a failure line.
+        .sensoryFeedback(trigger: hire.phase) { old, new in
+            switch (old, new) {
+            case (.hiring, .settingUp), (.hiring, .done): .success
+            case (_, .failed): .error
+            default: nil
+            }
+        }
         .overlay(alignment: .top) {
             Rectangle().fill(atum.color(.frame, scheme: scheme)).frame(height: 0.5)
         }
