@@ -372,9 +372,32 @@ shard's `ui-3` xcresult: the failure hierarchy, screenshots and recording.
   `ChatPanelHost`, `AppPanelPages.swift`) has no P2 change. The sibling tests
   that use the same launch passed on the same runner. No code changed for it.
   It is judged by the local repeat runs below.
+- **Second AX5 defect, found locally:** once Personality was reachable, the
+  test's `assistant.card.saved` check failed 3 of 3. "Saved" sits in the
+  card's header, and the list releases the header once it is scrolled off. On
+  the old `ScrollView` it existed off screen. The product is correct: the line
+  is where desktop has it.
+  - The test now drags back until the header and the handle row are both
+    built, then checks Saved. It also checks that the conflict band, which
+    sits between them, is absent. A band check made while the header is off
+    screen would pass vacuously.
 - **Verification:** `polish-p2/ci110b-run.sh`, run under the heavy-build lock
-  (Debug `build-for-testing`; both tests ×3; the other `ChatInfoUITests` and
-  `AppSidePanelUITests` cases once). The results are in the session log below.
+  on the iPhone 16e simulator, with derived data in `dd-polish-p2`. Logs are in
+  `polish-p2/logs/ci110b*` and `ci110c*`.
+  - **ci110b, at `606615e`:** Debug `build-for-testing` exit 0.
+    - `testUnlinkedAppPanelConnectReturnsToTheChat`: passed 3 of 3.
+    - The AX5 test: failed 3 of 3. The failure is at the Saved check, past
+      the original line-129 failure.
+    - The other 17 `ChatInfoUITests` and `AppSidePanelUITests` cases: 17 of
+      17 passed.
+  - **ci110c, with the Saved-check change:** build exit 0. The AX5 test
+    passed 3 of 3.
+  - `python3 scripts/design_lint.py`: exit 0.
+- **Verdict on shard 2:** it does not reproduce locally (3 of 3), and the P2
+  diff has no part in its path. It is treated as a hosted flake. The tap
+  landed while the scripted Moon reply was arriving, and no sheet
+  presentation began. If it recurs, look at `ChatScreen`'s sheet presentation
+  under a transcript update (P3 owns `ChatScreen`), not at the panel list.
 
 ## Known gaps
 
@@ -409,3 +432,12 @@ shard's `ui-3` xcresult: the failure hierarchy, screenshots and recording.
   - Both were fixed in `AssistantCard.swift`, and no test changed. The fixes
     were verified locally twice (above).
   - Local commit only: no push, no CI rerun.
+- **25 Nov 2026, PR #110 shards 1 and 2 CI-fix sub-agent (Opus):**
+  - Root causes came from the shards' xcresults: hierarchies and screen
+    recordings.
+  - AX5 card: the persona row was taller than the list. It is now capped at
+    four lines at accessibility sizes. The test drags the list's margin and
+    reads Saved where the list builds it.
+  - The unlinked app panel test passed 3 of 3 locally, and no P2 code is in
+    its path.
+  - Local commits only: no push, PR or CI rerun.

@@ -93,12 +93,13 @@ final class ChatInfoUITests: TranscriptUITestCase {
     /// scroll only its text, never the list (AX5, a long persona). The margin
     /// beside the groups belongs to the list alone.
     @MainActor
-    private func scrollCardList(_ app: XCUIApplication) {
+    private func scrollCardList(_ app: XCUIApplication, back: Bool = false) {
         let list = panelList(app)
-        guard list.exists else { app.swipeUp(); return }
-        let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.6))
+        guard list.exists else { if back { app.swipeDown() } else { app.swipeUp() }; return }
+        let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: back ? 0.2 : 0.6))
             .withOffset(CGVector(dx: 6, dy: 0))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -list.frame.height * 0.4)),
+        let travel = list.frame.height * 0.4 * (back ? 1 : -1)
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: travel)),
                     withVelocity: .slow, thenHoldForDuration: 0.1)
     }
 
@@ -154,7 +155,17 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists, "the personality field never took focus")
         field.typeText(" Vui vẻ.")
         leaveField(app)
-        XCTAssertTrue(element(app, "assistant.card.saved").waitForExistence(timeout: 5))
+        // "Saved" (in the header) and the conflict band (the group under it,
+        // above the handle row) head the card. The list builds rows only once
+        // they are on screen, so scroll back until the header and the handle
+        // row are both built: the band between them would then be built too.
+        let saved = element(app, "assistant.card.saved")
+        let handle = element(app, "assistant.card.handle")
+        for _ in 0..<8 where !(saved.exists && saved.isHittable && handle.exists) {
+            scrollCardList(app, back: true)
+        }
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        XCTAssertTrue(handle.exists, "the handle row under the band is not on screen")
         XCTAssertFalse(element(app, "assistant.card.persona-conflict").exists)
         let saves = probeLines("persona-save.txt").map(\.text)
         XCTAssertEqual(saves.count, 1)
