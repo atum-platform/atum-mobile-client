@@ -59,6 +59,10 @@ enum RoomPushDecision {
 /// The inputs a pending last-chat restore reads; a change retries it.
 private struct ChatRestoreSignals: Equatable {
     let intentID: UUID?
+    /// Matrix readiness (initial sync included) and each room publication:
+    /// a remembered room can become eligible without the roster changing.
+    let matrixReady: Bool
+    let roomPublication: UInt64
     let claimRevision: UInt64
     let hasAgentRoster: Bool
     let classificationRevision: UInt64
@@ -83,6 +87,8 @@ struct AppRoot: View {
     @State private var legalLinks = ChatLinkRouter()
     @State private var roomlessAppFallback: AppBotContinueRequest?
     @State private var appliedAccountScopeGeneration: UInt64?
+    /// The account the applied scope belongs to; nil before the first one.
+    @State private var appliedAccountScopeID: String?
     /// TS-6b: the one thread panel and the thread drafts.
     @State private var companyThreads = CompanyThreadsCoordinator()
     private let design = try! LiveDesign()
@@ -251,9 +257,12 @@ struct AppRoot: View {
         .onChange(of: model.accountScopeGeneration, initial: true) { _, _ in
             guard appliedAccountScopeGeneration != model.accountScopeGeneration else { return }
             appliedAccountScopeGeneration = model.accountScopeGeneration
-            router.resetAccountScope()
-            // Each account scope (launch, a new sign-in) reopens its last chat.
-            router.beginChatRestore(.launch)
+            // Only a scope that replaces a signed-in account discards its
+            // routes. The first account after none keeps a notification
+            // tapped while booting; each scope then reopens its last chat.
+            let replacesAccount = appliedAccountScopeID != nil
+            appliedAccountScopeID = model.accountScopeID
+            router.applyAccountScope(replacesAccount: replacesAccount)
         }
         // A listing hire belongs to the account it was picked under: a new
         // (or no) account lets it go, mid-hire included.
@@ -574,6 +583,8 @@ struct AppRoot: View {
         // input it reads changes.
         .onChange(of: ChatRestoreSignals(
             intentID: router.chatRestoreIntent?.id,
+            matrixReady: model.personalChatRestoreMatrixReady,
+            roomPublication: model.personalChatRestoreRoomPublication,
             claimRevision: model.personalChatRestoreRevision,
             hasAgentRoster: model.hasPersonalChatAgentRoster,
             classificationRevision: model.companyWorkspace.classificationRevision,

@@ -2800,6 +2800,138 @@ extension S2StateTests {
     }
 
     @MainActor
+    func testChatRestorePushReceiptClaimsNavigationBeforeHold() {
+        let router = Router()
+        router.applyAccountScope(replacesAccount: false)
+        var calls = 0
+        var stillCurrent: (@MainActor () -> Bool)?
+        XCTAssertNil(router.attemptChatRestore { entry, _, _, current in
+            calls += 1
+            XCTAssertEqual(entry, .launch)
+            stillCurrent = current
+            return nil
+        })
+        XCTAssertTrue(router.coversChatsRootForRestore)
+
+        // The relay delivers room B. Before any observer holds it, a queued
+        // retry (a claim reply for room A) must not open A.
+        router.receivePushIntent(roomID: "!push:atum.test")
+        XCTAssertEqual(stillCurrent?(), false)
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertFalse(router.coversChatsRootForRestore)
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            calls += 1
+            return "!remembered:atum.test"
+        })
+        XCTAssertEqual(calls, 1)
+        XCTAssertNil(router.homeRoomID)
+
+        // The shell then holds and validates B, which opens.
+        router.holdDeepLink(roomID: "!push:atum.test")
+        XCTAssertTrue(router.validatePendingDeepLink(sessionAndRosterAreReady: true) { _ in .allow })
+        XCTAssertEqual(router.homeRoomID, "!push:atum.test")
+    }
+
+    @MainActor
+    func testChatRestoreColdNotificationSurvivesInitialAccountScope() {
+        let router = Router()
+        // App start: the first (empty) scope, then a notification tapped
+        // while booting, held cold for validation.
+        router.applyAccountScope(replacesAccount: false)
+        router.receivePushIntent(roomID: "!push:atum.test")
+        router.holdDeepLink(roomID: "!push:atum.test", cold: true)
+
+        // The signed-in account's scope arrives: initial setup, not a switch.
+        router.applyAccountScope(replacesAccount: false)
+        XCTAssertEqual(router.pendingDeepLinkRoomID, "!push:atum.test")
+        XCTAssertTrue(router.pendingDeepLinkIsCold)
+        XCTAssertEqual(router.latestPushIntentRoomID, "!push:atum.test")
+        XCTAssertNil(router.chatRestoreIntent, "the notification owns the route; no launch restore")
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            XCTFail("A carried notification wins over the launch restore")
+            return "!remembered:atum.test"
+        })
+        var staged: String?
+        router.onValidatedColdRoom = { staged = $0 }
+        XCTAssertTrue(router.validatePendingDeepLink(sessionAndRosterAreReady: true) { _ in .allow })
+        XCTAssertEqual(staged, "!push:atum.test")
+
+        // Received but not yet held (the observer has not run): still carried.
+        let racing = Router()
+        racing.applyAccountScope(replacesAccount: false)
+        racing.receivePushIntent(roomID: "!push:atum.test")
+        racing.applyAccountScope(replacesAccount: false)
+        XCTAssertNil(racing.chatRestoreIntent)
+        XCTAssertEqual(racing.latestPushIntentRoomID, "!push:atum.test")
+
+        // Only a real account change discards it, and that scope restores.
+        let switching = Router()
+        switching.holdDeepLink(roomID: "!old:atum.test", cold: true)
+        switching.applyAccountScope(replacesAccount: true)
+        XCTAssertNil(switching.pendingDeepLinkRoomID)
+        XCTAssertNil(switching.latestPushIntentRoomID)
+        XCTAssertEqual(switching.chatRestoreIntent?.entry, .launch)
+        XCTAssertTrue(switching.coversChatsRootForRestore)
+    }
+
+    @MainActor
+    func testChatRestoreCoversYieldToTabSwitchRetapAndExpiry() {
+        let router = Router()
+        // The shell's wiring: Chats selected from another tab, at its root.
+        router.onUserSelectedTab = { tab in
+            if tab == .home, router.homeRoomID == nil { router.beginChatRestore(.chatsTap) }
+        }
+        var retaps = 0
+        router.onHomeRootRetap = { retaps += 1 }
+
+        router.select(tab: .store)
+        router.select(tab: .home)
+        let first = router.chatRestoreIntent
+        XCTAssertEqual(first?.entry, .chatsTap)
+        XCTAssertTrue(router.coversChatsRootForRestore)
+
+        // Switching away during the hold ends it; the other tab responds.
+        router.select(tab: .drive)
+        XCTAssertEqual(router.selectedTab, .drive)
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertFalse(router.coversChatsRootForRestore)
+
+        // Back to Chats: a new intent with a new ID.
+        router.select(tab: .home)
+        let second = router.chatRestoreIntent
+        XCTAssertNotNil(second)
+        XCTAssertNotEqual(second?.id, first?.id)
+
+        // A re-tap at Chats' root never restores: the roster scrolls to top.
+        router.select(tab: .home)
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertFalse(router.coversChatsRootForRestore)
+        XCTAssertEqual(retaps, 1)
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            XCTFail("A re-tap must not restore")
+            return "!last:atum.test"
+        })
+
+        // A claim reply that lands after the hold expired is discarded and
+        // the roster stays reachable.
+        router.select(tab: .store)
+        router.select(tab: .home)
+        guard let intent = router.chatRestoreIntent else { return XCTFail("tap intent") }
+        var stillCurrent: (@MainActor () -> Bool)?
+        XCTAssertNil(router.attemptChatRestore { _, _, _, current in stillCurrent = current; return nil })
+        router.endChatRestore(intent.id)
+        XCTAssertEqual(stillCurrent?(), false)
+        XCTAssertFalse(router.coversChatsRootForRestore)
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            XCTFail("An expired intent must not restore")
+            return "!last:atum.test"
+        })
+        XCTAssertEqual(router.selectedTab, .home)
+        XCTAssertTrue(router.homePath.isEmpty)
+        XCTAssertEqual(router.pushScreen, .homeRoot)
+    }
+
+    @MainActor
     func testChatRestorePassesHeldNotificationAsExplicitRoute() {
         let router = Router()
         router.holdDeepLink(roomID: "!push:atum.test")

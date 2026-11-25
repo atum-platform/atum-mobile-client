@@ -192,6 +192,8 @@ final class LiveMatrixSession {
     private(set) var hasCompletedInitialSync = false
     /// During replacement, the display snapshot can still hold old rooms.
     var hasPublishedRooms: Bool { latestRoomPublication != 0 }
+    /// The latest room publication this epoch; it advances with each one.
+    var roomPublication: UInt64 { latestRoomPublication }
     /// Sync, send queues and the scene phase for this session (B9, B30): the
     /// quiet connection glyph reads it. Nil until the session is established
     /// and after it is torn down.

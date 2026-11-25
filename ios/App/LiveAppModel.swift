@@ -482,6 +482,9 @@ final class LiveAppModel {
     private(set) var companyLeftRooms = Set<String>()
     private(set) var companyLeftToken: UInt64 = 0
     private(set) var accountScopeGeneration: UInt64 = 0
+    /// The Matrix account the current scope belongs to; nil with none. Read
+    /// it when `accountScopeGeneration` changes.
+    var accountScopeID: String? { companyAccountID }
     @ObservationIgnored private var companyConfigured = false
     @ObservationIgnored private var companyAccountID: String?
 
@@ -7135,6 +7138,14 @@ final class LiveAppModel {
     /// A pending restore can retry when its Matrix claim read settles.
     var personalChatRestoreRevision: UInt64 { liveMatrix?.personalChatClaimRevision ?? 0 }
     var hasPersonalChatAgentRoster: Bool { agentsRead.value != nil }
+    /// The Matrix readiness `restorePersonalChat` requires, initial sync
+    /// included. The shell retries on a change, even while `/agents` loads.
+    var personalChatRestoreMatrixReady: Bool {
+        guard let liveMatrix else { return false }
+        return liveMatrix.isReady && liveMatrix.hasCompletedInitialSync
+            && liveMatrix.hasPublishedRooms && !liveMatrix.isLoadingRooms
+    }
+    var personalChatRestoreRoomPublication: UInt64 { liveMatrix?.roomPublication ?? 0 }
 
     /// True while an input the restore policy reads is still arriving: the
     /// first room publication, the agent roster, workspace classification or
@@ -7144,8 +7155,7 @@ final class LiveAppModel {
         guard case .signedIn = stage, !signOutInProgress else { return false }
         guard let liveMatrix else { return true }
         guard liveMatrix.error == nil else { return false }
-        guard liveMatrix.isReady, liveMatrix.hasCompletedInitialSync, liveMatrix.hasPublishedRooms,
-              !liveMatrix.isLoadingRooms else { return true }
+        guard personalChatRestoreMatrixReady else { return true }
         if agentsRead.value == nil, agentsRead.condition == .loading { return true }
         switch companyWorkspace.phase {
         case .hidden, .unavailable: break
@@ -7166,8 +7176,7 @@ final class LiveAppModel {
               let context, account.matrixUserID == context.runtime.ticket.session.userID,
               personalChatRestoreSession.canRestore(installationID: context.installation.id,
                                                     signOutInProgress: signOutInProgress),
-              let liveMatrix, liveMatrix.isReady, liveMatrix.hasCompletedInitialSync,
-              liveMatrix.hasPublishedRooms, !liveMatrix.isLoadingRooms,
+              personalChatRestoreMatrixReady, let liveMatrix,
               entry != .launch || (conversation == nil && appBotRoomOpening == nil) else { return nil }
         liveMatrix.beginPersonalChatClaimChecks(intentID: intentID)
         let store = LastPersonalChatStore(matrixUserID: account.matrixUserID)

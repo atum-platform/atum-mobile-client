@@ -170,6 +170,9 @@ final class Router: RouterOpening {
 
     func receivePushIntent(roomID: String) {
         guard !roomID.isEmpty else { return }
+        // The relay's delivery claims the route at once: a restore retry
+        // queued before the shell holds this room must not open another.
+        claimNavigation()
         latestPushIntentRoomID = roomID
         pushIntentGeneration &+= 1
     }
@@ -230,6 +233,22 @@ final class Router: RouterOpening {
         else if let onValidatedRoom { onValidatedRoom(roomID) }
         else { open(roomId: roomID) }
         return true
+    }
+
+    /// The shell applies each new account scope here. `replacesAccount` is
+    /// true only when a signed-in account's scope ends (sign-out, another
+    /// account): its routes go with it. The first scope after none (a cold
+    /// launch, a fresh sign-in) is initial setup, not a switch, so a
+    /// notification received while booting is carried through and validated
+    /// against the resumed account. The scope then reopens its last chat
+    /// unless a notification already owns the route.
+    func applyAccountScope(replacesAccount: Bool) {
+        if replacesAccount { resetAccountScope() } else { claimNavigation() }
+        // A full reset clears the received intent, so one still recorded here
+        // arrived while no account was scoped.
+        guard pendingDeepLinkRoomID == nil, latestPushIntentRoomID == nil,
+              homePath.isEmpty, homeRoomID == nil else { return }
+        beginChatRestore(.launch)
     }
 
     func resetAccountScope() {
