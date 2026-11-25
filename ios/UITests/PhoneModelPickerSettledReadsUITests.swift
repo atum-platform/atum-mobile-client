@@ -55,7 +55,9 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         XCTAssertTrue(saved.exists, "the saved ChatGPT model must stay listed")
         XCTAssertTrue(saved.label.contains(expected.modelsFailed), saved.label)
         XCTAssertFalse(line.label.contains(expected.modelsFailed), "the failed words are repeated: \(line.label)")
-        let retry = element(app, "phone.model.status.chatGPT.retry")
+        // At accessibility sizes Try again sits under the words: bring it clear
+        // of the search bar too, or the tap would start a search (which hides the lines).
+        let retry = reveal(app, "phone.model.status.chatGPT.retry")
         XCTAssertTrue(retry.exists, "a failed ChatGPT read must offer Try again")
         XCTAssertTrue(retry.label.hasPrefix(expected.retry), retry.label)
         XCTAssertFalse(element(app, "phone.model.status.openCodeGo").exists, "OpenCode Go answered")

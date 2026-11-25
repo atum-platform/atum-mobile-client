@@ -154,5 +154,9 @@ Test fixes found in the first locked run (`85d96f7`):
   used the plan's picker ID, `claude-plan`, since `AccountPlan.pickerID`, and main has the same stale
   ID. Both of its tests failed for that reason alone, so the IDs are corrected here. The change is test-only.
 
-Verification (fix round r2): pending the locked rerun `/Volumes/AtumTestFlight/w4-x2/verify-fix-r2b.sh`.
+- In the rerun (`acdcbad`), AccessibilityXL left the ChatGPT line above the bar, but its Try again (under
+  the words at that size) stayed under it. The tap focused search, which hides the lines. The test now
+  reveals Try again itself before tapping.
+
+Verification (fix round r2): pending the locked rerun `/Volumes/AtumTestFlight/w4-x2/verify-fix-r2c.sh`.
 
