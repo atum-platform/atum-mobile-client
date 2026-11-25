@@ -158,6 +158,11 @@ enum StoreOutcome: Equatable, Sendable {
 }
 
 enum StoreOutcomePresentation {
+    static func completedPurchase(for state: StoreAcquireState?) -> Bool {
+        guard case .result(.purchased(let purchase, _))? = state else { return false }
+        return purchase.state == .granted || purchase.state == .completed
+    }
+
     static func notice(for state: StoreAcquireState, kind: LiveProductStoreItemKind) -> StoreNotice? {
         switch state {
         case .idle, .working: return nil

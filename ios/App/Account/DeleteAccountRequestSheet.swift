@@ -23,9 +23,10 @@ struct DeleteAccountRequestSheet: View {
     @State private var failed = false
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: kit.space(.s4)) {
             Text(title)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -40,7 +41,7 @@ struct DeleteAccountRequestSheet: View {
                     .accessibilityIdentifier("account.delete-account.failed")
             }
             Spacer(minLength: 0)
-            HStack(spacing: 12) {
+            HStack(spacing: kit.space(.s3)) {
                 Button(copy("src.matrix.chat-copy.copies.cancel"), action: onDone)
                     .buttonStyle(.atumSecondary)
                     .frame(maxWidth: .infinity)
@@ -51,8 +52,8 @@ struct DeleteAccountRequestSheet: View {
                     .accessibilityIdentifier("account.delete-account.confirm")
             }
         }
-        .padding(20)
-        .padding(.top, 8)
+        .padding(kit.space(.s5))
+        .padding(.top, kit.space(.s2))
         .atumDesign(design)
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)

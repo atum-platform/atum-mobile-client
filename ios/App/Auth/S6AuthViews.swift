@@ -9,12 +9,13 @@ struct S6BootWait: View {
     @Environment(\.colorScheme) private var scheme
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         ZStack {
             atum.color(.ground, scheme: scheme).ignoresSafeArea()
             if showsMark {
-                VStack(spacing: 24) {
+                VStack(spacing: kit.space(.s6)) {
                     LiveEclipseMark(design: design).frame(width: 76, height: 76)
                     AtomWait()
                         .frame(width: 28, height: 28)
@@ -31,7 +32,7 @@ struct S6BootWait: View {
             do { try await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow))) }
             catch { return }
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.2)) { showsMark = true }
+            withMotion(.quick) { showsMark = true }
         }
         .accessibilityIdentifier("boot.wait")
     }
@@ -52,6 +53,7 @@ struct S6WelcomeScreen: View {
 
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         GeometryReader { proxy in
@@ -68,7 +70,7 @@ struct S6WelcomeScreen: View {
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 24)
+                        .padding(.top, kit.space(.s6))
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("welcome.title")
                     Text(copy("src.matrix.mobile-device-copy.mobileDeviceCopy.welcomeBody"))
@@ -77,7 +79,7 @@ struct S6WelcomeScreen: View {
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 320)
-                        .padding(.top, 12)
+                        .padding(.top, kit.space(.s3))
                     notice
                     Spacer(minLength: 24)
                     Button(action: onContinue) {
@@ -102,21 +104,21 @@ struct S6WelcomeScreen: View {
                         .foregroundStyle(atum.color(.soft, scheme: scheme))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 16)
+                        .padding(.top, kit.space(.s4))
                         .accessibilityIdentifier("welcome.cloud-consent")
                     Text(legalText)
                         .font(.footnote)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .tint(atum.color(.ink, scheme: scheme))
-                        .padding(.top, 16)
+                        .padding(.top, kit.space(.s4))
                         .environment(\.openURL, OpenURLAction { url in
                             onOpenLegal(url)
                             return .handled
                         })
                     Spacer(minLength: 16)
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, kit.space(.s6))
                 .frame(minHeight: proxy.size.height)
             }
             .scrollBounceBehavior(.basedOnSize)
@@ -141,7 +143,7 @@ struct S6WelcomeScreen: View {
         case .failed:
             noticeText(copy("src.matrix.chat-copy.copies.errorGeneric"))
         case .expired:
-            VStack(spacing: 8) {
+            VStack(spacing: kit.space(.s2)) {
                 Text(copy("desktop.atum.auth.expiredTitle"))
                     .font(.headline)
                     .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -151,7 +153,7 @@ struct S6WelcomeScreen: View {
             }
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 16)
+            .padding(.top, kit.space(.s4))
         }
     }
 
@@ -161,7 +163,7 @@ struct S6WelcomeScreen: View {
             .foregroundStyle(atum.color(.soft, scheme: scheme))
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 16)
+            .padding(.top, kit.space(.s4))
     }
 
     private var legalText: AttributedString {
@@ -203,6 +205,7 @@ struct S6StatusScreen: View {
 
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -214,7 +217,7 @@ struct S6StatusScreen: View {
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 20)
+                .padding(.top, kit.space(.s5))
             Button(action: retry) {
                 Group {
                     if busy { AtomWait().frame(width: 20, height: 20) }
@@ -224,16 +227,16 @@ struct S6StatusScreen: View {
             }
             .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
             .disabled(busy)
-            .padding(.top, 32)
+            .padding(.top, kit.space(.s8))
             if let signOut {
                 Button(copy("desktop.dm.signOut"), action: signOut)
                     .buttonStyle(AtumQuietButtonStyle(atum: atum, scheme: scheme))
-                    .padding(.top, 8)
+                    .padding(.top, kit.space(.s2))
             }
             Spacer().frame(maxHeight: .infinity).layoutPriority(1.3)
         }
         .frame(maxWidth: 360)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, kit.space(.s6))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
         .accessibilityIdentifier("status.screen")

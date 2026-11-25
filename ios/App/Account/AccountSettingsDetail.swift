@@ -57,6 +57,9 @@ struct AccountSettingsDetail: View {
     @State private var connectionsModel = AccountConnectionsModel()
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
+    /// The settings rows' leading glyph column; help lines indent past it.
+    private static let glyphColumn: CGFloat = 28
 
     @AppStorage(AtumAppearance.storageKey) private var appearance = AtumAppearance.system.rawValue
 
@@ -175,11 +178,11 @@ struct AccountSettingsDetail: View {
     /// Top up when the Store stream provides it.
     @ViewBuilder private var howAtumAnswersContent: some View {
         Section {
-            HStack(spacing: 12) {
+            HStack(spacing: kit.space(.s3)) {
                 ProtonMark(.regular)
                     .frame(width: 28)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
                     Text(copy("desktop.atum.protons.title"))
                         .font(.body)
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -274,7 +277,7 @@ struct AccountSettingsDetail: View {
     @ViewBuilder private var otherDeviceRows: some View {
         switch deviceLoad {
         case .loading:
-            HStack(spacing: 12) {
+            HStack(spacing: kit.space(.s3)) {
                 AtomWait().frame(width: 20, height: 20)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
                     .frame(width: 28)
@@ -290,8 +293,8 @@ struct AccountSettingsDetail: View {
             .accessibilityIdentifier("account.settings.privacy.devices.loading")
         case .failed:
             let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                : AnyLayout(HStackLayout(spacing: 12))
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: kit.space(.s2)))
+                : AnyLayout(HStackLayout(spacing: kit.space(.s3)))
             layout {
                 Text(copy(SecurityCopyKey.devicesFailed))
                     .font(.body)
@@ -306,8 +309,8 @@ struct AccountSettingsDetail: View {
                     .tint(atum.color(.ink, scheme: scheme))
                     .accessibilityIdentifier("account.settings.privacy.devices.retry")
             }
-            .padding(.leading, 40)
-            .padding(.vertical, 6)
+            .padding(.leading, Self.glyphColumn + kit.space(.s3))
+            .padding(.vertical, kit.space(.s2))
             .frame(minHeight: 52)
         case let .loaded(devices):
             ForEach(Array(devices.enumerated()), id: \.element.id) { index, device in
@@ -318,7 +321,7 @@ struct AccountSettingsDetail: View {
                     .font(.footnote)
                     .foregroundStyle(atum.color(.soft, scheme: scheme))
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 40)
+                    .padding(.leading, Self.glyphColumn + kit.space(.s3))
                     .accessibilityIdentifier("account.settings.privacy.devices.error")
             }
         }
@@ -333,10 +336,10 @@ struct AccountSettingsDetail: View {
         let seen = device.lastSeen.map {
             copy(SecurityCopyKey.seen, [.text(AccountDeviceSeen.ago($0, locale: design.locale))])
         }
-        let content = HStack(spacing: 12) {
+        let content = HStack(spacing: kit.space(.s3)) {
             // Aligned with This iPhone's text; a device's kind is not known.
             Color.clear.frame(width: 28, height: 1)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 Text(verbatim: name)
                     .font(.body)
                     .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -357,7 +360,7 @@ struct AccountSettingsDetail: View {
                     .accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, kit.space(.s2))
         .frame(minHeight: 52)
         .contentShape(Rectangle())
         let identifier = "account.settings.privacy.devices.other.\(index)"
@@ -456,7 +459,7 @@ struct AccountSettingsDetail: View {
                 get: { shareActivity },
                 set: { value in Task { _ = await setShareActivity(value) } }
             )) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
                     Text(text(.shareActivity))
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
                     Text(text(.shareActivityHelp))
@@ -479,9 +482,9 @@ struct AccountSettingsDetail: View {
             NavigationLink {
                 IgnoredPeopleList(design: design, actions: actions)
             } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: kit.space(.s3)) {
                     Image(atum.symbol(.eyeOff))
-                        .font(.system(size: 20, weight: .light))
+                        .font(.title3.weight(.light))
                         .foregroundStyle(atum.color(.soft, scheme: scheme))
                         .frame(width: 28)
                         .accessibilityHidden(true)
@@ -508,7 +511,7 @@ struct AccountSettingsDetail: View {
                     .font(.subheadline)
                     .foregroundStyle(atum.color(.soft, scheme: scheme))
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, kit.space(.s2))
                     .accessibilityIdentifier("account.settings.assistants.empty")
             } else {
                 ForEach(presentation.assistants) { assistant in
@@ -726,7 +729,7 @@ struct AccountSettingsDetail: View {
 
     private var signOutButton: some View {
         Button(action: callbacks.beginSignOut) {
-            HStack(spacing: 12) {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(.logOut))
                     .font(.body)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -754,7 +757,7 @@ struct AccountSettingsDetail: View {
     /// drafts the deletion request to Atum's privacy mailbox.
     private var deleteAccountButton: some View {
         Button { deletesAccount = true } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(.trash))
                     .font(.body)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -778,9 +781,9 @@ struct AccountSettingsDetail: View {
         let detail = [assistant.title, state].compactMap { $0 }
             .filter { !$0.isEmpty }.joined(separator: " · ")
         let opens = assistant.isReady && callbacks.assistantCard != nil
-        let content = HStack(spacing: 12) {
+        let content = HStack(spacing: kit.space(.s3)) {
             HomeAvatar(row: assistant.homeRow, size: 36, loadMatrixThumbnail: thumbnailLoader)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 Text(verbatim: assistant.name)
                     .font(.body)
                     .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -865,10 +868,10 @@ struct AccountSettingsDetail: View {
     /// segmented control under the title. It applies at once, to the whole
     /// app (`LiveAppearanceApplier`), and is kept on this phone.
     private var appearanceRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: kit.space(.s3)) {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(.sun))
-                    .font(.system(size: 20, weight: .light))
+                    .font(.title3.weight(.light))
                     .foregroundStyle(atum.color(.soft, scheme: scheme))
                     .frame(width: 28)
                     .accessibilityHidden(true)
@@ -885,8 +888,9 @@ struct AccountSettingsDetail: View {
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("account.settings.general.appearance")
+            .sensoryFeedback(.selection, trigger: appearance)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, kit.space(.s2))
         .listRowBackground(atum.kitColor(.surface, scheme: scheme))
     }
 
@@ -897,13 +901,13 @@ struct AccountSettingsDetail: View {
                                  identifier: String,
                                  set: @escaping @MainActor (Bool) -> Void) -> some View {
         Toggle(isOn: Binding(get: { isOn }, set: { set($0) })) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: kit.space(.s3)) {
                 Image(atum.symbol(glyph))
                     .font(.body)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
                     .frame(width: 28)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
                     Text(text(title))
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
                     Text(text(detail))
@@ -932,7 +936,7 @@ struct AccountSettingsDetail: View {
                            title: String,
                            value: String?,
                            identifier: String) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(glyph))
                 .font(.body)
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
@@ -944,7 +948,7 @@ struct AccountSettingsDetail: View {
                 // One line when title and value both fit; otherwise the value
                 // goes under the title instead of truncating either of them.
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: kit.space(.s2)) {
                         statusTitle(title).fixedSize()
                         Spacer(minLength: 8)
                         if let value, !value.isEmpty {
@@ -980,13 +984,13 @@ struct AccountSettingsDetail: View {
                          help: String,
                          value: String?,
                          identifier: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: kit.space(.s3)) {
             Image(atum.symbol(glyph))
                 .font(.body)
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
                 .frame(width: 28)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: kit.space(.s1)) {
                 statusTitle(title)
                 Text(help)
                     .font(.footnote)
@@ -1007,7 +1011,7 @@ struct AccountSettingsDetail: View {
                     .frame(maxWidth: 140, alignment: .trailing)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, kit.space(.s2))
         .frame(minHeight: 52)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, help, value].compactMap { $0 }
@@ -1016,7 +1020,7 @@ struct AccountSettingsDetail: View {
     }
 
     private func stackedStatus(_ title: String, _ value: String?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: kit.space(.s1)) {
             statusTitle(title)
             if let value, !value.isEmpty {
                 Text(value)
@@ -1026,7 +1030,7 @@ struct AccountSettingsDetail: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
+        .padding(.vertical, kit.space(.s1))
     }
 
     private func statusTitle(_ value: String) -> some View {

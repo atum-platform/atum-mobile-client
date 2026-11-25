@@ -96,6 +96,7 @@ struct AccountScreen: View {
     }
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         List {
@@ -263,12 +264,12 @@ struct AccountScreen: View {
     private var identityHeader: some View {
         Section {
             Button { settingsState.select(.account) } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: kit.space(.s3)) {
                     AccountProfileHeader(design: design, presentation: presentation, actions: actions,
                                          identifierPrefix: "account.profile", background: .cell,
                                          editable: false, avatarSize: 56)
                     Image(atum.symbol(.chevronRight))
-                        .font(.system(size: 14))
+                        .font(.footnote)
                         .foregroundStyle(atum.kitColor(.ink4, scheme: scheme))
                         .accessibilityHidden(true)
                 }

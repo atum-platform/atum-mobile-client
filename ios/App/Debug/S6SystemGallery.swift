@@ -5,17 +5,18 @@ struct S6SystemGallery: View {
     let design: LiveDesign
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
+            LazyVStack(alignment: .leading, spacing: kit.space(.s6)) {
                 tokenGrid
                 typeRamp
                 avatarGrid
                 marks
                 buttons
             }
-            .padding(16)
+            .padding(kit.space(.s4))
         }
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
         .atumDesign(visual: atum)
@@ -23,13 +24,13 @@ struct S6SystemGallery: View {
     }
 
     private var tokenGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 108))], spacing: 8) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 108))], spacing: kit.space(.s2)) {
             ForEach(AtumColorRole.allCases, id: \.rawValue) { role in
-                VStack(alignment: .leading, spacing: 4) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
+                    RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous)
                         .fill(atum.color(role, scheme: scheme))
                         .frame(height: 44)
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .overlay(RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous)
                             .strokeBorder(atum.color(.avatarEdge, scheme: scheme), lineWidth: 0.5))
                     Text(verbatim: role.rawValue)
                         .font(.footnote)
@@ -40,7 +41,7 @@ struct S6SystemGallery: View {
     }
 
     private var typeRamp: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: kit.space(.s2)) {
             Text(design.text("src.matrix.mobile-device-copy.mobileDeviceCopy.welcomeTitle"))
                 .font(.system(.largeTitle, weight: .semibold))
             Text(design.text("src.matrix.mobile-device-copy.mobileDeviceCopy.uiStore"))
@@ -59,9 +60,9 @@ struct S6SystemGallery: View {
             (.person, "Mai"), (.group, "Anka"),
         ]
         let sizes: [CGFloat] = [20, 32, 44, 52, 72]
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: kit.space(.s3)) {
             ForEach(Array(kinds.enumerated()), id: \.offset) { _, value in
-                HStack(alignment: .center, spacing: 8) {
+                HStack(alignment: .center, spacing: kit.space(.s2)) {
                     ForEach(sizes, id: \.self) { size in
                         AtumAvatar(kind: value.0, name: value.1, size: size)
                     }
@@ -69,14 +70,14 @@ struct S6SystemGallery: View {
             }
             // Atum's face as Home's chat-list rows draw it: the logo inset (64%),
             // as the desktop's chat-list rows pass `inset`; the row above is 70%.
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: kit.space(.s2)) {
                 ForEach(sizes, id: \.self) { size in
                     AtumAvatar(kind: .atum, name: "Atum", size: size)
                 }
             }
             .environment(\.atumAvatarBrandInset, true)
             .accessibilityIdentifier("system.gallery.atum-inset")
-            HStack(spacing: atum.kit.space(.s3)) {
+            HStack(spacing: kit.space(.s3)) {
                 AppSeal(tier: .official)
                 AppSeal(tier: .verified)
             }
@@ -84,16 +85,16 @@ struct S6SystemGallery: View {
     }
 
     private var marks: some View {
-        VStack(alignment: .leading, spacing: atum.kit.space(.s3)) {
-            HStack(spacing: 20) {
-                HStack(spacing: 3) { ProtonMark(.small); Text(verbatim: "12") }
-                HStack(spacing: 5) { ProtonMark(.regular); Text(verbatim: "12.400") }
+        VStack(alignment: .leading, spacing: kit.space(.s3)) {
+            HStack(spacing: kit.space(.s5)) {
+                HStack(spacing: kit.space(.s1)) { ProtonMark(.small); Text(verbatim: "12") }
+                HStack(spacing: kit.space(.s1)) { ProtonMark(.regular); Text(verbatim: "12.400") }
                 AtomMark().frame(width: 28, height: 28)
                 AtomWait().frame(width: 28, height: 28)
             }
             // Atum's picker mark at the chip (16) and row (20) sizes, beside a
             // provider's, as the model picker lines them up.
-            HStack(spacing: atum.kit.space(.s3)) {
+            HStack(spacing: kit.space(.s3)) {
                 ProviderMark(design: design, art: .atum, size: 16)
                 ProviderMark(design: design, art: .atum, size: 20)
                 ProviderMark(design: design, provider: "openai", label: "OpenAI", size: 20)
@@ -105,7 +106,7 @@ struct S6SystemGallery: View {
     }
 
     private var buttons: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: kit.space(.s2)) {
             Button(design.text("src.matrix.mobile-device-copy.mobileDeviceCopy.welcomeActionsSignInLabel")) {}
                 .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
             Button(design.text("desktop.dm.signOut")) {}
