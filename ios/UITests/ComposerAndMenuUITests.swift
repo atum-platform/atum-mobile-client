@@ -1246,7 +1246,7 @@ final class PhoneModelPickerVisualsUITests: WS3UITestCase {
             .firstMatch
         XCTAssertTrue(current.waitForExistence(timeout: Self.sheetWait), "no current row")
         keepEvidence("sheet-\(tag)", of: app)
-        let plan = element(app, "phone.model.plan.claude")
+        let plan = element(app, "phone.model.plan.claude-plan")
         scrollSheet(app, until: plan)
         XCTAssertTrue(plan.exists, "no Claude plan entry")
         keepEvidence("sheet-plans-\(tag)", of: app)
@@ -1270,7 +1270,7 @@ final class PhoneModelPickerVisualsUITests: WS3UITestCase {
         chip.tap()
         XCTAssertTrue(element(app, "composer.model.close").waitForExistence(timeout: Self.sheetWait))
         keepEvidence("sheet-en-light-ax5", of: app)
-        let connect = app.buttons["phone.model.plan.claude.connect"]
+        let connect = app.buttons["phone.model.plan.claude-plan.connect"]
         scrollSheet(app, until: connect, limit: 14)
         XCTAssertTrue(connect.exists && connect.isHittable, "Connect is not reachable at AX5")
         keepEvidence("sheet-plans-en-light-ax5", of: app)

@@ -127,9 +127,11 @@ final class PhoneModelPickerCopyTests: XCTestCase {
         let copy = PhoneModelPickerCopy(design: design)
         let notReadyKey = PhonePickerCopyKey.modelsUnavailable.rawValue
         let loadingKey = PhonePickerCopyKey.modelsLoading.rawValue
+        let failedKey = PhonePickerCopyKey.modelsFailed.rawValue
         let signedOutKey = PhonePickerCopyKey.modelsSignedOut.rawValue
         XCTAssertEqual(copy.unavailable(.notReady), try design.copy.text(notReadyKey, locale: design.locale))
         XCTAssertEqual(copy.unavailable(.loading), try design.copy.text(loadingKey, locale: design.locale))
+        XCTAssertEqual(copy.unavailable(.failed), try design.copy.text(failedKey, locale: design.locale))
         XCTAssertEqual(copy.unavailable(.signedOut), try design.copy.text(signedOutKey, locale: design.locale))
     }
 

@@ -29,6 +29,8 @@ enum PhonePickerCopyKey: String, CaseIterable {
     case planUnavailableNoMac = "src.matrix.model-picker-copy.COPY.planUnavailable.no_mac"
     case planUnavailableReconnect = "src.matrix.model-picker-copy.COPY.planUnavailable.reconnect"
     case searchPlaceholder = "src.matrix.model-picker-copy.COPY.searchPlaceholder"
+    /// W4-X2: a failed destination readback leaves the catalogs read-only.
+    case switchProblemUnavailable = "src.matrix.model-picker-copy.COPY.switchProblem.unavailable"
     case thisMac = "src.matrix.model-picker-copy.COPY.thisMac"
     case unfavorite = "src.matrix.model-picker-copy.COPY.unfavorite"
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
@@ -86,10 +88,24 @@ struct PhoneModelPickerCopy {
         switch reason {
         case .loading:
             text(.modelsLoading)
+        case .failed:
+            text(.modelsFailed)
         case .notReady:
             text(.modelsUnavailable)
         case .signedOut:
             text(.modelsSignedOut)
+        }
+    }
+
+    /// A settled read line's words (desktop #126 `relayReadReason`): loading,
+    /// a connection's failed catalog, the unreachable registry, or the
+    /// destination readback that leaves every catalog read-only.
+    func status(_ status: PhoneModelPickerStatus) -> String {
+        switch (status.source, status.phase) {
+        case (_, .loading): text(.modelsLoading)
+        case (.destination, .failed): text(.switchProblemUnavailable)
+        case (.accountConnections, .failed): text(.modelsUnavailable)
+        case (.chatGPT, .failed), (.openCodeGo, .failed): text(.modelsFailed)
         }
     }
 

@@ -406,7 +406,7 @@ final class LiveAppModel {
         return state
     }
 
-    private func modelPickerScope(client: NativeDomainClient, roomID: String, principal: NativeID) -> () -> Bool {
+    private func modelPickerScope(client: NativeDomainClient, roomID: String, principal: NativeID) -> @MainActor () -> Bool {
         let generation = accountScopeGeneration
         return { [weak self] in
             self?.accountScopeGeneration == generation && self?.domainClient === client
@@ -2088,9 +2088,14 @@ final class LiveAppModel {
         let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         return AssistantModelDestinationActions(
             matrixAccountID: accountID,
+            isCurrent: current,
             read: { [weak self] in
-                guard let self, current() else { return .failed }
+                guard let self, current() else { return .unavailable }
                 return await self.readAssistantModelDestinations(roomID: roomID)
+            },
+            readOffer: { [weak self] in
+                guard let self, current() else { return .unavailable }
+                return await self.readAssistantModels(roomID: roomID)
             },
             save: { [weak self] snapshot, destination, model, requestID in
                 guard let self, current() else { return .refused(nil) }
@@ -2100,11 +2105,12 @@ final class LiveAppModel {
                 )
             },
             subscriptions: AssistantSubscriptionActions(
-                read: { [weak self] in
-                    guard current() else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
-                    return await self?.readSubscriptionAccount()
-                        ?? PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)
-                },
+                read: PhoneSubscriptionAccountReads(
+                    chatGPT: { try await client.chatGPTRelayStatus() },
+                    openCodeGo: { try await client.providerConnectionsStatus() },
+                    accountConnections: { try await client.accountConnections() },
+                    isCurrent: current
+                ),
                 save: { [weak self] snapshot, source, model, effort, requestID, consent, isSelectionCurrent in
                     guard isSelectionCurrent() else { return .cancelled }
                     guard let self, current() else { return .refused(nil) }
@@ -2462,24 +2468,12 @@ final class LiveAppModel {
         -> AssistantModelDestinationLoadResult {
         guard let client = domainClient, let agent = agentForRoom(roomID) else { return .failed }
         let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
-        let offerState = modelOfferState(for: agent.principal)
         let destinationState = modelDestinationState(for: agent.principal)
         do {
-            var offer: ManagedModelSnapshot?
             let snapshot = try await destinationState.read(isCurrent: current) {
-                async let destinationRead = client.managedModelDestinations(agentPrincipal: agent.principal)
-                offer = try? await offerState.read(isCurrent: current) {
-                    try await client.managedModels(agentPrincipal: agent.principal)
-                }
-                return try await destinationRead
+                try await client.managedModelDestinations(agentPrincipal: agent.principal)
             }
-            let eligible: Set<String> = Set((offer?.models ?? []).compactMap { model -> String? in
-                guard model.eligibility == .ready,
-                      ManagedModelLineup.servedAliases.contains(model.alias) else { return nil }
-                return model.alias
-            })
-            return .value(AssistantModelDestinationValue(snapshot: snapshot,
-                                                         cloudEligibleAliases: eligible))
+            return .value(snapshot)
         } catch let failure as NativeDomainClientFailure {
             if case let .http(http) = failure,
                [.notFound, .denied, .unavailable].contains(http.response.error) {
@@ -2640,20 +2634,6 @@ final class LiveAppModel {
         case .cancelled: return .cancelled
         case .failed: return .refused(nil)
         }
-    }
-
-    /// The account's subscriptions as the cloud can use them: the two owner
-    /// status reads the desktop makes for a cloud assistant's picker. Each one
-    /// that fails is nil, so the picker keeps a saved choice read-only.
-    private func readSubscriptionAccount() async -> PhoneSubscriptionAccount {
-        guard let client = domainClient else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
-        async let relay = try? client.chatGPTRelayStatus()
-        async let connections = try? client.providerConnectionsStatus()
-        async let registry = try? client.accountConnections()
-        let value = PhoneSubscriptionAccount(chatGPT: await relay, openCodeGo: await connections,
-                                             accountConnections: await registry)
-        guard domainClient === client else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
-        return value
     }
 
     /// The connect sheet's follow-up read, bound to the account session that

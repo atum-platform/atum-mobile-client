@@ -257,12 +257,12 @@ struct ScriptedChatHost: View {
                                 assistantModelDestinations: script.context.kind == .assistant
                                     ? AssistantModelDestinationActions(
                                         matrixAccountID: script.context.ownUserID,
+                                        isCurrent: { true },
                                         read: {
-                                            .value(AssistantModelDestinationValue(
-                                                snapshot: scriptedModelDestinations,
-                                                cloudEligibleAliases: Set(ManagedModelLineup.servedAliases)
-                                            ))
+                                            Self.pickerReads.contains("destination-failed")
+                                                ? .failed : .value(scriptedModelDestinations)
                                         },
+                                        readOffer: { .value(scriptedModels) },
                                         save: { _, destination, model, _ in
                                             scriptedModelDestinations = Self.modelDestinations(
                                                 destination: destination,
@@ -696,8 +696,16 @@ struct ScriptedChatHost: View {
     /// The scripted subscription actions, only with `-AtumScriptedSubscriptions`.
     private var scriptedSubscriptions: AssistantSubscriptionActions? {
         guard let demo = Self.subscriptionDemo else { return nil }
+        let account = Self.subscriptionAccount(demo)
         return AssistantSubscriptionActions(
-            read: { Self.subscriptionAccount(demo) },
+            read: PhoneSubscriptionAccountReads(
+                chatGPT: {
+                    if Self.pickerReads.contains("chatgpt-failed") { throw ScriptedReadFailure() }
+                    return account.chatGPT
+                },
+                openCodeGo: { account.openCodeGo },
+                accountConnections: { account.accountConnections }
+            ),
             save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
                      effort: ManagedModelEffort, _: NativeID,
                      _: ChatGPTTrainingConsent?, isSelectionCurrent: @escaping @MainActor () -> Bool)
@@ -725,6 +733,17 @@ struct ScriptedChatHost: View {
                 }),
             makeConnectionsPoll: { { Self.scriptedAccountConnections } })
     }
+
+    /// `-AtumScriptedPickerReads chatgpt-failed,destination-failed` (W4-X2):
+    /// the picker's ChatGPT relay read throws, and/or its destination readback
+    /// fails, so the settled status lines and Try again show. Synthetic.
+    static let pickerReadsFlag = "-AtumScriptedPickerReads"
+    private static let pickerReads: Set<String> = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: pickerReadsFlag), index + 1 < arguments.count else { return [] }
+        return Set(arguments[index + 1].split(separator: ",").map(String.init))
+    }()
+    private struct ScriptedReadFailure: Error {}
 
     /// `-AtumScriptedTraining required`: the account has no current
     /// training-off confirmation, so a ChatGPT pick asks first (synthetic).
@@ -784,12 +803,15 @@ struct ScriptedChatHost: View {
     /// `-AtumScriptedConnections plans`: the account registry the picker's
     /// Connect entries read (W4-E6), decoded from its wire shape: ChatGPT on a
     /// Mac, Claude and Antigravity connected nowhere. Without the flag the
-    /// picker has no registry and offers no Connect entry. Synthetic data.
+    /// picker has no registry and offers no Connect entry. `work` (W4-X2) also
+    /// has Claude connected on that Mac, so the picker draws its Work models
+    /// read-only with the hand-off to the Mac. Synthetic data.
     static let connectionsFlag = "-AtumScriptedConnections"
     private static let scriptedAccountConnections: AccountConnections? = {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: connectionsFlag), index + 1 < arguments.count,
-              arguments[index + 1] == "plans" else { return nil }
+              ["plans", "work"].contains(arguments[index + 1]) else { return nil }
+        let work = arguments[index + 1] == "work"
         let reach: [String: Any] = ["chat": "relay", "work": "native", "agents": "all"]
         let none: [String: Any] = ["chat": "none", "work": "none", "agents": "all"]
         func plan(_ id: String, connected: Bool) -> [String: Any] {
@@ -798,12 +820,15 @@ struct ScriptedChatHost: View {
              "devices": connected ? [["deviceServiceId": "14600000-0000-4000-8000-0000000000d1",
                                       "displayName": "MacBook Pro", "status": "connected",
                                       "observedAt": 1_760_000_000_000]] : [],
-             "models": connected ? [["id": "gpt-6.1", "displayName": "GPT-6.1"]] : [],
+             "models": !connected ? []
+                 : id == "claude" ? [["id": "claude-sonnet-5-5", "displayName": "Claude Sonnet 5.5"],
+                                     ["id": "claude-opus-5-5", "displayName": "Claude Opus 5.5"]]
+                 : [["id": "gpt-6.1", "displayName": "GPT-6.1"]],
              "reach": connected ? reach : none]
         }
         let value: [String: Any] = ["profile": "atum.account-connections/1",
                                     "connections": [plan("codex", connected: true),
-                                                    plan("claude", connected: false),
+                                                    plan("claude", connected: work),
                                                     plan("antigravity", connected: false)]]
         return try! NativeAPI.decode(AccountConnections.self, from: JSONSerialization.data(withJSONObject: value))
     }()
