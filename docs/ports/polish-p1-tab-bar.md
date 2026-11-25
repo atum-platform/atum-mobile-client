@@ -259,6 +259,9 @@ padding and glyph size are gone). The lower counts are locked in with
   `phone.tab.*` buttons, and did not run here.
 - The system bar draws the Phosphor glyphs at its own symbol size (about
   17 pt), smaller than the old 24 pt glyphs. That is the system standard.
+  The owner reported it as a regression. It was fixed in
+  `docs/ports/tabbar-icon-size.md`, which restores the 24 pt glyphs inside
+  the system bar.
 
 ## Session log
 
