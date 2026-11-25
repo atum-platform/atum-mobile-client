@@ -206,6 +206,28 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         XCTAssertEqual(PhoneModelPickerProjection.chip(pick: nil, destination: go, offer: nil)?.name, "GLM 5.2")
     }
 
+    func testChipWarnsWhenItsSavedSubscriptionCannotAnswer() throws {
+        let plan = try snapshot(cloudChoice: chatGPT("gpt-6.1"))
+        let go = try snapshot(profile: "atum.model-choice/1.4",
+                              cloudChoice: ["destination": "cloud", "source": "opencode_go",
+                                            "model": "glm-5.2", "effort": "high"])
+        let unavailable = try account(relay: relay(enabled: false), connections: connections(connected: false))
+        let available = try account(relay: relay(enabled: true), connections: connections(connected: true))
+
+        let row = try XCTUnwrap(PhoneModelPickerProjection.subscriptions(plan, destination: cloud, account: available)
+            .first { $0.selected })
+        let pick = PhoneModelPickerProjection.ChipPick(row: row, destinationRevision: plan.revision, offerRevision: nil)
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: plan, offer: nil, account: unavailable),
+                       .init(name: "GPT-6.1", source: .chatGPTPlan, planUnavailable: .noMac))
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: nil, destination: go, offer: nil, account: unavailable),
+                       .init(name: "GLM 5.2", source: .opencodeGo, planUnavailable: .reconnect))
+        XCTAssertNil(PhoneModelPickerProjection.chip(pick: pick, destination: plan, offer: nil, account: available)?
+            .planUnavailable)
+        XCTAssertNil(PhoneModelPickerProjection.chip(pick: nil, destination: go, offer: nil)?.planUnavailable)
+        XCTAssertNil(PhoneModelPickerProjection.chip(pick: nil, destination: try snapshot(), offer: nil,
+                                                    account: unavailable)?.planUnavailable)
+    }
+
     /// Review r1: the relay names "gpt-6.1-mini" "GPT-6.1 mini", the id alone
     /// reads "GPT-6.1 Mini". Once the account's status is loaded the chip uses
     /// the list's own row, cold or after a pick, so the two never disagree.

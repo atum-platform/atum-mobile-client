@@ -23,6 +23,8 @@ failure and acceptance notes.
   replies. The live scope also checks the account generation, domain client and assistant principal.
   The composer shares the picker account state and can keep settled facts to name its saved model
   after the picker closes. A Connect-sheet landing supersedes only the in-flight registry result.
+- W4-T's final chip settlement and plan warnings use that same shared account state. Its optional
+  pick callback follows the returned choice when a write replay names a different model.
 - Subscription rows need a ready destination read to be writable. Both pickers can project
   successful account catalogs with a missing destination snapshot. When a refresh fails over a
   previously held snapshot, the saved choice can still identify a row, with writes disabled.

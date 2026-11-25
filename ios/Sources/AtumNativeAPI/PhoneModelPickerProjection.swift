@@ -344,18 +344,44 @@ public enum PhoneModelPickerProjection {
 
     // MARK: - The composer chip
 
-    /// What the composer chip draws (desktop `chipLabel` and `chipRoute`): a
-    /// name, and the source and connection label its mark is matched from.
+    /// What the composer chip draws: its name, provider mark and any known
+    /// reason the named plan cannot answer right now (desktop `chipDown`).
     public struct ChipFace: Equatable, Sendable {
+        public enum PlanUnavailable: Equatable, Sendable {
+            case noMac
+            case reconnect
+        }
+
         public let name: String
         public let source: ManagedModelDestinationSource
         public let connectionLabel: String?
+        public let planUnavailable: PlanUnavailable?
 
-        public init(name: String, source: ManagedModelDestinationSource, connectionLabel: String? = nil) {
+        public init(name: String, source: ManagedModelDestinationSource, connectionLabel: String? = nil,
+                    planUnavailable: PlanUnavailable? = nil) {
             self.name = name
             self.source = source
             self.connectionLabel = connectionLabel
+            self.planUnavailable = planUnavailable
         }
+
+        fileprivate init(subscription row: Row) {
+            let reason: PlanUnavailable? = switch row.unavailable {
+            case .notReady: .noMac
+            case .signedOut: .reconnect
+            default: nil
+            }
+            self.init(name: row.displayName, source: row.source, connectionLabel: row.connectionLabel,
+                      planUnavailable: reason)
+        }
+    }
+
+    /// A replay can return a snapshot ahead of the write receipt. Keep the
+    /// tapped row's catalog metadata only if the returned cloud choice names it.
+    public static func settledDestinationPick(_ row: Row, destination: ManagedModelDestinationSnapshot) -> Row? {
+        guard let saved = destination.choice(for: cloudID),
+              saved.source == row.source, saved.model == row.model else { return nil }
+        return row.selecting(true)
     }
 
     /// A row a pick wrote, with the readbacks it was made over. The chip names
@@ -414,19 +440,18 @@ public enum PhoneModelPickerProjection {
                 return ChipFace(name: name, source: .atum, connectionLabel: row.connectionLabel)
             }
             if let listed = listedSubscription(row.source, model: row.model, destination: destination, account: account) {
-                return ChipFace(name: listed.displayName, source: listed.source, connectionLabel: listed.connectionLabel)
+                return ChipFace(subscription: listed)
             }
             return ChipFace(name: row.displayName, source: row.source, connectionLabel: row.connectionLabel)
         }
         if let saved = destination?.choice(for: cloudID) {
-            if let name = ManagedModelLineup.productName(for: saved.model) {
+            if saved.source == .atum, let name = ManagedModelLineup.productName(for: saved.model) {
                 return ChipFace(name: name, source: .atum)
             }
             if saved.source != .atum {
                 if let listed = listedSubscription(saved.source, model: saved.model,
                                                    destination: destination, account: account) {
-                    return ChipFace(name: listed.displayName, source: listed.source,
-                                    connectionLabel: listed.connectionLabel)
+                    return ChipFace(subscription: listed)
                 }
                 return ChipFace(name: ModelDisplayName.name(model: saved.model), source: saved.source)
             }

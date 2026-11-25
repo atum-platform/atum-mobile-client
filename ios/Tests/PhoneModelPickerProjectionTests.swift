@@ -408,13 +408,14 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
     /// The 1.4 contract is additive: the same shape plus `opencode_go` on a
     /// cloud destination. The phone accepts both profile literals and keeps a
     /// 1.3 snapshot working exactly as before.
-    private func subscriptionSnapshot() throws -> ManagedModelDestinationSnapshot {
+    private func destinationSnapshot(cloudSource: String, model: String, revision: Int = 3) throws
+        -> ManagedModelDestinationSnapshot {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(
             with: fixture("destination.snapshot")) as? [String: Any])
-        object["profile"] = "atum.model-choice/1.4"
+        object["profile"] = cloudSource == "chatgpt_plan" ? "atum.model-choice/1.5" : "atum.model-choice/1.4"
+        object["revision"] = revision
         var choices = try XCTUnwrap(object["choices"] as? [[String: Any]])
-        choices[0] = ["destination": "cloud", "source": "opencode_go",
-                      "model": "glm-5.2", "effort": "high"]
+        choices[0] = ["destination": "cloud", "source": cloudSource, "model": model, "effort": "high"]
         object["choices"] = choices
         return try NativeAPI.decode(
             ManagedModelDestinationSnapshot.self,
@@ -423,7 +424,7 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
     }
 
     func testA14SnapshotDecodesAndDrawsTheConnectedSubscriptionAfterTheLineUp() throws {
-        let snapshot = try subscriptionSnapshot()
+        let snapshot = try destinationSnapshot(cloudSource: "opencode_go", model: "glm-5.2")
         let destination = try ManagedModelDestinationID("cloud")
         let lineUp = PhoneModelPickerProjection.conversation(
             offer: nil, destination: snapshot, destinationID: destination)
@@ -440,6 +441,45 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertTrue(subscriptions[0].selected)
         XCTAssertFalse(subscriptions[0].selectable,
                        "without the account status the saved choice stays read-only")
+    }
+
+    @MainActor
+    func testReplayedSubscriptionReceiptSettlesTheChipFromTheNewerHeldChoice() async throws {
+        let before = try destinationSnapshot()
+        let receipt = try destinationSnapshot(cloudSource: "chatgpt_plan", model: "gpt-6.1", revision: 4)
+        let held = try destinationSnapshot(cloudSource: "atum", model: ManagedModelLineup.hardAlias, revision: 5)
+        let state = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        let choice = ManagedModelPickerChoice.subscription(.chatGPTPlan, model: "gpt-6.1", effort: .high)
+        let id = ModelWriteRequests<NativeID>.freshID()
+        let tap = PhoneModelPickerProjection.Row(favoriteID: nil, source: .chatGPTPlan, model: "gpt-6.1",
+                                                 displayName: "GPT-6.1", selected: false, selectable: true,
+                                                 isSubscription: true, subscriptionEffort: .high)
+        XCTAssertEqual(PhoneModelPickerProjection.settledDestinationPick(tap, destination: receipt), tap.selecting(true))
+
+        let first = await state.save(from: before, choice: choice, requestID: id,
+                                     refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { before }) { _, _ in
+            throw NativeDomainClientFailure.transportUnavailable
+        }
+        guard case .failed = first else { return XCTFail("Expected a lost response") }
+        let latest = try await state.read(isCurrent: { true }) { held }
+        let retry = await state.save(from: latest, choice: choice, requestID: ModelWriteRequests<NativeID>.freshID(),
+                                     refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { held }) { fence, key in
+            XCTAssertEqual(fence, before)
+            XCTAssertEqual(key, id)
+            return receipt
+        }
+        guard case let .saved(settled) = retry else { return XCTFail("Expected the held snapshot after replay") }
+        XCTAssertEqual(settled, held)
+        let pick = PhoneModelPickerProjection.settledDestinationPick(tap, destination: settled).map {
+            PhoneModelPickerProjection.ChipPick(row: $0, destinationRevision: settled.revision, offerRevision: nil)
+        }
+        let face = PhoneModelPickerProjection.ChipFace(name: "Nhật Thực", source: .atum)
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: settled, offer: nil), face)
+
+        let refresh = try await state.read(isCurrent: { true }) { held }
+        XCTAssertEqual(refresh.revision, settled.revision)
+        let reconciled = PhoneModelPickerProjection.reconciled(pick, destination: refresh, offer: nil)
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: reconciled, destination: refresh, offer: nil), face)
     }
 
     func testOpencodeGoIsCloudOnly() throws {
