@@ -36,10 +36,9 @@ control heights come from the design tokens (`atum.color`, `kit.space`, `kit.pho
   a relay.
 - **One Retry path.** W4-X1's account model reloads its three sources together. A per-source Retry
   would change W4-X1's state logic, so each account Try again re-reads all three under a fresh
-  budget. Desktop also re-reads its whole relay. In the composer, a destination Try again reruns the
-  full load (`load(force: true)`). An account-source Try again takes the account-only path when the
-  offer and destination are already ready. In the card picker, every Try again reruns `load()`.
-  Every read stays bounded by `PhoneModelPickerRead`.
+  budget. Desktop also re-reads its whole relay. Since W4-X1 `172fa3f`, every picker load refreshes the
+  destination, offer and account sources together. In both pickers, every Try again reruns `load()`,
+  bounded by `PhoneModelPickerRead`.
 - **Destination failure copy.** No pinned string names a failed destination readback. `modelsFailed`
   names "this connection" and `modelsUnavailable` names the connections registry, so the phone uses
   the pinned `switchProblem.unavailable`. That string describes the result: the assistant's choice
@@ -86,3 +85,7 @@ Results are recorded below once the run finishes.
   test passed in all five runs. The ChatGPT test failed at the hand-off step in each run: it looked up
   `phone.model.handoff.claude.open`, but the view uses the plan's picker ID (`claude-plan`). The UI
   hierarchy shows both hand-off groups rendered as designed. This was a test fix only.
+
+- r2 (`3256176`, after merging W4-X1 `3f9bc7c`): Swift tests passed (107, exit 0). The build failed
+  (exit 65) because the merge removed `load(force:)`, so the composer's Retry called a signature that no
+  longer existed. The fix is to call `load()`, which is now always a full refresh.

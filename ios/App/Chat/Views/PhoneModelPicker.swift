@@ -172,10 +172,9 @@ struct PhoneConversationModelPicker: View {
                     destinationStatus: PhoneModelPickerStatus.destination(destinationReadState),
                     providerStatuses: PhoneModelPickerStatus.providers(account),
                     handoffs: handoffs,
-                    // A destination retry reads everything again; an account
-                    // source's retry re-reads the account sources (and the
-                    // destination too when it has not answered yet).
-                    retry: { source in Task { await load(force: source == .destination) } },
+                    // Every picker load refreshes the destination, offer and
+                    // account sources together under one bounded budget.
+                    retry: { _ in Task { await load() } },
                     select: choose
                 )
             } else if unavailable {
