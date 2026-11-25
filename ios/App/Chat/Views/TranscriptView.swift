@@ -10,6 +10,7 @@ struct TranscriptView: View {
     let chrome: ChatChrome
     var covered = false
     var search: ChatSearchSession? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         GeometryReader { viewport in
@@ -31,7 +32,7 @@ struct TranscriptView: View {
             request: store.scrollRequest, followState: store.follow.state,
             covered: covered, pagination: store.pagination, generation: store.timelineGeneration,
             route: store.searchTargetEventID, focus: search?.focus, highlights: search?.highlights ?? [:],
-            insets: insets
+            insets: insets, dynamicTypeSize: dynamicTypeSize
         )
         .gesture(TranscriptKeyboardDismissal.Tap())
     }
@@ -57,6 +58,7 @@ private struct TranscriptCollection: UIViewRepresentable {
     let focus: ChatSearchSession.Focus?
     let highlights: [String: ChatSearchHighlight]
     let insets: UIEdgeInsets
+    let dynamicTypeSize: DynamicTypeSize
 
     func makeCoordinator() -> TranscriptEngine { TranscriptEngine(store: store, chrome: chrome) }
 
@@ -306,14 +308,15 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
             list.verticalScrollIndicatorInsets = input.insets
         }
 
-        let sizeChanged = dynamicTypeSize != environment.dynamicTypeSize
-        dynamicTypeSize = environment.dynamicTypeSize
+        let sizeChanged = dynamicTypeSize != input.dynamicTypeSize
+        dynamicTypeSize = input.dynamicTypeSize
         if sizeChanged, !store.follow.isFollowing {
-            readingAnchor = captureAnchor()
+            if readingAnchor == nil { readingAnchor = captureAnchor() }
             traceAnchor(readingAnchor)
             updateSizingPin()
         }
         var rowEnvironment = environment
+        rowEnvironment.dynamicTypeSize = input.dynamicTypeSize
         rowEnvironment.chatRowInteractions.showOriginal = { [weak self] in self?.showOriginal($0) }
         rowEnvironment.chatRowInteractions.opening = { [weak self] in self?.rowOpening($0) }
         rowEnvironment.chatRowInteractions.folded = { [weak self] in self?.rowFolded($0) }
@@ -437,12 +440,14 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         return layout.layoutAttributesForItem(at: indexPath)?.frame
     }
 
-    private func restore(_ anchor: Anchor) {
-        guard let list, let frame = rowFrame(anchor.id) else { return }
+    @discardableResult
+    private func restore(_ anchor: Anchor) -> Bool {
+        guard let list, let frame = rowFrame(anchor.id) else { return false }
         let before = list.contentOffset.y
         let desired = frame.minY - anchor.viewportY - list.adjustedContentInset.top
         let target = setOffset(desired)
         traceHold(anchor, before: before, desired: desired, target: target, after: list.contentOffset.y)
+        return abs(list.contentOffset.y - desired) <= 0.5
     }
 
     private func updateSizingPin() {
@@ -470,17 +475,18 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         guard !layingOut, !applyingSnapshot, let list, list.bounds.height > 0, !rows.isEmpty else { return }
         layingOut = true
         defer { layingOut = false }
+        var restored: Anchor?
         if placement != nil {
             placeSearchMatch()
         } else if motion == .idle, let id = replyJumpID {
             centerReply(id)
         } else if store.follow.isFollowing, motion == .idle, !reportKeyboardPanEnd {
             scrollToBottom(animated: false)
-        } else if motion == .idle, let anchor = measuredAnchor {
-            restore(anchor)
+        } else if motion == .idle, let anchor = measuredAnchor, restore(anchor) {
+            restored = anchor
         }
         if foldingAnchor != nil { foldingAnchor = nil }
-        readingAnchor = captureAnchor()
+        readingAnchor = restored ?? captureAnchor()
         updateSizingPin()
         scheduleReport()
     }

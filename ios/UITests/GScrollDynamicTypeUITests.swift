@@ -105,7 +105,9 @@ final class GScrollDynamicTypeUITests: TranscriptUITestCase {
         }
         let anchorRow = row(app, String(anchor.id.dropFirst(4)))
         request(size)
-        XCTAssertTrue(waitFor(25) { abs(anchorRow.frame.height - anchor.frame.height) > 4 }, "the size did not change to \(size)")
+        XCTAssertTrue(waitFor(25) {
+            anchorRow.exists && abs(anchorRow.frame.height - anchor.frame.height) > 4
+        }, "the held row did not become visible at \(size)")
         wait(1.5)
         // The row the transcript held during this change (`geometry.txt`).
         let held = probeLines("geometry.txt").last { $0.text.hasPrefix("held row=") }?.text
