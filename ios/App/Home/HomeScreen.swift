@@ -2519,96 +2519,34 @@ struct HomeAvatar: View {
     let size: CGFloat
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
 
-    @State private var art: AtumAvatarArt?
-    @State private var loadedRequest: HomeAvatarRequest?
-
-    private var request: HomeAvatarRequest {
-        HomeAvatarRequest(url: row.avatarURL, matrixURI: row.matrixAvatarURL,
-                          sha256: row.avatarSHA256, candidates: row.avatarCandidates)
-    }
-
     var body: some View {
         Group {
             if row.isFounder {
                 FounderRavenAvatar(size: size, fallbackName: row.name)
             } else {
-                AtumAvatar(kind: row.kind.avatarKind, name: row.name, art: art,
-                           mark: row.mark,
-                           placeholder: row.hasAvatarSource ? .neutral : .monogram,
-                           size: size)
-                    .task(id: request) {
-                        if loadedRequest != request {
-                            art = HomeAvatarArtCache.shared.art(for: request)
-                            loadedRequest = request
-                        }
-                        guard art == nil else { return }
-                        let pixelSide = AtumAvatar.thumbnailPixelSide(for: 72)
-                        let candidates = AtumAvatarCandidateLoader.candidates(
-                            avatar: row.avatarURL.map {
-                                LiveProductAvatar.photo(url: $0, fallback: row.name)
-                            },
-                            sha256: row.avatarSHA256,
-                            declared: row.avatarCandidates
-                        )
-                        let loaded = await AtumAvatarCandidateLoader.load(
-                            matrixURI: row.matrixAvatarURL,
-                            pixelSide: pixelSide,
-                            loadMatrixThumbnail: loadMatrixThumbnail,
-                            remoteCandidates: candidates
-                        )
-                        guard !Task.isCancelled else { return }
-                        art = loaded
-                        if let loaded {
-                            HomeAvatarArtCache.shared.store(loaded, for: request)
-                        }
-                    }
+                // `AtumAvatarArtMemo` replaces the row-only cache Home kept:
+                // a rebuilt row (a list diff, a scroll back, an account
+                // refresh) wears its photo on its first frame, and the chat
+                // opened from it reads the same entry. The 72 pt thumbnail
+                // whatever the size, so the copy is sharp enough there too.
+                AtumSourcedAvatar(kind: row.kind.avatarKind, name: row.name, mark: row.mark,
+                                  placeholder: row.hasAvatarSource ? .neutral : .monogram,
+                                  size: size, source: row.avatarSource, identity: row.id,
+                                  pixelSide: AtumAvatar.thumbnailPixelSide(for: 72),
+                                  loadMatrixThumbnail: loadMatrixThumbnail)
             }
         }
         .saturation(row.isComingSoon ? 0 : 1)
     }
 }
 
-private struct HomeAvatarRequest: Hashable {
-    let url: URL?
-    let matrixURI: String?
-    let sha256: String?
-    let candidates: [LiveProductRemoteArt]
-
-    var cacheKey: String {
-        let candidateKey = candidates
-            .map { $0.url.absoluteString + "#" + ($0.sha256 ?? "") }
-            .joined(separator: "|")
-        return [url?.absoluteString ?? "", matrixURI ?? "", sha256 ?? "", candidateKey]
-            .joined(separator: "\n")
-    }
-}
-
-/// Decoded row faces survive the view being rebuilt (a list diff, a scroll
-/// back, an account refresh), so a photo never blinks back to a placeholder.
-@MainActor
-private final class HomeAvatarArtCache {
-    static let shared = HomeAvatarArtCache()
-
-    private var values = [String: AtumAvatarArt]()
-    private var order = [String]()
-    private let capacity = 200
-
-    func art(for request: HomeAvatarRequest) -> AtumAvatarArt? {
-        let key = request.cacheKey
-        guard let value = values[key] else { return nil }
-        if let index = order.lastIndex(of: key) { order.remove(at: index) }
-        order.append(key)
-        return value
-    }
-
-    func store(_ art: AtumAvatarArt, for request: HomeAvatarRequest) {
-        let key = request.cacheKey
-        values[key] = art
-        if let index = order.lastIndex(of: key) { order.remove(at: index) }
-        order.append(key)
-        while order.count > capacity {
-            values.removeValue(forKey: order.removeFirst())
-        }
+extension HomeRow {
+    /// The row's photo sources: the same `AtumAvatarSource` the chat's title
+    /// builds from the room, so both read one memo entry.
+    @MainActor var avatarSource: AtumAvatarSource {
+        AtumAvatarSource(matrixURI: matrixAvatarURL,
+                         avatar: avatarURL.map { LiveProductAvatar.photo(url: $0, fallback: name) },
+                         sha256: avatarSHA256, declared: avatarCandidates)
     }
 }
 

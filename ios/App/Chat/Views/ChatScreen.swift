@@ -117,7 +117,7 @@ struct ChatScreen: View {
                                      sha256: info?.avatarSHA256,
                                      candidates: info?.avatarCandidates ?? [],
                                      name: info?.title ?? store.title,
-                                     kind: Self.avatarKind(store.kind))
+                                     kind: Self.avatarKind(store.kind), roomID: store.roomID)
         TranscriptView(store: store, chrome: chrome, covered: covered, search: search)
             .overlay {
                 if Self.isEmptyChat(rows: store.snapshot.rows, pagination: store.pagination) {
