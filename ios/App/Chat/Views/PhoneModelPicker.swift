@@ -54,8 +54,6 @@ struct PhoneConversationModelPicker: View {
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destination: ManagedModelDestinationSnapshot?
     @State private var destinationReadState: PhoneModelPickerReadState
-    /// The cloud aliases the 1.1 offer says are usable now, when it answered.
-    @State private var cloudEligibleAliases: Set<String>?
     /// Selection and load lifetime (desktop `beginSelection`): closing the
     /// picker retires every pending pick and load.
     @State private var lifetime = ModelPickerLifetime()
@@ -117,7 +115,6 @@ struct PhoneConversationModelPicker: View {
     private var rows: [PhoneModelPickerProjection.Row] {
         let atum = PhoneModelPickerProjection.conversation(
             offer: snapshot, destination: destination, destinationID: cloudDestination,
-            cloudEligibleAliases: cloudEligibleAliases,
             selectedAtumModel: pickedAtumModel
         )
         let subscriptions = PhoneModelPickerProjection.subscriptions(
@@ -184,6 +181,7 @@ struct PhoneConversationModelPicker: View {
         // account's subscription status: without this read a relayed ChatGPT
         // plan would show only its saved model, never the others it serves.
         let accountOnly = !force && snapshot != nil && destinationReadState == .ready
+            && destinations?.isCurrent() != false
         // An interrupted read (the list giving way to the card, a closed
         // sheet) still ends its load, so the next one is never refused.
         guard let token = lifetime.beginLoad() else { return }
@@ -199,10 +197,10 @@ struct PhoneConversationModelPicker: View {
         async let offerRead = loadOffer(within: budget, token: token)
         async let destinationRead = loadDestination(within: budget, token: token)
         let (offer, defaults, _) = await (offerRead, destinationRead, accountLoad)
-        guard !Task.isCancelled, lifetime.isCurrentLoad(token) else { return }
+        guard lifetime.isCurrentLoad(token) else { return }
         if case .value? = offer { return }
         if case .value? = defaults { return }
-        unavailable = offer?.isUnavailable == true || defaults?.isUnavailable == true
+        unavailable = Task.isCancelled || offer?.state == .unavailable || defaults?.state == .unavailable
         loadFailed = !unavailable
     }
 
@@ -213,8 +211,10 @@ struct PhoneConversationModelPicker: View {
     private func loadOffer(within budget: PhoneModelPickerRead, token: ModelPickerLifetime.Token) async
         -> AssistantModelLoadResult? {
         guard let actions else { return nil }
-        let result = await budget.withinOverall { await actions.read() } ?? .failed
-        guard !Task.isCancelled, lifetime.isCurrentLoad(token) else { return nil }
+        let result = await budget.scoped(isCurrent: { destinations?.isCurrent() != false }) {
+            await actions.read()
+        }
+        guard lifetime.isCurrentLoad(token) else { return nil }
         if case let .value(value) = result { apply(value) }
         return result
     }
@@ -223,18 +223,18 @@ struct PhoneConversationModelPicker: View {
         -> AssistantModelDestinationLoadResult? {
         guard let destinations else { return nil }
         destinationReadState = .loading
-        let result = await budget.withinOverall { await destinations.read() } ?? .failed
-        guard !Task.isCancelled, lifetime.isCurrentLoad(token),
-              destinations.subscriptions?.read.isCurrent() != false else { return nil }
-        switch result {
-        case let .value(value):
-            applyDestination(value.snapshot)
-            cloudEligibleAliases = value.cloudEligibleAliases
-        case .unavailable:
+        let result = await budget.scoped(isCurrent: destinations.isCurrent) { await destinations.read() }
+        guard lifetime.isCurrentLoad(token) else { return nil }
+        guard destinations.isCurrent() else {
             destinationReadState = .unavailable
-        case .failed:
-            destinationReadState = .failed
+            destination = nil
+            snapshot = nil
+            pickedAtumModel = nil
+            unavailable = true
+            return .unavailable
         }
+        destinationReadState = result.state
+        if case let .value(value) = result { applyDestination(value) }
         return result
     }
 
@@ -249,7 +249,7 @@ struct PhoneConversationModelPicker: View {
             save(snapshot, model: model, effort: effort)
             return
         }
-        guard destinations != nil, let destination else { return }
+        guard destinations != nil, destinationReadState == .ready, let destination else { return }
         savingRowID = row.stableID
         saveDestination(destination, model: model)
     }
@@ -367,6 +367,7 @@ struct PhoneConversationModelPicker: View {
     /// follow-up or a write after this.
     private func retire() {
         lifetime.retire()
+        if destinationReadState == .loading { destinationReadState = .unavailable }
         accountState.retire(keepingSettled: true)
         confirming = nil
         savingRowID = nil
@@ -457,20 +458,6 @@ struct PhoneConversationModelPicker: View {
     private func symbol(_ glyph: AtumGlyph) -> String { AtumVisualSystem(design: design).symbol(glyph) }
 }
 
-private extension AssistantModelLoadResult {
-    var isUnavailable: Bool {
-        if case .unavailable = self { return true }
-        return false
-    }
-}
-
-private extension AssistantModelDestinationLoadResult {
-    var isUnavailable: Bool {
-        if case .unavailable = self { return true }
-        return false
-    }
-}
-
 extension ManagedModelDestinationSnapshot {
     /// The card edits the cloud, as desktop's cardModelChoice does. A Mac
     /// home's model is edited from the Lives on sheet.
@@ -482,11 +469,12 @@ extension ManagedModelDestinationSnapshot {
 struct PhoneModelDestinationsPicker: View {
     let design: LiveDesign
     let actions: AssistantModelDestinationActions
-    @State private var value: AssistantModelDestinationValue?
+    @State private var snapshot: ManagedModelDestinationSnapshot?
     private var destination: ManagedModelDestinationID {
-        value?.snapshot.cardDestination ?? (try! ManagedModelDestinationID("cloud"))
+        snapshot?.cardDestination ?? (try! ManagedModelDestinationID("cloud"))
     }
     @State private var destinationReadState: PhoneModelPickerReadState = .loading
+    @State private var offer: AssistantModelLoadResult?
     @State private var savingRowID: String?
     @State private var saveFailed = false
     @State private var writes = ModelWriteRequests<DestinationModelWrite>()
@@ -554,21 +542,26 @@ struct PhoneModelDestinationsPicker: View {
         guard let token = lifetime.beginLoad() else { return }
         defer { lifetime.endLoad(token) }
         destinationReadState = .loading
+        offer = nil
         let budget = PhoneModelPickerRead()
         async let accountLoad: Void = loadAccount(within: budget)
-        let result = await budget.withinOverall { await actions.read() } ?? .failed
-        if !Task.isCancelled, lifetime.isCurrentLoad(token), actions.subscriptions?.read.isCurrent() != false {
-            switch result {
-            case let .value(next):
-                value = next
-                destinationReadState = .ready
-            case .unavailable:
+        async let offerLoad: Void = loadOffer(within: budget, token: token)
+        let result = await budget.scoped(isCurrent: actions.isCurrent) { await actions.read() }
+        if lifetime.isCurrentLoad(token) {
+            if actions.isCurrent() {
+                destinationReadState = result.state
+                if case let .value(next) = result { snapshot = next }
+            } else {
                 destinationReadState = .unavailable
-            case .failed:
-                destinationReadState = .failed
+                snapshot = nil
             }
         }
-        await accountLoad
+        _ = await (accountLoad, offerLoad)
+    }
+
+    private func loadOffer(within budget: PhoneModelPickerRead, token: ModelPickerLifetime.Token) async {
+        let result = await budget.scoped(isCurrent: actions.isCurrent) { await actions.readOffer() }
+        if lifetime.isCurrentLoad(token) { offer = result }
     }
 
     private func loadAccount(within budget: PhoneModelPickerRead) async {
@@ -576,43 +569,48 @@ struct PhoneModelDestinationsPicker: View {
     }
 
     private var rows: [PhoneModelPickerProjection.Row] {
-        let atum = value.map {
-            PhoneModelPickerProjection.destination($0.snapshot, destination: destination,
-                                                   cloudEligibleAliases: $0.cloudEligibleAliases)
+        let atum = snapshot.map {
+            PhoneModelPickerProjection.destination($0, destination: destination,
+                                                   cloudEligibleAliases: cloudEligibleAliases)
         } ?? []
         return atum + PhoneModelPickerProjection.subscriptions(
-            value?.snapshot, destination: destination, account: account,
+            snapshot, destination: destination, account: account,
             destinationReady: destinationReadState == .ready
         )
     }
 
+    private var cloudEligibleAliases: Set<String> {
+        guard destinationReadState == .ready, case let .value(value)? = offer else { return [] }
+        return Set(value.models.lazy.filter { $0.eligibility == .ready }.map(\.alias))
+    }
+
     private func choose(_ row: PhoneModelPickerProjection.Row) {
         if row.isSubscription { return chooseSubscription(row) }
-        guard savingRowID == nil, let value,
+        guard savingRowID == nil, destinationReadState == .ready, let snapshot,
               PhoneModelPickerProjection.canSelectAtumModel(
                   row.model,
-                  snapshot: value.snapshot,
+                  snapshot: snapshot,
                   destination: destination,
-                  cloudEligibleAliases: value.cloudEligibleAliases
+                  cloudEligibleAliases: cloudEligibleAliases
               ) else { return }
         savingRowID = row.stableID
         saveFailed = false
         let operation = writes.begin(DestinationModelWrite(destination: destination.rawValue,
                                                            model: row.model))
         Task { @MainActor in
-            let result = await actions.save(value.snapshot, destination, row.model, operation)
+            let result = await actions.save(snapshot, destination, row.model, operation)
             guard !Task.isCancelled else { return }
             savingRowID = nil
             switch result {
             case let .saved(snapshot):
-                self.value?.snapshot = snapshot
+                self.snapshot = snapshot
                 saveFailed = false
                 writes.settled()
             case .cancelled: break
             case let .refused(latest), let .consentRequired(_, latest):
                 if let latest {
                     // A conflict carries the authoritative snapshot: settled.
-                    self.value?.snapshot = latest
+                    self.snapshot = latest
                     writes.settled()
                 }
                 // Without it the outcome is unknown; an identical retry replays.
@@ -624,9 +622,9 @@ struct PhoneModelDestinationsPicker: View {
     /// The same 1.4 / 1.5 cloud write as the composer's picker, behind the
     /// same training-off gate for a ChatGPT pick.
     private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
-        guard savingRowID == nil, destinationReadState == .ready, let value, actions.subscriptions?.save != nil,
+        guard savingRowID == nil, destinationReadState == .ready, let snapshot, actions.subscriptions?.save != nil,
               PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: value.snapshot, account: account) != nil else { return }
+                  row, snapshot: snapshot, account: account) != nil else { return }
         let selection = lifetime.beginSelection()
         guard row.source == .chatGPTPlan else {
             return writeSubscription(row, consent: nil, selection: selection)
@@ -663,6 +661,7 @@ struct PhoneModelDestinationsPicker: View {
 
     private func retire() {
         lifetime.retire()
+        if destinationReadState == .loading { destinationReadState = .unavailable }
         accountState.retire()
         confirming = nil
         savingRowID = nil
@@ -671,10 +670,10 @@ struct PhoneModelDestinationsPicker: View {
     private func writeSubscription(_ row: PhoneModelPickerProjection.Row, consent: ChatGPTTrainingConsent?,
                                    selection: ModelPickerLifetime.Token) {
         guard lifetime.isCurrent(selection), destinationReadState == .ready,
-              let value, let save = actions.subscriptions?.save,
+              let snapshot, let save = actions.subscriptions?.save,
               row.source != .chatGPTPlan || consent != nil,
               let effort = PhoneModelPickerProjection.canSelectSubscription(
-                  row, snapshot: value.snapshot, account: account) else {
+                  row, snapshot: snapshot, account: account) else {
             savingRowID = nil
             saveFailed = true
             return
@@ -682,29 +681,29 @@ struct PhoneModelDestinationsPicker: View {
         savingRowID = row.stableID
         saveFailed = false
         let operation = subscriptionWrites.begin(SubscriptionWrite(
-            connection: row.connectionID, model: row.model, revision: value.snapshot.revision))
+            connection: row.connectionID, model: row.model, revision: snapshot.revision))
         Task { @MainActor in
-            let result = await save(value.snapshot, row.source, row.model, effort, operation, consent) {
+            let result = await save(snapshot, row.source, row.model, effort, operation, consent) {
                 lifetime.isCurrent(selection)
             }
             guard !Task.isCancelled, lifetime.isCurrent(selection) else { return }
             savingRowID = nil
             switch result {
             case let .saved(snapshot):
-                self.value?.snapshot = snapshot
+                self.snapshot = snapshot
                 saveFailed = false
                 subscriptionWrites.settled()
             case .cancelled: break
             case let .consentRequired(status, latest):
                 // The consent changed under the write: nothing was retried.
                 if let latest {
-                    self.value?.snapshot = latest
+                    self.snapshot = latest
                 }
                 subscriptionWrites.settled()
                 confirming = PendingChatGPTTraining(row: row, status: status, selection: selection)
             case let .refused(latest):
                 if let latest {
-                    self.value?.snapshot = latest
+                    self.snapshot = latest
                     subscriptionWrites.settled()
                 }
                 saveFailed = true

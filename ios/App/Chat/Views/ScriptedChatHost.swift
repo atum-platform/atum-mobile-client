@@ -257,12 +257,9 @@ struct ScriptedChatHost: View {
                                 assistantModelDestinations: script.context.kind == .assistant
                                     ? AssistantModelDestinationActions(
                                         matrixAccountID: script.context.ownUserID,
-                                        read: {
-                                            .value(AssistantModelDestinationValue(
-                                                snapshot: scriptedModelDestinations,
-                                                cloudEligibleAliases: Set(ManagedModelLineup.servedAliases)
-                                            ))
-                                        },
+                                        isCurrent: { true },
+                                        read: { .value(scriptedModelDestinations) },
+                                        readOffer: { .value(scriptedModels) },
                                         save: { _, destination, model, _ in
                                             scriptedModelDestinations = Self.modelDestinations(
                                                 destination: destination,

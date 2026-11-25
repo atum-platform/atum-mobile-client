@@ -423,7 +423,7 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         )
     }
 
-    func testA14SnapshotDecodesAndDrawsTheConnectedSubscriptionAfterTheLineUp() throws {
+    func testA14SnapshotDecodesAndDrawsTheSavedSubscriptionAfterTheLineUp() throws {
         let snapshot = try destinationSnapshot(cloudSource: "opencode_go", model: "glm-5.2")
         let destination = try ManagedModelDestinationID("cloud")
         let lineUp = PhoneModelPickerProjection.conversation(
@@ -431,14 +431,14 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertEqual(lineUp.map(\.model), ["nguyet-thuc", "nhat-thuc", "thai-cuc"],
                        "the line-up stays present when only the 1.4 read answers")
         XCTAssertTrue(lineUp.allSatisfy { !$0.selected },
-                      "the subscription is current, so no Atum row claims the check")
+                      "the saved choice belongs to a subscription")
 
         let subscriptions = PhoneModelPickerProjection.subscriptions(snapshot, destination: destination)
         XCTAssertEqual(subscriptions.count, 1)
         XCTAssertEqual(subscriptions[0].source, .opencodeGo)
         XCTAssertEqual(subscriptions[0].model, "glm-5.2")
         XCTAssertTrue(subscriptions[0].isSubscription)
-        XCTAssertTrue(subscriptions[0].selected)
+        XCTAssertFalse(subscriptions[0].selected)
         XCTAssertFalse(subscriptions[0].selectable,
                        "without the account status the saved choice stays read-only")
     }

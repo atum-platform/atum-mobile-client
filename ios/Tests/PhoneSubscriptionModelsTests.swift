@@ -420,7 +420,7 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         for status in [nil, PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)] {
             let rows = PhoneModelPickerProjection.subscriptions(saved, destination: cloud, account: status)
             XCTAssertEqual(rows.count, 1)
-            XCTAssertTrue(rows[0].selected)
+            XCTAssertFalse(rows[0].selected)
             XCTAssertFalse(rows[0].selectable)
             XCTAssertNil(rows[0].unavailable)
         }
@@ -457,7 +457,7 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         XCTAssertEqual(rows().map(\.model), ["gpt-6.1", "gpt-6.1-mini", "glm-5.2"])
         XCTAssertEqual(rows().map(\.selectable), [false, false, true])
         XCTAssertEqual(rows().first?.unavailable, .loading)
-        XCTAssertEqual(rows().first?.selected, true)
+        XCTAssertEqual(rows().first?.selected, false)
         XCTAssertNil(PhoneModelPickerProjection.canSelectSubscription(alternate, snapshot: saved, account: state.value))
         relayRead.finish(disabled.chatGPT)
         await refresh.value
@@ -509,6 +509,7 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         XCTAssertEqual(rows.map(\.model), ["gpt-6.1", "glm-5.2"])
         XCTAssertEqual(rows.map(\.unavailable), [.failed, nil])
         XCTAssertEqual(rows.map(\.selectable), [false, true])
+        XCTAssertFalse(rows[0].selected)
         relayRead.finish(status.chatGPT)
         await waitUntil { relayRead.returned }
         XCTAssertEqual(state.value?.chatGPTState, .failed)
@@ -516,12 +517,16 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
 
     func testDestinationFailureKeepsCatalogReadOnly() throws {
         let status = try account(relay: relay(enabled: true), connections: connections(connected: true))
-        for destination in [nil, try snapshot()] {
+        let savedChatGPT = try snapshot(cloudChoice: ["destination": "cloud", "source": "chatgpt_plan",
+                                                    "model": "gpt-6.1", "effort": "medium"])
+        let savedGo = try snapshot(cloudChoice: ["destination": "cloud", "source": "opencode_go",
+                                               "model": "glm-5.2", "effort": "high"])
+        for destination in [nil, savedChatGPT, savedGo] {
             let rows = PhoneModelPickerProjection.subscriptions(
                 destination, destination: cloud, account: status, destinationReady: false
             )
             XCTAssertEqual(rows.map(\.model), ["gpt-6.1", "gpt-6.1-mini", "glm-5.2"])
-            XCTAssertTrue(rows.allSatisfy { !$0.selectable && $0.subscriptionEffort == nil })
+            XCTAssertTrue(rows.allSatisfy { !$0.selected && !$0.selectable && $0.subscriptionEffort == nil })
         }
     }
 
@@ -549,8 +554,10 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         let savedRow = try XCTUnwrap(PhoneModelPickerProjection.subscriptions(
             savedGo, destination: cloud, account: state.value
         ).first { $0.source == .opencodeGo })
+        XCTAssertEqual(savedRow.model, "glm-5.2")
+        XCTAssertFalse(savedRow.selected)
         XCTAssertFalse(savedRow.selectable)
-        XCTAssertNil(savedRow.unavailable, "Go's failure state is available to the UI lane without changing this row")
+        XCTAssertEqual(savedRow.unavailable, .failed)
     }
 
     @available(macOS 14.0, *)
@@ -617,6 +624,92 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         XCTAssertEqual(state.value?.accountConnections, landed)
         XCTAssertEqual(state.value?.chatGPT, relay)
         XCTAssertEqual(state.value?.chatGPTState, .ready)
+    }
+
+    @MainActor
+    func testQueuedReplyWinsEvenIfTheClockPassesTheDeadlineBeforeTheActorResumes() async {
+        let pending = PendingRead<String>()
+        let timer = PendingRead<Void>()
+        let start = ContinuousClock().now
+        var now = start
+        let budget = PhoneModelPickerRead(
+            start: start, sourceLimit: .seconds(4), overallLimit: .seconds(8),
+            now: { now }, sleepUntil: { _ in await timer.read() }
+        )
+        let read = Task { await budget.withinOverall { await pending.read() } }
+        await waitUntil { pending.pending && timer.pending }
+        pending.finish("destination")
+        // Both operations run in one actor turn. The reply is queued before
+        // the deadline, and the timer has yet to finish.
+        now = start.advanced(by: .seconds(9))
+        await waitUntil { pending.returned }
+        timer.finish(())
+        let answer = await read.value
+        XCTAssertEqual(answer, "destination")
+    }
+
+    @MainActor
+    func testRetiredDestinationScopeSettlesUnavailableAndDropsItsReply() async throws {
+        let pending = PendingRead<PhoneModelPickerReadResult<ManagedModelDestinationSnapshot>>()
+        let destination = try snapshot()
+        var isCurrent = true
+        var state = PhoneModelPickerReadState.loading
+        let read = Task {
+            let result = await PhoneModelPickerRead().scoped(isCurrent: { isCurrent }) {
+                await pending.read()
+            }
+            state = result.state
+        }
+        await waitUntil { pending.pending }
+        isCurrent = false
+        pending.finish(.value(destination))
+        await read.value
+        XCTAssertEqual(state, .unavailable)
+    }
+
+    @MainActor
+    func testDestinationMakesTheCatalogWritableWhileTheOfferStillWaits() async throws {
+        let offer = PendingRead<PhoneModelPickerReadResult<ManagedModelSnapshot>>()
+        let account = try account(relay: relay(enabled: true), connections: connections(connected: true))
+        let destination = try snapshot()
+        let budget = PhoneModelPickerRead()
+        let offerRead = Task { await budget.scoped(isCurrent: { true }) { await offer.read() } }
+        await waitUntil { offer.pending }
+        let read = await budget.scoped(isCurrent: { true }) { .value(destination) }
+        XCTAssertEqual(read.state, .ready)
+        if case let .value(snapshot) = read {
+            let rows = PhoneModelPickerProjection.subscriptions(
+                snapshot, destination: cloud, account: account, destinationReady: read.state == .ready
+            )
+            XCTAssertEqual(rows.count, 3)
+            XCTAssertTrue(rows.allSatisfy(\.selectable))
+        } else {
+            XCTFail("destination snapshot did not settle")
+        }
+        XCTAssertTrue(offer.pending)
+        offer.finish(.failed)
+        let offerResult = await offerRead.value
+        XCTAssertEqual(offerResult.state, .failed)
+        XCTAssertEqual(read.state, .ready)
+    }
+
+    func testWorkHandoffsKeepNativePlanIdentityAndExcludeCloudRelayDuplicates() throws {
+        let mac = AccountConnectionDevice(deviceServiceID: "mac", displayName: "Mac", stale: false,
+                                          observedAt: 1)
+        let workModel = AccountConnectionModel(id: "work-model", displayName: "Work model")
+        let registry = AccountConnections(connections: AccountPlan.allCases.map { plan in
+            AccountConnection(id: plan.rawValue, kind: .plan,
+                              status: plan == .antigravity ? .needsAttention : .connected,
+                              devices: [mac], models: [workModel])
+        })
+        let enabled = try decode(ChatGPTRelayStatus.self, relay(enabled: true))
+        let handoffs = PhoneSubscriptionAccount(chatGPT: enabled, openCodeGo: nil, accountConnections: registry)
+            .workPlanHandoffs
+        XCTAssertEqual(handoffs.map(\.id), [.claude])
+        XCTAssertEqual(handoffs.first?.models, [workModel])
+        XCTAssertEqual(handoffs.first?.reason, .openOnMac)
+        let nativeOnly = PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil, accountConnections: registry)
+        XCTAssertEqual(nativeOnly.workPlanHandoffs.map(\.id), [.codex, .claude])
     }
 
     @MainActor

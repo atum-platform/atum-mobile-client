@@ -31,20 +31,45 @@ failure and acceptance notes.
 
 ## UI handoff
 
-Use the source-specific states when rendering status for each provider. The existing saved ChatGPT
-row already consumes `.loading`, `.failed` and the disabled relay's unavailable treatment through
-the pinned model strings. Go keeps its pinned reconnect treatment and exposes read failures through
-`openCodeGoState` for later UI wiring. `destinationReadState` in each picker owns write eligibility
-independently of the account catalog. Keep the catalog list visible with that state at
-`.unavailable` or `.failed`, and use `Row.selectable` for model actions.
+W4-X2 should pass `chatGPTState`, `openCodeGoState`, `accountConnectionsState` and
+`destinationReadState` to the list. Show each provider's settled copy and Retry for failed reads
+alongside any visible catalogs. Use the existing pinned loading, failure, unavailable and reconnect
+copy. `Row.selected` drives Current and `Row.selectable` gates model actions. A destination
+failure leaves successful plan catalogs visible and read-only.
+
+`PhoneSubscriptionAccount.workPlanHandoffs` supplies read-only model groups keyed by `AccountPlan`,
+with `.openOnMac` as the hand-off reason. The registry supplies the model names and keeps the
+native plan identity, including when two plans report the same model ID. Use the existing Work
+copy for the hand-off and the registry's read state for loading or failed copy. When ChatGPT's cloud
+relay already supplies the catalog, use that catalog once. Existing Connect entries still cover
+disconnected plans and plans that need attention.
+
+The ChatGPT training confirmation covers the existing cloud ChatGPT pick. Native Work consent
+requires its own plan-scoped agent and Mac grant or renewal through the native Work flow.
+
+## Fix round 2
+
+- Matched desktop #126's Current behavior. Both cloud plan reads keep the saved row name on failure.
+  The row is Current only when a successful plan catalog contains it and the destination has
+  successfully read back. OpenCode Go preserves its failed-read reason.
+- The reply and timeout settle a single stream. A queued reply can win without a later clock check
+  on the main actor. A controlled-clock regression advances the clock before the queued reply resumes.
+- A retired picker load token cannot publish over a newer load. A retired account or assistant
+  scope settles a still-owned destination load as unavailable and discards its stale snapshot.
+- The live destination reader issues the destination request alone. Both pickers load the bounded
+  1.1 offer alongside the destination and publish each as it answers. The card's Atum eligibility
+  follows the offer. Subscription writes can use a ready destination while the offer is pending.
+- Derived Mac hand-off groups from the existing Connections registry for W4-X2. The SwiftUI list
+  treatment and native Work grant or renewal UI are W4-X2 work.
 
 ## Verification
 
-The locked verification runs the subscription, picker projection and picker sections suites before
-the arm64 Debug simulator build. The subscription suite covers partial publication, timeout,
+The locked verification runs the subscription, picker state and preferences, projection and sections
+suites, the arm64 Debug simulator build, and the simulator-hosted picker copy suite. The
+subscription suite covers partial publication, timeout,
 per-source errors, read-only catalogs without destination readback, account changes, picker
-retirement and Connect-sheet landings. The deadline tests use injected 40 ms budgets and read
-continuations that can finish after cancellation.
+retirement, a stalled offer, native hand-off rows and Connect-sheet landings. The deadline tests use
+controlled reply and timer continuations, including replies that can finish after cancellation.
 
 ## Follow-ups
 

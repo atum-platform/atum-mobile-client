@@ -25,6 +25,17 @@ public struct PhoneSubscriptionAccount: Equatable, Sendable {
     public fileprivate(set) var openCodeGoState: PhoneModelPickerReadState
     public fileprivate(set) var accountConnectionsState: PhoneModelPickerReadState
 
+    /// Plan catalogs reported by Work on a Mac. A ChatGPT catalog already
+    /// supplied by the cloud relay is shown through its own source.
+    public var workPlanHandoffs: [PhoneModelPickerProjection.WorkPlanHandoff] {
+        guard accountConnectionsState == .ready else { return [] }
+        return AccountConnectionsView.planRows(accountConnections).compactMap { row in
+            guard !row.offersConnect, !row.models.isEmpty,
+                  row.plan != .codex || chatGPT?.state != .enabled else { return nil }
+            return .init(plan: row.plan, models: row.models)
+        }
+    }
+
     public init(chatGPT: ChatGPTRelayStatus?, openCodeGo: ProviderConnectionsStatus?,
                 accountConnections: AccountConnections? = nil) {
         self.chatGPT = chatGPT
@@ -41,14 +52,38 @@ public enum PhoneModelPickerReadState: Equatable, Sendable {
     case loading, ready, unavailable, failed
 }
 
+public enum PhoneModelPickerReadResult<Value: Sendable>: Sendable {
+    case value(Value)
+    case unavailable
+    case failed
+
+    public var state: PhoneModelPickerReadState {
+        switch self {
+        case .value: .ready
+        case .unavailable: .unavailable
+        case .failed: .failed
+        }
+    }
+}
+
 /// A monotonic budget shared by the reads started on a single picker load.
 public struct PhoneModelPickerRead: Sendable {
-    private let clock = ContinuousClock()
+    private let now: @MainActor @Sendable () -> ContinuousClock.Instant
+    private let sleepUntil: @MainActor @Sendable (ContinuousClock.Instant) async throws -> Void
     private let sourceDeadline: ContinuousClock.Instant
     private let overallDeadline: ContinuousClock.Instant
 
     public init(sourceLimit: Duration = .seconds(4), overallLimit: Duration = .seconds(8)) {
-        let start = clock.now
+        let clock = ContinuousClock()
+        self.init(start: clock.now, sourceLimit: sourceLimit, overallLimit: overallLimit,
+                  now: { clock.now }, sleepUntil: { try await clock.sleep(until: $0) })
+    }
+
+    init(start: ContinuousClock.Instant, sourceLimit: Duration, overallLimit: Duration,
+         now: @escaping @MainActor @Sendable () -> ContinuousClock.Instant,
+         sleepUntil: @escaping @MainActor @Sendable (ContinuousClock.Instant) async throws -> Void) {
+        self.now = now
+        self.sleepUntil = sleepUntil
         overallDeadline = start.advanced(by: overallLimit)
         sourceDeadline = min(start.advanced(by: sourceLimit), overallDeadline)
     }
@@ -57,6 +92,18 @@ public struct PhoneModelPickerRead: Sendable {
         _ read: @escaping @MainActor () async -> Value
     ) async -> Value? {
         await bounded(until: overallDeadline, read)
+    }
+
+    /// An expired budget is a failure. A retired scope settles as unavailable
+    /// and cannot publish either a successful reply or a transport error.
+    @MainActor public func scoped<Value: Sendable>(
+        isCurrent: @escaping @MainActor () -> Bool,
+        _ read: @escaping @MainActor () async -> PhoneModelPickerReadResult<Value>
+    ) async -> PhoneModelPickerReadResult<Value> {
+        guard !Task.isCancelled, isCurrent() else { return .unavailable }
+        let result = await withinOverall(read) ?? .failed
+        guard !Task.isCancelled, isCurrent() else { return .unavailable }
+        return result
     }
 
     @MainActor fileprivate func withinSource<Value: Sendable>(
@@ -68,17 +115,19 @@ public struct PhoneModelPickerRead: Sendable {
     @MainActor private func bounded<Value: Sendable>(
         until deadline: ContinuousClock.Instant, _ read: @escaping @MainActor () async -> Value
     ) async -> Value? {
-        guard !Task.isCancelled, clock.now < deadline else { return nil }
+        guard !Task.isCancelled, now() < deadline else { return nil }
         let (answers, continuation) = AsyncStream<Value>.makeStream(bufferingPolicy: .bufferingOldest(1))
-        // Unstructured tasks let the deadline return even when the transport
-        // ignores cancellation. Only the winning result reaches the caller.
+        // The first task to finish the stream wins. A buffered reply remains
+        // available even if the caller resumes after the deadline.
         let request = Task {
             guard !Task.isCancelled else { return }
             let value = await read()
-            if !Task.isCancelled, clock.now < deadline { continuation.yield(value) }
+            guard !Task.isCancelled else { return }
+            continuation.yield(value)
+            continuation.finish()
         }
         let timer = Task {
-            do { try await clock.sleep(until: deadline) } catch { return }
+            do { try await sleepUntil(deadline) } catch { return }
             continuation.finish()
         }
         defer {

@@ -622,7 +622,7 @@ private struct ComposerModelChoiceButton: View {
 
     private func read() async {
         if let actions, case let .value(value) = await actions.read() { adopt(offer: value) }
-        if let destinations, case let .value(value) = await destinations.read() { adopt(destination: value.snapshot) }
+        if let destinations, case let .value(value) = await destinations.read() { adopt(destination: value) }
         // A saved subscription is named by the account's catalog, as the list
         // names it (desktop `relayCurrentName`). An Atum choice needs no read.
         if !Task.isCancelled, !presented,

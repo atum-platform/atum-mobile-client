@@ -3,6 +3,15 @@ import Foundation
 /// Pure phone presentation derived only from decoded model-choice contracts.
 /// It creates no provider account or remote route identity.
 public enum PhoneModelPickerProjection {
+    public struct WorkPlanHandoff: Equatable, Sendable, Identifiable {
+        public enum Reason: Equatable, Sendable { case openOnMac }
+
+        public let plan: AccountPlan
+        public let models: [AccountConnectionModel]
+        public var id: AccountPlan { plan }
+        public var reason: Reason { .openOnMac }
+    }
+
     public struct Row: Equatable, Sendable {
         /// A small status word drawn beside a model's name. Only data a
         /// phone-visible contract carries is ever drawn: Atum names its default
@@ -218,81 +227,57 @@ public enum PhoneModelPickerProjection {
         }
     }
 
-    /// The cloud's subscription rows, as the desktop lists them for a cloud
-    /// assistant (`cloudSubscriptionRoutes`, `model-picker.tsx`): ChatGPT first,
-    /// then OpenCode Go, each from the account's own status.
-    ///
-    /// - A relayed ChatGPT plan lists every model the relay serves, and a
-    ///   connected OpenCode Go every model it serves. Each is choosable; the
-    ///   saved one is current.
-    /// - A saved ChatGPT model with no relay up stays listed, not choosable,
-    ///   as not ready (the desktop keeps a plan the cloud cannot reach yet).
-    /// - A saved OpenCode Go model whose connection was disconnected stays
-    ///   listed, not choosable, as signed out (the desktop's Reconnect note).
-    /// - A status the phone could not read keeps the saved model read-only.
-    /// - With no destination snapshot, known catalog rows are read-only.
-    ///
-    /// A Mac destination has no subscription write on the phone: its saved
-    /// choice stays read-only.
+    /// Cloud subscription rows come from independent plan catalogs. A saved
+    /// choice can still name a read-only row during a failed or incomplete read.
+    /// Only current catalog membership and destination readback mark it current.
     public static func subscriptions(_ snapshot: ManagedModelDestinationSnapshot?,
                                      destination: ManagedModelDestinationID,
                                      account: PhoneSubscriptionAccount? = nil,
                                      destinationReady: Bool = true) -> [Row] {
         let saved = snapshot?.choices.first { $0.destination == destination && $0.source.isSubscription }
-        guard destination.isCloud else { return saved.map { [savedRow($0, unavailable: nil)] } ?? [] }
+        guard destination.isCloud else {
+            return saved.map { [savedRow($0, selected: destinationReady, unavailable: nil)] } ?? []
+        }
 
-        func served(_ source: ManagedModelDestinationSource,
-                    _ models: [SubscriptionModelDescriptor],
-                    refreshing: Bool = false) -> [Row] {
-            models.map { model in
-                let current = saved?.source == source && saved?.model == model.id
-                let effort = snapshot != nil && destinationReady && !refreshing ? model.writeEffort : nil
+        func planRows(_ source: ManagedModelDestinationSource,
+                      models: [SubscriptionModelDescriptor], state: PhoneModelPickerReadState?,
+                      unavailable: Row.Unavailable?) -> [Row] {
+            let savedModel = saved?.source == source ? saved : nil
+            let ready = state == .ready && snapshot != nil && destinationReady
+            let reason: Row.Unavailable? = switch state {
+            case .loading?: .loading
+            case .failed?: .failed
+            default: unavailable
+            }
+            var rows = models.map { model in
+                let matchesSaved = savedModel?.model == model.id
+                let effort = ready ? model.writeEffort : nil
                 return Row(favoriteID: nil, source: source, model: model.id,
                            displayName: ModelDisplayName.name(model: model.id, displayName: model.displayName),
-                           selected: current, selectable: !current && effort != nil,
+                           selected: ready && matchesSaved, selectable: !matchesSaved && effort != nil,
                            isSubscription: true, subscriptionEffort: effort,
-                           unavailable: current && refreshing && source == .chatGPTPlan ? .loading : nil)
+                           unavailable: matchesSaved ? reason : nil)
             }
+            if let savedModel, !rows.contains(where: { $0.model == savedModel.model }) {
+                rows.append(savedRow(savedModel, selected: false, unavailable: reason))
+            }
+            return rows
         }
 
-        var rows: [Row] = []
-        let savedPlan = saved?.source == .chatGPTPlan ? saved : nil
-        switch account?.chatGPTState {
-        case .loading?:
-            rows = served(.chatGPTPlan, account?.chatGPT?.models ?? [], refreshing: true)
-            if let savedPlan, !rows.contains(where: \.selected) {
-                rows.append(savedRow(savedPlan, unavailable: .loading))
-            }
-        case .ready?: rows += served(.chatGPTPlan, account?.chatGPT?.models ?? [])
-        case .failed?: rows += savedPlan.map { [savedRow($0, unavailable: .failed)] } ?? []
-        case .unavailable?, nil:
-            let reason: Row.Unavailable? = account?.chatGPT?.state == .disabled ? .notReady : nil
-            rows += savedPlan.map { [savedRow($0, unavailable: reason)] } ?? []
-        }
-        let savedGo = saved?.source == .opencodeGo ? saved : nil
-        switch account?.openCodeGoState {
-        case .loading?:
-            let cached = account?.openCodeGo?.state == .connected ? account?.openCodeGo?.models ?? [] : []
-            let refreshing = served(.opencodeGo, cached, refreshing: true)
-            rows += refreshing
-            if let savedGo, !refreshing.contains(where: \.selected) {
-                rows.append(savedRow(savedGo, unavailable: nil))
-            }
-        case .ready?: rows += served(.opencodeGo, account?.openCodeGo?.models ?? [])
-        case .failed?, .unavailable?, nil:
-            let reason: Row.Unavailable? = account?.openCodeGo?.state == .disconnected ? .signedOut : nil
-            rows += savedGo.map { [savedRow($0, unavailable: reason)] } ?? []
-        }
-        return rows
+        let relay = account?.chatGPT
+        let go = account?.openCodeGo
+        return planRows(.chatGPTPlan, models: relay?.models ?? [], state: account?.chatGPTState,
+                        unavailable: relay?.state == .disabled ? .notReady : nil)
+            + planRows(.opencodeGo, models: go?.state == .connected ? go?.models ?? [] : [],
+                       state: account?.openCodeGoState,
+                       unavailable: go?.state == .disconnected ? .signedOut : nil)
     }
 
-    /// The saved subscription model when the phone cannot offer it: current
-    /// only while nothing says it stopped working, and never choosable.
-    private static func savedRow(_ choice: ManagedModelDestinationChoice, unavailable: Row.Unavailable?) -> Row {
+    private static func savedRow(_ choice: ManagedModelDestinationChoice, selected: Bool,
+                                 unavailable: Row.Unavailable?) -> Row {
         Row(favoriteID: nil, source: choice.source, model: choice.model,
             displayName: ModelDisplayName.name(model: choice.model),
-            selected: unavailable != .notReady && unavailable != .signedOut, selectable: false, isSubscription: true,
-            unavailable: unavailable)
+            selected: selected, selectable: false, isSubscription: true, unavailable: unavailable)
     }
 
     /// The write boundary for a subscription pick, as `canSelectAtumModel` is
