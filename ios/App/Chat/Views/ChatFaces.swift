@@ -104,50 +104,30 @@ struct ChatFace: Equatable {
 /// The shared squircle renderer for rows, the typing bubble and Seen marks.
 /// It never starts a network read for a raw `mxc` URI: the app's Matrix client
 /// owns that (and its cache), as on Home and in the info sheet.
+/// `AtumSourcedAvatar` draws a photo Home already decoded on the first frame
+/// and keeps it while the same face's source changes. The task key is the
+/// source alone: name-only profile updates never blank or reload the photo.
 struct ChatFaceView: View {
     let face: ChatFace
     let size: CGFloat
 
     @Environment(\.chatLoadMatrixThumbnail) private var loadMatrixThumbnail
-    @State private var art: AtumAvatarArt?
 
     var body: some View {
-        AtumAvatar(kind: face.kind, name: face.name, art: art,
-                   mark: face.avatar?.agentMark, size: size)
-            .task(id: Request(face: face, size: size)) {
-                art = nil
-                let pixelSide = AtumAvatar.thumbnailPixelSide(for: size)
-                let loaded = await AtumAvatarCandidateLoader.load(
-                    matrixURI: face.matrixAvatarURI,
-                    pixelSide: pixelSide,
-                    loadMatrixThumbnail: loadMatrixThumbnail,
-                    remoteCandidates: AtumAvatarCandidateLoader.candidates(
-                        avatar: face.avatar,
-                        sha256: face.sha256,
-                        declared: face.candidates
-                    ),
-                    prefersRemote: face.prefersRosterPhoto
-                )
-                // A cancelled request for the former profile cannot clear the
-                // image a newer profile request has already delivered.
-                guard !Task.isCancelled else { return }
-                art = loaded
-            }
+        AtumSourcedAvatar(kind: face.kind, name: face.name, mark: face.avatar?.agentMark, size: size,
+                          source: face.source, identity: face.identity,
+                          loadMatrixThumbnail: loadMatrixThumbnail)
+    }
+}
+
+extension ChatFace {
+    @MainActor var source: AtumAvatarSource {
+        AtumAvatarSource(matrixURI: matrixAvatarURI, avatar: avatar, sha256: sha256,
+                         declared: candidates, prefersRemote: prefersRosterPhoto)
     }
 
-    private struct Request: Hashable {
-        let matrixURI: String?
-        let candidates: [LiveProductRemoteArt]
-        let prefersRosterPhoto: Bool
-        let size: CGFloat
-
-        @MainActor init(face: ChatFace, size: CGFloat) {
-            // Name-only profile updates must not blank and reload the photo.
-            matrixURI = face.matrixAvatarURI
-            candidates = AtumAvatarCandidateLoader.candidates(avatar: face.avatar, sha256: face.sha256,
-                                                              declared: face.candidates)
-            prefersRosterPhoto = face.prefersRosterPhoto
-            self.size = size
-        }
-    }
+    /// Who the face is, for `AtumSourcedAvatar`: the faces carry no user ID,
+    /// so the kind and name stand in. The room face before and after its info
+    /// arrives keeps both, so its photo is never dropped in between.
+    var identity: String { "\(kind)|\(name)" }
 }

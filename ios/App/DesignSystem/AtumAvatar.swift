@@ -279,6 +279,10 @@ struct AvatarArtLRU<Key: Hashable, Value> {
     }
 
     func contains(_ key: Key) -> Bool { values[key] != nil }
+
+    /// The value without marking it used (a view's initializer, which runs
+    /// on every parent update, reads with this).
+    func peek(_ key: Key) -> Value? { values[key] }
 }
 
 /// Decodes avatar thumbnails and samples their pixels off the main actor, and
@@ -330,29 +334,57 @@ enum AtumAvatarCandidateLoader {
         return [LiveProductRemoteArt(url: url, sha256: sha256)]
     }
 
+    /// Decoded art and the source it came from, so the memo can share it
+    /// with every other face that lists the same source.
+    struct Loaded {
+        let art: AtumAvatarArt
+        let origin: AtumAvatarArtOrigin
+    }
+
     static func load(matrixURI: String?, pixelSide: Int,
                      loadMatrixThumbnail: ((String, Int) async -> Data?)?,
                      remoteCandidates: [LiveProductRemoteArt], prefersRemote: Bool = false) async -> AtumAvatarArt? {
+        await loadTracked(matrixURI: matrixURI, pixelSide: pixelSide,
+                          loadMatrixThumbnail: loadMatrixThumbnail,
+                          remoteCandidates: remoteCandidates, prefersRemote: prefersRemote)?.art
+    }
+
+    static func load(source: AtumAvatarSource, pixelSide: Int,
+                     loadMatrixThumbnail: ((String, Int) async -> Data?)?) async -> Loaded? {
+        await loadTracked(matrixURI: source.matrixURI, pixelSide: pixelSide,
+                          loadMatrixThumbnail: loadMatrixThumbnail,
+                          remoteCandidates: source.candidates, prefersRemote: source.prefersRemote)
+    }
+
+    private static func loadTracked(matrixURI: String?, pixelSide: Int,
+                                    loadMatrixThumbnail: ((String, Int) async -> Data?)?,
+                                    remoteCandidates: [LiveProductRemoteArt],
+                                    prefersRemote: Bool) async -> Loaded? {
         guard !Task.isCancelled else { return nil }
-        if prefersRemote, let art = await load(remoteCandidates: remoteCandidates, pixelSide: pixelSide) {
-            return Task.isCancelled ? nil : art
+        if prefersRemote, let loaded = await loadTracked(remoteCandidates: remoteCandidates, pixelSide: pixelSide) {
+            return Task.isCancelled ? nil : loaded
         }
         guard !Task.isCancelled else { return nil }
         if let matrixURI, let loadMatrixThumbnail,
            let data = await loadMatrixThumbnail(matrixURI, pixelSide) {
             guard !Task.isCancelled else { return nil }
             if let art = await AtumAvatarArt.load(data: data, pixelSide: pixelSide) {
-                return Task.isCancelled ? nil : art
+                return Task.isCancelled ? nil : Loaded(art: art, origin: .matrix(matrixURI))
             }
         }
         guard !Task.isCancelled else { return nil }
         if prefersRemote { return nil }
-        return await load(remoteCandidates: remoteCandidates, pixelSide: pixelSide)
+        return await loadTracked(remoteCandidates: remoteCandidates, pixelSide: pixelSide)
     }
 
     static func load(remoteCandidates: [LiveProductRemoteArt],
                      pixelSide: Int) async -> AtumAvatarArt? {
-        await load(
+        await loadTracked(remoteCandidates: remoteCandidates, pixelSide: pixelSide)?.art
+    }
+
+    private static func loadTracked(remoteCandidates: [LiveProductRemoteArt],
+                                    pixelSide: Int) async -> Loaded? {
+        await loadTracked(
             remoteCandidates: remoteCandidates,
             pixelSide: pixelSide,
             fetch: { candidate in
@@ -369,6 +401,14 @@ enum AtumAvatarCandidateLoader {
                      fetch: (LiveProductRemoteArt) async -> Data?,
                      rememberDecodeFailure: ((LiveProductRemoteArt) async -> Void)? = nil)
         async -> AtumAvatarArt? {
+        await loadTracked(remoteCandidates: remoteCandidates, pixelSide: pixelSide, fetch: fetch,
+                          rememberDecodeFailure: rememberDecodeFailure)?.art
+    }
+
+    static func loadTracked(remoteCandidates: [LiveProductRemoteArt], pixelSide: Int,
+                     fetch: (LiveProductRemoteArt) async -> Data?,
+                     rememberDecodeFailure: ((LiveProductRemoteArt) async -> Void)? = nil)
+        async -> Loaded? {
         for candidate in remoteCandidates {
             guard !Task.isCancelled else { return nil }
             let url = candidate.url
@@ -380,9 +420,172 @@ enum AtumAvatarCandidateLoader {
                 if let rememberDecodeFailure { await rememberDecodeFailure(candidate) }
                 continue
             }
-            return Task.isCancelled ? nil : loaded
+            return Task.isCancelled ? nil : Loaded(art: loaded, origin: .remote(candidate))
         }
         return nil
+    }
+}
+
+/// Where a face's decoded art came from: the room's Matrix media or one
+/// public catalog candidate. The memo is keyed by it, so the Home row, the
+/// chat title and the transcript share one decoded photo whatever order each
+/// tries its sources in.
+enum AtumAvatarArtOrigin: Hashable {
+    case matrix(String)
+    case remote(LiveProductRemoteArt)
+}
+
+/// Everything a face may load its photo from, in one value: the task key of
+/// `AtumSourcedAvatar` and the memo's lookup.
+struct AtumAvatarSource: Hashable {
+    let matrixURI: String?
+    let candidates: [LiveProductRemoteArt]
+    let prefersRemote: Bool
+
+    @MainActor init(matrixURI: String?, avatar: LiveProductAvatar?, sha256: String?,
+                    declared: [LiveProductRemoteArt], prefersRemote: Bool = false) {
+        self.matrixURI = matrixURI
+        candidates = AtumAvatarCandidateLoader.candidates(avatar: avatar, sha256: sha256, declared: declared)
+        self.prefersRemote = prefersRemote
+    }
+
+    /// The origins in the order `AtumAvatarCandidateLoader` tries them.
+    /// Matrix media counts only when the caller can load it.
+    func origins(matrixLoads: Bool) -> [AtumAvatarArtOrigin] {
+        let matrix = matrixLoads ? matrixURI.map { [AtumAvatarArtOrigin.matrix($0)] } ?? [] : []
+        let remote = candidates.map(AtumAvatarArtOrigin.remote)
+        return prefersRemote ? remote + matrix : matrix + remote
+    }
+}
+
+/// Decoded faces by origin, read synchronously, so a face that another
+/// surface already showed is drawn on its first frame instead of after an
+/// async load (owner report 25 Nov 2026: opening a chat blinked the agent's
+/// photo out and back). It holds what `AtumAvatarArtDecoder` decoded; it
+/// never fetches. One entry per origin keeps the sharpest copy.
+@MainActor
+final class AtumAvatarArtMemo {
+    static let shared = AtumAvatarArtMemo(capacity: 200)
+
+    struct Entry {
+        let art: AtumAvatarArt
+        let pixelSide: Int
+    }
+
+    struct Hit {
+        let art: AtumAvatarArt
+        /// The face's first-choice source at its own resolution or better:
+        /// nothing a load could return would be better.
+        let isFinal: Bool
+    }
+
+    private var cache: AvatarArtLRU<AtumAvatarArtOrigin, Entry>
+
+    init(capacity: Int) { cache = AvatarArtLRU(capacity: capacity) }
+
+    var count: Int { cache.count }
+
+    /// The best art already decoded for `source`: its first origin that has
+    /// any. `touch: false` reads without reordering the LRU.
+    func hit(for source: AtumAvatarSource, pixelSide: Int, matrixLoads: Bool, touch: Bool = true) -> Hit? {
+        for (index, origin) in source.origins(matrixLoads: matrixLoads).enumerated() {
+            guard let entry = touch ? cache.value(for: origin) : cache.peek(origin) else { continue }
+            return Hit(art: entry.art, isFinal: index == 0 && entry.pixelSide >= pixelSide)
+        }
+        return nil
+    }
+
+    func store(_ art: AtumAvatarArt, origin: AtumAvatarArtOrigin, pixelSide: Int) {
+        if let existing = cache.peek(origin), existing.pixelSide > pixelSide {
+            _ = cache.value(for: origin)
+            return
+        }
+        cache.insert(Entry(art: art, pixelSide: pixelSide), for: origin)
+    }
+}
+
+/// What a face shows while its source changes. A same-person change (a room
+/// face replaced by the room info's, a member profile arriving, a new photo
+/// URI) keeps the old picture until the new one is decoded; only a different
+/// person, or a face that no longer has any source, clears it at once.
+enum AtumAvatarArtTransition {
+    static func start(hit: AtumAvatarArt?, current: AtumAvatarArt?,
+                      sameIdentity: Bool, hasSource: Bool) -> AtumAvatarArt? {
+        guard hasSource else { return nil }
+        return hit ?? (sameIdentity ? current : nil)
+    }
+
+    /// The load's result, else the memo's smaller or second-choice copy;
+    /// nothing when no source decoded (the photo is gone or unreadable).
+    static func finish(loaded: AtumAvatarArt?, hit: AtumAvatarArt?) -> AtumAvatarArt? {
+        loaded ?? hit
+    }
+}
+
+/// The one loading face, used by Home rows, the chat title and info sheet
+/// header, the greeting and the transcript's faces: `AtumAvatar` plus the
+/// load, seeded from `AtumAvatarArtMemo` on its first frame.
+struct AtumSourcedAvatar: View {
+    let kind: AtumAvatarKind
+    let name: String
+    let mark: AgentMark?
+    let placeholder: AtumAvatar.Placeholder
+    let size: CGFloat
+    let source: AtumAvatarSource
+    /// Who the face is (a room or user ID, or a name): a change of person
+    /// drops the old photo at once.
+    let identity: String
+    let pixelSide: Int
+    let loadMatrixThumbnail: ((String, Int) async -> Data?)?
+
+    @State private var art: AtumAvatarArt?
+    @State private var shownIdentity: String
+
+    init(kind: AtumAvatarKind, name: String, mark: AgentMark? = nil,
+         placeholder: AtumAvatar.Placeholder = .monogram, size: CGFloat,
+         source: AtumAvatarSource, identity: String, pixelSide: Int? = nil,
+         loadMatrixThumbnail: ((String, Int) async -> Data?)?) {
+        self.kind = kind
+        self.name = name
+        self.mark = mark
+        self.placeholder = placeholder
+        self.size = size
+        self.source = source
+        self.identity = identity
+        let pixelSide = pixelSide ?? AtumAvatar.thumbnailPixelSide(for: size)
+        self.pixelSide = pixelSide
+        self.loadMatrixThumbnail = loadMatrixThumbnail
+        // The first frame already wears a photo another surface decoded.
+        _art = State(initialValue: AtumAvatarArtMemo.shared.hit(
+            for: source, pixelSide: pixelSide, matrixLoads: loadMatrixThumbnail != nil, touch: false)?.art)
+        _shownIdentity = State(initialValue: identity)
+    }
+
+    var body: some View {
+        AtumAvatar(kind: kind, name: name, art: art, mark: mark, placeholder: placeholder, size: size)
+            .task(id: Load(source: source, pixelSide: pixelSide)) {
+                let memo = AtumAvatarArtMemo.shared
+                let matrixLoads = loadMatrixThumbnail != nil
+                let hasSource = !source.origins(matrixLoads: matrixLoads).isEmpty
+                let hit = memo.hit(for: source, pixelSide: pixelSide, matrixLoads: matrixLoads)
+                art = AtumAvatarArtTransition.start(hit: hit?.art, current: art,
+                                                    sameIdentity: shownIdentity == identity,
+                                                    hasSource: hasSource)
+                shownIdentity = identity
+                guard hasSource, hit?.isFinal != true else { return }
+                let loaded = await AtumAvatarCandidateLoader.load(source: source, pixelSide: pixelSide,
+                                                                   loadMatrixThumbnail: loadMatrixThumbnail)
+                // A cancelled request for the former source cannot replace
+                // what a newer request shows.
+                guard !Task.isCancelled else { return }
+                if let loaded { memo.store(loaded.art, origin: loaded.origin, pixelSide: pixelSide) }
+                art = AtumAvatarArtTransition.finish(loaded: loaded?.art, hit: hit?.art)
+            }
+    }
+
+    private struct Load: Hashable {
+        let source: AtumAvatarSource
+        let pixelSide: Int
     }
 }
 

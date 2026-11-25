@@ -421,3 +421,121 @@ final class RosterAvatarKindTests: XCTestCase {
                        .monogram("M"))
     }
 }
+
+/// Owner report, 25 Nov 2026: opening a chat blinked the agent's photo out and
+/// back. Every face started with no art and cleared it on each source change,
+/// so the title, greeting and transcript faces drew one placeholder frame even
+/// when Home had just decoded the same photo. `AtumAvatarArtMemo` seeds the
+/// first frame and `AtumAvatarArtTransition` keeps a same-person photo.
+@MainActor
+final class AvatarArtMemoTests: XCTestCase {
+    /// Distinct arts, told apart by their backplate.
+    private func art(_ color: Color) -> AtumAvatarArt { AtumAvatarArt(image: Image(systemName: "circle"), backplate: color) }
+
+    private let photoURL = URL(string: "https://images.atum.test/luna.png")!
+
+    func testTheHomeRowAndTheChatTitleListTheSameSources() {
+        let home = HomeRow(id: "!luna", kind: .assistant, name: "Luna", avatarURL: photoURL,
+                           matrixAvatarURL: "mxc://atum.test/luna", avatarSHA256: "abc")
+        let info = ChatInfoPresentation(roomID: "!luna", title: "Luna", kind: .assistant,
+                                        avatar: .photo(url: photoURL, fallback: "L"),
+                                        matrixAvatarURI: "mxc://atum.test/luna", avatarSHA256: "abc")
+        XCTAssertEqual(home.avatarSource, info.avatarSource,
+                       "the row and the title read one memo entry for the same room")
+        let face = ChatFace.room(info.avatar, matrixURI: info.matrixAvatarURI, sha256: info.avatarSHA256,
+                                 candidates: [], name: "Luna", kind: .assistant)
+        XCTAssertEqual(face.source.origins(matrixLoads: true), [
+            .remote(LiveProductRemoteArt(url: photoURL, sha256: "abc")), .matrix("mxc://atum.test/luna"),
+        ], "an agent's transcript face prefers its roster photo, as desktop")
+        XCTAssertEqual(info.avatarSource.origins(matrixLoads: false),
+                       [.remote(LiveProductRemoteArt(url: photoURL, sha256: "abc"))],
+                       "Matrix media counts only when the caller can load it")
+    }
+
+    func testAPhotoHomeDecodedSeedsTheChatTitleAsFinal() {
+        let memo = AtumAvatarArtMemo(capacity: 8)
+        let source = AtumAvatarSource(matrixURI: "mxc://atum.test/luna", avatar: nil, sha256: nil, declared: [])
+        XCTAssertNil(memo.hit(for: source, pixelSide: 96, matrixLoads: true))
+        // Home decodes its 72 pt thumbnail (216 px).
+        memo.store(art(.red), origin: .matrix("mxc://atum.test/luna"), pixelSide: 216)
+        let title = memo.hit(for: source, pixelSide: AtumAvatar.thumbnailPixelSide(for: 32), matrixLoads: true)
+        XCTAssertEqual(title?.art.backplate, .red, "the 32 pt title wears it on its first frame")
+        XCTAssertEqual(title?.isFinal, true, "and needs no load: the copy is sharper than it asks for")
+        let larger = memo.hit(for: source, pixelSide: 300, matrixLoads: true)
+        XCTAssertEqual(larger?.art.backplate, .red, "a bigger face shows the smaller copy meanwhile")
+        XCTAssertEqual(larger?.isFinal, false, "and still loads its own size")
+    }
+
+    func testASecondChoiceSourceIsShownButNotFinal() {
+        let memo = AtumAvatarArtMemo(capacity: 8)
+        let face = ChatFace.room(.photo(url: photoURL, fallback: "L"), matrixURI: "mxc://atum.test/luna",
+                                 sha256: nil, candidates: [], name: "Luna", kind: .assistant)
+        memo.store(art(.blue), origin: .matrix("mxc://atum.test/luna"), pixelSide: 216)
+        let hit = memo.hit(for: face.source, pixelSide: 72, matrixLoads: true)
+        XCTAssertEqual(hit?.art.backplate, .blue, "the Matrix photo stands in for the roster photo")
+        XCTAssertEqual(hit?.isFinal, false, "the roster photo, its first choice, still loads")
+        memo.store(art(.green), origin: .remote(LiveProductRemoteArt(url: photoURL, sha256: nil)), pixelSide: 72)
+        let after = memo.hit(for: face.source, pixelSide: 72, matrixLoads: true)
+        XCTAssertEqual(after?.art.backplate, .green)
+        XCTAssertEqual(after?.isFinal, true)
+    }
+
+    func testTheMemoKeepsTheSharpestCopyAndStaysBounded() {
+        let memo = AtumAvatarArtMemo(capacity: 2)
+        let origin = AtumAvatarArtOrigin.matrix("mxc://atum.test/a")
+        let source = AtumAvatarSource(matrixURI: "mxc://atum.test/a", avatar: nil, sha256: nil, declared: [])
+        memo.store(art(.red), origin: origin, pixelSide: 216)
+        memo.store(art(.blue), origin: origin, pixelSide: 72)
+        XCTAssertEqual(memo.hit(for: source, pixelSide: 200, matrixLoads: true)?.art.backplate, .red,
+                       "a smaller decode never replaces a sharper one")
+        memo.store(art(.green), origin: origin, pixelSide: 216)
+        XCTAssertEqual(memo.hit(for: source, pixelSide: 200, matrixLoads: true)?.art.backplate, .green,
+                       "a same-size decode is the newer photo")
+        memo.store(art(.blue), origin: .matrix("mxc://atum.test/b"), pixelSide: 72)
+        memo.store(art(.blue), origin: .matrix("mxc://atum.test/c"), pixelSide: 72)
+        XCTAssertEqual(memo.count, 2)
+        XCTAssertNil(memo.hit(for: source, pixelSide: 72, matrixLoads: true), "the least recently used went")
+    }
+
+    func testASamePersonSourceChangeKeepsThePhotoUntilTheNewOneIsReady() {
+        let old = art(.red)
+        let kept = AtumAvatarArtTransition.start(hit: nil, current: old, sameIdentity: true, hasSource: true)
+        XCTAssertEqual(kept?.backplate, .red, "the room face becoming the room info's face keeps its photo")
+        let seeded = AtumAvatarArtTransition.start(hit: art(.green), current: old, sameIdentity: true, hasSource: true)
+        XCTAssertEqual(seeded?.backplate, .green, "an already-decoded new photo shows at once")
+        XCTAssertNil(AtumAvatarArtTransition.start(hit: nil, current: old, sameIdentity: false, hasSource: true),
+                     "a different person never wears the former face's photo")
+        XCTAssertNil(AtumAvatarArtTransition.start(hit: nil, current: old, sameIdentity: true, hasSource: false),
+                     "a removed photo shows the monogram")
+        XCTAssertEqual(AtumAvatarArtTransition.finish(loaded: art(.blue), hit: old)?.backplate, .blue)
+        XCTAssertEqual(AtumAvatarArtTransition.finish(loaded: nil, hit: old)?.backplate, .red,
+                       "a failed sharper load keeps the memo's copy")
+        XCTAssertNil(AtumAvatarArtTransition.finish(loaded: nil, hit: nil))
+    }
+
+    func testTheRoomFaceKeepsItsIdentityWhenTheRoomInfoArrives() {
+        let before = ChatFace.room(.photo(url: photoURL, fallback: "L"), matrixURI: nil, sha256: nil,
+                                   candidates: [], name: "Luna", kind: .assistant)
+        let after = ChatFace.room(.photo(url: photoURL, fallback: "L"), matrixURI: "mxc://atum.test/luna",
+                                  sha256: "abc", candidates: [], name: "Luna", kind: .assistant)
+        XCTAssertNotEqual(before.source, after.source, "the info's sources are a new request")
+        XCTAssertEqual(before.identity, after.identity, "but the same person, so the photo stays")
+    }
+
+    func testTheTrackedLoaderReportsWhichSourceDecoded() async throws {
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8,
+                                              bytesPerRow: 0, space: space,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        let data = try XCTUnwrap(UIImage(cgImage: try XCTUnwrap(context.makeImage())).pngData())
+        let source = AtumAvatarSource(matrixURI: "mxc://atum.test/luna", avatar: nil, sha256: nil, declared: [])
+        let loaded = await AtumAvatarCandidateLoader.load(source: source, pixelSide: 48,
+                                                          loadMatrixThumbnail: { _, _ in data })
+        XCTAssertEqual(loaded?.origin, .matrix("mxc://atum.test/luna"))
+        let none = await AtumAvatarCandidateLoader.load(source: source, pixelSide: 48,
+                                                        loadMatrixThumbnail: { _, _ in nil })
+        XCTAssertNil(none)
+    }
+}
