@@ -2874,6 +2874,90 @@ extension S2StateTests {
         XCTAssertTrue(switching.coversChatsRootForRestore)
     }
 
+    /// W4-V2 r3: a cold notification for an ordinary group whose
+    /// classification is still unknown holds the boot screen only for the
+    /// bounded hold, then the shell mounts at its roster; the notification
+    /// routes once the (pre-mount) classification settles.
+    @MainActor
+    func testChatRestoreColdNotificationWithUnknownClassificationHoldsBoundedThenShowsTheList() async throws {
+        let company = "00000000-0000-4000-8000-5d0f6b1c2a93"
+        let channel = "00000000-0000-4000-8000-0e4f2b7d9c18"
+        let companyRoom = "!company:atum.test"
+        let group = "!family:atum.test"
+        let api = CompanyAPIStub(
+            list: try companyList([company]),
+            directories: [company: try companyDirectory(
+                companyID: company, channelID: channel, roomID: companyRoom
+            )],
+            snapshots: [company: try companySnapshot(companyID: company, channelID: channel)]
+        )
+        api.delayedCompanyID = company
+        let model = CompanyWorkspaceModel()
+        model.clientProvider = { api }
+        let router = Router()
+        var staged = [String]()
+        var routed = [String]()
+        router.onValidatedColdRoom = { staged.append($0) }
+        router.onValidatedRoom = { routed.append($0) }
+        func decide(_ roomID: String) -> Router.PendingRoomDecision {
+            RoomPushDecision.decide(
+                canOpen: true,
+                destination: RoomRootDestination.authoritative(
+                    roomKind: .group, classification: model.roomClassification(roomID)),
+                awaitsDirectory: model.awaitsConversationDirectory(roomID))
+        }
+
+        // Tapped while booting, carried through the first account scope.
+        router.applyAccountScope(replacesAccount: false)
+        router.receivePushIntent(roomID: group)
+        router.holdDeepLink(roomID: group, cold: true)
+        router.applyAccountScope(replacesAccount: false)
+        XCTAssertNil(router.chatRestoreIntent)
+
+        let refresh = Task { await model.refresh() }
+        while api.channelContinuation == nil { await Task.yield() }
+        model.reconcileMatrixRooms([companyRoom, group])
+        XCTAssertEqual(model.roomClassification(group), .unknown)
+        XCTAssertFalse(router.validatePendingDeepLink(sessionAndRosterAreReady: true, decision: decide))
+        XCTAssertTrue(router.pendingDeepLinkIsCold, "the boot screen holds while it can still validate")
+
+        // The hold is the launch restore's, at most 3 s.
+        XCTAssertEqual(Router.coldDeepLinkHold, Router.chatRestoreHold(for: .launch))
+        XCTAssertLessThanOrEqual(Router.coldDeepLinkHold, .seconds(3))
+
+        // It expires: the shell mounts at Chats' roster with nothing pushed.
+        let generation = router.navigationGeneration
+        router.releaseColdDeepLinkHold()
+        XCTAssertFalse(router.pendingDeepLinkIsCold)
+        XCTAssertEqual(router.selectedTab, .home)
+        XCTAssertNil(router.homeRoomID)
+        XCTAssertTrue(router.homePath.isEmpty)
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertFalse(router.coversChatsRootForRestore)
+        XCTAssertEqual(router.navigationGeneration, generation, "releasing the hold navigates nowhere")
+        XCTAssertEqual(router.pendingDeepLinkRoomID, group, "still held, as a foreground notification")
+        XCTAssertTrue(staged.isEmpty && routed.isEmpty)
+
+        // The directory lands and the classification settles: it routes the
+        // foreground way, never staged behind a cover that is gone.
+        api.resumeDelayedChannel()
+        await refresh.value
+        model.reconcileMatrixRooms([companyRoom, group])
+        XCTAssertEqual(model.roomClassification(group), .personal)
+        XCTAssertTrue(router.validatePendingDeepLink(sessionAndRosterAreReady: true, decision: decide))
+        XCTAssertEqual(routed, [group])
+        XCTAssertTrue(staged.isEmpty)
+        XCTAssertNil(router.pendingDeepLinkRoomID)
+
+        // A conclusive denial during the hold mounts the shell at once.
+        let denied = Router()
+        denied.holdDeepLink(roomID: "!gone:atum.test", cold: true)
+        XCTAssertFalse(denied.validatePendingDeepLink(sessionAndRosterAreReady: true) { _ in .deny })
+        XCTAssertFalse(denied.pendingDeepLinkIsCold)
+        XCTAssertNil(denied.pendingDeepLinkRoomID)
+        XCTAssertNil(denied.homeRoomID)
+    }
+
     @MainActor
     func testChatRestoreCoversYieldToTabSwitchRetapAndExpiry() {
         let router = Router()

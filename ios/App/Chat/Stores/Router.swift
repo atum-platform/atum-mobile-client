@@ -42,6 +42,10 @@ final class Router: RouterOpening {
         }
     }
 
+    /// How long a cold notification may keep the boot screen up while its
+    /// room is still being validated: the launch restore's hold.
+    static let coldDeepLinkHold = chatRestoreHold(for: .launch)
+
     private(set) var selectedTab: Tab = .home
     var homePath = NavigationPath()
     var drivePath = NavigationPath()
@@ -233,6 +237,15 @@ final class Router: RouterOpening {
         else if let onValidatedRoom { onValidatedRoom(roomID) }
         else { open(roomId: roomID) }
         return true
+    }
+
+    /// The cold hold is over: the shell mounts at its roster. The
+    /// notification stays held, now as a foreground one, so a later
+    /// conclusive validation opens it the way a foreground notification
+    /// opens (and a denial drops it). Navigation is not claimed: nothing
+    /// moved.
+    func releaseColdDeepLinkHold() {
+        pendingDeepLinkIsCold = false
     }
 
     /// The shell applies each new account scope here. `replacesAccount` is

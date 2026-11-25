@@ -49,8 +49,14 @@ enum CompanyRoomRemovalFence {
 }
 
 enum RoomPushDecision {
+    /// `awaitsDirectory`: the room claims the company conversation type and
+    /// the directory that could vouch for it has not finished. It stays held
+    /// (never opens under Chats); the directory then routes it to Team Space
+    /// or denies it.
     static func decide(canOpen: Bool,
-                       destination: RoomRootDestination?) -> Router.PendingRoomDecision {
+                       destination: RoomRootDestination?,
+                       awaitsDirectory: Bool = false) -> Router.PendingRoomDecision {
+        if awaitsDirectory { return .pending }
         guard canOpen else { return .deny }
         return destination == nil ? .pending : .allow
     }
@@ -115,7 +121,15 @@ struct AppRoot: View {
                                retry: beginDomainSignIn, signOut: nil)
             case let .signedIn(account):
                 if router.pendingDeepLinkIsCold {
+                    // A cold notification holds the boot screen no longer
+                    // than a launch restore. Past it the shell mounts at its
+                    // roster; the notification stays held and the mounted
+                    // shell's validation still routes it once it is known.
                     S6BootWait(design: design)
+                        .task {
+                            do { try await Task.sleep(for: Router.coldDeepLinkHold) } catch { return }
+                            router.releaseColdDeepLinkHold()
+                        }
                 } else {
                     // W4-V2: launch keeps the boot screen up while the last
                     // chat can still be restored, so the person lands
@@ -176,6 +190,16 @@ struct AppRoot: View {
             LiveRemoteNotificationRelay.shared.update(screen: screen)
         }
         .onChange(of: model.pushRoutingReady) { _, _ in validatePendingPush() }
+        // Room classification runs whether or not the shell is mounted: a cold
+        // notification is validated behind the boot screen, before the shell.
+        .task(id: roomClassificationInput) {
+            reconcileRoomClassification()
+            validatePendingPush()
+            attemptChatRestore()
+        }
+        .onChange(of: model.companyWorkspace.classificationRevision) { _, _ in
+            validatePendingPush()
+        }
         .fullScreenCover(item: $legalLinks.presented) { page in
             SafariView(url: page.url).ignoresSafeArea()
         }
@@ -611,19 +635,6 @@ struct AppRoot: View {
                 await model.avatarThumbnail(uri: uri, pixelSide: side)
             }
         }
-        .task(id: RoomClassificationInput(
-            roomIDs: presentation.rooms.rooms.map(\.id).sorted(),
-            typeClaims: presentation.rooms.rooms.filter(\.claimsConversationType).map(\.id).sorted(),
-            revision: model.companyWorkspace.classificationRevision
-        )) {
-            model.companyWorkspace.reconcileMatrixRooms(
-                Set(presentation.rooms.rooms.map(\.id)),
-                conversationTypeClaims: Set(presentation.rooms.rooms
-                    .filter(\.claimsConversationType).map(\.id))
-            )
-            validatePendingPush()
-            attemptChatRestore()
-        }
         .onChange(of: router.homePath.count) { _, count in
             if count == 0 { router.didPopHomeRoom() }
         }
@@ -646,9 +657,6 @@ struct AppRoot: View {
             ) {
                 router.popTeamSpaceToRoot()
             }
-        }
-        .onChange(of: model.companyWorkspace.classificationRevision) { _, _ in
-            validatePendingPush()
         }
     }
 
@@ -1413,13 +1421,39 @@ struct AppRoot: View {
         validatePendingPush()
     }
 
+    /// The signed-in room list's classification input; nil without an account.
+    private var roomClassificationInput: RoomClassificationInput? {
+        guard case .signedIn = model.stage else { return nil }
+        let rooms = model.presentation().rooms.rooms
+        return RoomClassificationInput(
+            roomIDs: rooms.map(\.id).sorted(),
+            typeClaims: rooms.filter(\.claimsConversationType).map(\.id).sorted(),
+            revision: model.companyWorkspace.classificationRevision
+        )
+    }
+
+    /// Registers the rooms and their conversation-type claims with the
+    /// company workspace. Idempotent; it bumps the classification revision
+    /// only when something changed.
+    private func reconcileRoomClassification() {
+        guard let input = roomClassificationInput else { return }
+        model.companyWorkspace.reconcileMatrixRooms(Set(input.roomIDs),
+                                                    conversationTypeClaims: Set(input.typeClaims))
+    }
+
     private func validatePendingPush() {
+        // The claims are registered before the decision reads them, so a
+        // company-typed DM is never classified before its claim is known
+        // (a cold notification can validate before the classification task
+        // has run).
+        if router.pendingDeepLinkRoomID != nil { reconcileRoomClassification() }
         router.validatePendingDeepLink(
             sessionAndRosterAreReady: model.pushRoutingReady
         ) {
             RoomPushDecision.decide(
                 canOpen: model.canOpenPushedRoom($0),
-                destination: roomDestination(for: $0)
+                destination: roomDestination(for: $0),
+                awaitsDirectory: model.companyWorkspace.awaitsConversationDirectory($0)
             )
         }
     }

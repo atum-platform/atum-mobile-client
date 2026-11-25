@@ -1136,6 +1136,15 @@ final class CompanyWorkspaceModel {
             && !roomDirectory.isCompanyChannel(roomID)
     }
 
+    /// A quarantined conversation-type room whose directory has not settled
+    /// yet: it may still be a company conversation, so a notification for it
+    /// waits (it never opens under Chats). A downgrade or an unavailable
+    /// directory settles it as quarantined.
+    func awaitsConversationDirectory(_ roomID: String) -> Bool {
+        isQuarantinedConversation(roomID) && !classificationComplete
+            && phase != .hidden && phase != .unavailable
+    }
+
     // MARK: Conversation actions, fenced to the selected company
 
     /// New message. The company the person is in is captured before the call and checked again
