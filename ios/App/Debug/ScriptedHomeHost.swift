@@ -237,7 +237,8 @@ struct ScriptedHomeHost: View {
                 }
             } store: {
                 StoreScreen(design: design, store: scriptedStore,
-                            onRefresh: {}, onOpenRoom: { router.open(roomId: $0) })
+                            onRefresh: {}, onOpenRoom: { router.open(roomId: $0) },
+                            onOpenPurchased: { router.openStorePurchased() })
             } teamSpace: {
                 TeamSpaceScreen(
                     design: design,
