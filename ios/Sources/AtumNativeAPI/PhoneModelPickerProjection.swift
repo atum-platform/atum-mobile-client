@@ -108,6 +108,17 @@ public enum PhoneModelPickerProjection {
             return connectionID + "." + model.replacingOccurrences(of: "/", with: "_")
         }
 
+        /// The same row drawn read-only: not current, not choosable and with no
+        /// Default word, as while the destination readback is not ready (W4-X2).
+        public func readOnly() -> Row {
+            Row(favoriteID: favoriteID, source: source, model: model,
+                displayName: displayName, selected: false, selectable: false,
+                badges: [], connectionID: explicitConnectionID,
+                connectionLabel: connectionLabel, tagline: tagline, announced: announced,
+                isSubscription: isSubscription, subscriptionEffort: nil,
+                unavailable: unavailable)
+        }
+
         /// The same row with the current mark moved by a pick in flight.
         public func selecting(_ selected: Bool) -> Row {
             Row(favoriteID: favoriteID, source: source, model: model,
@@ -167,14 +178,19 @@ public enum PhoneModelPickerProjection {
     /// One 1.3 destination. Cloud remains Atum-only and uses the separately
     /// decoded 1.1 eligibility set; Mac behavior retains truthful external
     /// readback while exposing only Atum aliases for selection.
+    /// `destinationReady` false (a readback still loading or failed, so the
+    /// snapshot may be stale) draws every row read-only and unchecked (W4-X2).
     public static func destination(_ snapshot: ManagedModelDestinationSnapshot,
                                    destination: ManagedModelDestinationID,
                                    cloudEligibleAliases: Set<String>,
-                                   selectedAtumModel: String? = nil) -> [Row] {
-        guard destination.isCloud else { return mac(snapshot, destination: destination) }
-        return cloudDestinationRows(snapshot, destination: destination, selectedAtumModel: selectedAtumModel) {
-            cloudEligibleAliases.contains($0) && snapshot.atumWriteEffort(for: destination, model: $0) != nil
-        }
+                                   selectedAtumModel: String? = nil,
+                                   destinationReady: Bool = true) -> [Row] {
+        let rows = destination.isCloud
+            ? cloudDestinationRows(snapshot, destination: destination, selectedAtumModel: selectedAtumModel) {
+                cloudEligibleAliases.contains($0) && snapshot.atumWriteEffort(for: destination, model: $0) != nil
+            }
+            : mac(snapshot, destination: destination)
+        return destinationReady ? rows : rows.map { $0.readOnly() }
     }
 
     private static func cloudDestinationRows(_ snapshot: ManagedModelDestinationSnapshot,
@@ -204,11 +220,26 @@ public enum PhoneModelPickerProjection {
     /// the 1.1 offer is only eligibility and thinking levels. Either one alone
     /// still yields the full Atum line-up, so a missing older read never
     /// removes the picker. With neither read there is nothing to draw.
+    /// `destinationReady` false (the destination readback is loading or has
+    /// failed) keeps the line-up visible but read-only and unchecked: neither
+    /// the 1.1 offer nor a cached 1.3 snapshot may stand in for it (W4-X2).
     public static func conversation(offer: ManagedModelSnapshot?,
                                     destination: ManagedModelDestinationSnapshot?,
                                     destinationID: ManagedModelDestinationID,
                                     cloudEligibleAliases: Set<String>? = nil,
-                                    selectedAtumModel: String? = nil) -> [Row] {
+                                    selectedAtumModel: String? = nil,
+                                    destinationReady: Bool = true) -> [Row] {
+        let rows = conversationRows(offer: offer, destination: destination, destinationID: destinationID,
+                                    cloudEligibleAliases: cloudEligibleAliases,
+                                    selectedAtumModel: selectedAtumModel)
+        return destinationReady ? rows : rows.map { $0.readOnly() }
+    }
+
+    private static func conversationRows(offer: ManagedModelSnapshot?,
+                                         destination: ManagedModelDestinationSnapshot?,
+                                         destinationID: ManagedModelDestinationID,
+                                         cloudEligibleAliases: Set<String>?,
+                                         selectedAtumModel: String?) -> [Row] {
         guard let destination else {
             guard let offer else { return [] }
             return cloud(offer).map { row in

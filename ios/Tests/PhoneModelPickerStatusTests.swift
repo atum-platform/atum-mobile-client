@@ -46,4 +46,20 @@ final class PhoneModelPickerStatusTests: XCTestCase {
                        [.chatGPT, .openCodeGo, .accountConnections])
         XCTAssertTrue(PhoneModelPickerStatus.providers(account.value).allSatisfy { $0.phase == .failed })
     }
+
+    func testALineDropsItsWordsOnlyWhenASavedRowAlreadyCarriesThem() {
+        typealias Row = PhoneModelPickerProjection.Row
+        let saved = Row(favoriteID: nil, source: .chatGPTPlan, model: "gpt-6.1", displayName: "GPT-6.1",
+                        selected: false, selectable: false, isSubscription: true, unavailable: .failed)
+        let go = Row(favoriteID: nil, source: .opencodeGo, model: "glm-5.2", displayName: "GLM 5.2",
+                     selected: false, selectable: true, isSubscription: true)
+        let failed = PhoneModelPickerStatus(source: .chatGPT, phase: .failed)
+        XCTAssertTrue(failed.isShownOnRow(in: [saved, go]))
+        XCTAssertFalse(failed.isShownOnRow(in: [go]), "no saved ChatGPT row: the line keeps its words")
+        XCTAssertFalse(PhoneModelPickerStatus(source: .chatGPT, phase: .loading).isShownOnRow(in: [saved]),
+                       "a row that reads failed does not say loading")
+        XCTAssertFalse(PhoneModelPickerStatus(source: .openCodeGo, phase: .failed).isShownOnRow(in: [saved, go]))
+        XCTAssertFalse(PhoneModelPickerStatus(source: .destination, phase: .failed).isShownOnRow(in: [saved]))
+        XCTAssertFalse(PhoneModelPickerStatus(source: .accountConnections, phase: .failed).isShownOnRow(in: [saved]))
+    }
 }

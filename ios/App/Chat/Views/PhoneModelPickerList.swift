@@ -56,6 +56,10 @@ struct PhoneModelPickerList: View {
     @State private var disclosure = PhoneModelPickerDisclosure()
     @State private var preferences: ModelPickerPreferences
     @State private var connecting: AccountPlanConnectRequest?
+    /// The sources whose failed line VoiceOver has been told about, so each
+    /// failure is announced once, when its line first appears (desktop
+    /// `role="alert"`). A line that loads again and fails again is new.
+    @State private var announcedFailures: Set<PhoneModelPickerStatus.Source> = []
     /// The bar's controls grow with the text, to a cap, so a large type size
     /// never squeezes the filter symbol out of its circle.
     @ScaledMetric(relativeTo: .body) private var barControl = 44.0
@@ -137,9 +141,9 @@ struct PhoneModelPickerList: View {
                 }
             }
             if !browsing {
-                ForEach(handoffs) { handoffSection($0) }
+                ForEach(shownHandoffs) { handoffSection($0) }
             }
-            if layout.isEmpty, handoffs.isEmpty || browsing {
+            if layout.isEmpty, shownHandoffs.isEmpty || browsing {
                 Section {
                     Text(verbatim: emptyCopy)
                         .foregroundStyle(atum.color(.soft, scheme: scheme))
@@ -185,6 +189,7 @@ struct PhoneModelPickerList: View {
         }
         .onChange(of: viewKey) { _, next in disclosure.show(view: next) }
         .onChange(of: rows) { _, _ in disclosure.settle(sections) }
+        .onChange(of: failedStatuses, initial: true) { _, next in announceFailures(next) }
         .sheet(item: $connecting) { request in
             AccountPlanConnectSheet(design: design, plan: request.plan,
                                     makePoll: request.handoff ? nil : makeConnectionsPoll,
@@ -246,21 +251,52 @@ struct PhoneModelPickerList: View {
 
     // MARK: Settled reads and the Mac hand-off (W4-X2)
 
+    /// The hand-off groups drawn now. While the ChatGPT relay read is loading
+    /// or has failed, its line stands for ChatGPT; desktop never offers a
+    /// ChatGPT hand-off on a device that reaches the relay (`model-picker.tsx`
+    /// `relayReadReason`), so the same models are not listed twice (W4-X2 r2).
+    private var shownHandoffs: [PhoneModelPickerProjection.WorkPlanHandoff] {
+        guard providerStatuses.contains(where: { $0.source == .chatGPT }) else { return handoffs }
+        return handoffs.filter { $0.plan != .codex }
+    }
+
+    private var failedStatuses: [PhoneModelPickerStatus] {
+        ([destinationStatus].compactMap { $0 } + providerStatuses).filter { $0.phase == .failed }
+    }
+
+    /// Speaks a line once, when it first reads failed: "{source}, {words}".
+    private func announceFailures(_ failed: [PhoneModelPickerStatus]) {
+        let sources = Set(failed.map(\.source))
+        let fresh = failed.filter { !announcedFailures.contains($0.source) }
+        announcedFailures = sources
+        guard !fresh.isEmpty else { return }
+        let words = fresh.map { status in
+            [statusTitle(status.source), copy.status(status)].compactMap { $0 }.joined(separator: ", ")
+        }.joined(separator: ". ")
+        var announcement = AttributedString(words)
+        announcement.accessibilitySpeechAnnouncementPriority = .high
+        AccessibilityNotification.Announcement(announcement).post()
+    }
+
     /// One settled read line (desktop #126 `catalogState` and the subscription
     /// note): the source, its bounded loading or failed words and, for a
     /// failure, Try again. At accessibility sizes Try again goes under the words.
     private func statusRow(_ status: PhoneModelPickerStatus) -> some View {
         let title = statusTitle(status.source)
-        let message = copy.status(status)
+        // A saved plan row already says why under its name: desktop gives
+        // the reason there only, so the line keeps its source and Try again.
+        let message: String? = title != nil && status.isShownOnRow(in: rows) ? nil : copy.status(status)
         let words = VStack(alignment: .leading, spacing: design.kit.space(.s1)) {
             if let title {
                 Text(verbatim: title)
                     .font(.body)
                     .foregroundStyle(atum.color(.ink, scheme: scheme))
             }
-            Text(verbatim: message)
-                .font(title == nil ? .body : .footnote)
-                .foregroundStyle(atum.color(title == nil ? .muted : .soft, scheme: scheme))
+            if let message {
+                Text(verbatim: message)
+                    .font(title == nil ? .body : .footnote)
+                    .foregroundStyle(atum.color(title == nil ? .muted : .soft, scheme: scheme))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
@@ -276,12 +312,12 @@ struct PhoneModelPickerList: View {
             if status.offersRetry, dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: design.kit.space(.s2)) {
                     lead
-                    retryButton(status, title: title ?? message)
+                    retryButton(status, title: title ?? message ?? "")
                 }
             } else if status.offersRetry {
                 HStack(spacing: design.kit.space(.s3)) {
                     lead
-                    retryButton(status, title: title ?? message)
+                    retryButton(status, title: title ?? message ?? "")
                 }
             } else {
                 lead

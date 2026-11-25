@@ -5,10 +5,12 @@ import XCTest
 /// Synthetic scripted data only (`-AtumScriptedSubscriptions ready`,
 /// `-AtumScriptedConnections work`, `-AtumScriptedPickerReads …`).
 ///
-/// - A failed ChatGPT relay read shows its own line with Try again; the
-///   other sources settle quietly and Claude's Work models hand off to the Mac.
+/// - A failed ChatGPT relay read shows its own line with Try again; the saved
+///   ChatGPT row alone carries the failed words, ChatGPT gets no Work hand-off,
+///   the other sources settle quietly and Claude's Work models hand off to the Mac.
 /// - A failed destination readback shows its own line with Try again above
-///   the models, and the ChatGPT catalog stays visible but read-only.
+///   the models; Atum's line-up and the ChatGPT catalog stay visible but
+///   read-only and unchecked.
 ///
 /// `ATUM_PICKER_LOCALE` (`vi` default, or `en`), `ATUM_PICKER_AX=1` (an
 /// accessibility text size) and `ATUM_CAPTURE_TAG` name the run; pass them as
@@ -48,7 +50,11 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         let app = openPicker(reads: "chatgpt-failed")
 
         let line = reveal(app, "phone.model.status.chatGPT")
-        XCTAssertTrue(line.label.contains(expected.modelsFailed), line.label)
+        // The saved GPT-6.1 row says why; the line keeps its source and Try again only.
+        let saved = element(app, "phone.model.row.gpt-6.1")
+        XCTAssertTrue(saved.exists, "the saved ChatGPT model must stay listed")
+        XCTAssertTrue(saved.label.contains(expected.modelsFailed), saved.label)
+        XCTAssertFalse(line.label.contains(expected.modelsFailed), "the failed words are repeated: \(line.label)")
         let retry = element(app, "phone.model.status.chatGPT.retry")
         XCTAssertTrue(retry.exists, "a failed ChatGPT read must offer Try again")
         XCTAssertTrue(retry.label.hasPrefix(expected.retry), retry.label)
@@ -64,6 +70,9 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         let handoff = reveal(app, "phone.model.handoff.claude-plan.open")
         XCTAssertTrue(handoff.label.contains(expected.inWork), handoff.label)
         XCTAssertTrue(element(app, "phone.model.handoff.claude-plan.model.claude-sonnet-5-5").exists)
+        // The ChatGPT line stands for ChatGPT: no hand-off lists its models a second time.
+        XCTAssertFalse(element(app, "phone.model.handoff.openai-codex").exists, "ChatGPT hand-off beside its line")
+        XCTAssertFalse(element(app, "phone.model.handoff.openai-codex.open").exists, "ChatGPT hand-off beside its line")
         keepEvidence("work-handoff-\(tag)", of: app)
         handoff.tap()
         let needsMac = element(app, "connections.sheet.needs-mac")
@@ -84,6 +93,15 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         let retry = element(app, "phone.model.status.destination.retry")
         XCTAssertTrue(retry.exists, "a failed destination read must offer Try again")
         XCTAssertFalse(element(app, "phone.model.status.chatGPT").exists, "ChatGPT answered")
+        // Atum's line-up is listed, greyed and with no check: neither the 1.1
+        // offer nor a cached snapshot may stand in for the failed readback.
+        for model in ["nguyet-thuc", "nhat-thuc"] {
+            let row = element(app, "phone.model.row.\(model)")
+            XCTAssertTrue(row.waitForExistence(timeout: Self.waitSeconds), "missing \(model)")
+            XCTAssertFalse(row.isEnabled, "\(model) must be read-only without a destination readback")
+            XCTAssertFalse(row.isSelected, "\(model) must not be checked without a destination readback")
+            XCTAssertEqual(row.value as? String ?? "", "", "\(model) must not read as current")
+        }
         keepEvidence("destination-failed-\(tag)", of: app)
 
         // The relayed catalog is listed, and no model in it can be picked.

@@ -117,10 +117,21 @@ struct PhoneConversationModelPicker: View {
         _accountState = State(initialValue: accountState ?? PhoneModelPickerAccount())
     }
 
+    /// Whether an Atum row may be current and chosen (W4-X2 r2). With a
+    /// destination read, only its readback says what the cloud runs: while it
+    /// loads or after it fails, neither the 1.1 offer nor a cached 1.3
+    /// snapshot stands in, so the line-up is drawn read-only and unchecked and
+    /// `choose` writes nothing. A destination read the server does not offer
+    /// (`unavailable`) leaves the 1.1 offer as the authority, as before W4-X2.
+    private var atumWritable: Bool {
+        guard destinations != nil else { return true }
+        return destinationReadState == .ready || destinationReadState == .unavailable
+    }
+
     private var rows: [PhoneModelPickerProjection.Row] {
         let atum = PhoneModelPickerProjection.conversation(
             offer: snapshot, destination: destination, destinationID: cloudDestination,
-            selectedAtumModel: pickedAtumModel
+            selectedAtumModel: pickedAtumModel, destinationReady: atumWritable
         )
         let subscriptions = PhoneModelPickerProjection.subscriptions(
             destination, destination: cloudDestination, account: account,
@@ -250,7 +261,7 @@ struct PhoneConversationModelPicker: View {
     private func choose(_ row: PhoneModelPickerProjection.Row) {
         if row.isSubscription { return chooseSubscription(row) }
         let model = row.model
-        guard savingRowID == nil, savingEffort == nil, row.source == .atum,
+        guard savingRowID == nil, savingEffort == nil, atumWritable, row.source == .atum,
               row.selectable, !row.selected else { return }
         if let snapshot, let offer = snapshot.models.first(where: { $0.alias == model }) {
             guard offer.eligibility == .ready, let effort = offer.selectionEffort else { return }
@@ -266,7 +277,7 @@ struct PhoneConversationModelPicker: View {
     /// A thinking-level change writes the model that answers now with the new
     /// level: the same fenced save a model pick makes.
     private func chooseEffort(_ level: ManagedModelEffort, shownModel: String) {
-        guard savingRowID == nil, savingEffort == nil, let snapshot,
+        guard savingRowID == nil, savingEffort == nil, atumWritable, let snapshot,
               let thinking = thinking(in: rows), thinking.model == shownModel,
               thinking.canChange(to: level) else { return }
         savingEffort = level
@@ -587,9 +598,12 @@ struct PhoneModelDestinationsPicker: View {
     }
 
     private var rows: [PhoneModelPickerProjection.Row] {
+        // A snapshot kept from an earlier read is drawn read-only and
+        // unchecked while a later read loads or after it fails (W4-X2 r2).
         let atum = snapshot.map {
             PhoneModelPickerProjection.destination($0, destination: destination,
-                                                   cloudEligibleAliases: cloudEligibleAliases)
+                                                   cloudEligibleAliases: cloudEligibleAliases,
+                                                   destinationReady: destinationReadState == .ready)
         } ?? []
         return atum + PhoneModelPickerProjection.subscriptions(
             snapshot, destination: destination, account: account,

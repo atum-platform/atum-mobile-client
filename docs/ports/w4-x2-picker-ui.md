@@ -12,16 +12,18 @@ selection, and `connections/connect-sheet.tsx` on a device without Work.
 | Source / state | Phone treatment | Copy key |
 | --- | --- | --- |
 | Destination `loading` | A line at the top of the list: spinner (a still clock under Reduce Motion) and the loading words | `src.matrix.model-picker-copy.COPY.modelsLoading` |
-| Destination `failed` | Its own line at the top, alert glyph, words, **Try again**. Loaded catalogs stay listed and read-only (`Row.selectable` is false without a ready destination) | `…COPY.switchProblem.unavailable`, `…COPY.modelsRetry` |
+| Destination `failed` | Its own line at the top, alert glyph, words, **Try again**. Atum's line-up and every loaded catalog stay listed, read-only and unchecked (r2: `destinationReady` in the projection; no row is selectable or current without a ready destination) | `…COPY.switchProblem.unavailable`, `…COPY.modelsRetry` |
 | Destination `ready` / `unavailable` | No line | — |
 | ChatGPT / OpenCode Go `loading` | A line under the models: provider mark, "{Plan} plan", spinner and loading words | `…COPY.planAccount`, `…COPY.modelsLoading` |
-| ChatGPT / OpenCode Go `failed` | Same line with the failed words and **Try again** | `…COPY.modelsFailed`, `…COPY.modelsRetry` |
+| ChatGPT / OpenCode Go `failed` | Same line with the failed words and **Try again**. When a saved plan row already shows that reason under its name, the line keeps only the plan name and Try again (r2) | `…COPY.modelsFailed`, `…COPY.modelsRetry` |
 | Account Connections `loading` | Link glyph, "Subscriptions", loading words | `src.matrix.mobile-copy.mobileScreensCopy.connections.subscriptions`, `…COPY.modelsLoading` |
 | Account Connections `failed` | Same line with the unreachable-connections words and **Try again** | `…COPY.modelsUnavailable`, `…COPY.modelsRetry` |
 | Any account source `ready` / `unavailable` | No line. The existing treatments remain: catalog rows, a saved row's reason (`Row.unavailable`), Connect entries | — |
 | Work plan reported on a Mac (`workPlanHandoffs`) | A read-only group per plan: header with the plan mark and "{Plan} plan", one greyed row per model, then a hand-off row with the reason. Tapping it opens the existing connect sheet in hand-off mode: plan mark, "Connect {Plan}", "Open Atum on your Mac to connect." and Close, with no registry follow | `…COPY.planAccount`, `…connections.picker.inWork`, `…connections.sheet.title.plan=*`, `…connections.sheet.needsMac`, `…connections.sheet.close` |
 
 Status and hand-off rows are hidden while a search or filter is active, as the Connect entries are.
+While the ChatGPT line shows (loading or failed), no ChatGPT hand-off group is drawn (r2).
+VoiceOver announces a line once when it first reads failed: "{source}, {words}" at high priority (r2).
 The destination line is always shown. At accessibility text sizes, Try again moves under the words.
 Every status row is one VoiceOver element reading "{source}, {words}". Each Try again reads
 "Try again: {source}". A hand-off row reads "{Plan} plan, Works in Work for now", with the needs-Mac
@@ -55,10 +57,17 @@ control heights come from the design tokens (`atum.color`, `kit.space`, `kit.pho
   `accountConnectionsState`, the pickers' `destinationReadState` and `workPlanHandoffs`. The pure
   mapping is `PhoneModelPickerStatus` in `AtumNativeAPI` and is unit-tested. No W4-X1 bug fix was
   needed.
-- **Known overlap.** When the ChatGPT relay read fails, `workPlanHandoffs` no longer treats ChatGPT
-  as supplied by the cloud relay. A ChatGPT plan that Work reports on a Mac therefore also appears as
-  a hand-off group, next to the failed ChatGPT line. Both follow W4-X1's contract, and the overlap is
-  left as is.
+- **ChatGPT hand-off hidden behind its line (r2).** When the ChatGPT relay read fails,
+  `workPlanHandoffs` no longer treats ChatGPT as supplied by the cloud relay, so W4-X1 also lists
+  a ChatGPT plan that Work reports on a Mac. Desktop never offers that hand-off on a device that reaches
+  the relay (`model-picker.tsx:894`, `:1089`). The list therefore hides the `.codex` hand-off group
+  while the ChatGPT line shows (loading or failed). This is a UI filter only (`shownHandoffs`). W4-X1 is unchanged.
+- **Read-only means unchecked too (r2).** With a destination read, Atum rows are selectable and
+  current only when that read is `ready`. While it loads or after it fails, neither the 1.1 offer
+  nor a cached 1.3 snapshot stands in. `choose` and `chooseEffort` write nothing, the line-up has no
+  check and no Default word, and no thinking control shows. A destination read the server does not
+  offer (`unavailable`) leaves the 1.1 offer as the authority, as before W4-X2, so a legacy server
+  keeps a working picker. The card applies the same gate to a snapshot kept from an earlier read.
 
 ## Gaps
 
@@ -68,12 +77,18 @@ Copy, for the desktop export lane:
 - Desktop's Renew title (`connections/copy.ts` `renewal`, "Keep your assistants on this Mac") and the
   Work relay fix labels (`relay-copy` `fix.allow` / `fix.renew`) are not in the pin.
 
+Behaviour, deferred from r1 review:
+- One merged loading note, and no destination line over a cached snapshot (review follow-up 5).
+  The phone draws a line per loading source, and draws the destination line even over a cached snapshot.
+- Retry reloads the whole picker. There is no per-source retry.
+- Desktop #129 removed Renew, so no Renew variant is planned.
+
 Data:
 - The phone has no native consent read (desktop `work.readPlanConsent`: state, agents, named Macs,
   `nativeRenewal`). It can't tell missing consent from expired consent, or from a plan that would
   already work. Every Work plan therefore gets the same hand-off, and no Allow or Renew variant is
   built.
-- Hand-off models aren't searchable and have no favorites. They come from the registry, not a
+- Hand-off models aren't searchable (review gap 4) and have no favorites. They come from the registry, not a
   model-choice contract, so they have no write identity.
 
 ## Verification
@@ -99,3 +114,35 @@ Results are recorded below once the run finishes.
   `destination-failed-catalog`, each tagged `w4x2-{en,vi}-{light,dark}` plus `-en-light-ax`.
 - Unlocked checks: `python3 scripts/design_lint.py` reported OK with no new findings (exit 0). The copy-key
   pin test passed (7 OK). `python3 scripts/public_guard.py --base origin/main --head HEAD` passed (exit 0).
+
+## Fix round r2 (review r1, Opus: HOLD)
+
+Findings, then fixes:
+
+1. **Blocker: the composer's failed destination was not read-only.** `conversation(offer:destination:)`
+   took `selectable` from the 1.1 offer and the check from the 1.1 choice or the cached 1.3 snapshot,
+   and `choose()` wrote through the 1.1 path. Fix: `PhoneModelPickerProjection.conversation` and
+   `.destination` take `destinationReady`. When it is false, every row becomes `Row.readOnly()`:
+   unchecked, not selectable, no Default word and no subscription effort. The composer passes
+   `atumWritable`, which is true only when it has no destination read, or its read is `ready` or
+   `unavailable`. `choose()` and `chooseEffort()` also guard on `atumWritable`.
+2. **Should-fix: the card kept a stale snapshot after a later failure.** The card passes
+   `destinationReadState == .ready` to `.destination`, so old rows draw greyed and unchecked.
+3. **Should-fix: ChatGPT hand-off next to its failed line.** `PhoneModelPickerList.shownHandoffs`
+   drops the `.codex` group while a ChatGPT status line exists. The change is UI-only.
+4. **Should-fix: failed words shown twice.** `PhoneModelPickerStatus.isShownOnRow(in:)` is true when a
+   saved plan row of that source carries the same reason (`failed`/`loading`). The line then draws the
+   plan name and Try again without the words. The VoiceOver label is the plan name, and the failed row
+   still speaks the reason.
+5. **Follow-up: failure announcement.** The list posts `AccessibilityNotification.Announcement`
+   (high priority) when a line first reads failed, including a line that is already failed when the
+   list appears. A source that loads again and fails again is announced again.
+
+Tests: `PhoneModelPickerProjectionTests` adds the composer and card read-only cases.
+`PhoneModelPickerStatusTests` adds the row-reason case. In `PhoneModelPickerSettledReadsUITests`, the
+destination test asserts that Nguyệt Thực and Nhật Thực are disabled, unselected and have no
+current value. The ChatGPT test asserts that the saved GPT-6.1 row carries the failed words, the line
+does not repeat them, and no `openai-codex` hand-off exists.
+
+Verification (fix round r2): pending the locked run `/Volumes/AtumTestFlight/w4-x2/verify-fix-r2.sh`.
+

@@ -214,6 +214,52 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertEqual(rows.filter(\.selected).map(\.model), [ManagedModelLineup.defaultAlias])
     }
 
+    func testAnUnreadyDestinationDrawsTheConversationLineUpReadOnlyAndUnchecked() throws {
+        // W4-X2 r2: a failed or loading destination readback. Neither the 1.1
+        // offer's eligibility nor a cached 1.3 snapshot's saved choice may
+        // stand in for it: every Atum row is drawn, none is current or choosable.
+        let cloud = try ManagedModelDestinationID("cloud")
+        let snapshot = try NativeAPI.decode(
+            ManagedModelDestinationSnapshot.self, from: fixture("destination.snapshot"))
+        for destination in [snapshot, nil] as [ManagedModelDestinationSnapshot?] {
+            let ready = PhoneModelPickerProjection.conversation(
+                offer: try cloudSnapshot(), destination: destination, destinationID: cloud)
+            XCTAssertTrue(ready.contains(where: \.selectable))
+            XCTAssertTrue(ready.contains(where: \.selected))
+            let rows = PhoneModelPickerProjection.conversation(
+                offer: try cloudSnapshot(), destination: destination, destinationID: cloud,
+                selectedAtumModel: ManagedModelLineup.defaultAlias, destinationReady: false)
+            XCTAssertEqual(rows.map(\.model), ["nguyet-thuc", "nhat-thuc", "thai-cuc"])
+            XCTAssertEqual(rows.map(\.selected), [false, false, false])
+            XCTAssertEqual(rows.map(\.selectable), [false, false, false])
+            XCTAssertEqual(rows.map(\.badges), [[], [], []])
+            XCTAssertNil(PhoneModelPickerProjection.conversationThinking(offer: try cloudSnapshot(), rows: rows))
+        }
+    }
+
+    func testTheCardKeepsAStaleSnapshotReadOnlyAfterALaterFailure() throws {
+        // The card's earlier read succeeded; a later one failed. Its old
+        // snapshot's rows stay listed but greyed and unchecked.
+        let snapshot = try NativeAPI.decode(
+            ManagedModelDestinationSnapshot.self, from: fixture("destination.snapshot"))
+        let cloud = try ManagedModelDestinationID("cloud")
+        let fresh = PhoneModelPickerProjection.destination(
+            snapshot, destination: cloud, cloudEligibleAliases: [ManagedModelLineup.defaultAlias])
+        XCTAssertEqual(fresh.map(\.selectable), [true, false, false])
+        XCTAssertEqual(fresh.filter(\.selected).map(\.model), [ManagedModelLineup.defaultAlias])
+        let stale = PhoneModelPickerProjection.destination(
+            snapshot, destination: cloud, cloudEligibleAliases: [ManagedModelLineup.defaultAlias],
+            destinationReady: false)
+        XCTAssertEqual(stale.map(\.model), fresh.map(\.model))
+        XCTAssertEqual(stale.map(\.selectable), [false, false, false])
+        XCTAssertEqual(stale.map(\.selected), [false, false, false])
+        let mac = PhoneModelPickerProjection.destination(
+            snapshot, destination: try ManagedModelDestinationID("mac:mini-b"), cloudEligibleAliases: [],
+            destinationReady: false)
+        XCTAssertFalse(mac.isEmpty)
+        XCTAssertFalse(mac.contains { $0.selectable || $0.selected })
+    }
+
     // MARK: Thinking level and the way back to Atum
 
     /// A cloud offer whose current model is ready, with the levels it accepts.

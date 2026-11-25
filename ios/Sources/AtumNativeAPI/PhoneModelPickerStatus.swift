@@ -49,6 +49,21 @@ public struct PhoneModelPickerStatus: Equatable, Sendable, Identifiable {
         ].compactMap { $0 }
     }
 
+    /// Whether a listed row already carries this line's words (a saved plan
+    /// model whose reason reads loading or failed). Desktop shows that reason
+    /// on the row only, so the line then keeps its source and Try again but
+    /// drops the repeated words (W4-X2 r2).
+    public func isShownOnRow(in rows: [PhoneModelPickerProjection.Row]) -> Bool {
+        let plan: ManagedModelDestinationSource
+        switch source {
+        case .chatGPT: plan = .chatGPTPlan
+        case .openCodeGo: plan = .opencodeGo
+        case .destination, .accountConnections: return false
+        }
+        let reason: PhoneModelPickerProjection.Row.Unavailable = phase == .loading ? .loading : .failed
+        return rows.contains { $0.isSubscription && $0.source == plan && $0.unavailable == reason }
+    }
+
     private static func line(_ source: Source, _ state: PhoneModelPickerReadState) -> Self? {
         switch state {
         case .loading: Self(source: source, phase: .loading)
