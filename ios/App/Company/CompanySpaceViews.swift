@@ -15,20 +15,36 @@ struct CompanyPagesBar: View {
     let tabs: [CompanySpaceTab]
     @Binding var selection: CompanySpaceTab
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var copy: TeamSpaceCopy { TeamSpaceCopy(design: design) }
+    private var kit: AtumKit { design.kit }
 
     var body: some View {
-        Picker(selection: $selection) {
-            ForEach(tabs, id: \.self) { tab in
-                Text(verbatim: copy.page(tab)).tag(tab)
-                    .accessibilityIdentifier("company.page." + tab.rawValue)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                // The system segmented control keeps its small fixed text at
+                // accessibility sizes (UX audit issue 9): the same choice,
+                // drawn with segments that scale.
+                TeamSpaceSegments(design: design, items: tabs, selection: $selection,
+                                  title: { copy.page($0) },
+                                  identifier: { "company.page." + $0.rawValue },
+                                  label: copy.pagesLabel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Picker(selection: $selection) {
+                    ForEach(tabs, id: \.self) { tab in
+                        Text(verbatim: copy.page(tab)).tag(tab)
+                            .accessibilityIdentifier("company.page." + tab.rawValue)
+                    }
+                } label: {
+                    Text(verbatim: copy.pagesLabel)
+                }
+                .pickerStyle(.segmented)
             }
-        } label: {
-            Text(verbatim: copy.pagesLabel)
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, kit.space(.s4))
         .padding(.vertical, 6)
+        .sensoryFeedback(.selection, trigger: selection)
         .accessibilityIdentifier("company.pages")
     }
 }
@@ -273,15 +289,17 @@ struct TeamSpaceUtilityRow: View {
     let action: () -> Void
 
     @Environment(\.colorScheme) private var scheme
+    /// The glyph column grows with the glyph's text style.
+    @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 28
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(atum.symbol(glyph))
-                    .font(.system(size: 17))
+                    .font(.body)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .frame(width: 28)
+                    .frame(width: glyphColumn)
                     .accessibilityHidden(true)
                 Text(verbatim: title)
                     .font(.body.weight(TeamSpaceBadges.isBold(badge) ? .semibold : .regular))

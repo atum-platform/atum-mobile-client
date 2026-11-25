@@ -435,6 +435,11 @@ struct ChatInfoHome: View {
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
+    private var kit: AtumKit { design.kit }
+    private var ink: Color { atum.color(.ink, scheme: scheme) }
+    /// The panel's grouped rows keep the panel's own cell colour on the sheet.
+    private var rowBackground: Color { atum.color(.cell, scheme: scheme) }
+
     var body: some View {
         Group {
             if isAssistantInfo {
@@ -442,51 +447,25 @@ struct ChatInfoHome: View {
                 // screen, every field edited where it stands. No profile
                 // summary and no "Edit assistant" step.
                 assistantSection
-            } else if isPersonal {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        header
-                        if case .group = info.kind { membersRow.padding(.top, 20) }
-                        if case .person = info.kind, let spaces = details?.teamSpaces, !spaces.isEmpty {
-                            teamSpacesSection(spaces).padding(.top, 24)
-                        }
-                        conversationSection.padding(.top, 24)
-                        if let sharedCollections {
-                            SharedCollectionsSection(design: design, info: info, open: actions.sharedCollections,
-                                                     controller: sharedCollections, seeAll: { open(.shared($0)) })
-                        }
-                        assistantAccessSection.padding(.top, 24)
-                        exitSection.padding(.top, 24)
-                    }
-                    .padding(.top, 24)
-                    .padding(.bottom, 32)
-                }
-                .scrollDismissesKeyboard(.interactively)
             } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        header
-                        if case .app = info.kind, let appPanel = actions.appPanel {
-                            AppPanelPagesSection(design: design, appName: info.title, actions: appPanel,
-                                                 open: open, backToChat: close)
-                                .padding(.top, 24)
-                        }
-                        actionTiles
-                            .padding(.top, 20)
-                        assistantAccessSection.padding(.top, 24)
-                        if let company = info.company {
-                            CompanyChannelInfoSection(design: design, info: info, company: company,
-                                                      startedAt: details?.startedAt,
-                                                      actions: actions.companyChannel,
-                                                      loadMatrixThumbnail: loadMatrixThumbnail)
-                                .padding(.top, 24)
-                        }
-                        if case .app = info.kind { deleteSection.padding(.top, 24) }
-                        exitSection.padding(.top, 24)
+                // One system inset-grouped list, as Settings draws its pages
+                // (UX polish P2, audit issue 6): section headers, footers and
+                // row highlights are the system's, not hand-drawn cards.
+                List {
+                    headerSection
+                    if isPersonal {
+                        personalSections
+                    } else {
+                        channelSections
                     }
-                    .padding(.top, 24)
-                    .padding(.bottom, 32)
                 }
+                .listStyle(.insetGrouped)
+                .listSectionSpacing(.compact)
+                // One side margin for the list's groups and the full-width
+                // sections it hosts (`panelEmbeddedRow`), so their edges line up.
+                .contentMargins(.horizontal, kit.space(.s4), for: .scrollContent)
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
             }
         }
         .background(atum.color(.ground, scheme: scheme).opacity(0.001))
@@ -551,103 +530,137 @@ struct ChatInfoHome: View {
         return design.text(PersonInfoKey.conversationInfo)
     }
 
+    // MARK: Sections
+
+    /// Who the chat is with, centred on the panel's ground above the groups
+    /// (the Settings profile header pattern).
+    private var headerSection: some View {
+        Section {
+            header
+                .frame(maxWidth: .infinity)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 0, leading: kit.space(.s6), bottom: 0, trailing: kit.space(.s6)))
+        }
+    }
+
+    /// Person and group chats: the desktop's conversation info panel order.
+    @ViewBuilder private var personalSections: some View {
+        if case let .group(memberCount) = info.kind {
+            Section { membersRow(count: memberCount) }
+                .listRowBackground(rowBackground)
+        }
+        if case .person = info.kind, let spaces = details?.teamSpaces, !spaces.isEmpty {
+            teamSpacesSection(spaces)
+        }
+        conversationSection
+        if let sharedCollections, actions.sharedCollections != nil, SharedCollectionsSection.applies(to: info) {
+            Section {
+                SharedCollectionsSection(design: design, info: info, open: actions.sharedCollections,
+                                         controller: sharedCollections, seeAll: { open(.shared($0)) })
+                    .panelEmbeddedRow(bleed: kit.space(.s4))
+            }
+        }
+        assistantAccessSection
+        exitSection
+    }
+
+    /// App and Team Space chats keep their own sections between the header
+    /// and the chat's controls.
+    @ViewBuilder private var channelSections: some View {
+        if case .app = info.kind, let appPanel = actions.appPanel {
+            Section {
+                AppPanelPagesSection(design: design, appName: info.title, actions: appPanel,
+                                     open: open, backToChat: close)
+                    .panelEmbeddedRow(bleed: kit.space(.s4))
+            }
+        }
+        Section {
+            actionTiles
+                .panelEmbeddedRow(bleed: kit.space(.s4))
+        }
+        assistantAccessSection
+        if let company = info.company {
+            Section {
+                CompanyChannelInfoSection(design: design, info: info, company: company,
+                                          startedAt: details?.startedAt,
+                                          actions: actions.companyChannel,
+                                          loadMatrixThumbnail: loadMatrixThumbnail)
+                    .panelEmbeddedRow(bleed: kit.space(.s4))
+            }
+        }
+        if case .app = info.kind { deleteSection }
+        exitSection
+    }
+
     // MARK: Personal chats (desktop)
 
     /// "N members" opens the group's Members page inside the panel.
-    private var membersRow: some View {
-        let count: Int = if case let .group(memberCount) = info.kind { memberCount } else { 0 }
-        return Button { open(.members) } label: {
-            HStack(spacing: 12) {
-                Image(atum.symbol(.users))
+    private func membersRow(count: Int) -> some View {
+        NavigationLink(value: ChatPanelPolicy.Page.members) {
+            Label {
                 Text(design.text(PersonInfoKey.members, arguments: [.number(Int64(count))]))
-                Spacer()
-                Image(atum.symbol(.chevronRight))
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+            } icon: {
+                Image(atum.symbol(.users))
             }
-            .foregroundStyle(atum.color(.ink, scheme: scheme))
-            .padding(.horizontal, 16)
-            .frame(minHeight: 52)
-            .contentShape(Rectangle())
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .foregroundStyle(ink)
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
         .accessibilityIdentifier("info.members.open")
     }
 
     private func teamSpacesSection(_ spaces: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(design.text(PersonInfoKey.teamSpaces))
-            VStack(spacing: 0) {
-                ForEach(Array(spaces.enumerated()), id: \.offset) { index, name in
-                    HStack(spacing: 12) {
-                        Image(atum.symbol(.briefcase))
-                        Text(verbatim: name)
-                        Spacer()
-                    }
-                    .foregroundStyle(atum.color(.ink, scheme: scheme))
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 48)
-                    if index < spaces.count - 1 { Divider().padding(.leading, 48) }
+        Section {
+            ForEach(Array(spaces.enumerated()), id: \.offset) { _, name in
+                Label {
+                    Text(verbatim: name)
+                } icon: {
+                    Image(atum.symbol(.briefcase))
                 }
+                .foregroundStyle(ink)
+                // A container per row, so the name stays its own text.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("info.team-spaces")
             }
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 16)
+        } header: {
+            Text(verbatim: design.text(PersonInfoKey.teamSpaces))
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("info.team-spaces")
+        .listRowBackground(rowBackground)
     }
 
     /// The conversation's own facts and switches: encryption, when it began,
     /// pin, mute and (for an ordinary chat) low priority.
     private var conversationSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(design.text(PersonInfoKey.conversation))
-            VStack(spacing: 0) {
-                factRow(glyph: .shield,
-                        text: design.text(info.roomIsEncrypted ? PersonInfoKey.encrypted : PersonInfoKey.notEncrypted),
-                        id: "info.encryption")
-                if let startedAt = details?.startedAt {
-                    Divider().padding(.leading, 48)
-                    factRow(glyph: .clock,
-                            text: design.text(PersonInfoKey.started, arguments: [.text(startedDate(startedAt))]),
-                            id: "info.started")
-                }
-                Divider().padding(.leading, 48)
-                switchRow(glyph: info.isPinned ? .pinFilled : .pin, title: copy(.pin),
-                          isOn: info.isPinned, isEnabled: info.isPinned || !info.pinLimitReached,
-                          id: "info.pin") { actions.setPinned?(info.roomID, $0) }
-                Divider().padding(.leading, 48)
-                switchRow(glyph: info.isMuted ? .bellOff : .bell, title: design.text(PersonInfoKey.muteNotifications),
-                          isOn: info.isMuted, isEnabled: actions.setMuted != nil,
-                          id: "info.mute") { actions.setMuted?(info.roomID, $0) }
-                if info.offersLowPriority, actions.setLowPriority != nil {
-                    Divider().padding(.leading, 48)
-                    switchRow(glyph: .chevronDown, title: design.text(PersonInfoKey.lowPriority),
-                              isOn: info.isLowPriority, isEnabled: true,
-                              id: "info.low-priority") { actions.setLowPriority?(info.roomID, $0) }
-                }
-                if let rename = actions.rename, !info.isFounder {
-                    Divider().padding(.leading, 48)
-                    renameRow(rename)
-                }
+        Section {
+            factRow(glyph: .shield,
+                    text: design.text(info.roomIsEncrypted ? PersonInfoKey.encrypted : PersonInfoKey.notEncrypted),
+                    id: "info.encryption")
+            if let startedAt = details?.startedAt {
+                factRow(glyph: .clock,
+                        text: design.text(PersonInfoKey.started, arguments: [.text(startedDate(startedAt))]),
+                        id: "info.started")
             }
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 16)
+            switchRow(glyph: info.isPinned ? .pinFilled : .pin, title: copy(.pin),
+                      isOn: info.isPinned, isEnabled: info.isPinned || !info.pinLimitReached,
+                      id: "info.pin") { actions.setPinned?(info.roomID, $0) }
+            switchRow(glyph: info.isMuted ? .bellOff : .bell, title: design.text(PersonInfoKey.muteNotifications),
+                      isOn: info.isMuted, isEnabled: actions.setMuted != nil,
+                      id: "info.mute") { actions.setMuted?(info.roomID, $0) }
+            if info.offersLowPriority, actions.setLowPriority != nil {
+                switchRow(glyph: .chevronDown, title: design.text(PersonInfoKey.lowPriority),
+                          isOn: info.isLowPriority, isEnabled: true,
+                          id: "info.low-priority") { actions.setLowPriority?(info.roomID, $0) }
+            }
+            if let rename = actions.rename, !info.isFounder {
+                renameRow(rename)
+            }
+        } header: {
+            Text(verbatim: design.text(PersonInfoKey.conversation))
+                .accessibilityIdentifier("info.conversation")
+        } footer: {
             if !info.isPinned, info.pinLimitReached {
                 Text(copy(.pinLimit))
-                    .font(.footnote)
-                    .foregroundStyle(atum.color(.soft, scheme: scheme))
-                    .padding(.horizontal, 32)
             }
         }
-        // A container of its own, so its rows keep their identifiers (on a
-        // plain stack the identifier is handed down and replaces theirs).
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("info.conversation")
+        .listRowBackground(rowBackground)
     }
 
     /// HC-7: Rename (desktop conversation menu): your own name for the chat,
@@ -660,17 +673,13 @@ struct ChatInfoHome: View {
                 renameRequest = request
             }
         } label: {
-            HStack(spacing: 12) {
-                Image(atum.symbol(.pencil))
+            Label {
                 Text(copy(.rename))
-                Spacer()
+            } icon: {
+                Image(atum.symbol(.pencil))
             }
-            .foregroundStyle(atum.color(.ink, scheme: scheme))
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-            .contentShape(Rectangle())
+            .foregroundStyle(ink)
         }
-        .buttonStyle(.plain)
         .accessibilityIdentifier("info.rename")
         // On the row, so the panel's own dialogs (Block, Delete) keep their
         // presentation host to themselves.
@@ -679,23 +688,13 @@ struct ChatInfoHome: View {
         }
     }
 
-    private func sectionTitle(_ text: String) -> some View {
-        Text(verbatim: text)
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(atum.color(.soft, scheme: scheme))
-            .padding(.horizontal, 32)
-            .accessibilityAddTraits(.isHeader)
-    }
-
     private func factRow(glyph: AtumGlyph, text: String, id: String) -> some View {
-        HStack(spacing: 12) {
-            Image(atum.symbol(glyph))
+        Label {
             Text(verbatim: text)
-            Spacer()
+        } icon: {
+            Image(atum.symbol(glyph))
         }
-        .foregroundStyle(atum.color(.ink, scheme: scheme))
-        .padding(.horizontal, 16)
-        .frame(minHeight: 48)
+        .foregroundStyle(ink)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier(id)
     }
@@ -703,15 +702,14 @@ struct ChatInfoHome: View {
     private func switchRow(glyph: AtumGlyph, title: String, isOn: Bool, isEnabled: Bool,
                            id: String, set: @escaping (Bool) -> Void) -> some View {
         Toggle(isOn: Binding(get: { isOn }, set: { set($0) })) {
-            HStack(spacing: 12) {
-                Image(atum.symbol(glyph))
+            Label {
                 Text(verbatim: title)
+            } icon: {
+                Image(atum.symbol(glyph))
             }
         }
         .tint(atum.color(.actionStrong, scheme: scheme))
-        .foregroundStyle(atum.color(.ink, scheme: scheme))
-        .padding(.horizontal, 16)
-        .frame(minHeight: 48)
+        .foregroundStyle(ink)
         .disabled(!isEnabled)
         .accessibilityIdentifier(id)
     }
@@ -722,9 +720,9 @@ struct ChatInfoHome: View {
     }
 
     private var header: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: kit.space(.s2)) {
             ChatInfoAvatar(info: info, size: 72, loadMatrixThumbnail: loadMatrixThumbnail)
-            HStack(spacing: 6) {
+            HStack(spacing: kit.space(.s2)) {
                 Text(verbatim: info.title)
                     .font(.title2.weight(.semibold))
                     .lineLimit(2)
@@ -761,10 +759,11 @@ struct ChatInfoHome: View {
                     .foregroundStyle(atum.color(.soft, scheme: scheme))
             }
         }
-        .padding(.horizontal, 24)
         .accessibilityElement(children: .combine)
     }
 
+    /// Pin and Mute for app and Team Space chats: two tiles under the header
+    /// (desktop's quick actions), side by side or stacked at accessibility sizes.
     @ViewBuilder private var actionTiles: some View {
         let tiles = Group {
             infoAction(isEnabled: info.isPinned || !info.pinLimitReached,
@@ -780,11 +779,11 @@ struct ChatInfoHome: View {
                 actions.setMuted?(info.roomID, !info.isMuted)
             }
         }
-        VStack(spacing: 8) {
+        VStack(spacing: kit.space(.s2)) {
             if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: 12) { tiles }
+                VStack(spacing: kit.space(.s3)) { tiles }
             } else {
-                HStack(spacing: 12) { tiles }
+                HStack(spacing: kit.space(.s3)) { tiles }
             }
             if !info.isPinned, info.pinLimitReached {
                 Text(copy(.pinLimit))
@@ -793,20 +792,20 @@ struct ChatInfoHome: View {
                     .multilineTextAlignment(.center)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, kit.space(.s4))
     }
 
     private func infoAction(isEnabled: Bool, glyph: AtumGlyph, label: ChatCopyKey,
                             id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: kit.space(.s2)) {
                 Image(atum.symbol(glyph)).font(.title3)
                 Text(copy(label)).font(.footnote)
             }
-            .foregroundStyle(atum.color(.ink, scheme: scheme))
+            .foregroundStyle(ink)
             .frame(maxWidth: .infinity, minHeight: 64)
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(rowBackground,
+                        in: RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -815,27 +814,27 @@ struct ChatInfoHome: View {
     }
 
     private var assistantAccessSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label {
-                Text(copy(.infoAssistantAccessTitle))
-                    .font(.footnote.weight(.semibold))
-            } icon: {
-                Image(atum.symbol(.keyRound))
-            }
-            .foregroundStyle(atum.color(.ink, scheme: scheme))
+        Section {
+            VStack(alignment: .leading, spacing: kit.space(.s2)) {
+                Label {
+                    Text(copy(.infoAssistantAccessTitle))
+                        .font(.footnote.weight(.semibold))
+                } icon: {
+                    Image(atum.symbol(.keyRound))
+                }
+                .foregroundStyle(ink)
 
-            Text(copy(info.assistantAccessCopyKey))
-                .font(.footnote)
-                .foregroundStyle(atum.color(.soft, scheme: scheme))
-                .fixedSize(horizontal: false, vertical: true)
+                Text(copy(info.assistantAccessCopyKey))
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, kit.space(.s1))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("info.assistant-access")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(atum.color(.cell, scheme: scheme),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, 16)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("info.assistant-access")
+        .listRowBackground(rowBackground)
     }
 
     private var isAssistantInfo: Bool {
@@ -907,14 +906,13 @@ struct ChatInfoHome: View {
     /// undone in place.
     @ViewBuilder private var exitSection: some View {
         if reportablePeer != nil || ignorablePeer != nil || exitAction != nil {
-            VStack(spacing: 0) {
+            Section {
                 if let peer = reportablePeer {
                     // PENDING-COPY:src.matrix.chat-copy.copies.reportPerson
                     actionRow(glyph: .alertCircle, title: ReportCopy.text(design, .reportPerson),
                               tone: .ink, id: "info.report") {
                         reporting = ReportPersonRequest(userID: peer.userID)
                     }
-                    if ignorablePeer != nil || exitAction != nil { Divider().padding(.leading, 48) }
                 }
                 if let peer = ignorablePeer {
                     let blocked = details?.ignoredUserIDs.contains(peer.userID) == true
@@ -929,7 +927,6 @@ struct ChatInfoHome: View {
                             confirmation = .ignore(userID: peer.userID, name: peer.name)
                         }
                     }
-                    if exitAction != nil { Divider().padding(.leading, 48) }
                 }
                 if let exitAction {
                     actionRow(glyph: exitAction == .deleteChat ? .trash : .logOut,
@@ -939,45 +936,36 @@ struct ChatInfoHome: View {
                     }
                 }
             }
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 16)
+            .listRowBackground(rowBackground)
         }
     }
 
     private func actionRow(glyph: AtumGlyph, title: String, tone: AtumColorRole, id: String,
                            action: @escaping () -> Void) -> some View {
         Button(role: tone == .danger ? .destructive : nil, action: action) {
-            HStack(spacing: 12) {
-                Image(atum.symbol(glyph))
+            Label {
                 Text(verbatim: title)
-                Spacer()
+            } icon: {
+                Image(atum.symbol(glyph))
             }
             .foregroundStyle(atum.color(tone, scheme: scheme))
-            .padding(.horizontal, 16)
-            .frame(minHeight: 52)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityIdentifier(id)
     }
 
     private var deleteSection: some View {
-        Button(role: .destructive) { confirmation = .deleteApp } label: {
-            HStack(spacing: 12) {
-                Image(atum.symbol(.trash))
-                Text(copy(.deleteChat))
-                Spacer()
+        Section {
+            Button(role: .destructive) { confirmation = .deleteApp } label: {
+                Label {
+                    Text(copy(.deleteChat))
+                } icon: {
+                    Image(atum.symbol(.trash))
+                }
+                .foregroundStyle(atum.color(.danger, scheme: scheme))
             }
-            .foregroundStyle(atum.color(.danger, scheme: scheme))
-            .padding(.horizontal, 16)
-            .frame(minHeight: 52)
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .accessibilityIdentifier("info.delete")
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-        .accessibilityIdentifier("info.delete")
+        .listRowBackground(rowBackground)
     }
 
     private var kindLine: String? {
@@ -1129,4 +1117,19 @@ enum PersonInfoKey {
     static let loading = prefix + "loading"
     static let failed = prefix + "failed"
     static let tryAgain = prefix + "tryAgain"
+}
+
+extension View {
+    /// A section another view draws in full (Shared, an app's pages, a Team
+    /// Space channel's details) inside the panel's grouped list: no row
+    /// background or insets, and widened by the list's side margin so its own
+    /// 16 pt edges line up with the list's groups. Its buttons stay where they
+    /// are drawn, so a tap never runs every button in the row.
+    func panelEmbeddedRow(bleed: CGFloat) -> some View {
+        buttonStyle(.borderless)
+            .padding(.horizontal, -bleed)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+    }
 }

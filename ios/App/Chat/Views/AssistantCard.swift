@@ -219,21 +219,31 @@ struct AssistantCard: View {
                                  capabilities: capabilities)
     }
 
+    private var kit: AtumKit { design.kit }
+    private var rowBackground: Color { atum.color(.cell, scheme: scheme) }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
+        // One system inset-grouped list, as Settings draws its pages (UX polish
+        // P2, audit issue 6): the face and name head it on the ground, then
+        // the card's groups with system headers, footers and row highlights.
+        List {
+            Section {
                 header
-                band
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 0, leading: kit.space(.s4), bottom: 0, trailing: kit.space(.s4)))
+            } footer: {
                 offlineCaption
-                handleSection
-                personaSection
-                rowsSection
-                retireSection
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 32)
+            band
+            handleSection
+            personaSection
+            rowsSection
+            retireSection
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
+        .contentMargins(.horizontal, kit.space(.s4), for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(atum.color(.ground, scheme: scheme))
         .navigationTitle(entry == .settingsRoster
@@ -330,7 +340,7 @@ struct AssistantCard: View {
     // MARK: Header
 
     private var header: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: kit.space(.s2)) {
             avatarBlock
             nameField
             if let title = identity.title, !title.isEmpty {
@@ -352,14 +362,14 @@ struct AssistantCard: View {
             if let onMessage {
                 // Desktop's card pill: a quiet capsule with the chat glyph.
                 Button(action: onMessage) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: kit.space(.s2)) {
                         Image(atum.symbol(.messageCircle))
                             .accessibilityHidden(true)
                         Text(copy.text(.message))
                     }
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(atum.color(.ink, scheme: scheme))
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, kit.space(.s4))
                     .frame(minHeight: 36)
                     .background(atum.kitColor(.fillQuiet, scheme: scheme), in: Capsule())
                 }
@@ -368,7 +378,6 @@ struct AssistantCard: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, 16)
     }
 
     @ViewBuilder private var avatarBlock: some View {
@@ -402,6 +411,9 @@ struct AssistantCard: View {
             }
             .font(.footnote)
             .foregroundStyle(atum.color(.soft, scheme: scheme))
+            // Its own target inside the header row (a list row runs every
+            // default-style button it holds).
+            .buttonStyle(.borderless)
             .disabled(savingPhoto)
             .accessibilityIdentifier("assistant.card.photo.remove")
         }
@@ -444,10 +456,10 @@ struct AssistantCard: View {
             .submitLabel(.done)
             .onSubmit { focused = nil }
             .disabled(definition?.rename == nil || snapshot == nil)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, kit.space(.s3))
             .padding(.vertical, 6)
             .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous)
                     .fill(focused == .name ? atum.color(.cell, scheme: scheme) : .clear)
             }
             .accessibilityLabel(copy.text(.nameLabel, [.text(displayName)]))
@@ -461,7 +473,6 @@ struct AssistantCard: View {
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, 12)
                 .accessibilityIdentifier("assistant.card.offline")
         }
     }
@@ -488,78 +499,79 @@ struct AssistantCard: View {
     }
 
     private func noteBand(text: String, retry: Bool, identifier: String) -> some View {
-        HStack(spacing: 8) {
-            Image(atum.symbol(.alertCircle))
-                .accessibilityHidden(true)
-            Text(verbatim: text)
-                .font(.footnote)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            if retry {
-                Button(copy.text(.retry)) { self.retry() }
-                .font(.footnote.weight(.semibold))
+        Section {
+            HStack(spacing: kit.space(.s2)) {
+                Image(atum.symbol(.alertCircle))
+                    .accessibilityHidden(true)
+                Text(verbatim: text)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: kit.space(.s2))
+                if retry {
+                    Button(copy.text(.retry)) { self.retry() }
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.borderless)
+                }
             }
+            .foregroundStyle(atum.color(.danger, scheme: scheme))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(identifier)
         }
-        .foregroundStyle(atum.color(.danger, scheme: scheme))
-        .padding(12)
-        .background(atum.color(.cell, scheme: scheme),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.bottom, 12)
-        .accessibilityIdentifier(identifier)
+        .listRowBackground(rowBackground)
     }
 
+    /// What it helps with (or its hand-written instructions) and its
+    /// personality, with the card's grey help lines as the group's footer.
     @ViewBuilder private var personaSection: some View {
         if loadFailed, snapshot == nil {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(copy.text(.loadFailed, [.text(displayName)]))
-                    .font(.subheadline)
-                    .foregroundStyle(atum.color(.soft, scheme: scheme))
-                Button(copy.text(.retry)) { Task { await loadDefinition(force: true) } }
-                    .font(.subheadline.weight(.semibold))
+            Section {
+                VStack(alignment: .leading, spacing: kit.space(.s2)) {
+                    Text(copy.text(.loadFailed, [.text(displayName)]))
+                        .font(.subheadline)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    Button(copy.text(.retry)) { Task { await loadDefinition(force: true) } }
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(.borderless)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, kit.space(.s1))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.bottom, 12)
+            .listRowBackground(rowBackground)
         } else if let persona {
-            VStack(alignment: .leading, spacing: 10) {
+            Section {
                 if persona.kind == .custom {
                     instructionField
                 } else {
                     purposeField
                 }
                 personalityRow
-                Text(copy.text(.footnote))
-                    .font(.footnote)
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                if AssistantPersonaPolicy.exceedsContextBudget(snapshot?.definition?.soul ?? "") {
-                    // Desktop's quiet length hint, under the footnote in the same voice.
-                    Text(copy.text(.longPersona))
-                        .font(.footnote)
-                        .foregroundStyle(atum.color(.muted, scheme: scheme))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("assistant.card.long-persona")
+                if personalityExpanded {
+                    personalityField
                 }
-                if loading, snapshot == nil {
-                    ProgressView().controlSize(.small)
-                }
-                if snapshot?.definition == nil, !loading, !loadFailed {
-                    Text(copy.text(.setupRowNotReady))
-                        .font(.footnote)
-                        .foregroundStyle(atum.color(.soft, scheme: scheme))
-                        .accessibilityIdentifier("assistant.card.setup")
+            } footer: {
+                VStack(alignment: .leading, spacing: kit.space(.s2)) {
+                    Text(copy.text(.footnote))
+                    if AssistantPersonaPolicy.exceedsContextBudget(snapshot?.definition?.soul ?? "") {
+                        // Desktop's quiet length hint, under the footnote in the same voice.
+                        Text(copy.text(.longPersona))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("assistant.card.long-persona")
+                    }
+                    if loading, snapshot == nil {
+                        ProgressView().controlSize(.small)
+                    }
+                    if snapshot?.definition == nil, !loading, !loadFailed {
+                        Text(copy.text(.setupRowNotReady))
+                            .accessibilityIdentifier("assistant.card.setup")
+                    }
                 }
             }
-            .padding(16)
-            .background(atum.color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.bottom, 12)
+            .listRowBackground(rowBackground)
         }
     }
 
     private var purposeField: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: kit.space(.s2)) {
             Text(copy.text(.purposeLabel, [.text(displayName)]))
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
@@ -570,10 +582,11 @@ struct AssistantCard: View {
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .accessibilityIdentifier("assistant.card.purpose")
         }
+        .padding(.vertical, kit.space(.s1))
     }
 
     private var instructionField: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: kit.space(.s2)) {
             // Desktop labels a hand-written persona's text like any other
             // assistant's main field (`PersonaFields`, `purposeLabel`).
             Text(copy.text(.purposeLabel, [.text(displayName)]))
@@ -586,49 +599,47 @@ struct AssistantCard: View {
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .accessibilityIdentifier("assistant.card.instructions")
         }
+        .padding(.vertical, kit.space(.s1))
     }
 
+    /// Personality, folded to its value; it opens its field in the row below.
     private var personalityRow: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                if personalityExpanded {
-                    focused = nil
-                    enqueue(.who)
-                }
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    personalityExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Text(copy.text(.personality))
-                        .foregroundStyle(atum.color(.ink, scheme: scheme))
-                    Spacer(minLength: 8)
-                    Text(whoValue)
-                        .font(.footnote)
-                        .foregroundStyle(atum.color(.soft, scheme: scheme))
-                        .lineLimit(1)
-                    Image(atum.symbol(personalityExpanded ? .chevronDown
-                                                                   : .chevronRight))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(atum.color(.muted, scheme: scheme))
-                        .accessibilityHidden(true)
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!editable)
-            .accessibilityIdentifier("assistant.card.personality")
+        Button {
             if personalityExpanded {
-                TextField(copy.text(.personalityPlaceholder), text: $whoEdit.draft, axis: .vertical)
-                    .lineLimit(2...8)
-                    .focused($focused, equals: .who)
-                    .disabled(!editable)
-                    .foregroundStyle(atum.color(.ink, scheme: scheme))
-                    .padding(.top, 4)
-                    .accessibilityIdentifier("assistant.card.personality.field")
+                focused = nil
+                enqueue(.who)
             }
+            withMotion(.standard) {
+                personalityExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: kit.space(.s2)) {
+                Text(copy.text(.personality))
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+                Spacer(minLength: kit.space(.s2))
+                Text(whoValue)
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .lineLimit(1)
+                Image(atum.symbol(personalityExpanded ? .chevronDown
+                                                               : .chevronRight))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
         }
+        .disabled(!editable)
+        .accessibilityIdentifier("assistant.card.personality")
+    }
+
+    private var personalityField: some View {
+        TextField(copy.text(.personalityPlaceholder), text: $whoEdit.draft, axis: .vertical)
+            .lineLimit(2...8)
+            .focused($focused, equals: .who)
+            .disabled(!editable)
+            .foregroundStyle(atum.color(.ink, scheme: scheme))
+            .accessibilityIdentifier("assistant.card.personality.field")
     }
 
     private var whoValue: String {
@@ -638,17 +649,19 @@ struct AssistantCard: View {
 
     // MARK: Rows
 
-    private var rowsSection: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(visibleRows.enumerated()), id: \.element) { index, row in
-                if index > 0 {
-                    Divider().padding(.leading, 16)
+    /// Where it lives, its model, pet, skills and routines: one group. Each
+    /// row draws its own 16 pt inset and 52 pt height (the home row is drawn by
+    /// `AssistantHomeCardControl`), so the group's rows match.
+    @ViewBuilder private var rowsSection: some View {
+        if !visibleRows.isEmpty {
+            Section {
+                ForEach(visibleRows, id: \.self) { row in
+                    rowView(row)
                 }
-                rowView(row)
             }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(rowBackground)
         }
-        .background(atum.color(.cell, scheme: scheme),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     /// The header draws the face, name and Message; the persona section draws
@@ -691,10 +704,10 @@ struct AssistantCard: View {
     }
 
     private var handleRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: kit.space(.s2)) {
             Text(AssistantCardStandaloneCopy.botName(design))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
-            Spacer(minLength: 8)
+            Spacer(minLength: kit.space(.s2))
             if let handle = identity.botHandle, !handle.isEmpty {
                 Text(verbatim: "@" + handle)
                     .font(.footnote)
@@ -709,7 +722,7 @@ struct AssistantCard: View {
             }
         }
         .frame(minHeight: 52)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, kit.space(.s4))
     }
 
     @ViewBuilder private var modelRow: some View {
@@ -719,7 +732,6 @@ struct AssistantCard: View {
             } label: {
                 cardRow(label: AssistantCardStandaloneCopy.model(design), value: modelValue)
             }
-            .buttonStyle(.plain)
             .accessibilityIdentifier("assistant.card.model")
         }
     }
@@ -739,7 +751,6 @@ struct AssistantCard: View {
         } label: {
             cardRow(label: copy.text(.pet), value: petName ?? copy.text(.petChoose))
         }
-        .buttonStyle(.plain)
         .disabled(onOpenStore == nil)
         .accessibilityIdentifier("assistant.card.pet")
     }
@@ -753,49 +764,42 @@ struct AssistantCard: View {
     /// (`skillLabel`), and "Find more skills" opens the Skills shelf.
     /// `skillsLabel` ("Skills, 3") is the row's accessibility label, as on
     /// desktop, never its visible value.
-    private var skillsRow: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { skillsExpanded.toggle() }
-            } label: {
-                cardRow(label: copy.text(.skills), value: "\(skills.count)")
+    @ViewBuilder private var skillsRow: some View {
+        Button {
+            withMotion(.standard) { skillsExpanded.toggle() }
+        } label: {
+            cardRow(label: copy.text(.skills), value: "\(skills.count)")
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(design.text(AssistantCardCopyKey.skillsLabel.rawValue,
+                                        arguments: [.number(Int64(skills.count))]))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("assistant.card.skills")
+        if skillsExpanded {
+            ForEach(skills, id: \.name) { skill in
+                Text(verbatim: AssistantSkillLabel.label(skill.name))
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, kit.space(.s4))
             }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(design.text(AssistantCardCopyKey.skillsLabel.rawValue,
-                                            arguments: [.number(Int64(skills.count))]))
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("assistant.card.skills")
-            if skillsExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(skills, id: \.name) { skill in
-                        Text(verbatim: AssistantSkillLabel.label(skill.name))
-                            .font(.footnote)
-                            .foregroundStyle(atum.color(.soft, scheme: scheme))
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            if let onOpenStore {
+                Button { onOpenStore(.skills) } label: {
+                    HStack(spacing: kit.space(.s2)) {
+                        Text(copy.text(.findSkills))
+                        Spacer(minLength: kit.space(.s2))
+                        Image(atum.symbol(.arrowUpRight))
+                            .foregroundStyle(atum.color(.muted, scheme: scheme))
+                            .accessibilityHidden(true)
                     }
-                    if let onOpenStore {
-                        Divider()
-                        Button { onOpenStore(.skills) } label: {
-                            HStack(spacing: 8) {
-                                Text(copy.text(.findSkills))
-                                Spacer(minLength: 8)
-                                Image(atum.symbol(.arrowUpRight))
-                                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                                    .accessibilityHidden(true)
-                            }
-                            .frame(minHeight: 32)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(atum.color(.ink, scheme: scheme))
-                        .accessibilityIdentifier("assistant.card.skills.find")
-                    }
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, kit.space(.s4))
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(atum.color(.ink, scheme: scheme))
+                .accessibilityIdentifier("assistant.card.skills.find")
             }
         }
     }
@@ -805,7 +809,6 @@ struct AssistantCard: View {
             Button { routinesPresented = true } label: {
                 cardRow(label: copy.text(.routines), value: routineStatus)
             }
-            .buttonStyle(.plain)
             .accessibilityIdentifier("assistant.card.routines")
             .onAppear { startRoutineProbe(using: routines) }
         }
@@ -814,9 +817,9 @@ struct AssistantCard: View {
     /// One line at ordinary sizes. At the accessibility sizes the value moves
     /// under its label and wraps, so neither is clipped.
     private func cardRow(label: String, value: String?) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: kit.space(.s2)) {
             if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
                     Text(label)
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
                         .fixedSize(horizontal: false, vertical: true)
@@ -827,11 +830,11 @@ struct AssistantCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: kit.space(.s2))
             } else {
                 Text(label)
                     .foregroundStyle(atum.color(.ink, scheme: scheme))
-                Spacer(minLength: 8)
+                Spacer(minLength: kit.space(.s2))
                 if let value, !value.isEmpty {
                     Text(verbatim: value)
                         .font(.footnote)
@@ -845,7 +848,7 @@ struct AssistantCard: View {
                 .accessibilityHidden(true)
         }
         .frame(minHeight: 52)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, kit.space(.s4))
         .contentShape(Rectangle())
     }
 
@@ -907,18 +910,23 @@ struct AssistantCard: View {
         instructionsEdit = AssistantCardEdit(saved: parsed.instructions)
     }
 
-    @ViewBuilder private var handleSection: some View {
-        Group {
-            if let handles {
-                AssistantHandleEditor(design: design, assistantName: displayName, actions: handles,
-                                      disabled: offline)
-            } else {
-                handleRow
+    /// The bot handle: the directory editor (AS-5), or the read-only line.
+    /// Both draw their own 16 pt inset. The editor's untyped buttons stay
+    /// borderless, as they were outside a list, so each keeps its own target.
+    private var handleSection: some View {
+        Section {
+            Group {
+                if let handles {
+                    AssistantHandleEditor(design: design, assistantName: displayName, actions: handles,
+                                          disabled: offline)
+                } else {
+                    handleRow
+                }
             }
+            .buttonStyle(.borderless)
         }
-        .background(atum.color(.cell, scheme: scheme),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.bottom, 12)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(rowBackground)
     }
 
     // MARK: Retire (AS-4)
@@ -931,38 +939,32 @@ struct AssistantCard: View {
     /// card as it was and says so.
     @ViewBuilder private var retireSection: some View {
         if rows.contains(.retire), retire != nil {
-            VStack(alignment: .leading, spacing: 8) {
+            Section {
                 Button(role: .destructive) {
                     retireFailed = false
                     confirmsRetire = true
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: kit.space(.s2)) {
                         Text(copy.text(.deleteRow, [.text(displayName)]))
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 8)
+                        Spacer(minLength: kit.space(.s2))
                         if retiring { ProgressView().controlSize(.small) }
                     }
                     .foregroundStyle(atum.color(.danger, scheme: scheme))
-                    .frame(minHeight: 52)
-                    .padding(.horizontal, 16)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
                 .disabled(retiring || offline)
-                .background(atum.color(.cell, scheme: scheme),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .accessibilityIdentifier("assistant.card.retire")
+            } footer: {
                 if retireFailed {
                     Text(retireCopy.text(.agentRetireFailed))
-                        .font(.footnote)
                         .foregroundStyle(atum.color(.danger, scheme: scheme))
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 16)
                         .accessibilityIdentifier("assistant.card.retire.failed")
                 }
             }
-            .padding(.top, 12)
+            .listRowBackground(rowBackground)
         }
     }
 

@@ -60,13 +60,15 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertTrue(head.label.hasPrefix(expected.working), head.label)
         XCTAssertTrue(element(app, "desk.now.steps").exists, "no checklist")
         XCTAssertTrue(element(app, "desk.files.sent").exists, "no sent files")
-        XCTAssertTrue(element(app, "desk.files.own").waitForExistence(timeout: 3), "no own files")
         keepScreenshot("w4-e3-desk-\(tag)", of: app)
 
         // Large: its folder opens in place, Back returns; More shows the routines.
         // Swipe on the panel itself: it grows to large (a swipe on the app can land on the chat).
+        // The desk is a list, which builds a group once it is on screen: the
+        // agent's own files can sit under the medium fold.
         element(app, "desk.page").swipeUp()
         XCTAssertTrue(element(app, "desk.page").waitForExistence(timeout: 3), "the panel closed: \(boundedHierarchy(app))")
+        XCTAssertTrue(element(app, "desk.files.own").waitForExistence(timeout: 3), "no own files")
         let folder = element(app, "desk.own.folder.reports")
         XCTAssertTrue(folder.waitForExistence(timeout: 3), boundedHierarchy(app))
         folder.tap()
@@ -79,7 +81,8 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertEqual(pause.value as? String, "0", "one routine is live: not paused")
         element(app, "desk.more").tap()
         let brief = app.switches["desk.routine.job-brief"]
-        XCTAssertTrue(brief.waitForExistence(timeout: 3), boundedHierarchy(app))
+        // More opens the routines under the controls, past the fold.
+        XCTAssertTrue(revealByScrolling(brief, in: element(app, "desk.page")), boundedHierarchy(app))
         XCTAssertEqual(brief.value as? String, "1")
         XCTAssertEqual(app.switches["desk.routine.job-review"].value as? String, "0")
         keepScreenshot("w4-e3-desk-controls-\(tag)", of: app)

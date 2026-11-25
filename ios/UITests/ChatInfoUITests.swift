@@ -352,7 +352,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 3), "Info sheet did not appear")
         XCTAssertTrue(app.staticTexts["Nhóm thử"].exists)
         XCTAssertTrue(app.staticTexts["4 thành viên"].exists)
-        let scroll = sheet.scrollViews.firstMatch
+        let scroll = panelList(app)
         XCTAssertTrue(scroll.waitForExistence(timeout: 10))
         // Give the medium sheet enough travel to expand. The drag starts
         // inside its scroll view and can end above the medium detent.
@@ -361,7 +361,8 @@ final class ChatInfoUITests: TranscriptUITestCase {
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
         let assistantAccess = scroll.descendants(matching: .any)
             .matching(identifier: "info.assistant-access").firstMatch
-        XCTAssertTrue(assistantAccess.waitForExistence(timeout: 3))
+        // The list builds a row once it is scrolled to.
+        XCTAssertTrue(revealByScrolling(assistantAccess, in: scroll), boundedHierarchy(app))
         XCTAssertTrue(assistantAccess.label.contains("Trợ lý của bạn có thể đọc"))
         XCTAssertTrue(assistantAccess.label.contains("tin nhắn của người khác trong nhóm"))
         XCTAssertTrue(assistantAccess.label.localizedCaseInsensitiveContains("nhà cung cấp mô hình"))
@@ -404,7 +405,9 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 15))
         title.tap()
         let delete = app.descendants(matching: .any).matching(identifier: "info.delete").firstMatch
-        XCTAssertTrue(delete.waitForExistence(timeout: 3))
+        // Below the fold at medium; the list builds the row once it is scrolled to.
+        XCTAssertTrue(panelList(app).waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(delete, in: panelList(app)), boundedHierarchy(app))
         delete.tap()
 
         XCTAssertTrue(app.staticTexts["Xóa cuộc trò chuyện này?"].waitForExistence(timeout: 2))

@@ -756,11 +756,11 @@ struct HomeScreen: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, atum.kit.space(.s4))
         .padding(.top, 2)
-        .padding(.bottom, 8)
+        .padding(.bottom, atum.kit.space(.s2))
         .background(atum.color(.ground, scheme: scheme))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: searching)
+        .motion(.quick, value: searching)
     }
 
     private var searching: Bool { searchFocused || !query.isEmpty }
@@ -814,8 +814,10 @@ struct HomeScreen: View {
     @ViewBuilder private var createButton: some View {
         if canStartChat {
             Button { startChatPresented = true } label: {
+                // A text style, held to the 44 pt glass circle it sits in.
                 Image(atum.symbol(.plus))
-                    .font(.system(size: 19, weight: .light))
+                    .font(.title3.weight(.light))
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }
@@ -999,7 +1001,7 @@ struct HomeScreen: View {
             // Kit state: one glyph in ink-4, one line.
             VStack(spacing: 12) {
                 Image(atum.symbol(.cloudOff))
-                    .font(.system(size: 32, weight: .light))
+                    .font(.largeTitle.weight(.light))
                     .foregroundStyle(atum.kitColor(.ink4, scheme: scheme))
                     .accessibilityHidden(true)
                 Text(copy(.offline))
@@ -1362,8 +1364,9 @@ private struct HomeSearchField: View {
     var body: some View {
         if let atum {
             HStack(spacing: 8) {
+                // The text style beside the field's, so it scales with the prompt.
                 Image(atum.symbol(.search))
-                    .font(.system(size: 16, weight: .light))
+                    .font(.callout.weight(.light))
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
                     .accessibilityHidden(true)
                 // Vertical, so the prompt wraps instead of clipping at large
@@ -1659,7 +1662,7 @@ private struct HomeStartChatSheet: View {
 
     private var mainAssistantBadge: some View {
         Image(atum.symbol(.starFilled))
-            .font(.system(size: 13))
+            .font(.footnote)
             .foregroundStyle(atum.kitColor(.ink3, scheme: scheme))
             .accessibilityIdentifier("home.startChat.mainAssistant")
             .accessibilityLabel(Text(verbatim: design.text(StartChatCopyKey.mainAgent.rawValue)))

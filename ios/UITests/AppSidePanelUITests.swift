@@ -47,8 +47,11 @@ final class AppSidePanelUITests: TranscriptUITestCase {
         let order = ["readings", "library", "match", "tarot"].map { element(app, "info.app.page." + $0).frame.minY }
         XCTAssertEqual(order, order.sorted(), "pages are not in the declared order")
         XCTAssertTrue(app.buttons["Luận Giải"].exists, boundedHierarchy(app))
-        // The phone's chat controls stay below the pages.
-        XCTAssertGreaterThan(element(app, "info.pin").frame.minY, element(app, "info.app.page.tarot").frame.minY)
+        // The phone's chat controls stay below the pages. The panel is a list,
+        // which builds the controls' row once it is on screen: raise the panel.
+        let pin = element(app, "info.pin")
+        for _ in 0..<3 where !(pin.exists && pin.isHittable) { element(app, "info.sheet").swipeUp() }
+        XCTAssertGreaterThan(pin.frame.minY, element(app, "info.app.page.tarot").frame.minY)
         keepScreenshot("as11-app-panel-pages-vi", of: app)
 
         reveal(readings, in: app)

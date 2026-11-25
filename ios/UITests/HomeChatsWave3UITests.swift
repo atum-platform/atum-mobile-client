@@ -208,12 +208,13 @@ final class HomeChatsWave3UITests: TranscriptUITestCase {
         let app = launchScripted(.chatPeople)
         element(app, "chat.title").tap()
         let rename = element(app, "info.rename")
-        XCTAssertTrue(rename.waitForExistence(timeout: 5), boundedHierarchy(app))
+        XCTAssertTrue(element(app, "info.sheet").waitForExistence(timeout: 5), boundedHierarchy(app))
         // The row sits under the switches: raise the panel (swipe the panel,
-        // not the chat behind it) until it is in view.
-        for _ in 0..<3 where !rename.isHittable {
+        // not the chat behind it) until it is in view. The panel's list builds
+        // the row only once it is on screen.
+        for _ in 0..<4 where !(rename.exists && rename.isHittable) {
             element(app, "info.sheet").swipeUp()
-            _ = waitFor(2) { rename.isHittable }
+            _ = waitFor(2) { rename.exists && rename.isHittable }
         }
         XCTAssertTrue(waitFor(3) { rename.isHittable }, boundedHierarchy(app))
         rename.tap()
