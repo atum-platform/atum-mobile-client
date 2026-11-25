@@ -136,6 +136,49 @@ and the photo cleared when the memo missed.
   only affects catalog URLs that declare no `sha256`. A declared digest is part of
   the origin key. Not addressed.
 
+## Fix round 3
+
+The pinned Matrix Rust SDK [requests a size-specific thumbnail with caching enabled][sdk-thumbnail]
+and [opens a SQLite media store under the configured cache path][sdk-media-store].
+The app builds or restores that client with paths for the custody ticket's
+installation generation (`ios/App/MatrixLiveRuntime.swift:79`, `:117`, `:647`
+and `ios/Sources/AtumNativeAPI/MatrixStoreDirectory.swift:48`). Ordinary sign-out
+quarantines and purges that generation's store (`ios/Sources/AtumNativeAPI/LocalSignOut.swift:274`,
+`:303`). Forced end and Sign in again can preserve the old store for recovery.
+A new installation opens its own cache path. The SDK's [clearCaches API][sdk-clear]
+also removes room and state caches and requires recreating the client, so it
+would interfere with that recovery path.
+
+The app's separate thumbnail disk cache used URI and size alone.
+`clearAccountCaches` ran after successful sign-out and contextless
+`signOutFromStatus`. Forced end, Sign in again and rollback-incomplete
+sign-out went through `clearCompanyAccountScope` alone, leaving those disk
+entries readable.
+
+- `MatrixAvatarThumbnailCache` now keeps only its bounded in-memory fast path.
+  The SDK handles persistence. No app lookup reads the old `v1|mxc|` disk keys.
+  The existing sign-out cleanup still removes legacy files alongside catalog art.
+- The cache scope binds to the Matrix installation generation and a lifetime
+  identifier. A live session carries that scope, including across routine token
+  renewal. `clearCompanyAccountScope` retires it synchronously alongside the
+  decoded memo. That method is called by successful sign-out, rollback-incomplete
+  sign-out, contextless `signOutFromStatus`, Sign in again when archiving the
+  stranded session, and forced session end.
+- `LiveMatrixSession.avatarThumbnail` checks custody before any hit and after
+  the SDK fetch. The cache checks the session's scope before reading and again
+  before returning or storing a fetch result. A fetch that completes after its
+  account ends returns no bytes to the caller and cannot populate the next
+  account's app cache.
+
+### Follow-ups from r2
+
+- The empty-chat greeting can still flash when SwiftUI replaces `ChatFaceView`
+  with `ChatInfoAvatar` as room info arrives (`ios/App/Chat/Views/ChatScreen.swift:475`).
+
+[sdk-thumbnail]: https://github.com/matrix-org/matrix-rust-sdk/blob/97a1589b70bd122c1d66e0d68ea008d8554076a5/bindings/matrix-sdk-ffi/src/client.rs#L1526-L1548
+[sdk-media-store]: https://github.com/matrix-org/matrix-rust-sdk/blob/97a1589b70bd122c1d66e0d68ea008d8554076a5/crates/matrix-sdk/src/client/builder/mod.rs#L825-L841
+[sdk-clear]: https://github.com/matrix-org/matrix-rust-sdk/blob/97a1589b70bd122c1d66e0d68ea008d8554076a5/bindings/matrix-sdk-ffi/src/client.rs#L2141-L2163
+
 ## Verification
 
 - `AvatarArtMemoTests` (`ios/AppTests/AvatarArtTests.swift`): Home row and title list
@@ -153,6 +196,12 @@ and the photo cleared when the memo missed.
   namesake does not; the room face survives its title changing; a different person
   or a removed photo clears on the first frame. Logs:
   `/Volumes/AtumTestFlight/avatar-blip/r2-*.log`.
+- Round 3 (`MatrixAvatarThumbnailCacheTests`): a second account misses after
+  the shared teardown, late fetches cannot publish or cache bytes, reopening
+  the same installation creates a new scope, and a real legacy disk entry is
+  ignored. The route wiring is checked at the five calls to
+  `clearCompanyAccountScope`. The focused suites and the Debug app build use
+  one lock acquisition. Logs are in `/Volumes/AtumTestFlight/avatar-blip/r3-*.log`.
 - Design lint 0. `scripts/public_guard.py --base origin/main --head HEAD` exit 0.
 - No frame capture. The blink is one or two frames during the push, and the scripted
   host serves avatars from local fixtures. A capture needs a timed screen recording of

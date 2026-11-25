@@ -2,6 +2,7 @@
 import AtumChat
 import AtumNativeAPI
 import CoreGraphics
+import CryptoKit
 import SwiftUI
 import UIKit
 import XCTest
@@ -32,6 +33,87 @@ final class AvatarFrameTests: XCTestCase {
     func testTheAppTileRatioIsTheKitToken() throws {
         let kit = try AtumKit.vendored()
         XCTAssertEqual(AvatarShapePolicy.appCornerRadiusRatio, kit.tokens.phone.appIconCornerRatio, accuracy: 0.0001)
+    }
+}
+
+@MainActor
+final class MatrixAvatarThumbnailCacheTests: XCTestCase {
+    private let uri = "mxc://atum.test/shared"
+    private let pixelSide = 96
+    private let bytesA = Data([1])
+    private let bytesB = Data([2])
+
+    /// Forced end, Sign in again, and both sign-out entry points all retire
+    /// the cache through LiveAppModel.clearCompanyAccountScope.
+    func testAccountEndDropsBytesBeforeAnotherAccountStarts() async {
+        let cache = MatrixAvatarThumbnailCache()
+        let scopeA = cache.beginAccountScope(sessionGeneration: UUID())
+        let initial = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeA) { bytesA }
+        XCTAssertEqual(initial, bytesA)
+        let cached = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeA) { nil }
+        XCTAssertEqual(cached, bytesA)
+
+        cache.endAccountScope()
+        let signedOut = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeA) {
+            XCTFail("An ended session must not fetch")
+            return bytesA
+        }
+        XCTAssertNil(signedOut)
+
+        let scopeB = cache.beginAccountScope(sessionGeneration: UUID())
+        let miss = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeB) { nil }
+        XCTAssertNil(miss)
+        let own = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeB) { bytesB }
+        XCTAssertEqual(own, bytesB)
+        let stale = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeA) { nil }
+        XCTAssertNil(stale)
+    }
+
+    func testFetchThatFinishesAfterAccountChangesCannotReturnOrCacheItsBytes() async {
+        let cache = MatrixAvatarThumbnailCache()
+        let scopeA = cache.beginAccountScope(sessionGeneration: UUID())
+        let generationB = UUID()
+        let late = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeA) {
+            // The SDK call returns only after A has ended and B has started.
+            cache.endAccountScope()
+            _ = cache.beginAccountScope(sessionGeneration: generationB)
+            return bytesA
+        }
+        XCTAssertNil(late)
+        let scopeB = cache.beginAccountScope(sessionGeneration: generationB)
+        let miss = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: scopeB) { nil }
+        XCTAssertNil(miss)
+    }
+
+    func testReopeningTheSameInstallationAfterAccountEndRequiresANewScope() async {
+        let cache = MatrixAvatarThumbnailCache()
+        let generation = UUID()
+        let first = cache.beginAccountScope(sessionGeneration: generation)
+        XCTAssertEqual(cache.beginAccountScope(sessionGeneration: generation), first)
+        cache.endAccountScope()
+        let reopened = cache.beginAccountScope(sessionGeneration: generation)
+        XCTAssertNotEqual(reopened, first)
+        let stale = await cache.thumbnail(uri: uri, pixelSide: pixelSide, scope: first) { bytesA }
+        XCTAssertNil(stale)
+    }
+
+    func testLegacyUnscopedThumbnailOnDiskIsIgnored() async {
+        let legacyURI = "mxc://atum.test/\(UUID().uuidString)"
+        let legacyKey = "v1|mxc|\(legacyURI)|\(pixelSide)"
+        let disk = AvatarDiskCache()
+        let filename = SHA256.hash(data: Data(legacyKey.utf8))
+            .map { String(format: "%02x", $0) }.joined() + ".bin"
+        let legacyFile = await disk.directory.appendingPathComponent(filename)
+        defer { try? FileManager.default.removeItem(at: legacyFile) }
+        let stored = await disk.store(bytesA, for: legacyKey)
+        XCTAssertTrue(stored)
+        let fixture = await disk.data(for: legacyKey)
+        XCTAssertEqual(fixture, bytesA)
+
+        let cache = MatrixAvatarThumbnailCache()
+        let scope = cache.beginAccountScope(sessionGeneration: UUID())
+        let result = await cache.thumbnail(uri: legacyURI, pixelSide: pixelSide, scope: scope) { bytesB }
+        XCTAssertEqual(result, bytesB)
     }
 }
 
