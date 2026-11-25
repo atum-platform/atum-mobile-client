@@ -68,6 +68,15 @@ struct S6SystemGallery: View {
                     }
                 }
             }
+            // Atum's face as Home's chat-list rows draw it: the logo inset (64%),
+            // as the desktop's chat-list rows pass `inset`; the row above is 70%.
+            HStack(alignment: .center, spacing: kit.space(.s2)) {
+                ForEach(sizes, id: \.self) { size in
+                    AtumAvatar(kind: .atum, name: "Atum", size: size)
+                }
+            }
+            .environment(\.atumAvatarBrandInset, true)
+            .accessibilityIdentifier("system.gallery.atum-inset")
             HStack(spacing: kit.space(.s3)) {
                 AppSeal(tier: .official)
                 AppSeal(tier: .verified)
@@ -76,11 +85,22 @@ struct S6SystemGallery: View {
     }
 
     private var marks: some View {
-        HStack(spacing: kit.space(.s5)) {
-            HStack(spacing: kit.space(.s1)) { ProtonMark(.small); Text(verbatim: "12") }
-            HStack(spacing: kit.space(.s1)) { ProtonMark(.regular); Text(verbatim: "12.400") }
-            AtomMark().frame(width: 28, height: 28)
-            AtomWait().frame(width: 28, height: 28)
+        VStack(alignment: .leading, spacing: kit.space(.s3)) {
+            HStack(spacing: kit.space(.s5)) {
+                HStack(spacing: kit.space(.s1)) { ProtonMark(.small); Text(verbatim: "12") }
+                HStack(spacing: kit.space(.s1)) { ProtonMark(.regular); Text(verbatim: "12.400") }
+                AtomMark().frame(width: 28, height: 28)
+                AtomWait().frame(width: 28, height: 28)
+            }
+            // Atum's picker mark at the chip (16) and row (20) sizes, beside a
+            // provider's, as the model picker lines them up.
+            HStack(spacing: kit.space(.s3)) {
+                ProviderMark(design: design, art: .atum, size: 16)
+                ProviderMark(design: design, art: .atum, size: 20)
+                ProviderMark(design: design, provider: "openai", label: "OpenAI", size: 20)
+                Text(verbatim: "Nguyệt Thực 1.3")
+            }
+            .accessibilityIdentifier("system.gallery.picker-marks")
         }
         .foregroundStyle(atum.color(.ink, scheme: scheme))
     }
