@@ -1,10 +1,12 @@
 import AtumChat
 import SwiftUI
+import UIKit
 
 /// The signed-in shell: Personal chats, Drive, Store and Workplace remain
-/// distinct destinations; Account stays behind Home's top-left avatar.
-/// Each root keeps its own navigation path on `Router`, so changing tabs never
-/// rebuilds or resets a different tab's navigation state.
+/// distinct destinations in the system tab bar; Account stays behind Home's
+/// top-left avatar. Each root keeps its own navigation path on `Router` and
+/// its own live view tree inside `TabView`, so changing tabs never rebuilds or
+/// resets a different tab's navigation or view state.
 struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamSpaceContent: View,
                AccountContent: View>: View {
     @Bindable var router: Router
@@ -37,27 +39,18 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Group {
-                switch router.selectedTab {
-                case .home:
-                    NavigationStack(path: $router.homePath) { home() }
-                case .drive:
-                    NavigationStack(path: $router.drivePath) { drive() }
-                case .store:
-                    NavigationStack(path: $router.storePath) { store() }
-                case .teamSpace:
-                    NavigationStack(path: $router.teamSpacePath) { teamSpace() }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            // Reserve the bar's actual layout height outside NavigationStack.
-            // An inset on the outer navigation container did not constrain the
-            // nested List's scrollable tail, leaving its final row underneath.
-            if router.activeRoomID == nil {
-                bottomBar
-            }
+        // The system tab bar (P1, UX polish audit issue 1). Every root keeps
+        // its own live `NavigationStack`, so a tab switch no longer destroys
+        // another tab's scroll position, search text or `@State`. A chat
+        // destination hides the bar with `.toolbarVisibility(.hidden, for:
+        // .tabBar)`, which UIKit animates as part of the push and the pop
+        // (interactive swipe-back included). The bar sits behind the
+        // keyboard, and content scrolls beneath its Liquid Glass.
+        TabView(selection: selection) {
+            tab(.home) { NavigationStack(path: $router.homePath) { home() } }
+            tab(.drive) { NavigationStack(path: $router.drivePath) { drive() } }
+            tab(.store) { NavigationStack(path: $router.storePath) { store() } }
+            tab(.teamSpace) { NavigationStack(path: $router.teamSpacePath) { teamSpace() } }
         }
         .atumDesign(design)
         .sheet(isPresented: accountPresentation) {
@@ -83,73 +76,65 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
         }
     }
 
-    @Environment(\.colorScheme) private var scheme
-
     private var accountPresentation: Binding<Bool> {
         Binding(get: { router.isAccountPresented },
                 set: { if !$0 { router.dismissAccount() } })
     }
-/** Preserve user-visible identity, state and recovery behavior across connection changes. */
-    /// top field): one glass capsule of four icon tabs. Kit sizes for an
-    /// icon-only bar: 24 pt glyphs (`icon.xl`), 44 pt tabs (the regular touch
-    /// height) inside a 4 pt inset, so the capsule is 52 pt tall; the selected
-    /// tab sits on a `fill-selected` capsule with its glyph filled. Titles stay
-    /// as accessibility labels. An unavailable tab is never dimmed (STYLE: no
-    /// silent gates); it opens its coming-soon destination and says so.
-    private var bottomBar: some View {
-        let kit = design.kit
-        return HStack(spacing: 0) {
-            tabButton(.home)
-            tabButton(.drive)
-            tabButton(.store)
-            tabButton(.teamSpace)
-        }
-        .padding(kit.space(.s1))
-        .modifier(LiveGlass(design: design,
-                            radius: (kit.phoneControlHeight(.regular) + kit.space(.s1) * 2) / 2))
-        .padding(.horizontal, kit.space(.s4))
-        .padding(.top, kit.space(.s1))
-        .padding(.bottom, 2)
+
+    /// The bar writes through `Router.select(tab:)`, never `selectedTab`
+    /// directly, so a user's tab choice still cancels an in-flight room open
+    /// (`onUserSelectedTab`) and a re-tap of the selected tab still pops it
+    /// or, on Home's root, scrolls the roster to its top. Programmatic routing
+    /// (notifications, `open(roomId:)`) changes `selectedTab` and the bar
+    /// follows through the getter.
+    private var selection: Binding<Router.Tab> {
+        Binding(get: { router.selectedTab }, set: { router.select(tab: $0) })
     }
 
-    private func tabButton(_ kind: Router.Tab) -> some View {
+    /// One icon-only system tab. The Kit's Phosphor glyphs stay the images
+    /// (Light at rest, Fill when selected) and the exported title stays the
+    /// accessibility label and the large-content-viewer title, as before.
+    /// The system draws the selection (the tint is the app's ink) and the
+    /// Liquid Glass. Only a mention earns a mark (gap spec §2), drawn by the
+    /// system badge with the same "99+" cap as a Home row. An unavailable tab
+    /// is never dimmed (STYLE: no silent gates); it opens its coming-soon
+    /// destination and says so in its value.
+    private func tab<Content: View>(_ kind: Router.Tab,
+                                    @ViewBuilder content: () -> Content) -> some TabContent<Router.Tab> {
         let title = PhoneTabCopy.title(for: kind, design: design)
-        let selected = router.selectedTab == kind
-        let available = isAvailable(kind)
         let atum = AtumVisualSystem(design: design)
-        let kit = design.kit
-        return Button { router.select(tab: kind) } label: {
+        let selected = router.selectedTab == kind
+        let destination = content()
+            // The bar's bottom scroll edge is the system hard edge, not the
+            // default soft one. iOS 26's soft edge fades and dims list rows
+            // about 65 pt above the bar's top (a 148 pt pocket over an 83 pt
+            // bar on a 390 x 844 iPhone). Resting rows above the bar lost
+            // contrast there (CI fix, `testRosterAccessibilityAudit`). The
+            // hard edge stops at the bar. Rows still scroll beneath the glass,
+            // and the system inset still rests the last row above it. Views
+            // that set their own edge style, such as the chat transcript's
+            // soft edge over its composer, keep it.
+            .scrollEdgeEffectStyle(.hard, for: .bottom)
+            .background(TabBarItemIdentifiers(identifiers: Router.Tab.barOrder.map { "phone.tab." + $0.identifier }))
+        return Tab(value: kind) {
+            destination
+        } label: {
+            // No title text in the bar: FlowPhone2's phone shell is four icon
+            // tabs. A `.fill` custom symbol must not be picked up by the bar's
+            // automatic fill variant, so variants are pinned off.
             Image(atum.symbol(glyph(for: kind, selected: selected)))
-                .font(.system(size: CGFloat(kit.tokens.icon["xl"] ?? 24), weight: .light))
-                .overlay(alignment: .topTrailing) {
-                    // Only mentions earn a mark on a tab (gap spec §2).
-                    let mark = badge(for: kind)
-                    if case .mention = mark {
-                        HomeBadgeView(design: design, badge: mark, pinned: false)
-                            .offset(x: 12, y: -6)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: kit.phoneControlHeight(.regular))
-                .foregroundStyle(atum.color(.ink, scheme: scheme))
-                .background {
-                    if selected {
-                        Capsule().fill(atum.kitColor(.fillSelected, scheme: scheme))
-                    }
-                }
-                .contentShape(Capsule())
+                .environment(\.symbolVariants, .none)
         }
-        .buttonStyle(.plain)
+        .badge(badgeText(for: kind))
         .accessibilityLabel(Text(verbatim: title))
-        .accessibilityValue(Text(verbatim: available ? badgeDescription(for: kind)
-                                            : design.text("desktop.atum.discover.comingSoon")))
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityValue(Text(verbatim: isAvailable(kind) ? badgeDescription(for: kind)
+                                                 : design.text("desktop.atum.discover.comingSoon")))
         .accessibilityIdentifier("phone.tab." + kind.identifier)
-        // A long press shows the tab's name large, as for any icon-only control.
-        .accessibilityShowsLargeContentViewer {
-            Image(atum.symbol(glyph(for: kind, selected: selected)))
-            Text(verbatim: title)
-        }
+    }
+
+    private func badgeText(for tab: Router.Tab) -> Text? {
+        guard case let .mention(count) = badge(for: tab) else { return nil }
+        return Text(verbatim: Badge.pillText(count))
     }
 
     private func badge(for tab: Router.Tab) -> Badge {
@@ -183,8 +168,7 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
 }
 
 /// The simple one-line placeholder an unavailable destination opens. It is a
-/// real tab destination, never a dead tap; the tab itself is subdued by
-/// `RootTabs`.
+/// real tab destination, never a dead tap; the tab itself is never dimmed.
 struct PhoneComingSoonView: View {
     let design: LiveDesign
     let tab: PhoneTab
@@ -243,7 +227,55 @@ enum PhoneTabCopy {
     }
 }
 
+/// Pins the `phone.tab.*` accessibility identifiers on the UIKit tab bar
+/// items. `TabContent.accessibilityIdentifier` reaches the bar's buttons, but
+/// iOS 26 rebuilds those buttons (for example once content scrolls beneath
+/// the glass) and the rebuilt ones carried the label and value without the
+/// identifier. The item's own identifier survives a rebuild. Any loaded tab
+/// can pin all four, so tabs that were never opened are identified too.
+private struct TabBarItemIdentifiers: UIViewControllerRepresentable {
+    let identifiers: [String]
+
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.identifiers = identifiers
+        // After SwiftUI has applied this pass's tab item changes.
+        DispatchQueue.main.async { controller.apply() }
+    }
+
+    final class Controller: UIViewController {
+        var identifiers: [String] = []
+
+        override func loadView() {
+            view = UIView()
+            view.isUserInteractionEnabled = false
+            view.isAccessibilityElement = false
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            apply()
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            apply()
+        }
+
+        func apply() {
+            guard let items = tabBarController?.tabBar.items, items.count == identifiers.count else { return }
+            for (item, identifier) in zip(items, identifiers) where item.accessibilityIdentifier != identifier {
+                item.accessibilityIdentifier = identifier
+            }
+        }
+    }
+}
+
 private extension Router.Tab {
+    /// The bar's left-to-right order, as declared in `RootTabs.body`.
+    static let barOrder: [Router.Tab] = [.home, .drive, .store, .teamSpace]
+
     var identifier: String {
         switch self {
         case .home: PhoneTab.chats.rawValue

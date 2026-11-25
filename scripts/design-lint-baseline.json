@@ -1,0 +1,332 @@
+{
+  "about": "Design lint counts per file; see scripts/design_lint.py. Lower a count by migrating to tokens, then run --update.",
+  "files": {
+    "ios/App/Account/AccountConnectionsSection.swift": {
+      "padding": 3,
+      "spacing": 7,
+      "animation": 1
+    },
+    "ios/App/Account/AccountProfileHeader.swift": {
+      "spacing": 4
+    },
+    "ios/App/Account/AccountScreen.swift": {
+      "spacing": 1,
+      "font-size": 1
+    },
+    "ios/App/Account/AccountSettingsDetail.swift": {
+      "padding": 8,
+      "spacing": 22,
+      "font-size": 2
+    },
+    "ios/App/Account/DeleteAccountRequestSheet.swift": {
+      "padding": 2,
+      "spacing": 2
+    },
+    "ios/App/Account/IgnoredPeopleList.swift": {
+      "spacing": 1
+    },
+    "ios/App/Account/LegalScreens.swift": {
+      "padding": 1,
+      "spacing": 1
+    },
+    "ios/App/Account/PhoneApprovalSettings.swift": {
+      "padding": 3,
+      "spacing": 7,
+      "font-size": 1
+    },
+    "ios/App/AppBots/AppBotViews.swift": {
+      "padding": 6,
+      "spacing": 3
+    },
+    "ios/App/AppBots/AppOnboardingViews.swift": {
+      "padding": 2,
+      "spacing": 3
+    },
+    "ios/App/Auth/S6AuthViews.swift": {
+      "padding": 11,
+      "spacing": 2,
+      "animation": 1
+    },
+    "ios/App/Chat/Media/AttachSheet.swift": {
+      "padding": 4,
+      "spacing": 3,
+      "radius": 1,
+      "font-size": 1
+    },
+    "ios/App/Chat/Media/AttachmentTray.swift": {
+      "padding": 4,
+      "spacing": 3,
+      "radius": 3,
+      "font-size": 2
+    },
+    "ios/App/Chat/Media/MediaRows.swift": {
+      "padding": 1,
+      "spacing": 2,
+      "radius": 1,
+      "font-size": 1,
+      "animation": 2
+    },
+    "ios/App/Chat/Media/MediaViewer.swift": {
+      "padding": 3,
+      "spacing": 3
+    },
+    "ios/App/Chat/SharedCollections/SharedCollectionsSection.swift": {
+      "padding": 19,
+      "spacing": 14,
+      "radius": 6,
+      "animation": 1
+    },
+    "ios/App/Chat/Views/AgentDeskPage.swift": {
+      "padding": 13,
+      "spacing": 15,
+      "radius": 1,
+      "animation": 1
+    },
+    "ios/App/Chat/Views/AnswerActionsRow.swift": {
+      "padding": 1,
+      "font-size": 1
+    },
+    "ios/App/Chat/Views/AppPanelPages.swift": {
+      "padding": 2,
+      "spacing": 3
+    },
+    "ios/App/Chat/Views/AssistantCard.swift": {
+      "padding": 27,
+      "spacing": 16,
+      "radius": 7,
+      "animation": 2
+    },
+    "ios/App/Chat/Views/AssistantHandleEditor.swift": {
+      "padding": 9,
+      "spacing": 11,
+      "radius": 1
+    },
+    "ios/App/Chat/Views/AssistantHomeSheet.swift": {
+      "padding": 1,
+      "spacing": 2
+    },
+    "ios/App/Chat/Views/AssistantNewSheet.swift": {
+      "padding": 3,
+      "spacing": 7
+    },
+    "ios/App/Chat/Views/AssistantRoutinesView.swift": {
+      "padding": 1,
+      "spacing": 10
+    },
+    "ios/App/Chat/Views/AtomMark.swift": {
+      "animation": 2
+    },
+    "ios/App/Chat/Views/ChatGPTTrainingConfirm.swift": {
+      "padding": 3,
+      "spacing": 3
+    },
+    "ios/App/Chat/Views/ChatInfoSheet.swift": {
+      "padding": 41,
+      "spacing": 16,
+      "radius": 7
+    },
+    "ios/App/Chat/Views/ChatPanelHost.swift": {
+      "padding": 5,
+      "spacing": 2,
+      "radius": 1
+    },
+    "ios/App/Chat/Views/ChatScreen.swift": {
+      "padding": 6,
+      "spacing": 5
+    },
+    "ios/App/Chat/Views/ChatSearchBar.swift": {
+      "padding": 3,
+      "spacing": 4,
+      "font-size": 1
+    },
+    "ios/App/Chat/Views/Composer.swift": {
+      "padding": 19,
+      "spacing": 8,
+      "font-size": 7,
+      "animation": 1
+    },
+    "ios/App/Chat/Views/DayDividerRow.swift": {
+      "padding": 3
+    },
+    "ios/App/Chat/Views/DeliveryLine.swift": {
+      "padding": 7,
+      "spacing": 2
+    },
+    "ios/App/Chat/Views/EmptyChatGreeting.swift": {
+      "padding": 7,
+      "spacing": 1,
+      "radius": 2
+    },
+    "ios/App/Chat/Views/FailedSendSheet.swift": {
+      "padding": 4,
+      "spacing": 3,
+      "radius": 2
+    },
+    "ios/App/Chat/Views/JumpPillButton.swift": {
+      "spacing": 1
+    },
+    "ios/App/Chat/Views/LoadingEarlierRow.swift": {
+      "padding": 1
+    },
+    "ios/App/Chat/Views/MessageBubbleRow.swift": {
+      "padding": 16,
+      "spacing": 10
+    },
+    "ios/App/Chat/Views/MessageMenu.swift": {
+      "padding": 10,
+      "spacing": 6,
+      "radius": 3,
+      "font-size": 1,
+      "animation": 2
+    },
+    "ios/App/Chat/Views/NoticeRow.swift": {
+      "padding": 1,
+      "spacing": 1,
+      "animation": 1
+    },
+    "ios/App/Chat/Views/PhoneModelPickerList.swift": {
+      "padding": 9,
+      "spacing": 15,
+      "radius": 1,
+      "animation": 2
+    },
+    "ios/App/Chat/Views/QuoteView.swift": {
+      "spacing": 2,
+      "radius": 1
+    },
+    "ios/App/Chat/Views/ReactionChips.swift": {
+      "padding": 2,
+      "spacing": 2
+    },
+    "ios/App/Chat/Views/ReadMarkerRow.swift": {
+      "spacing": 1
+    },
+    "ios/App/Chat/Views/SelectTextSheet.swift": {
+      "padding": 2
+    },
+    "ios/App/Chat/Views/TranscriptView.swift": {
+      "padding": 2,
+      "radius": 1,
+      "animation": 4
+    },
+    "ios/App/Company/CompanyChannelChrome.swift": {
+      "padding": 14,
+      "spacing": 13,
+      "radius": 2
+    },
+    "ios/App/Company/CompanyInviteViews.swift": {
+      "padding": 3,
+      "spacing": 13
+    },
+    "ios/App/Company/CompanyLogo.swift": {
+      "padding": 1
+    },
+    "ios/App/Company/CompanySpaceViews.swift": {
+      "padding": 8,
+      "spacing": 13,
+      "font-size": 1
+    },
+    "ios/App/Company/CompanyThreadsViews.swift": {
+      "padding": 4,
+      "spacing": 9
+    },
+    "ios/App/Company/CompanyWorkspaceViews.swift": {
+      "padding": 40,
+      "spacing": 16,
+      "radius": 1,
+      "font-size": 2
+    },
+    "ios/App/Company/ConversationViews.swift": {
+      "padding": 25,
+      "spacing": 10,
+      "radius": 1,
+      "animation": 1
+    },
+    "ios/App/Company/TeamSpaceRevampViews.swift": {
+      "padding": 6,
+      "spacing": 6,
+      "radius": 2,
+      "font-size": 1
+    },
+    "ios/App/Debug/S6SystemGallery.swift": {
+      "padding": 1,
+      "spacing": 11,
+      "radius": 2
+    },
+    "ios/App/Drive/DriveGalleryView.swift": {
+      "padding": 6,
+      "spacing": 4,
+      "radius": 1,
+      "font-size": 2,
+      "animation": 1
+    },
+    "ios/App/Drive/DriveScreen.swift": {
+      "padding": 7,
+      "spacing": 14,
+      "radius": 2,
+      "font-size": 3
+    },
+    "ios/App/Home/AppCardSheet.swift": {
+      "padding": 8,
+      "spacing": 2,
+      "radius": 1
+    },
+    "ios/App/Home/AttentionBell.swift": {
+      "padding": 7,
+      "spacing": 2,
+      "font-size": 1
+    },
+    "ios/App/Home/HomeGlobalSearch.swift": {
+      "spacing": 3
+    },
+    "ios/App/Home/HomeScreen.swift": {
+      "padding": 53,
+      "spacing": 36,
+      "radius": 2,
+      "font-size": 4,
+      "animation": 2
+    },
+    "ios/App/Home/ListingHireView.swift": {
+      "padding": 3,
+      "spacing": 5,
+      "font-size": 1
+    },
+    "ios/App/NativeRichText.swift": {
+      "padding": 1,
+      "spacing": 5,
+      "radius": 3
+    },
+    "ios/App/Onboarding/FirstRunCards.swift": {
+      "padding": 4,
+      "radius": 2
+    },
+    "ios/App/Recovery/RecoverySheets.swift": {
+      "padding": 8,
+      "spacing": 4,
+      "radius": 2,
+      "font-size": 1
+    },
+    "ios/App/Shell/RootTabs.swift": {
+      "spacing": 1,
+      "font-size": 1
+    },
+    "ios/App/Store/ProtonTopUp.swift": {
+      "padding": 8,
+      "spacing": 4
+    },
+    "ios/App/Store/StoreItemSheet.swift": {
+      "padding": 11,
+      "spacing": 7,
+      "animation": 1
+    },
+    "ios/App/Store/StorePurchasedScreen.swift": {
+      "spacing": 6
+    },
+    "ios/App/Store/StoreScreen.swift": {
+      "padding": 9,
+      "spacing": 6,
+      "font-size": 2,
+      "animation": 1
+    }
+  }
+}

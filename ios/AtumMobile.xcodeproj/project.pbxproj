@@ -41,6 +41,7 @@
 		22B6D11E40D6CC1F3CE999E0 /* ProtonTopUp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17CA4634D4BB32072A0A9001 /* ProtonTopUp.swift */; };
 		25E48EEEFA8F85D1D89E44DA /* AtumMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C847BF5BA076FDE92399ED /* AtumMobileApp.swift */; };
 		281E7098764877EE3887C071 /* AtumKitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 217E49CD3A5C5BA3920263DF /* AtumKitTests.swift */; };
+		E1A0D5F0C3B24A6B9D7E0103 /* MotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A0D5F0C3B24A6B9D7E0104 /* MotionTests.swift */; };
 		282F9A8E0CF933BF588450C2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 6E89864C3077D2CDA9F91E56 /* PrivacyInfo.xcprivacy */; };
 		289D64EBC63A86A62671DB68 /* MathFonts-GUST-FONT-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F21F9F26B7AE3ADF4F7C1F85 /* MathFonts-GUST-FONT-LICENSE.txt */; };
 		29DA3E212073130210A58D9D /* AppOnboardingCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5773C98F5EB80B08BB493152 /* AppOnboardingCopyTests.swift */; };
@@ -130,6 +131,7 @@
 		AB0FED87F238AF93CE3B3244 /* AssistantHandleEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B04ADFE2DD7D8C4A57DD93EC /* AssistantHandleEditor.swift */; };
 		74D4917D0D3526D46932032D /* AccountSettingsState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65E57A0A4A6E16379B0A7464 /* AccountSettingsState.swift */; };
 		751C1D9424BBC65042A66641 /* AtumKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB56378C2BC54E677F08543 /* AtumKit.swift */; };
+		E1A0D5F0C3B24A6B9D7E0101 /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A0D5F0C3B24A6B9D7E0102 /* Motion.swift */; };
 		752543E1C1F44F58EDE96024 /* Router.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FA7D84EF28A8812D98C3FF2 /* Router.swift */; };
 		756D19CC6AAB44EBF12A8CE4 /* RosterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BA26BBC62B824A20B3BFF8B /* RosterStore.swift */; };
 		75AC2E993A4C3B4443CD8F2C /* ChatKindsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADA32EDA94792AE695A460E6 /* ChatKindsUITests.swift */; };
@@ -197,6 +199,7 @@
 		AB04F912D2B46AC1968F4354 /* ConcurrencyExtras-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 2EFA8574785BD123D4370DE8 /* ConcurrencyExtras-LICENSE.txt */; };
 		AE7D9EF90761D538DE094614 /* MatrixAvatarThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41709887A661B2844962F90D /* MatrixAvatarThumbnailCache.swift */; };
 		B15C2E7D990B421063B3B19F /* LiveRosterRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */; };
+		B15C2E7D990B421063B3B200 /* PersonalChatRestore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335569E8FE2821CC21B60D50 /* PersonalChatRestore.swift */; };
 		B4FBA601A2C1C139359B2F53 /* Sentry-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 2AD275C49D2EBAA73DE4EFFA /* Sentry-LICENSE.txt */; };
 		B511169B2E7A874AD5DEB0D3 /* ScriptedSharedCollectionsScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063B1C239670DA214B9AFBFF /* ScriptedSharedCollectionsScope.swift */; };
 		D7F0C11D5AE957357C54F531 /* ScriptedAppPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF4C280E1ADD572263A9ABC /* ScriptedAppPanel.swift */; };
@@ -401,6 +404,7 @@
 		3726BD0AEBAEF5BAC1DEF7EF /* ProviderMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMark.swift; sourceTree = "<group>"; };
 		1D9CF44135356E3483D961CF /* TranscriptUITestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUITestSupport.swift; sourceTree = "<group>"; };
 		217E49CD3A5C5BA3920263DF /* AtumKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumKitTests.swift; sourceTree = "<group>"; };
+		E1A0D5F0C3B24A6B9D7E0104 /* MotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionTests.swift; sourceTree = "<group>"; };
 		21E48DC827F8DCEA162870C8 /* StoreCommercePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreCommercePresentation.swift; sourceTree = "<group>"; };
 		2272F6429351CE1353BD78BA /* CompanyCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyCopy.swift; sourceTree = "<group>"; };
 		23A2083BB4DA250A5DC8B663 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -425,6 +429,7 @@
 		E2C0A1B2C3D4E5F601234502 /* ChatGPTTrainingConfirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTTrainingConfirm.swift; sourceTree = "<group>"; };
 		3321C10CB12E085D9D92FF11 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRosterRows.swift; sourceTree = "<group>"; };
+		335569E8FE2821CC21B60D50 /* PersonalChatRestore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalChatRestore.swift; sourceTree = "<group>"; };
 		3553821F25D476C4DB869723 /* ComposerDictationCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerDictationCopy.swift; sourceTree = "<group>"; };
 		3680C4853A6454B341ABC067 /* TranscriptUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUITests.swift; sourceTree = "<group>"; };
 		3CD6FBB9D92465A29802E123 /* MathFonts-EmbeddedNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "MathFonts-EmbeddedNotices.txt"; sourceTree = "<group>"; };
@@ -473,6 +478,7 @@
 		5CFFC0417081A9085D996D97 /* StoreCommerceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreCommerceUITests.swift; sourceTree = "<group>"; };
 		5DD77D2B748B43AEA0A1F88A /* Sentry-THIRD_PARTY_NOTICES.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Sentry-THIRD_PARTY_NOTICES.txt"; sourceTree = "<group>"; };
 		5EB56378C2BC54E677F08543 /* AtumKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumKit.swift; sourceTree = "<group>"; };
+		E1A0D5F0C3B24A6B9D7E0102 /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
 		5EDEE7E5C75ED5F661437470 /* AppOnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppOnboardingViews.swift; sourceTree = "<group>"; };
 		6118FC17F0E26712603AC6DF /* Hermes-Agent-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Hermes-Agent-MIT.txt"; sourceTree = "<group>"; };
 		635EDAC779946482EC51EB28 /* TimelineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineController.swift; sourceTree = "<group>"; };
@@ -768,6 +774,7 @@
 				A79DAA0826AD59000F42AC06 /* AtumAppearance.swift */,
 				3CDA670495E738C2EA73023F /* AtumAvatar.swift */,
 				5EB56378C2BC54E677F08543 /* AtumKit.swift */,
+				E1A0D5F0C3B24A6B9D7E0102 /* Motion.swift */,
 				11F7F7D5D559C9A6AFE29481 /* AtumSettingsRow.swift */,
 				5B11924707D6B263D7C558F9 /* AtumSharedControls.swift */,
 				3E574CAA6873D7ED17908C6A /* AtumVisualSystem.swift */,
@@ -933,6 +940,7 @@
 				C10AAA4D763F43361B56ED7E /* LiveDesign.swift */,
 				C556E604E3FCF2BBD412F45D /* LiveMatrixSession.swift */,
 				335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */,
+				335569E8FE2821CC21B60D50 /* PersonalChatRestore.swift */,
 				D2FE0A337D7F9A239000E290 /* MASWebAuthPresenter.swift */,
 				023052D06543345DF0DC9F77 /* MatrixLiveRuntime.swift */,
 				55FD517430985EDE52675D60 /* NativeRichText.swift */,
@@ -976,6 +984,7 @@
 				2B181445F09BDFE967DFAF55 /* AssistantRoutineStateTests.swift */,
 				5A72440409A3D796EF7342BB /* AttachmentPreparerTests.swift */,
 				217E49CD3A5C5BA3920263DF /* AtumKitTests.swift */,
+				E1A0D5F0C3B24A6B9D7E0104 /* MotionTests.swift */,
 				9C2D9DF99EFDD46B2622E0F9 /* AvatarArtTests.swift */,
 				0B34D10943B247E13747AAF8 /* CompanySwitcherTests.swift */,
 				A301DCAB5CF1EE9026EC7F22 /* ComposerDictationTests.swift */,
@@ -1542,6 +1551,7 @@
 				D112ED06F4E6F28973D03A76 /* AssistantRoutineStateTests.swift in Sources */,
 				897A7BC36296D6BA7A38A5F7 /* AttachmentPreparerTests.swift in Sources */,
 				281E7098764877EE3887C071 /* AtumKitTests.swift in Sources */,
+				E1A0D5F0C3B24A6B9D7E0103 /* MotionTests.swift in Sources */,
 				EC5732DB20F5BAEC7053CD62 /* AvatarArtTests.swift in Sources */,
 				DE4586D8A4A1098F3187CD00 /* CompanySwitcherTests.swift in Sources */,
 				980202A90D75370EB5875264 /* ComposerDictationTests.swift in Sources */,
@@ -1666,6 +1676,7 @@
 				B522BB699B2DA98CCDC88396 /* AtumAppearance.swift in Sources */,
 				B9295376C15D2060AD472299 /* AtumAvatar.swift in Sources */,
 				751C1D9424BBC65042A66641 /* AtumKit.swift in Sources */,
+				E1A0D5F0C3B24A6B9D7E0101 /* Motion.swift in Sources */,
 				25E48EEEFA8F85D1D89E44DA /* AtumMobileApp.swift in Sources */,
 				3CF3F1745E408086C8828604 /* AtumSettingsRow.swift in Sources */,
 				04AED8B26FF5878412870333 /* AtumSharedControls.swift in Sources */,
@@ -1742,6 +1753,7 @@
 				539C6229A0FD734258D70CD0 /* LiveProductModels.swift in Sources */,
 				21EF3F77E989BD727A6D49BE /* LiveReporting.swift in Sources */,
 				B15C2E7D990B421063B3B19F /* LiveRosterRows.swift in Sources */,
+				B15C2E7D990B421063B3B200 /* PersonalChatRestore.swift in Sources */,
 				30E9A2996EE40C1BE148E7C7 /* LiveSharedCollections.swift in Sources */,
 				C475E35DE3168E0E18519B28 /* LiveStoreCommerce.swift in Sources */,
 				A3D0C1E2B4F5061728394A53 /* ProtonAmountFormat.swift in Sources */,

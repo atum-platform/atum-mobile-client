@@ -75,6 +75,22 @@ struct AtumKit: Sendable {
         case s1 = "1", s2 = "2", s3 = "3", s4 = "4", s5 = "5", s6 = "6", s8 = "8", s12 = "12"
     }
 
+    /// The phone's three corner radii: `sm` (10) for chips and small tiles, `lg` (20) for
+    /// bubbles, cards and the composer, `full` for capsules. Each reads a kit radius (`md`,
+    /// `xl`, `full`), so the desktop tokens stay the one source. Grouped lists keep the
+    /// system radius; a run's inner corner stays `ChatLayout.runRadius`.
+    enum PhoneRadius: CaseIterable, Sendable {
+        case sm, lg, full
+
+        var kitRadius: Radius {
+            switch self {
+            case .sm: .md
+            case .lg: .xl
+            case .full: .full
+            }
+        }
+    }
+
     /// Desktop control heights (26/32/40). Phone buttons use `phoneControlHeight`.
     enum ControlHeight: String, CaseIterable, Sendable {
         case sm, md, lg
@@ -213,6 +229,9 @@ struct AtumKit: Sendable {
     }
 
     func radius(_ radius: Radius) -> CGFloat { CGFloat(tokens.radius[radius.rawValue]!) }
+
+    /// A phone corner radius. Prefer `Capsule()` over `phoneRadius(.full)` for capsules.
+    func phoneRadius(_ radius: PhoneRadius) -> CGFloat { self.radius(radius.kitRadius) }
 
     func space(_ space: Space) -> CGFloat { CGFloat(tokens.space[space.rawValue]!) }
 
