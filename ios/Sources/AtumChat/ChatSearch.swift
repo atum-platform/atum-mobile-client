@@ -333,6 +333,25 @@ public enum ChatHistorySearch {
                             placeMatch: @MainActor (RoutedMatch) async throws -> Bool = { _ in true }) async -> Progress {
         var replacedGeneration: UInt64?
         var placementAttempts = 0
+        var projectionWaitRemaining: Duration = .seconds(10)
+        func projectionIsPending() -> Bool {
+            guard let timelineGeneration else { return false }
+            let projectedGeneration = snapshot().generation
+            return projectedGeneration == Snapshot.empty.generation || projectedGeneration != timelineGeneration()
+        }
+        func waitForProjection() async -> Phase? {
+            guard projectionIsPending() else { return nil }
+            // Share the wait budget across reattachments in this walk.
+            let deadline = ContinuousClock.now + projectionWaitRemaining
+            defer { projectionWaitRemaining = max(.zero, ContinuousClock.now.duration(to: deadline)) }
+            while projectionIsPending() {
+                let now = ContinuousClock.now
+                guard now < deadline else { return .failed }
+                do { try await Task.sleep(until: min(now + .milliseconds(100), deadline), clock: .continuous) }
+                catch { return .cancelled }
+            }
+            return nil
+        }
         func currentProjection() -> Snapshot {
             let current = snapshot()
             // The transcript keeps drawing the old rows until the replacement
@@ -347,6 +366,7 @@ public enum ChatHistorySearch {
                          generation: { timelineGeneration?() ?? snapshot().generation },
                          acceptMatch: {
                              while !Task.isCancelled {
+                                 if let phase = await waitForProjection() { return phase }
                                  let current = currentProjection()
                                  guard current.generation != Snapshot.empty.generation,
                                        let row = current.rows.first(where: { $0.item.eventID == eventID })
@@ -366,15 +386,21 @@ public enum ChatHistorySearch {
                                  } catch {
                                      return Task.isCancelled ? .cancelled : .failed
                                  }
-                                 // If the replacement already contains the reply,
-                                 // try it before spending another page.
+                                 // Give the live projection a chance to publish the
+                                 // reply before spending another page.
                                  if match.isCurrent(in: currentProjection()) { return nil }
                              }
                              return nil
                          }, loadPage: {
+                             // A swap can invalidate the page slot while the walk
+                             // is starting a page or awaiting its result.
+                             guard !projectionIsPending() else { return .timelineReplaced }
                              let generation = snapshot().generation
                              let page = await loadPage()
                              if page == .timelineReplaced { replacedGeneration = generation }
+                             if page == .failed, let timelineGeneration, timelineGeneration() != generation {
+                                 return .timelineReplaced
+                             }
                              return page
                          })
     }

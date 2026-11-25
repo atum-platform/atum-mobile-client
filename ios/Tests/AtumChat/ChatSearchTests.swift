@@ -240,12 +240,14 @@ final class ChatSearchTests: XCTestCase {
                 // Reattach after the old final page returns and the walk yields.
                 refresh = Task { @MainActor in
                     timelineGeneration = 2
+                    try? await Task.sleep(for: .milliseconds(400))
+                    snapshot = Snapshot(rows: self.rows([recent]), change: .reset, generation: 2)
                 }
                 return .loaded(hasMore: false)
             }
             XCTAssertEqual(timelineGeneration, 2)
-            XCTAssertEqual(snapshot.generation, 1, "the replacement need not have projected yet")
-            snapshot = Snapshot(rows: self.rows([reply, recent]), change: .reset, generation: 2)
+            XCTAssertEqual(snapshot.generation, 2, "the replacement must project before paging")
+            snapshot.rows = self.rows([reply, recent])
             return .loaded(hasMore: true)
         })
         await refresh?.value
@@ -317,25 +319,66 @@ final class ChatSearchTests: XCTestCase {
         let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
         var replacement = reply
         replacement.id = "replacement-reply"
+        let replacementRows = rows([replacement])
         var snapshot = Snapshot(rows: rows([reply]), change: .reset, generation: 1)
         var liveGeneration: UInt64 = 1
+        var refresh: Task<Void, Never>?
         var attempted = [String]()
         let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot },
                                                   timelineGeneration: { liveGeneration }, loadPage: {
-            XCTAssertEqual(liveGeneration, 2)
-            XCTAssertEqual(snapshot.generation, 1, "detaching retains the displayed rows")
-            XCTAssertEqual(attempted, [reply.id], "the stale row must not be placed again")
-            snapshot = Snapshot(rows: self.rows([replacement]), change: .reset, generation: liveGeneration)
-            return .loaded(hasMore: true)
+            XCTFail("the replacement already contains the reply")
+            return .failed
         }, placeMatch: { match in
             attempted.append(match.rowID)
-            guard match.rowID == reply.id else { return true }
+            guard match.rowID == reply.id else { return match.isCurrent(in: snapshot) }
             return try await ChatHistorySearch.waitForRoutedPlacement(timeout: .milliseconds(20)) { _ in
                 liveGeneration = 2
+                refresh = Task {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    snapshot = Snapshot(rows: replacementRows, change: .reset, generation: 2)
+                }
             }
         })
+        await refresh?.value
         XCTAssertEqual(result.phase, .found)
-        XCTAssertEqual(result.pages, 1)
+        XCTAssertEqual(result.pages, 0)
+        XCTAssertEqual(attempted, [reply.id, replacement.id])
+    }
+
+    @MainActor
+    func testRoutedSearchSurvivesAReattachSlowerThanThePageSlotDeadline() async {
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var replacement = reply
+        replacement.id = "replacement-reply"
+        let replacementRows = rows([replacement])
+        var snapshot = Snapshot(rows: rows([reply]), change: .reset, generation: 1)
+        var liveGeneration: UInt64 = 1
+        var refresh: Task<Void, Never>?
+        var attempted = [String]()
+        var pagesRequested = 0
+
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot },
+                                                  timelineGeneration: { liveGeneration }, loadPage: {
+            pagesRequested += 1
+            // A detached store cannot claim a page slot and fails after four seconds.
+            try? await Task.sleep(for: .seconds(4))
+            return .failed
+        }, placeMatch: { match in
+            attempted.append(match.rowID)
+            guard match.rowID == reply.id else { return match.isCurrent(in: snapshot) }
+            return try await ChatHistorySearch.waitForRoutedPlacement { completion in
+                liveGeneration = 2
+                completion.finish()
+                refresh = Task {
+                    try? await Task.sleep(for: .seconds(5))
+                    snapshot = Snapshot(rows: replacementRows, change: .reset, generation: 2)
+                }
+            }
+        })
+        await refresh?.value
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 0)
+        XCTAssertEqual(pagesRequested, 0)
         XCTAssertEqual(attempted, [reply.id, replacement.id])
     }
 
