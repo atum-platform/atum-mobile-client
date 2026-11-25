@@ -243,7 +243,63 @@ desktop shows, it is left as it is and proposed here.
 
 ## Verification
 
-(Filled in after the locked run; see the session log below.)
+Every heavy step ran under the shared heavy-build lock, with derived data in
+`dd-polish-p2` on the build volume, on the arm64 simulator
+`CB24FAE2-75F9-4E19-A856-0F5A9F036C0B` (iPhone 16e, iOS 27.0). No Swift package
+and no tested logic changed, so no `swift test` and no new AppTests ran.
+
+| Run | Result | Log (build volume) |
+|---|---|---|
+| Debug `build-for-testing` (app, AppTests, UITests) | `TEST BUILD SUCCEEDED`. No new warnings in touched code: the only ones in touched files are the pre-existing `AssistantCard` `PhotosPicker` label isolation warnings. | `polish-p2/logs/build-120528.log` |
+| Capture 1: build with the temporary capture class, then 4 capture tests | Build 0. Card, Chat Info, desk, Team Space and Home: 3 of 4 passed. The card test's first launch on the cold simulator timed out with no process ID: an infrastructure failure, with no app frame drawn. The shots found the `Label` glyph regression (session log). | `polish-p2/logs/capture-build.log`, `capture-test.log` |
+| Capture 2: rebuild with the glyph fix, then the card and Chat Info tests only | Build 0. 2 of 2 passed. | `polish-p2/logs/capture2-build.log`, `capture2-test.log` |
+
+- The temporary class `PolishP2CaptureUITests`
+  (`/Volumes/AtumTestFlight/polish-p2/harness/`) was copied in for each build
+  and removed. The project was restored by the script, so it was never
+  committed. The scripts are `polish-p2/locked-build.sh`,
+  `locked-capture.sh` and `locked-capture2.sh`.
+- **Before** shots are the UX audit's, in `/Volumes/AtumTestFlight/ux-audit/shots/`:
+  - `08-assistant-card-*-light.png`
+  - `08-group-info-*-light.png`
+  - `13-desk-*-light.png`
+  - `14-desk-dark.png`
+  - `09-team-space-board*-light.png`
+  - `15-team-space-ax-large.png`
+  - `15-home-ax-large.png`
+- **After** shots are in `/Volumes/AtumTestFlight/polish-p2/shots/`:
+  - `p2-assistant-card-*`
+  - `p2-group-info-*`, `p2-person-info-*`, `p2-app-info-*` (medium, large,
+    scrolled and bottom, light and dark, plus the group at AX-Large)
+  - `p2-desk-*` (medium, large, More open, light and dark)
+  - `p2-team-space-{root,board,board-list}-{light,ax-large}`
+  - `p2-home-{light,ax-large}`
+- `python3 scripts/design_lint.py`: exit 0. The baseline was lowered for P2's
+  seven files only, through `--update` then keeping every other lane's entry
+  as it is at HEAD. The kept entries include `Composer.swift`, whose count is
+  already lower on main and belongs to P3. P2's files went from 339 findings
+  to 185.
+- `python3 -m unittest tests.test_design_lint`: OK.
+- `python3 scripts/public_guard.py --base origin/main --head HEAD`: exit 0, by
+  its own exit code.
+- **Not run locally (lane rule):** the UI suites. The hosted UI shards must
+  run, at least, `ChatInfoUITests`, `ChatPanelUITests`, `AgentDeskBellUITests`,
+  `AppSidePanelUITests`, `HomeChatsWave3UITests`, `SharedCollectionsUITests`,
+  `AssistantsWave3UITests` and `TeamSpaceRevampUITests`.
+
+## Known gaps
+
+- **Lazy rows in the UI tests:** the test changes above were reasoned from
+  the code and the captures, not run. A hosted run may still find a row that
+  a test reads before scrolling to it.
+- **Large sheet:** the panel's rows keep the `cell` colour on the sheet's own
+  ground. At the large detent in light mode, both are white, so groups read by
+  spacing and separators only. That was already the case before this lane
+  (audit shot `08-group-info-scrolled-light.png`). Proposal: give the panel
+  the Settings ground (`ground` behind `cell`), which would replace the
+  medium detent's glass look. That is a design call for the owner.
+- **Section headers:** iOS 26 draws inset-grouped section headers in a bolder
+  style than the old grey footnote titles, the same as Settings.
 
 ## Session log
 
