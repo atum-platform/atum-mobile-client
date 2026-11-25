@@ -92,15 +92,15 @@ public struct PhoneModelPickerRead: Sendable {
 }
 
 public struct PhoneSubscriptionAccountReads: Sendable {
-    public let chatGPT: @MainActor () async throws -> ChatGPTRelayStatus?
-    public let openCodeGo: @MainActor () async throws -> ProviderConnectionsStatus?
-    public let accountConnections: @MainActor () async throws -> AccountConnections?
-    public let isCurrent: @MainActor () -> Bool
+    public let chatGPT: @MainActor @Sendable () async throws -> ChatGPTRelayStatus?
+    public let openCodeGo: @MainActor @Sendable () async throws -> ProviderConnectionsStatus?
+    public let accountConnections: @MainActor @Sendable () async throws -> AccountConnections?
+    public let isCurrent: @MainActor @Sendable () -> Bool
 
-    public init(chatGPT: @escaping @MainActor () async throws -> ChatGPTRelayStatus?,
-                openCodeGo: @escaping @MainActor () async throws -> ProviderConnectionsStatus?,
-                accountConnections: @escaping @MainActor () async throws -> AccountConnections?,
-                isCurrent: @escaping @MainActor () -> Bool = { true }) {
+    public init(chatGPT: @escaping @MainActor @Sendable () async throws -> ChatGPTRelayStatus?,
+                openCodeGo: @escaping @MainActor @Sendable () async throws -> ProviderConnectionsStatus?,
+                accountConnections: @escaping @MainActor @Sendable () async throws -> AccountConnections?,
+                isCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) {
         self.chatGPT = chatGPT
         self.openCodeGo = openCodeGo
         self.accountConnections = accountConnections

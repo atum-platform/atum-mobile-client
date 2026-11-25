@@ -36,6 +36,14 @@ the pinned model strings. Go keeps its pinned reconnect treatment and exposes re
 independently of the account catalog. Keep the catalog list visible with that state at
 `.unavailable` or `.failed`, and use `Row.selectable` for model actions.
 
+## Verification
+
+The locked verification runs the subscription, picker projection and picker sections suites before
+the arm64 Debug simulator build. The subscription suite covers partial publication, timeout,
+per-source errors, read-only catalogs without destination readback, account changes, picker
+retirement and Connect-sheet landings. The deadline tests use injected 40 ms budgets and read
+continuations that can finish after cancellation.
+
 ## Follow-ups
 
 - Wire provider-level settled presentation and any destination retry affordance over the still-visible
