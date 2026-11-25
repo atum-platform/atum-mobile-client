@@ -87,12 +87,20 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertEqual(app.switches["desk.routine.job-review"].value as? String, "0")
         keepScreenshot("w4-e3-desk-controls-\(tag)", of: app)
 
-        // Pause moves every live switch at once and is sent to the host.
-        // The row is the switch's label; iOS moves a switch from its knob.
-        pause.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
-        XCTAssertTrue(waitFor(3) { (pause.value as? String) == "1" }, "Pause did not move")
+        // The labelled switch can cover the whole list row. Tap the native
+        // switch inside it and keep it clear of the sheet's edges.
+        let knob = pause.switches.firstMatch
+        guard revealByScrolling(knob, in: element(app, "desk.page"), up: nil, verticalInset: 44) else {
+            XCTFail("Pause switch did not come into the sheet's tap area: \(boundedHierarchy(app))")
+            return
+        }
+        let probeCount = probeLines("agent-desk.txt").count
+        knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitFor(3) { (pause.value as? String) == "1" }, "Pause did not move: \(boundedHierarchy(app))")
         XCTAssertTrue(waitFor(3) { (brief.value as? String) == "0" }, "the routine did not pause with it")
-        XCTAssertTrue(waitFor(3) { self.probeLines("agent-desk.txt").contains { $0.text == "control pause" } })
+        XCTAssertTrue(waitFor(3) {
+            self.probeLines("agent-desk.txt").dropFirst(probeCount).contains { $0.text == "control pause" }
+        }, "Pause did not reach the host")
 
         // All settings is the agent's card, one Back away. With two sent files it
         // sits below the fold: scroll to it as a person does and tap it once the

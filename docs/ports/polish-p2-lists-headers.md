@@ -500,3 +500,16 @@ shard's `ui-3` xcresult: the failure hierarchy, screenshots and recording.
   - Local results: the AX5 test passed 3 of 3, and ChatInfo + AppSidePanel
     passed 19 of 19.
   - Local commit only: no push, PR edit or CI rerun.
+- **26 Nov 2026, PR #110 desk Pause test (hosted run 45694085769):**
+  - The shard 1 recording and synthesized event show `desk.pause` was
+    visible and off. The tap at 92% of the labelled row landed at x=345 pt,
+    on the track to the right of the off-state knob (x≈299–336 pt).
+  - `AgentDeskBellUITests` now brings the nested native switch into the
+    sheet's tap area and taps its center. It still verifies that Pause
+    turns on and the live routine turns off, and checks for a fresh
+    `control pause` probe line on each pass through the test.
+  - On one iPhone 16e under the heavy-build lock, build-for-testing passed and
+    `AgentDeskBellUITests` plus `DriveRevampUITests/testCaptureDriveSurfaces`
+    passed (2 tests, 0 failures). The Drive menu failure did not reproduce.
+    Result: `/Volumes/AtumTestFlight/dd-polish-p2/desk-45694085769/ui.xcresult`.
+  - `python3 scripts/design_lint.py` exited 0.
