@@ -6,10 +6,12 @@ import SwiftUI
 /// `Resources/ThirdPartyNotices/ProviderMarks-NOTICE.txt`), the same matching
 /// on the provider's id and label, and the same colours. Monochrome marks
 /// follow the theme's ink; Claude, Gemini, DeepSeek, MiniMax and Qwen keep
-/// their identifying colour; Antigravity is a full-colour image. Atum is its
-/// own crescent. A provider with no bundled mark falls back to its initial in
-/// the shared squircle, as the desktop's `BrandTile` does. A signed-out
-/// connection keeps its full-strength mark (desktop round 2).
+/// their identifying colour; Antigravity is a full-colour image. Atum wears
+/// its real logo, the desktop's inset `BrandMark` (`PickerRouteMark`,
+/// `model-picker-list.tsx`): the eclipse at 64% on the dark brand tile, in
+/// light and dark alike. A provider with no bundled mark falls back to its
+/// initial in the shared squircle, as the desktop's `BrandTile` does. A
+/// signed-out connection keeps its full-strength mark (desktop round 2).
 struct ProviderMark: View {
     enum Art: Equatable {
         case atum
@@ -47,11 +49,7 @@ struct ProviderMark: View {
         Group {
             switch art {
             case .atum:
-                // Atum's small face, the crescent the chat title draws
-                // (`AtumAvatar.swift:171`); the full eclipse reads as a solid
-                // dot at row size in light mode. AtumAvatar scales itself.
-                AtumAvatar(kind: .atum, name: "Atum", size: size)
-                    .atumDesign(design)
+                AtumBrandTile(design: design, side: side)
             case let .template(asset, color):
                 Image(asset)
                     .renderingMode(.template)
@@ -106,5 +104,36 @@ struct ProviderMark: View {
     private static func hex(_ value: UInt32) -> Color {
         Color(.sRGB, red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255,
               blue: Double(value & 255) / 255, opacity: 1)
+    }
+}
+
+/// The desktop's inset `BrandMark` (`components/brand-mark.tsx`): Atum's mark
+/// (`marks/eclipse.json`, the same file as the desktop's `atum-mark.svg`) at
+/// 64% of a dark `#141311` tile, the tile's edge kept by a 0.5 pt inset
+/// hairline of `line-2` (the desktop's `--atum-line-strong`). The tile is the
+/// brand's own colour, so it stays dark in light mode too. Its corner is the
+/// desktop picker's 0.25rem on a 16 px mark, kept in proportion as it grows.
+struct AtumBrandTile: View {
+    let design: LiveDesign
+    let side: CGFloat
+
+    @Environment(\.colorScheme) private var scheme
+
+    static let tile = Color(.sRGB, red: 0x14 / 255, green: 0x13 / 255, blue: 0x11 / 255, opacity: 1)
+    static let markScale: CGFloat = 0.64
+    static let cornerScale: CGFloat = 4.0 / 16
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: side * Self.cornerScale)
+        ZStack {
+            shape.fill(Self.tile)
+            LiveEclipseMark(design: design)
+                .frame(width: side * Self.markScale, height: side * Self.markScale)
+        }
+        .frame(width: side, height: side)
+        .clipShape(shape)
+        .overlay {
+            shape.strokeBorder(design.kit.color(.line2, scheme: scheme), lineWidth: 0.5)
+        }
     }
 }

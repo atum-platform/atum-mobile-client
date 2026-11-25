@@ -67,7 +67,7 @@ struct S6SystemGallery: View {
                     }
                 }
             }
-            HStack(spacing: 12) {
+            HStack(spacing: atum.kit.space(.s3)) {
                 AppSeal(tier: .official)
                 AppSeal(tier: .verified)
             }
@@ -75,11 +75,22 @@ struct S6SystemGallery: View {
     }
 
     private var marks: some View {
-        HStack(spacing: 20) {
-            HStack(spacing: 3) { ProtonMark(.small); Text(verbatim: "12") }
-            HStack(spacing: 5) { ProtonMark(.regular); Text(verbatim: "12.400") }
-            AtomMark().frame(width: 28, height: 28)
-            AtomWait().frame(width: 28, height: 28)
+        VStack(alignment: .leading, spacing: atum.kit.space(.s3)) {
+            HStack(spacing: 20) {
+                HStack(spacing: 3) { ProtonMark(.small); Text(verbatim: "12") }
+                HStack(spacing: 5) { ProtonMark(.regular); Text(verbatim: "12.400") }
+                AtomMark().frame(width: 28, height: 28)
+                AtomWait().frame(width: 28, height: 28)
+            }
+            // Atum's picker mark at the chip (16) and row (20) sizes, beside a
+            // provider's, as the model picker lines them up.
+            HStack(spacing: atum.kit.space(.s3)) {
+                ProviderMark(design: design, art: .atum, size: 16)
+                ProviderMark(design: design, art: .atum, size: 20)
+                ProviderMark(design: design, provider: "openai", label: "OpenAI", size: 20)
+                Text(verbatim: "Nguyệt Thực 1.3")
+            }
+            .accessibilityIdentifier("system.gallery.picker-marks")
         }
         .foregroundStyle(atum.color(.ink, scheme: scheme))
     }

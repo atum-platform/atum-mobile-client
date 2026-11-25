@@ -44,6 +44,13 @@ final class ProviderMarkTests: XCTestCase {
         XCTAssertEqual(ProviderMark.art(provider: "atum", label: "Atum"), .atum)
     }
 
+    /// Atum's row mark is the desktop's inset BrandMark (`PickerRouteMark`):
+    /// the eclipse at 64% of the tile, a 0.25rem corner on a 16 px mark.
+    func testAtumWearsTheDesktopsInsetBrandMark() {
+        XCTAssertEqual(AtumBrandTile.markScale, 0.64)
+        XCTAssertEqual(AtumBrandTile.cornerScale * 16, 4)
+    }
+
     /// Monochrome marks follow the theme's ink; the brand-coloured ones keep their colour.
     func testOnlyTheDesktopsColouredMarksCarryAColour() {
         let coloured = ["claude", "deepseek", "gemini", "minimax", "qwen"]
