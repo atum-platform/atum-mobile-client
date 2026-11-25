@@ -247,6 +247,8 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private var cancelRouteOnReport = false
     private var detachOnReport = false
     private var dismissedKeyboardOnDrag = false
+    private var keyboardPull: (entry: CGFloat, height: CGFloat)?
+    private var reportKeyboardPanEnd = false
     #if DEBUG
     private var loggedInset: CGFloat?
     private var loggedLatestDistance: Double?
@@ -284,7 +286,11 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         }
         list.willLayout = { [weak self] in self?.beforeLayout() }
         list.didLayout = { [weak self] in self?.afterLayout() }
-        list.windowChanged = { [weak self] in self?.scheduleReport() }
+        list.windowChanged = { [weak self, weak list] in
+            // Have the window track the keyboard before the first pull.
+            _ = list?.window?.keyboardLayoutGuide
+            self?.scheduleReport()
+        }
         return list
     }
 
@@ -442,7 +448,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private func updateSizingPin() {
         if applyingSnapshot {
             layout.pin = .none
-        } else if store.follow.isFollowing, motion != .user, placement == nil {
+        } else if store.follow.isFollowing, motion != .user, placement == nil, !reportKeyboardPanEnd {
             layout.pin = .bottom
         } else if let id = placement?.rowID ?? foldingAnchor?.id ?? readingAnchor?.id,
                   let path = dataSource?.indexPath(for: id) {
@@ -468,7 +474,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
             placeSearchMatch()
         } else if motion == .idle, let id = replyJumpID {
             centerReply(id)
-        } else if store.follow.isFollowing, motion == .idle {
+        } else if store.follow.isFollowing, motion == .idle, !reportKeyboardPanEnd {
             scrollToBottom(animated: false)
         } else if motion == .idle, let anchor = measuredAnchor {
             restore(anchor)
@@ -506,7 +512,13 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     // keyboard even if the finger has yet to reach it.
     @objc private func handleKeyboardDrag(_ pan: UIPanGestureRecognizer) {
         if pan.state == .began { dismissedKeyboardOnDrag = false }
-        guard pan.state == .changed, !dismissedKeyboardOnDrag, pan.translation(in: pan.view).y > 24 else { return }
+        guard pan.state == .changed else { return }
+        let travel = pan.translation(in: pan.view).y
+        if let pull = keyboardPull, travel < 0 || travel > pull.height {
+            keyboardPull = nil
+            scheduleReport()
+        }
+        guard !dismissedKeyboardOnDrag, travel > 24 else { return }
         dismissedKeyboardOnDrag = true
         TranscriptKeyboardDismissal.dismiss()
     }
@@ -517,7 +529,21 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         replyJumpID = nil
         stopPlacement()
         cancelRouteOnReport = true
+        keyboardPull = candidateKeyboardPull(in: scrollView)
         updateSizingPin()
+    }
+
+    /// A short pull from the transcript into the keyboard dismisses it
+    /// while keeping the latest row. A drag starting farther up or moving
+    /// more than a keyboard height reads older messages as usual.
+    private func candidateKeyboardPull(in scrollView: UIScrollView) -> (entry: CGFloat, height: CGFloat)? {
+        guard store.follow.isFollowing, let window = scrollView.window else { return nil }
+        let keyboard = window.keyboardLayoutGuide.layoutFrame
+        let pan = scrollView.panGestureRecognizer
+        let startY = pan.location(in: window).y - pan.translation(in: window).y
+        let distance = keyboard.minY - startY
+        guard keyboard.height > window.safeAreaInsets.bottom, (0...keyboard.height).contains(distance) else { return nil }
+        return (entry: distance, height: keyboard.height)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -530,6 +556,17 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if let pull = keyboardPull {
+            keyboardPull = nil
+            let travel = scrollView.panGestureRecognizer.translation(in: scrollView).y
+            if (pull.entry...pull.height).contains(travel) {
+                if decelerate { scrollView.stopScrollingAndZooming() }
+                endMotion()
+                scrollToBottom(animated: false)
+                return
+            }
+            reportKeyboardPanEnd = !decelerate
+        }
         if !decelerate { endMotion() }
     }
 
@@ -580,10 +617,11 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
                 markMemory("chat.open")
             }
             let clampedToSearch = placement != nil
-            if geometry != lastGeometry || detachOnReport {
+            if keyboardPull == nil, geometry != lastGeometry || detachOnReport || reportKeyboardPanEnd {
                 lastGeometry = geometry
-                let reportedMotion = detachOnReport ? .user : motion
+                let reportedMotion = detachOnReport || reportKeyboardPanEnd ? .user : motion
                 detachOnReport = false
+                reportKeyboardPanEnd = false
                 store.handle(.geometry(
                     distanceFromBottom: clampedToSearch
                         ? max(geometry.distanceFromBottom, FollowPolicy.nearBottomPoints + 1)
