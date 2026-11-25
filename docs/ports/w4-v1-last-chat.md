@@ -120,5 +120,10 @@ and all 16 restore methods in `AtumMobileTests/S2StateTests`. The added and
 updated cases cover a superseded claim reply followed by a new Team Space
 marker, a timed-out claim retried by a new Chats tap, an exit fence across
 publication gaps and relaunch, exit confirmation and explicit reopening,
-and recovery after aborted sign-out. The build volume holds the
-`w4-v1/r3-*` logs and XCTest result bundle.
+and recovery after aborted sign-out.
+
+Another XCTest job held the shared lock at the 90-minute deadline.
+`lockf` exited 75 before the Debug build and all 16 methods could run.
+The restore policy and test source type-checked against the cached iOS
+modules. The lock log, type-check log and list of pending methods are
+retained under `w4-v1/r3-*` on the build volume.
