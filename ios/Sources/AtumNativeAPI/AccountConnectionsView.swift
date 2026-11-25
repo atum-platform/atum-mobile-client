@@ -161,6 +161,9 @@ public enum AccountConnectionsCopy {
     public static let needsMac = Phrase("src.matrix.mobile-copy.mobileScreensCopy.connections.sheet.needsMac")
     public static let close = Phrase("src.matrix.mobile-copy.mobileScreensCopy.connections.sheet.close")
     public static let tryAgain = Phrase("src.matrix.mobile-copy.mobileScreensCopy.connections.progress.tryAgain")
+    /// "Works in Work for now": desktop's reason for a plan's models that run
+    /// in Work on a Mac (`model-picker.tsx` `connectionWords.picker.inWork`).
+    public static let pickerInWork = Phrase("src.matrix.mobile-copy.mobileScreensCopy.connections.picker.inWork")
     /// The Connections page's own "couldn't check" (the ChatGPT-with-Google
     /// row's read failure): the phone has no Mac facts to fall back on.
     public static let readFailed = Phrase("src.matrix.chatgpt-training-copy.COPY.readFailed")

@@ -245,6 +245,10 @@ struct AccountConnectionsSections: View {
 
 struct AccountPlanConnectRequest: Identifiable, Equatable {
     let plan: AccountPlan
+    /// A Work plan that is already connected on a Mac: the sheet only hands
+    /// off to Atum on the Mac (desktop's Allow sheet on a device without Work)
+    /// and does not follow the registry, which would read it as just landed.
+    var handoff = false
     var id: String { plan.rawValue }
 }
 

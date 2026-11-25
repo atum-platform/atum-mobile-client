@@ -40,6 +40,15 @@ struct PhoneModelPickerList: View {
     /// The sheet saw a plan land: the picker takes that registry, so the
     /// plan's Connect entry goes away.
     let onConnectionsChanged: @MainActor (AccountConnections) -> Void
+    /// W4-X2: the destination readback's own line, drawn above the models
+    /// (a failure leaves every loaded catalog visible and read-only).
+    let destinationStatus: PhoneModelPickerStatus?
+    /// One line per account source still loading or failed (desktop #126).
+    let providerStatuses: [PhoneModelPickerStatus]
+    /// Plans Work reports on a Mac: read-only models with a hand-off to the
+    /// Mac, never a native consent the phone cannot host.
+    let handoffs: [PhoneModelPickerProjection.WorkPlanHandoff]
+    let retry: (PhoneModelPickerStatus.Source) -> Void
     let select: (Row) -> Void
 
     @State private var query = ""
@@ -47,6 +56,10 @@ struct PhoneModelPickerList: View {
     @State private var disclosure = PhoneModelPickerDisclosure()
     @State private var preferences: ModelPickerPreferences
     @State private var connecting: AccountPlanConnectRequest?
+    /// The sources whose failed line VoiceOver has been told about, so each
+    /// failure is announced once, when its line first appears (desktop
+    /// `role="alert"`). A line that loads again and fails again is new.
+    @State private var announcedFailures: Set<PhoneModelPickerStatus.Source> = []
     /// The bar's controls grow with the text, to a cap, so a large type size
     /// never squeezes the filter symbol out of its circle.
     @ScaledMetric(relativeTo: .body) private var barControl = 44.0
@@ -69,7 +82,15 @@ struct PhoneModelPickerList: View {
          planConnects: [AccountPlan] = [],
          makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)? = nil,
          onConnectionsChanged: @escaping @MainActor (AccountConnections) -> Void = { _ in },
+         destinationStatus: PhoneModelPickerStatus? = nil,
+         providerStatuses: [PhoneModelPickerStatus] = [],
+         handoffs: [PhoneModelPickerProjection.WorkPlanHandoff] = [],
+         retry: @escaping (PhoneModelPickerStatus.Source) -> Void = { _ in },
          select: @escaping (Row) -> Void) {
+        self.destinationStatus = destinationStatus
+        self.providerStatuses = providerStatuses
+        self.handoffs = handoffs
+        self.retry = retry
         self.design = design
         self.matrixAccountID = matrixAccountID
         self.destinationID = destinationID
@@ -100,6 +121,9 @@ struct PhoneModelPickerList: View {
     var body: some View {
         let layout = sections
         List {
+            if let destinationStatus {
+                Section { statusRow(destinationStatus) }
+            }
             ForEach(layout) { section in
                 Section {
                     if disclosure.isOpen(section, browsing: browsing) {
@@ -111,7 +135,15 @@ struct PhoneModelPickerList: View {
                     sectionHeader(section)
                 }
             }
-            if layout.isEmpty {
+            if !providerStatuses.isEmpty, !browsing {
+                Section {
+                    ForEach(providerStatuses) { statusRow($0) }
+                }
+            }
+            if !browsing {
+                ForEach(shownHandoffs) { handoffSection($0) }
+            }
+            if layout.isEmpty, shownHandoffs.isEmpty || browsing {
                 Section {
                     Text(verbatim: emptyCopy)
                         .foregroundStyle(atum.color(.soft, scheme: scheme))
@@ -157,9 +189,11 @@ struct PhoneModelPickerList: View {
         }
         .onChange(of: viewKey) { _, next in disclosure.show(view: next) }
         .onChange(of: rows) { _, _ in disclosure.settle(sections) }
+        .onChange(of: failedStatuses, initial: true) { _, next in announceFailures(next) }
         .sheet(item: $connecting) { request in
             AccountPlanConnectSheet(design: design, plan: request.plan,
-                                    makePoll: makeConnectionsPoll, onLanded: onConnectionsChanged)
+                                    makePoll: request.handoff ? nil : makeConnectionsPoll,
+                                    onLanded: onConnectionsChanged)
         }
     }
 
@@ -212,6 +246,199 @@ struct PhoneModelPickerList: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("phone.model.plan." + plan.pickerID)
             }
+        }
+    }
+
+    // MARK: Settled reads and the Mac hand-off (W4-X2)
+
+    /// The hand-off groups drawn now. While the ChatGPT relay read is loading
+    /// or has failed, its line stands for ChatGPT; desktop never offers a
+    /// ChatGPT hand-off on a device that reaches the relay (`model-picker.tsx`
+    /// `relayReadReason`), so the same models are not listed twice (W4-X2 r2).
+    private var shownHandoffs: [PhoneModelPickerProjection.WorkPlanHandoff] {
+        guard providerStatuses.contains(where: { $0.source == .chatGPT }) else { return handoffs }
+        return handoffs.filter { $0.plan != .codex }
+    }
+
+    private var failedStatuses: [PhoneModelPickerStatus] {
+        ([destinationStatus].compactMap { $0 } + providerStatuses).filter { $0.phase == .failed }
+    }
+
+    /// Speaks a line once, when it first reads failed: "{source}, {words}".
+    private func announceFailures(_ failed: [PhoneModelPickerStatus]) {
+        let sources = Set(failed.map(\.source))
+        let fresh = failed.filter { !announcedFailures.contains($0.source) }
+        announcedFailures = sources
+        guard !fresh.isEmpty else { return }
+        let words = fresh.map { status in
+            [statusTitle(status.source), copy.status(status)].compactMap { $0 }.joined(separator: ", ")
+        }.joined(separator: ". ")
+        var announcement = AttributedString(words)
+        announcement.accessibilitySpeechAnnouncementPriority = .high
+        AccessibilityNotification.Announcement(announcement).post()
+    }
+
+    /// One settled read line (desktop #126 `catalogState` and the subscription
+    /// note): the source, its bounded loading or failed words and, for a
+    /// failure, Try again. At accessibility sizes Try again goes under the words.
+    private func statusRow(_ status: PhoneModelPickerStatus) -> some View {
+        let title = statusTitle(status.source)
+        // A saved plan row already says why under its name: desktop gives
+        // the reason there only, so the line keeps its source and Try again.
+        let message: String? = title != nil && status.isShownOnRow(in: rows) ? nil : copy.status(status)
+        let words = VStack(alignment: .leading, spacing: design.kit.space(.s1)) {
+            if let title {
+                Text(verbatim: title)
+                    .font(.body)
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
+            }
+            if let message {
+                Text(verbatim: message)
+                    .font(title == nil ? .body : .footnote)
+                    .foregroundStyle(atum.color(title == nil ? .muted : .soft, scheme: scheme))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        let lead = HStack(alignment: .center, spacing: design.kit.space(.s3)) {
+            statusMark(status)
+            words
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([title, message].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(status.phase == .loading ? .updatesFrequently : [])
+        .accessibilityIdentifier("phone.model.status." + status.source.rawValue)
+        return Group {
+            if status.offersRetry, dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: design.kit.space(.s2)) {
+                    lead
+                    retryButton(status, title: title ?? message ?? "")
+                }
+            } else if status.offersRetry {
+                HStack(spacing: design.kit.space(.s3)) {
+                    lead
+                    retryButton(status, title: title ?? message ?? "")
+                }
+            } else {
+                lead
+            }
+        }
+        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? design.kit.space(.s2) : 0)
+        .frame(minHeight: design.kit.phoneControlHeight(.regular))
+        .listRowBackground(atum.color(.cell, scheme: scheme))
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func statusMark(_ status: PhoneModelPickerStatus) -> some View {
+        if status.phase == .loading {
+            // A spinner is motion: with Reduce Motion the line keeps a still clock.
+            if reduceMotion {
+                Image(atum.symbol(.clock))
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .accessibilityHidden(true)
+            } else {
+                ProgressView().controlSize(.small).accessibilityHidden(true)
+            }
+        } else {
+            switch status.source {
+            case .destination:
+                Image(atum.symbol(.alertCircle))
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .accessibilityHidden(true)
+            case .chatGPT:
+                ProviderMark(design: design, art: ProviderMark.art(source: .chatGPTPlan, connectionLabel: nil), size: 20)
+                    .accessibilityHidden(true)
+            case .openCodeGo:
+                ProviderMark(design: design, art: ProviderMark.art(source: .opencodeGo, connectionLabel: nil), size: 20)
+                    .accessibilityHidden(true)
+            case .accountConnections:
+                Image(atum.symbol(.link))
+                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func retryButton(_ status: PhoneModelPickerStatus, title: String) -> some View {
+        Button(copy.text(.modelsRetry)) { retry(status.source) }
+            .buttonStyle(.atumSecondary)
+            .disabled(savingRowID != nil)
+            .accessibilityLabel(copy.text(.modelsRetry) + ": " + title)
+            .accessibilityIdentifier("phone.model.status." + status.source.rawValue + ".retry")
+    }
+
+    /// Whose read the line is about. The destination's line needs no name: its
+    /// words already say the assistant's choice cannot change right now.
+    private func statusTitle(_ source: PhoneModelPickerStatus.Source) -> String? {
+        switch source {
+        case .destination: nil
+        case .chatGPT: label(for: .chatGPTPlan)
+        case .openCodeGo: label(for: .opencodeGo)
+        case .accountConnections: AccountConnectionsWords.text(AccountConnectionsCopy.subscriptions, design: design)
+        }
+    }
+
+    /// A plan Work reports on a Mac (W4-X1 `workPlanHandoffs`): its models,
+    /// read-only, then one hand-off line. Desktop greys these rows with "Works
+    /// in Work for now" and, when native consent is missing, opens its Allow
+    /// sheet; on a device without Work that sheet says to open Atum on the Mac,
+    /// which is all the phone can offer. It never grants consent itself.
+    private func handoffSection(_ handoff: PhoneModelPickerProjection.WorkPlanHandoff) -> some View {
+        let planName = copy.text(.planAccount, [.text(handoff.plan.productName)])
+        let reason = AccountConnectionsWords.text(AccountConnectionsCopy.pickerInWork, design: design)
+        let handoffID = "phone.model.handoff." + handoff.plan.pickerID
+        return Section {
+            ForEach(handoff.models, id: \.id) { model in
+                let name = ModelDisplayName.name(model: model.id, displayName: model.displayName)
+                HStack(spacing: design.kit.space(.s3)) {
+                    AccountPlanMark(design: design, plan: handoff.plan, size: 20)
+                    Text(verbatim: name)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(minHeight: 52)
+                .listRowBackground(atum.color(.cell, scheme: scheme))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(name + ", " + reason)
+                .accessibilityIdentifier(handoffID + ".model." + model.id)
+            }
+            Button {
+                connecting = AccountPlanConnectRequest(plan: handoff.plan, handoff: true)
+            } label: {
+                HStack(spacing: design.kit.space(.s3)) {
+                    Image(atum.symbol(.arrowUpRight))
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .accessibilityHidden(true)
+                    Text(verbatim: reason)
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(atum.symbol(.chevronRight))
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: design.kit.phoneControlHeight(.regular))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(atum.color(.cell, scheme: scheme))
+            .accessibilityLabel(planName + ", " + reason)
+            .accessibilityHint(AccountConnectionsWords.text(AccountConnectionsCopy.needsMac, design: design))
+            .accessibilityIdentifier(handoffID + ".open")
+        } header: {
+            HStack(spacing: design.kit.space(.s3)) {
+                AccountPlanMark(design: design, plan: handoff.plan, size: 20)
+                Text(verbatim: planName)
+            }
+            .font(.body)
+            .foregroundStyle(atum.color(.muted, scheme: scheme))
+            .textCase(nil)
+            .frame(minHeight: design.kit.phoneControlHeight(.regular), alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(handoffID)
         }
     }
 

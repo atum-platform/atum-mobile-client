@@ -18,6 +18,11 @@ final class AccountConnectionsStateTests: XCTestCase {
         })
     }
 
+    private func reads(registry: @escaping @MainActor () async -> AccountConnections?,
+                       openCodeGo: ProviderConnectionsStatus? = nil) -> PhoneSubscriptionAccountReads {
+        PhoneSubscriptionAccountReads(chatGPT: { nil }, openCodeGo: { openCodeGo }, accountConnections: registry)
+    }
+
     func testThePickerOffersConnectOnlyOnceTheRegistryHasAnswered() {
         XCTAssertEqual(PhoneModelPickerList.planConnects(nil), [])
         XCTAssertEqual(PhoneModelPickerList.planConnects(PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)), [],
@@ -31,9 +36,8 @@ final class AccountConnectionsStateTests: XCTestCase {
     /// sheet's registry, keeping the subscription statuses it already read.
     func testThePickerDropsConnectOnceThePlanLands() async {
         let state = PhoneModelPickerAccount()
-        let before = PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil,
-                                              accountConnections: registry([.codex: true, .claude: false]))
-        await state.reload { before }
+        let before = registry([.codex: true, .claude: false])
+        await state.reload(reads { before })
         XCTAssertEqual(PhoneModelPickerList.planConnects(state.value), [.claude, .antigravity])
         state.landed(registry([.codex: true, .claude: true]))
         XCTAssertEqual(PhoneModelPickerList.planConnects(state.value), [.antigravity])
@@ -42,31 +46,29 @@ final class AccountConnectionsStateTests: XCTestCase {
     func testARefusedPickRefreshCannotOfferConnectOverANewerAnswer() async {
         let state = PhoneModelPickerAccount()
         let connected = registry([.codex: true, .claude: true, .antigravity: true])
-        let newer = PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil, accountConnections: connected)
-        let old = PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil,
-                                           accountConnections: registry([.codex: true, .claude: false, .antigravity: true]))
-        await state.reload {
+        let old = registry([.codex: true, .claude: false, .antigravity: true])
+        await state.reload(reads {
             state.landed(connected)
             return old
-        }
+        })
         XCTAssertEqual(PhoneModelPickerList.planConnects(state.value), [])
-        await state.reload { old }
+        await state.reload(reads { old })
         XCTAssertEqual(PhoneModelPickerList.planConnects(state.value), [.claude])
         // A landing during the read keeps the sheet's registry but still takes
         // the read's fresh subscription status (OpenCode Go disconnected elsewhere).
         let disconnected = try! NativeAPI.decode(ProviderConnectionsStatus.self, from: Data("""
             {"profile":"atum.provider-connections/1","revision":3,"connections":[{"provider":"opencode_go","state":"disconnected","revision":3,"models":[],"modelPolicy":"none"}]}
             """.utf8))
-        await state.reload {
+        await state.reload(reads(registry: {
             state.landed(connected)
-            return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: disconnected, accountConnections: old.accountConnections)
-        }
+            return old
+        }, openCodeGo: disconnected))
         XCTAssertEqual(state.value?.openCodeGo, disconnected, "a landing must not drop the fresh OpenCode Go status")
         XCTAssertEqual(state.value?.accountConnections, connected)
-        await state.reload {
-            await state.reload { newer }
+        await state.reload(reads {
+            await state.reload(self.reads { connected })
             return old
-        }
+        })
         XCTAssertEqual(PhoneModelPickerList.planConnects(state.value), [])
     }
 

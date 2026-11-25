@@ -280,11 +280,7 @@ enum AssistantRenameResult {
     case failed
 }
 
-enum AssistantModelLoadResult {
-    case value(ManagedModelSnapshot)
-    case unavailable
-    case failed
-}
+typealias AssistantModelLoadResult = PhoneModelPickerReadResult<ManagedModelSnapshot>
 
 enum AssistantModelSaveResult {
     case saved(ManagedModelSnapshot)
@@ -298,18 +294,7 @@ struct AssistantModelActions {
     let save: (ManagedModelSnapshot, String, ManagedModelEffort, NativeID) async -> AssistantModelSaveResult
 }
 
-struct AssistantModelDestinationValue: Equatable {
-    var snapshot: ManagedModelDestinationSnapshot
-    /// The cloud aliases the provider says are usable now. Mac destinations
-    /// use the locally supported Atum lineup and do not inherit this set.
-    let cloudEligibleAliases: Set<String>
-}
-
-enum AssistantModelDestinationLoadResult {
-    case value(AssistantModelDestinationValue)
-    case unavailable
-    case failed
-}
+typealias AssistantModelDestinationLoadResult = PhoneModelPickerReadResult<ManagedModelDestinationSnapshot>
 
 enum AssistantModelDestinationSaveResult {
     case cancelled
@@ -325,7 +310,9 @@ enum AssistantModelDestinationSaveResult {
 
 struct AssistantModelDestinationActions {
     let matrixAccountID: String
+    let isCurrent: @MainActor () -> Bool
     let read: () async -> AssistantModelDestinationLoadResult
+    let readOffer: () async -> AssistantModelLoadResult
     let save: (ManagedModelDestinationSnapshot, ManagedModelDestinationID, String, NativeID) async
         -> AssistantModelDestinationSaveResult
     /// The cloud's subscription models (`PhoneModelPicker.swift`). Nil where the host has none.
