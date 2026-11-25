@@ -6,6 +6,371 @@ import UserNotifications
 import XCTest
 
 final class S2StateTests: XCTestCase {
+    func testPersonalChatRestoreSurvivesRelaunchAndIsAccountScoped() throws {
+        let name = "PersonalChatRestoreTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let account = "@owner:atum.test"
+        let other = "@another:atum.test"
+        let first = rosterRoom("!first:atum.test", userID: "@first:atum.test", latest: 1)
+        let last = rosterRoom("!last:atum.test", userID: "@last:atum.test", latest: 2)
+        LastPersonalChatStore(matrixUserID: account, defaults: defaults).remember(first.roomID)
+        LastPersonalChatStore(matrixUserID: account, defaults: defaults).remember(last.roomID)
+        LastPersonalChatStore(matrixUserID: account, defaults: defaults).remember("app:placeholder")
+
+        let relaunched = try XCTUnwrap(UserDefaults(suiteName: name))
+        let remembered = LastPersonalChatStore(matrixUserID: account, defaults: relaunched).roomID()
+        let otherRemembered = LastPersonalChatStore(matrixUserID: other, defaults: relaunched).roomID()
+        XCTAssertEqual(relaunched.persistentDomain(forName: name)?.values.compactMap { $0 as? String },
+                       [last.roomID])
+        XCTAssertEqual(restoreDestination(remembered: remembered, rooms: [first, last]), last.roomID)
+        XCTAssertNil(restoreDestination(remembered: otherRemembered, rooms: [first, last]))
+        LastPersonalChatStore(matrixUserID: other, defaults: relaunched).remember(first.roomID)
+        XCTAssertEqual(LastPersonalChatStore(matrixUserID: account, defaults: relaunched).roomID(), last.roomID)
+        XCTAssertEqual(LastPersonalChatStore(matrixUserID: other, defaults: relaunched).roomID(), first.roomID)
+    }
+
+    func testPersonalChatRestoreSkipsLeftInvitedAndReclassifiedRooms() throws {
+        let primary = try cloudPrimaryForRestore()
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let formerPersonal = rosterRoom("!company:atum.test", userID: "@person:atum.test", latest: 2)
+        let left = "!left:atum.test"
+        let invitation = LiveMatrixInvite(roomID: "!invite:atum.test", inviterID: "@person:atum.test")
+        XCTAssertEqual(restoreDestination(remembered: left, rooms: [main], agents: [primary]), main.roomID)
+        XCTAssertEqual(restoreDestination(remembered: invitation.roomID, rooms: [main],
+                                          invites: [invitation], agents: [primary]), main.roomID)
+        XCTAssertEqual(restoreDestination(remembered: formerPersonal.roomID, rooms: [main, formerPersonal],
+                                          agents: [primary]), formerPersonal.roomID)
+        XCTAssertNil(restoreDestination(remembered: formerPersonal.roomID, rooms: [formerPersonal],
+                                        classification: { _ in .unknown }))
+        XCTAssertEqual(restoreDestination(remembered: formerPersonal.roomID, rooms: [main, formerPersonal],
+                                          agents: [primary], classification: {
+            $0 == formerPersonal.roomID ? .privateCos(companyID: "company") : .personal
+        }), main.roomID)
+        let claimed = rosterRoom("!claimed:atum.test", userID: "@person:atum.test", latest: 3,
+                                 roomType: ConversationRoomType.value)
+        XCTAssertEqual(restoreDestination(remembered: claimed.roomID, rooms: [main, claimed],
+                                          agents: [primary]), main.roomID)
+    }
+
+    @MainActor
+    func testPersonalChatRestoreRejectsPrivateCosClaimWithoutDirectoryBinding() async throws {
+        let (workspace, _, cos) = try privateCosModel()
+        let binding = try XCTUnwrap(cos.view.binding)
+        cos.failure = CompanyStubFailure.unavailable
+        await workspace.refresh()
+        XCTAssertTrue(workspace.classificationComplete)
+        XCTAssertTrue(workspace.privateCosBindings.roomIDs.isEmpty)
+
+        let primary = try cloudPrimaryForRestore()
+        let cosAgent = try XCTUnwrap(decodeAgents([agentJSON(id: "00000000-0000-4000-8000-d09f929fabe6",
+            name: "Chief of Staff", matrixUser: binding.agentUserId)]).first)
+        let claimed = rosterRoom(binding.roomId, userID: binding.agentUserId, latest: 100,
+                                 roomType: "io.atum.assistant", isEncrypted: true)
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let rooms = [claimed, main]
+        workspace.reconcileMatrixRooms(Set(rooms.map(\.roomID)))
+        XCTAssertEqual(workspace.personalChatRestoreClassification(claimed.roomID), .personal)
+
+        let claimedResponse = PersonalChatCompanyClaim.read(status: 200, body: Data("{}".utf8))
+        let failedResponse = PersonalChatCompanyClaim.read(status: 403, body: Data())
+        let absentResponse = PersonalChatCompanyClaim.read(status: 404, body: Data(#"{"errcode":"M_NOT_FOUND"}"#.utf8))
+        XCTAssertEqual(claimedResponse, .claimed)
+        XCTAssertEqual(failedResponse, .unavailable)
+        XCTAssertEqual(absentResponse, .absent)
+        XCTAssertEqual(PersonalChatCompanyClaim.read(status: 404, body: Data()), .unavailable)
+
+        let agents = [primary, cosAgent]
+        let classification: (String) -> CompanyRoomClassification = { workspace.personalChatRestoreClassification($0) }
+        XCTAssertEqual(restoreDecision(remembered: claimed.roomID, rooms: rooms, agents: agents,
+                                       companyClaim: { _ in nil }, classification: classification),
+                       .checkCompanyClaim(claimed.roomID))
+        XCTAssertNil(restoreDecision(remembered: claimed.roomID, rooms: rooms, agents: agents,
+                                     companyClaim: { _ in .checking }, classification: classification))
+        for rejected in [claimedResponse, failedResponse] {
+            XCTAssertEqual(restoreDestination(remembered: claimed.roomID, rooms: rooms, agents: agents,
+                                              companyClaim: { $0 == claimed.roomID ? rejected : absentResponse },
+                                              classification: classification), main.roomID)
+        }
+    }
+
+    func testPersonalChatRestoreRefreshesClaimAfterSupersededIntent() {
+        let room = rosterRoom("!room:atum.test", userID: "@person:atum.test", latest: 1)
+        let roomID = room.roomID
+        var checks = PersonalChatClaimChecks()
+        checks.begin(intentID: UUID())
+        XCTAssertEqual(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                       companyClaim: checks.claim), .checkCompanyClaim(roomID))
+        let superseded = checks.start(roomID)
+        XCTAssertFalse(checks.finish(roomID, claim: .absent, scopeID: superseded, stillCurrent: false))
+        XCTAssertNil(checks.claim(roomID))
+
+        // The directory still sees a personal room, but the Matrix marker has appeared.
+        checks.begin(intentID: UUID())
+        XCTAssertEqual(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                       companyClaim: checks.claim), .checkCompanyClaim(roomID))
+        let current = checks.start(roomID)
+        XCTAssertFalse(checks.finish(roomID, claim: .absent, scopeID: superseded, stillCurrent: true))
+        XCTAssertEqual(checks.claim(roomID), .checking)
+        XCTAssertTrue(checks.finish(roomID, claim: .claimed, scopeID: current, stillCurrent: true))
+        XCTAssertNil(restoreDestination(entry: .chatsTap, remembered: roomID, rooms: [room],
+                                        companyClaim: checks.claim))
+    }
+
+    func testPersonalChatRestoreRetriesTimedOutClaimOnLaterTap() {
+        let room = rosterRoom("!room:atum.test", userID: "@person:atum.test", latest: 1)
+        let roomID = room.roomID
+        var checks = PersonalChatClaimChecks()
+        let firstIntent = UUID()
+        checks.begin(intentID: firstIntent)
+        let firstScope = checks.start(roomID)
+        let timeout = PersonalChatCompanyClaim.read(status: nil, body: Data())
+        XCTAssertTrue(checks.finish(roomID, claim: timeout, scopeID: firstScope, stillCurrent: true))
+        checks.begin(intentID: firstIntent)
+        XCTAssertNil(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                     companyClaim: checks.claim))
+
+        checks.begin(intentID: UUID())
+        XCTAssertEqual(restoreDecision(for: .chatsTap, remembered: roomID, rooms: [room],
+                                       companyClaim: checks.claim), .checkCompanyClaim(roomID))
+        let nextScope = checks.start(roomID)
+        XCTAssertTrue(checks.finish(roomID, claim: .absent, scopeID: nextScope, stillCurrent: true))
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, remembered: roomID, rooms: [room],
+                                          companyClaim: checks.claim), roomID)
+    }
+
+    func testPersonalChatRestoreResumesAfterAbortedSignOut() {
+        var session = PersonalChatRestoreSession()
+        let installation = UUID()
+        session.begin(installationID: installation)
+        XCTAssertTrue(session.canRestore(installationID: installation, signOutInProgress: false))
+        XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: true))
+
+        session.beginSignOut()
+        XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: true))
+        session.begin(installationID: installation)
+        XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: false))
+
+        session.abortSignOut(installationID: UUID())
+        XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: false))
+        session.abortSignOut(installationID: installation)
+        XCTAssertTrue(session.canRestore(installationID: installation, signOutInProgress: false))
+
+        session.beginSignOut()
+        let replacement = UUID()
+        session.begin(installationID: replacement)
+        XCTAssertFalse(session.canRestore(installationID: installation, signOutInProgress: false))
+        XCTAssertTrue(session.canRestore(installationID: replacement, signOutInProgress: false))
+    }
+
+    func testPersonalChatRestoreFencesPendingExitAfterListOmission() throws {
+        let name = "PersonalChatRestoreExitTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = LastPersonalChatStore(matrixUserID: "@owner:atum.test", defaults: defaults)
+        let primary = try cloudPrimaryForRestore()
+        let room = rosterRoom("!exit:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        store.remember(room.roomID)
+
+        store.beginExit(room.roomID)
+        XCTAssertNil(store.roomID())
+        // A room-list rebuild can omit the room while the SDK still knows it as joined.
+        store.pruneExitedRooms(membership: { _ in .joined })
+        XCTAssertNil(restoreDestination(rooms: [], agents: [primary], exitedRoomIDs: store.exitedRoomIDs()))
+        store.pruneExitedRooms(membership: { _ in nil })
+        XCTAssertEqual(store.exitedRoomIDs(), [room.roomID])
+        XCTAssertNil(restoreDestination(remembered: room.roomID, rooms: [room], agents: [primary],
+                                        exitedRoomIDs: store.exitedRoomIDs()))
+        XCTAssertNil(restoreDestination(rooms: [room], agents: [primary], exitedRoomIDs: store.exitedRoomIDs()))
+
+        let person = rosterRoom("!person:atum.test", userID: "@person:atum.test", latest: 2)
+        store.beginExit(person.roomID)
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: [person], exitedRoomIDs: store.exitedRoomIDs()))
+    }
+
+    func testPersonalChatRestorePersistsExitFenceAcrossRelaunch() throws {
+        let name = "PersonalChatRestoreExitTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let room = rosterRoom("!exit:atum.test", userID: "@person:atum.test", latest: 1)
+        let owner = "@owner:atum.test"
+        LastPersonalChatStore(matrixUserID: owner, defaults: defaults).beginExit(room.roomID)
+
+        let relaunched = try XCTUnwrap(UserDefaults(suiteName: name))
+        let restoredStore = LastPersonalChatStore(matrixUserID: owner, defaults: relaunched)
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: [room], exitedRoomIDs: restoredStore.exitedRoomIDs()))
+        let other = LastPersonalChatStore(matrixUserID: "@another:atum.test", defaults: relaunched)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: [room], exitedRoomIDs: other.exitedRoomIDs()),
+                       room.roomID)
+    }
+
+    func testPersonalChatRestoreClearsExitOnConfirmedLeaveOrExplicitOpen() throws {
+        let name = "PersonalChatRestoreExitTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = LastPersonalChatStore(matrixUserID: "@owner:atum.test", defaults: defaults)
+        let left = "!left:atum.test"
+        let banned = "!banned:atum.test"
+        let opened = rosterRoom("!opened:atum.test", userID: "@person:atum.test", latest: 1)
+        for roomID in [left, banned, opened.roomID] { store.beginExit(roomID) }
+        store.pruneExitedRooms { roomID in
+            switch roomID {
+            case left: return .left
+            case banned: return .banned
+            default: return .joined
+            }
+        }
+        XCTAssertEqual(store.exitedRoomIDs(), [opened.roomID])
+        store.clearExit(opened.roomID)
+        XCTAssertTrue(store.exitedRoomIDs().isEmpty)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: [opened], exitedRoomIDs: store.exitedRoomIDs()),
+                       opened.roomID)
+    }
+
+    func testPersonalChatRestoreWaitsForAgentsBeforeRestoringUntypedDirectChat() throws {
+        let legacy = rosterRoom("!legacy:atum.test", userID: "@former:atum.test", latest: 99)
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let rooms = [legacy, main]
+        XCTAssertNil(restoreDestination(remembered: legacy.roomID, rooms: rooms, agents: nil))
+
+        let retired = try XCTUnwrap(decodeAgents([agentJSON(id: "00000000-0000-4000-8000-d09f929fabe6",
+            name: "Former", matrixUser: "@former:atum.test", status: "retired")]).first)
+        let primary = try cloudPrimaryForRestore()
+        XCTAssertEqual(restoreDestination(remembered: legacy.roomID, rooms: rooms, agents: [retired, primary]),
+                       main.roomID)
+        XCTAssertEqual(restoreDestination(remembered: legacy.roomID, rooms: rooms, agents: [primary]),
+                       legacy.roomID)
+    }
+
+    func testPersonalChatRestoreFallsBackWhenRememberedJoinedRoomIsUnlistedAndUnknown() throws {
+        let primary = try cloudPrimaryForRestore()
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        var unlisted = rosterRoom("!unlisted:atum.test", userID: "@person:atum.test", latest: 2)
+        let rooms = [unlisted, main]
+        let classification: (String) -> CompanyRoomClassification = { $0 == main.roomID ? .personal : .unknown }
+        XCTAssertEqual(restoreDestination(remembered: unlisted.roomID, rooms: rooms, agents: [primary],
+                                          unlistedRoomIDs: [unlisted.roomID], classification: classification),
+                       main.roomID)
+        XCTAssertEqual(restoreDestination(remembered: unlisted.roomID, rooms: rooms, agents: [primary],
+                                          classification: classification), main.roomID)
+        unlisted.hasCreateState = false
+        XCTAssertEqual(restoreDestination(remembered: unlisted.roomID, rooms: [unlisted, main], agents: [primary]),
+                       main.roomID)
+    }
+
+    func testPersonalChatRestoreChecksFormerAssistantIdentityEvenOnPeopleRow() throws {
+        let primary = try cloudPrimaryForRestore()
+        let old = rosterRoom("!old:atum.test", userID: "@former:atum.test", latest: 50,
+                             roomType: "io.atum.assistant")
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let people = rosterRoom("!person:atum.test", userID: "@person:atum.test", latest: 2)
+        let rows = LiveRosterRows.rows(.init(agents: [primary], apps: [], rooms: [old, main], invites: [],
+                                           pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "vi")).rows
+        let formerRow = try XCTUnwrap(rows.first { $0.id == old.roomID })
+        XCTAssertEqual(formerRow.kind, .people)
+        XCTAssertEqual(restoreDestination(remembered: old.roomID, rooms: [old, main], agents: [primary]),
+                       main.roomID)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, remembered: old.roomID, rooms: [old, people]),
+                       people.roomID)
+
+        let inactive = try decodeAgents([agentJSON(id: "00000000-0000-4000-8000-d09f929fabe6",
+            name: "Former", matrixUser: "@former:atum.test", status: "retired")])
+        let legacy = rosterRoom("!legacy:atum.test", userID: "@former:atum.test", latest: 99)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, remembered: legacy.roomID,
+                                          rooms: [legacy, people], agents: inactive), people.roomID)
+    }
+
+    func testPersonalChatRestoreFindsCloudOnlyPrimaryAndLeavesUnavailablePrimaryAlone() throws {
+        let primary = try cloudPrimaryForRestore()
+        let main = rosterRoom("!main:atum.test", userID: "@primary:atum.test", latest: 1,
+                              roomType: "io.atum.assistant")
+        let person = rosterRoom("!person:atum.test", userID: "@person:atum.test", latest: 2)
+        XCTAssertEqual(primary.answering, .cloud)
+        XCTAssertEqual(restoreDestination(rooms: [person, main], agents: [primary]), main.roomID)
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: [person], agents: [primary]))
+    }
+
+    func testPersonalChatRestoreUsesDesktopOrderOnlyForChatsTapWithoutAgent() {
+        var low = rosterRoom("!low:atum.test", userID: "@person:atum.test", latest: 100)
+        low.isLowPriority = true
+        let older = rosterRoom("!older:atum.test", userID: "@person:atum.test", latest: 20)
+        let newer = rosterRoom("!newer:atum.test", userID: "@person:atum.test", latest: 30)
+        var firstPin = rosterRoom("!first-pin:atum.test", userID: "@person:atum.test", latest: 1, favourite: true)
+        firstPin.favouriteOrder = 0.1
+        var secondPin = rosterRoom("!second-pin:atum.test", userID: "@person:atum.test", latest: 2, favourite: true)
+        secondPin.favouriteOrder = 0.9
+        let unrankedPin = rosterRoom("!unranked-pin:atum.test", userID: "@person:atum.test",
+                                     latest: 3, favourite: true)
+        let rooms = [low, older, newer, secondPin, unrankedPin, firstPin]
+        XCTAssertNil(restoreDestination(rooms: rooms))
+        XCTAssertNil(restoreDestination(entry: .chatsTap, rooms: rooms, agents: nil))
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: rooms), firstPin.roomID)
+        XCTAssertEqual(restoreDestination(entry: .chatsTap, rooms: [low, older, newer]), newer.roomID)
+    }
+
+    func testPersonalChatRestoreYieldsToNotificationAndNewerNavigation() {
+        let last = rosterRoom("!last:atum.test", userID: "@person:atum.test", latest: 1)
+        for entry in [PersonalChatRestoreEntry.launch, .chatsTap] {
+            XCTAssertEqual(restoreDestination(entry: entry, remembered: last.roomID, rooms: [last]), last.roomID)
+            XCTAssertNil(restoreDestination(entry: entry, remembered: last.roomID, rooms: [last],
+                                            hasExplicitRoute: true))
+            XCTAssertNil(restoreDestination(entry: entry, remembered: last.roomID, rooms: [last], isCurrent: false))
+        }
+    }
+
+    func testPersonalChatRestoreReadsOnlyValidNumericPinOrder() {
+        XCTAssertEqual(PersonalChatRestorePolicy.favouriteOrder(eventJSON:
+            #"{"type":"m.tag","content":{"tags":{"m.favourite":{"order":0.25},"m.lowpriority":{}}}}"#), 0.25)
+        for invalid in ["2", #""0.25""#, "true"] {
+            let raw = #"{"type":"m.tag","content":{"tags":{"m.favourite":{"order":"# + invalid + "}}}}"
+            XCTAssertNil(PersonalChatRestorePolicy.favouriteOrder(eventJSON: raw))
+        }
+    }
+
+    private func restoreDestination(
+        entry: PersonalChatRestoreEntry = .launch, remembered: String? = nil,
+        rooms: [LiveMatrixRoomRow], invites: [LiveMatrixInvite] = [], agents: [AgentsResponse.Agent]? = [],
+        hasExplicitRoute: Bool = false, isCurrent: Bool = true,
+        exitedRoomIDs: Set<String> = [], unlistedRoomIDs: Set<String> = [],
+        companyClaim: (String) -> PersonalChatCompanyClaim? = { _ in .absent },
+        classification: (String) -> CompanyRoomClassification = { _ in .personal }
+    ) -> String? {
+        guard case let .open(row) = restoreDecision(for: entry, remembered: remembered, rooms: rooms,
+            invites: invites, agents: agents, hasExplicitRoute: hasExplicitRoute, isCurrent: isCurrent,
+            exitedRoomIDs: exitedRoomIDs, unlistedRoomIDs: unlistedRoomIDs, companyClaim: companyClaim,
+            classification: classification) else { return nil }
+        return row.id
+    }
+
+    private func restoreDecision(
+        for entry: PersonalChatRestoreEntry = .launch, remembered: String? = nil,
+        rooms: [LiveMatrixRoomRow], invites: [LiveMatrixInvite] = [], agents: [AgentsResponse.Agent]? = [],
+        hasExplicitRoute: Bool = false, isCurrent: Bool = true,
+        exitedRoomIDs: Set<String> = [], unlistedRoomIDs: Set<String> = [],
+        companyClaim: (String) -> PersonalChatCompanyClaim? = { _ in .absent },
+        classification: (String) -> CompanyRoomClassification = { _ in .personal }
+    ) -> PersonalChatRestoreDecision? {
+        let rows = LiveRosterRows.rows(.init(agents: agents ?? [], apps: [], rooms: rooms, invites: invites,
+                                            pointers: [:], hiddenRooms: MobileHiddenRoomLedger(), locale: "vi")).rows
+        return PersonalChatRestorePolicy.decision(for: entry, rememberedRoomID: remembered,
+            joinedRooms: rooms, rows: rows.filter { !unlistedRoomIDs.contains($0.id) }, agents: agents,
+            hasExplicitRoute: hasExplicitRoute, isCurrent: isCurrent, exitedRoomIDs: exitedRoomIDs,
+            classification: classification, companyClaim: companyClaim)
+    }
+
+    private func cloudPrimaryForRestore() throws -> AgentsResponse.Agent {
+        var agent = agentJSON(id: "00000000-0000-4000-8000-064e196185a1", name: "Primary",
+                              matrixUser: "@primary:atum.test", isDefault: true)
+        agent["answering"] = "cloud"
+        return try XCTUnwrap(decodeAgents([agent]).first)
+    }
+
     func testRosterPreviewSkipsOnlyConfirmedClearedWorkingLines() {
         let agent = "@assistant:atum.test"
         let answer = LiveLatestEventPreview(text: "Here is the plan", content: .text("Here is the plan"),
@@ -1899,7 +2264,8 @@ final class S2StateTests: XCTestCase {
                             isNotice: Bool = false,
                             favourite: Bool = false,
                             appBotHiddenAt: UInt64? = nil,
-                            legacyMove: MobileLegacyAppBotMove? = nil) -> LiveMatrixRoomRow {
+                            legacyMove: MobileLegacyAppBotMove? = nil,
+                            isEncrypted: Bool? = false) -> LiveMatrixRoomRow {
         LiveMatrixRoomRow(
             roomID: id, displayName: id, avatarURL: nil, latestText: text,
             latestPreviewContent: previewContent ?? text.map(RowPreview.Content.text) ?? .none,
@@ -1908,7 +2274,7 @@ final class S2StateTests: XCTestCase {
             unreadCount: 0, notificationCount: 0, highlightCount: 0,
             isMarkedUnread: false, isFavourite: favourite, isMuted: false,
             isDirect: true, memberUserIDs: [userID], memberCount: 2,
-            roomType: roomType, isEncrypted: false,
+            roomType: roomType, isEncrypted: isEncrypted,
             appBotHiddenAt: appBotHiddenAt, legacyAppBotMove: legacyMove
         )
     }
