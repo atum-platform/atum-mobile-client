@@ -305,8 +305,10 @@ Hosted run 45562847668 (head `4fe85c4`) failed two tests in shard 2.
      bot menus), and so did the Drive capture.
    - **Residual:** in 1/16 runs the swipes still did not scroll, and the
      resting touch of a swipe then opened the menu. The variant without the
-     follower showed it too (1/8). See the session log for the main
-     comparison.
+     follower showed it too (1/8). A final round 8 ran main and the fix
+     alternately, 8 runs each, and both passed 8/8. Totals: fix 23/24,
+     main 11/11. The one residual run is not separable from noise at this
+     sample size.
    - **Separate test fragility:** one variant run (D-2) failed the contrast
      check instead (ratio 1.05). There, XCTest reported my quote hittable while
      it sat under the composer glass, so the test skipped its swipe and
@@ -386,6 +388,7 @@ Logs and bundles: `/Volumes/AtumTestFlight/polish-p3/ci109*` and
   5. Variant D.
   6. The fix.
   7. The fix against variant F.
+  8. The fix against main.
 
   Experiments used throwaway detached worktrees under
   `/Volumes/AtumTestFlight/polish-p3/`. Design lint and the public guard ran
