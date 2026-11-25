@@ -251,6 +251,42 @@ final class StoreCommercePresentationTests: XCTestCase {
         XCTAssertEqual(folded.map(\.id), ["pet/hatch-first"]); XCTAssertNil(folded[0].regularOffer)
     }
 
+    /// W4-Z2 (desktop #132 `storeItemComingSoon`): without beta features a
+    /// hire or skill the account doesn't own is "Coming soon"; pets are
+    /// unchanged, owned items stay usable, and beta accounts see today's Store.
+    func testHiresAndSkillsWaitForBetaFeaturesAndPetsAndOwnedItemsDoNot() {
+        for kind in [LiveProductStoreItemKind.agent, .skill] {
+            XCTAssertTrue(StoreBetaGate.comingSoon(kind, betaFeatures: false, owned: false), "\(kind)")
+            XCTAssertFalse(StoreBetaGate.comingSoon(kind, betaFeatures: false, owned: true), "owned \(kind)")
+            XCTAssertFalse(StoreBetaGate.comingSoon(kind, betaFeatures: true, owned: false), "beta \(kind)")
+        }
+        XCTAssertFalse(StoreBetaGate.comingSoon(.pet, betaFeatures: false, owned: false))
+        XCTAssertFalse(StoreBetaGate.comingSoon(.pet, betaFeatures: true, owned: false))
+    }
+
+    /// The row: only a price gives way to "Coming soon". Open and a delivery
+    /// under way stay, and a skill owned on any assistant keeps its row.
+    func testOnlyAnUnownedRowsPriceBecomesComingSoon() {
+        XCTAssertEqual(StoreBetaGate.rowStatus(.price, kind: .agent, betaFeatures: false, owned: false), .comingSoon)
+        XCTAssertEqual(StoreBetaGate.rowStatus(.price, kind: .skill, betaFeatures: false, owned: false), .comingSoon)
+        XCTAssertEqual(StoreBetaGate.rowStatus(.price, kind: .skill, betaFeatures: false, owned: true), .price)
+        XCTAssertEqual(StoreBetaGate.rowStatus(.owned, kind: .agent, betaFeatures: false, owned: true), .owned)
+        XCTAssertEqual(StoreBetaGate.rowStatus(.pending, kind: .skill, betaFeatures: false, owned: false), .pending)
+        XCTAssertEqual(StoreBetaGate.rowStatus(.price, kind: .pet, betaFeatures: false, owned: false), .price)
+        XCTAssertEqual(StoreBetaGate.rowStatus(.price, kind: .agent, betaFeatures: true, owned: false), .price)
+    }
+
+    /// The gate's only words are the pinned desktop "Coming soon", in every locale.
+    func testComingSoonIsThePinnedDiscoverKeyInEveryLocale() throws {
+        XCTAssertEqual(StoreCopyKey.comingSoon, "desktop.atum.discover.comingSoon")
+        let copy = try AtumCopy()
+        XCTAssertEqual(copy.locales.count, 5)
+        for locale in copy.locales {
+            XCTAssertFalse(try copy.text(StoreCopyKey.comingSoon, locale: locale).isEmpty, locale)
+        }
+        XCTAssertEqual(try copy.text(StoreCopyKey.comingSoon, locale: "en"), "Coming soon")
+    }
+
     func testRequirementsShowOnlyExportedTokensOnce() {
         XCTAssertEqual(StoreRequirementPresentation.keys(for: ["Atum", "internet", "runs-scripts", "internet"]),
                        ["desktop.atum.discover.needsInternet", "desktop.atum.discover.needsScripts"])

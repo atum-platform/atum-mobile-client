@@ -195,6 +195,7 @@ struct ScriptedHomeHost: View {
                             hire: Self.hireMode == nil ? nil : Self.scriptedHire,
                             hireFlow: Self.hireMode == nil ? nil : listingHire,
                             hireAccount: Self.hireMode == nil ? nil : "@scripted:atum.test",
+                            betaFeatures: AtumDebugLaunch.scriptedBetaFeatures,
                             // `capacity`: the hired assistant's chat never opens here.
                             chatReady: { _ in Self.hireMode != "capacity" }
                         ),

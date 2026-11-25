@@ -400,6 +400,36 @@ import XCTest
         XCTAssertNil(flow.hire)
     }
 
+    /// W4-Z2 (desktop #132): without beta features the Researcher reads
+    /// "Coming soon" and a press starts nothing and sends no hire request,
+    /// not even the name line. With them the same press hires as today.
+    func testWithoutBetaFeaturesAShelfPressStartsNoHireAndSendsNothing() async throws {
+        let researcher = try listing()
+        let flow = ListingHireFlow()
+        let runs = Runs([.hired])
+        flow.press(researcher, name: "Researcher", shownAs: "Researcher", account: Self.owner,
+                   betaFeatures: false, run: runs.run)
+        flow.press(researcher, name: nil, shownAs: "Researcher", account: Self.owner,
+                   betaFeatures: false, run: runs.run)
+        flow.confirm()
+        flow.retry()
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertNil(flow.hire)
+        XCTAssertTrue(runs.calls.isEmpty, "a hire request went out without beta features")
+
+        flow.press(researcher, name: "Researcher", shownAs: "Researcher", account: Self.owner,
+                   betaFeatures: true, run: runs.run)
+        XCTAssertEqual(flow.hire?.phase, .hiring)
+        await settle(flow)
+        XCTAssertEqual(flow.hire?.phase, .done)
+        XCTAssertEqual(runs.calls.count, 1)
+        flow.reset()
+        flow.press(researcher, name: nil, shownAs: "Researcher", account: Self.owner,
+                   betaFeatures: true, run: runs.run)
+        XCTAssertEqual(flow.hire?.phase, .failed(.name))
+        XCTAssertEqual(runs.calls.count, 1)
+    }
+
     /// Review r2 finding 4: Done needs a Home row that opens the hired
     /// assistant's chat. No room yet, or duplicate plain rooms Home won't
     /// choose between, is the waiting row, which can't open.

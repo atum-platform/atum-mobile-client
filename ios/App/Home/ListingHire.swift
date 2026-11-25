@@ -99,6 +99,17 @@ struct ListingHireState: Equatable, Sendable {
         if !listing.hireRequired { start(confirmed: false) }
     }
 
+    /// A press on the shelf (`AssistantNewSheet`). Without the account's beta
+    /// features the listing is "Coming soon" (desktop #132): no hire starts
+    /// and nothing is sent. Otherwise a usable name hires it, and none shows
+    /// the name line (`refuseName`).
+    func press(_ listing: OpenAgentListing, name: String?, shownAs title: String, account: String,
+               betaFeatures: Bool, run: @escaping Run) {
+        guard betaFeatures else { return }
+        if let name { pick(listing, name: name, account: account, run: run) }
+        else { refuseName(listing, shownAs: title, account: account) }
+    }
+
     /// The person chose a listing whose every name (its title, numbered, and
     /// the catalog name) is already refused here: the name line, with Back,
     /// and nothing is sent (`ListingAssistantName.name` is nil).

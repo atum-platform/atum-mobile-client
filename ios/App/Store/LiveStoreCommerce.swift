@@ -140,6 +140,13 @@ import Observation
         return item.kind != .skill || assistant.map(ownership.assistantIDs.contains) == true
     }
 
+    /// Owned at all: on the account or, for a skill, on any assistant
+    /// (desktop `storeOwnership`). The Store's "Coming soon" never covers it.
+    func ownedAnywhere(_ itemIDs: Set<String>) -> Bool {
+        entitlements.contains { itemIDs.contains($0.itemID) && $0.isOwned }
+            || catalog.contains { itemIDs.contains($0.itemID) && $0.ownership?.state == .owned }
+    }
+
     func attempt(itemID: String, assistant: NativeID?) -> StorePurchaseAttempt? {
         try? acquisition?.attempt(itemID: itemID, assistantID: assistant)
     }

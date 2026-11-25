@@ -122,6 +122,9 @@ struct HomeAssistantActions {
     var hireFlow: ListingHireFlow?
     /// The signed-in account (its Matrix ID) a pick belongs to; nil hides the shelf.
     var hireAccount: String?
+    /// The account's beta features. Without them every listing reads "Coming
+    /// soon": shown, but never hired (desktop #132). Make your own still works.
+    var betaFeatures = false
     /// The names the catalog's apps go by, so a hired assistant is never named
     /// as an app (desktop `appCatalogNames`).
     var appNames: [String] = []

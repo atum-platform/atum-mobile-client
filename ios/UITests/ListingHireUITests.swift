@@ -60,6 +60,58 @@ final class ListingHireUITests: TranscriptUITestCase {
                        file: file, line: line)
     }
 
+    /// W4-Z2 (desktop #132): without beta features Ready to hire still shows
+    /// the Researcher, its button reads "Coming soon", is disabled and sends
+    /// no hire; Make your own still works. Light and dark, default and AX5.
+    @MainActor
+    func testWithoutBetaFeaturesTheResearcherIsComingSoonAndMakeYourOwnWorks() {
+        let soonWords = ["en": "Coming soon", "vi": "Sắp có"]
+        for language in ["en", "vi"] {
+            for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
+                for dark in [false, true] {
+                    if language == "vi" && size != "UICTContentSizeCategoryL" { continue }
+                    let words = Self.words[language]!
+                    let suffix = "\(language)-\(dark ? "dark" : "light")-\(size.hasSuffix("XXXL") ? "ax5" : "default")"
+                    let app = XCUIApplication()
+                    app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+                        + ["-AtumScriptedHire", "free", "-AtumScriptedBetaFeatures", "NO",
+                           "-AppleLanguages", "(\(language))",
+                           "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
+                           "-atum.appearance", dark ? "dark" : "light",
+                           "-UIPreferredContentSizeCategoryName", size] + probeArguments
+                    app.launch()
+                    let create = app.buttons.matching(identifier: "home.create").firstMatch
+                    XCTAssertTrue(create.waitForExistence(timeout: 40))
+                    create.tap()
+                    let newAssistant = app.buttons.matching(identifier: "home.startChat.newAssistant").firstMatch
+                    XCTAssertTrue(newAssistant.waitForExistence(timeout: 15))
+                    newAssistant.tap()
+                    let soon = app.buttons.matching(identifier: "home.newAssistant.listing.soon").firstMatch
+                    XCTAssertTrue(soon.waitForExistence(timeout: 20), "no Coming soon on the shelf")
+                    XCTAssertEqual(soon.label, "\(soonWords[language]!) \(words.title)")
+                    XCTAssertFalse(soon.isEnabled, "Coming soon is pressable")
+                    XCTAssertTrue(element(app, "home.newAssistant.readyToHire").exists)
+                    XCTAssertTrue(app.staticTexts[words.title].exists, "the listing is gone")
+                    XCTAssertFalse(app.buttons.matching(identifier: "home.newAssistant.listing.hire").firstMatch.exists,
+                                   "a Hire button without beta features")
+                    keepScreenshot("hire-soon-\(suffix)", of: app)
+
+                    soon.tap()
+                    XCTAssertFalse(element(app, "home.newAssistant.hire.status").waitForExistence(timeout: 2),
+                                   "a hire started without beta features")
+                    XCTAssertFalse(probeLines("home-actions.txt").contains { $0.text.hasPrefix("hire ") },
+                                   "a hire request went out without beta features")
+                    // Make your own never waits for beta.
+                    let name = element(app, "home.newAssistant.name")
+                    XCTAssertTrue(name.exists, "the make-your-own form is gone")
+                    XCTAssertTrue(name.isEnabled, "Make your own is disabled")
+                    XCTAssertTrue(element(app, "home.newAssistant.own").exists)
+                    app.terminate()
+                }
+            }
+        }
+    }
+
     @MainActor
     func testHireTheResearcherInEnglishAndVietnameseLightAndDark() {
         for language in ["en", "vi"] {

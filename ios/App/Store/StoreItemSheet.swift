@@ -11,11 +11,16 @@ import SwiftUI
 /// with Continue (desktop `store-detail.tsx:372-420, 611-614`). While Apple
 /// checkout is closed (`StorePurchaseGate`, REL-15) a paid item offers
 /// neither Get nor top-up, only one quiet line; free items and Open stay.
+/// Without the account's beta features a hire or skill not owned for the
+/// chosen assistant is "Coming soon" (`StoreBetaGate`, desktop #132): its
+/// description and facts stay, a disabled Coming soon takes the action's
+/// place, and no recipient, price or balance shows.
 struct StoreItemSheet: View {
     let design: LiveDesign
     let item: LiveProductStoreItem
     let commerce: LiveStoreCommerce?
     let openRoom: (String) -> Void
+    var betaFeatures = false
 
     @State private var chosenAssistant: NativeID?
     @State private var quote: StoreAcquireQuote?
@@ -173,6 +178,7 @@ struct StoreItemSheet: View {
 
     private var showsRecipients: Bool {
         guard perAssistant, let commerce, commerce.readState == .ready else { return false }
+        if case .comingSoon = phase { return false }
         return !eligible.isEmpty
     }
 
@@ -291,10 +297,12 @@ struct StoreItemSheet: View {
         case ready(StoreAcquireQuote)
         /// A paid item while Apple checkout is closed: no Get, no top-up.
         case purchasesClosed
+        /// A hire or skill without beta features: read about it, nothing to get yet.
+        case comingSoon
 
         var showsPrice: Bool {
             switch self {
-            case .owned, .pending: false
+            case .owned, .pending, .comingSoon: false
             default: true
             }
         }
@@ -324,7 +332,9 @@ struct StoreItemSheet: View {
     }
 
     private var phase: Phase {
-        guard let commerce else { return ownedFor(nil) ? .owned : .info }
+        // Past the ownership checks, so "owned" is false for the chosen assistant.
+        let comingSoon = StoreBetaGate.comingSoon(item.kind, betaFeatures: betaFeatures, owned: false)
+        guard let commerce else { return ownedFor(nil) ? .owned : comingSoon ? .comingSoon : .info }
         if ownedFor(assistant) && (!perAssistant || assistant != nil) { return .owned }
         if commerce.purchases.contains(where: {
             $0.itemID == item.id && $0.assistantID == assistant && $0.state == .deliveryPending
@@ -332,6 +342,7 @@ struct StoreItemSheet: View {
         if let attempt = commerce.unresolvedAttempts.first(where: {
             $0.itemID == item.id && $0.assistantID == assistant
         }) { return .unresolved(attempt) }
+        if comingSoon { return .comingSoon }
         guard let offer = item.offer, item.kind != .agent, item.install == nil,
               offer.billingInterval == .oneTime else { return .info }
         if item.deliverable == false { return .notForSale }
@@ -377,7 +388,7 @@ struct StoreItemSheet: View {
         case .info:
             return item.offer == nil && item.install == nil && item.kind != .agent
                 ? .init(key: StoreCopyKey.detailNoOffer, tone: .neutral) : nil
-        case .loading, .ready, .purchasesClosed: return nil
+        case .loading, .ready, .purchasesClosed, .comingSoon: return nil
         case .readFailed(let state):
             switch state {
             case .offline: return .init(key: StoreCopyKey.offline, tone: .warning)
@@ -441,6 +452,15 @@ struct StoreItemSheet: View {
             )
         case .unresolved(let attempt):
             return AnyView(checkStatusButton(attempt))
+        case .comingSoon:
+            return AnyView(
+                Button {} label: {
+                    Text(copy(StoreCopyKey.comingSoon)).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.atumPrimary)
+                .disabled(true)
+                .accessibilityIdentifier("store.detail.soon")
+            )
         case .purchasesClosed:
             return AnyView(
                 Text(copy(StoreCopyKey.purchasesClosed))

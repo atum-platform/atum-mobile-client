@@ -3,6 +3,14 @@ import AtumDesign
 import AtumNativeAPI
 import SwiftUI
 
+extension EnvironmentValues {
+    /// The signed-in account's beta features (`LiveAppModel.betaFeatures`),
+    /// installed by `AppRoot`. False wherever no root installs it, so a Store
+    /// without an account shows hires and skills as "Coming soon"
+    /// (`StoreBetaGate`).
+    @Entry var atumBetaFeatures: Bool = false
+}
+
 /// S6's Store. Every row is one button with one trailing value: an item opens
 /// its sheet (`StoreItemSheet`); an app with an already joined canonical room
 /// opens it, and a live app with a published bot but no room yet starts a chat
@@ -30,6 +38,7 @@ struct StoreScreen: View {
     var onOpenPurchased: (() -> Void)? = nil
 
     @Environment(\.protonTopUp) private var topUp
+    @Environment(\.atumBetaFeatures) private var betaFeatures
     /// Apple checkout, mirrored from the coordinator: the balance opens the
     /// packs only once it is open (fails closed while settling or closed).
     @State private var checkout: StorePurchaseGate.Checkout = .settling
@@ -70,7 +79,7 @@ struct StoreScreen: View {
         .onReceive(StorePurchaseGate.checkoutUpdates(topUp)) { checkout = $0 }
         .sheet(item: $selectedItem) { item in
             StoreItemSheet(design: design, item: item, commerce: commerce,
-                           openRoom: onOpenRoom)
+                           openRoom: onOpenRoom, betaFeatures: betaFeatures)
         }
         .navigationDestination(isPresented: $showsPurchased) { purchasedDestination }
         .navigationDestination(for: Router.StoreDestination.self) { destination in
@@ -367,8 +376,17 @@ struct StoreScreen: View {
             .textCase(nil)
     }
 
-    /// The row's one trailing value: owned or getting ready instead of a price.
+    /// The row's one trailing value: owned or getting ready instead of a
+    /// price, and "Coming soon" for a hire or skill nobody here owns yet
+    /// (`StoreBetaGate`). The row still opens its sheet.
     private func status(for item: LiveProductStoreItem) -> StoreItemRow.Status {
+        let owned = item.ownership?.state == .owned
+            || commerce?.ownedAnywhere(StoreShelfPlan.itemIDs(for: item.id)) == true
+        return StoreBetaGate.rowStatus(ownershipStatus(for: item), kind: item.kind,
+                                       betaFeatures: betaFeatures, owned: owned)
+    }
+
+    private func ownershipStatus(for item: LiveProductStoreItem) -> StoreItemRow.Status {
         guard let commerce else {
             return item.kind != .skill && item.ownership?.state == .owned ? .owned : .price
         }
@@ -535,7 +553,7 @@ private struct StorePurchasedEntry: View {
 }
 
 struct StoreItemRow: View {
-    enum Status: Equatable { case price, owned, pending }
+    enum Status: Equatable { case price, owned, pending, comingSoon }
     @Environment(\.colorScheme) private var scheme
 
     let design: LiveDesign
@@ -548,6 +566,7 @@ struct StoreItemRow: View {
         StoreRowLayout(design: design, title: item.title, summary: item.summary,
                        summaryID: "store.item.\(item.id).summary") {
             StoreItemArt(item: item)
+                .opacity(status == .comingSoon ? StoreBetaGate.dimmedOpacity : 1)
         } trailing: {
             trailing
         }
@@ -563,6 +582,9 @@ struct StoreItemRow: View {
         switch status {
         case .owned:
             StoreRowPill(design: design) { Text(design.text(StoreCopyKey.open)) }
+        case .comingSoon:
+            StoreRowPill(design: design) { Text(design.text(StoreCopyKey.comingSoon)) }
+                .opacity(StoreBetaGate.dimmedOpacity)
         case .pending:
             Image(AtumVisualSystem(design: design).symbol(.clock))
                 .font(design.kit.font(.callout))
@@ -608,6 +630,7 @@ struct StoreItemRow: View {
         var parts = [item.title, item.summary].filter { !$0.isEmpty }
         switch status {
         case .owned: parts.append(design.text(StoreCopyKey.owned))
+        case .comingSoon: parts.append(design.text(StoreCopyKey.comingSoon))
         case .pending: parts.append(design.text(StoreCopyKey.detailPending))
         case .price:
             if let offer = item.offer, offer.billingInterval == .month {

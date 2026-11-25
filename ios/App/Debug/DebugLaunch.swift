@@ -46,6 +46,17 @@ enum AtumDebugLaunch {
     static let showsExpiredSessionPreview =
         ProcessInfo.processInfo.arguments.contains(expiredSessionPreviewFlag)
     static let expiredSessionPreviewFlag = "-AtumExpiredSessionPreview"
+
+    /// The scripted hosts' account beta features (W4-Z2): on unless a UI
+    /// test passes `-AtumScriptedBetaFeatures NO`, so every existing scripted
+    /// walk keeps today's Store and hire, and the gate's walk turns it off.
+    static let scriptedBetaFeatures: Bool = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: scriptedBetaFeaturesFlag), flag + 1 < arguments.count
+        else { return true }
+        return arguments[flag + 1] != "NO"
+    }()
+    static let scriptedBetaFeaturesFlag = "-AtumScriptedBetaFeatures"
 }
 
 enum S6ScriptedScenario: String, CaseIterable {

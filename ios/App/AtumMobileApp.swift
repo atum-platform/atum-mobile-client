@@ -55,10 +55,12 @@ struct AtumMobileApp: App {
             ExpiredSessionPreviewHost()
         } else if let scenario = AtumDebugLaunch.s6Scenario {
             S6ScriptedHost(scenario: scenario)
+                .environment(\.atumBetaFeatures, AtumDebugLaunch.scriptedBetaFeatures)
         } else if let script = AtumScriptedLaunch.selection?.chat {
             ScriptedChatHost(script: script)
         } else if let roster = AtumScriptedLaunch.selection?.roster {
             ScriptedHomeHost(roster: roster)
+                .environment(\.atumBetaFeatures, AtumDebugLaunch.scriptedBetaFeatures)
         } else {
             AppRoot()
         }

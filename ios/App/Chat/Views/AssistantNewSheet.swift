@@ -248,13 +248,16 @@ struct AssistantNewSheet: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Button(copy(ListingHireCopy.hire)) { pick(listing) }
+                    // Without beta features: "Coming soon", disabled (desktop #132).
+                    let action = copy(actions.betaFeatures ? ListingHireCopy.hire : StoreCopyKey.comingSoon)
+                    Button(action) { pick(listing) }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
                         .tint(atum.color(.ink, scheme: scheme))
-                        .disabled(shelfDisabled)
-                        .accessibilityLabel(Text(verbatim: copy(ListingHireCopy.hire) + " " + title))
-                        .accessibilityIdentifier("home.newAssistant.listing.hire")
+                        .disabled(shelfDisabled || !actions.betaFeatures)
+                        .accessibilityLabel(Text(verbatim: action + " " + title))
+                        .accessibilityIdentifier(actions.betaFeatures ? "home.newAssistant.listing.hire"
+                                                                      : "home.newAssistant.listing.soon")
                 }
                 .padding(.vertical, 2)
                 .accessibilityElement(children: .contain)
@@ -273,17 +276,16 @@ struct AssistantNewSheet: View {
     }
 
     private func pick(_ listing: OpenAgentListing) {
-        guard !shelfDisabled, let flow = actions.hireFlow, let run = actions.hire,
+        guard !shelfDisabled, actions.betaFeatures, let flow = actions.hireFlow, let run = actions.hire,
               let account = actions.hireAccount else { return }
         nameFocused = false
-        guard let name = ListingAssistantName.name(for: listing, locale: design.locale,
-                                                   others: actions.names, apps: actions.appNames) else {
-            // Every name this listing could take is refused here: say so,
-            // and send nothing.
-            flow.refuseName(listing, shownAs: listing.title(locale: design.locale), account: account)
-            return
-        }
-        flow.pick(listing, name: name, account: account, run: run)
+        // A nil name: every name this listing could take is refused here, so
+        // the flow says so and sends nothing.
+        flow.press(listing,
+                   name: ListingAssistantName.name(for: listing, locale: design.locale,
+                                                   others: actions.names, apps: actions.appNames),
+                   shownAs: listing.title(locale: design.locale), account: account,
+                   betaFeatures: actions.betaFeatures, run: run)
     }
 
     private var handleSection: some View {

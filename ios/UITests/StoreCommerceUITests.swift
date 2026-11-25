@@ -20,6 +20,13 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     private static let skillOwned = "Trợ lý này đã có kỹ năng."
     private static let purchasesClosed = "Chưa thể mua hàng"
     private static let renewalCancelled = "Đã hủy gia hạn. Quyền truy cập còn đến ngày hiển thị."
+    /// `desktop.atum.discover.comingSoon` in Vietnamese.
+    private static let comingSoon = "Sắp có"
+    private static let withoutBeta = ["-AtumScriptedBetaFeatures", "NO"]
+    private enum ScriptedIDs {
+        static let mai = "20000000-0000-4000-8000-0000000000a1"
+        static let lanAgent = "20000000-0000-4000-8000-0000000000b1"
+    }
 
     @MainActor
     func testDetailReviewConfirmSucceedsOnce() {
@@ -189,6 +196,81 @@ final class StoreCommerceUITests: TranscriptUITestCase {
             .firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "store.renewal.cancel").exists)
         keepScreenshot("U-Store-9-renewal-cancelled-light-vi", of: app)
+    }
+
+    /// W4-Z2 (desktop #132): without beta features the hire and the skill
+    /// read "Coming soon" (dimmed, in place of the price) and still open;
+    /// the sheet keeps the description, with a disabled Coming soon
+    /// and no recipient, price or balance. The pet is unchanged. Light and
+    /// dark, default size and AX5.
+    @MainActor
+    func testWithoutBetaFeaturesHiresAndSkillsAreComingSoonAndPetsStayForSale() {
+        for size in ["UICTContentSizeCategoryL", Self.ax5Size] {
+            for dark in [false, true] {
+                let suffix = "\(dark ? "dark" : "light")-\(size == Self.ax5Size ? "ax5" : "default")-vi"
+                let app = launchStore("store.acquire", contentSize: size,
+                                      extra: Self.withoutBeta + ["-atum.appearance", dark ? "dark" : "light"])
+                XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
+                for id in ["skill/nova", "agent/scout"] {
+                    let row = element(app, "store.item.\(id)")
+                    let list = app.collectionViews.firstMatch
+                    for _ in 0..<6 where !(row.exists && row.isHittable) { list.swipeUp() }
+                    XCTAssertTrue(row.waitForExistence(timeout: 5), id)
+                    XCTAssertTrue(row.label.hasSuffix(Self.comingSoon), "\(id) row: \(row.label)")
+                    XCTAssertFalse(row.label.contains("Proton"), "\(id) row still shows a price: \(row.label)")
+                }
+                keepScreenshot("U-Store-Z2-rows-\(suffix)", of: app)
+
+                for id in ["skill/nova", "agent/scout"] {
+                    openItem(id, in: app)
+                    let soon = element(app, "store.detail.soon")
+                    XCTAssertTrue(soon.waitForExistence(timeout: 8), "\(id) sheet has no Coming soon")
+                    XCTAssertEqual(soon.label, Self.comingSoon)
+                    XCTAssertFalse(soon.isEnabled, "\(id) Coming soon is pressable")
+                    XCTAssertTrue(element(app, "store.detail.description").exists, "\(id) lost its description")
+                    XCTAssertFalse(element(app, "store.detail.acquire").exists, "\(id) offers Get")
+                    XCTAssertFalse(element(app, "store.detail.balance").exists, "\(id) shows the balance")
+                    XCTAssertFalse(element(app, "store.recipient.\(ScriptedIDs.mai)").exists, "\(id) asks for a recipient")
+                    XCTAssertFalse(element(app, "store.recipient.\(ScriptedIDs.lanAgent)").exists, "\(id) asks for a recipient")
+                    XCTAssertFalse(element(app, "topup.entry").exists, "\(id) offers a top-up")
+                    if id == "skill/nova" { keepScreenshot("U-Store-Z2-detail-\(suffix)", of: app) }
+                    element(app, "store.sheet.close").tap()
+                    XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 5))
+                }
+
+                if size == "UICTContentSizeCategoryL" {
+                    let pet = element(app, "store.item.pet/gigi")
+                    XCTAssertFalse(pet.label.contains(Self.comingSoon), "the pet is Coming soon: \(pet.label)")
+                    openItem("pet/gigi", in: app)
+                    let acquire = element(app, "store.detail.acquire")
+                    XCTAssertTrue(acquire.waitForExistence(timeout: 8), "a pet can no longer be got")
+                    XCTAssertTrue(acquire.isEnabled)
+                    XCTAssertFalse(element(app, "store.detail.soon").exists)
+                }
+                app.terminate()
+            }
+        }
+    }
+
+    /// What is already owned is never Coming soon: the owned hire opens, and
+    /// the skill Mai owns keeps its row. Lan doesn't own it, so its sheet
+    /// (Lan is the assistant it would go to) is Coming soon.
+    @MainActor
+    func testWithoutBetaFeaturesOwnedItemsStayUsable() {
+        let app = launchStore("store.owned", extra: Self.withoutBeta)
+        XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
+        let skill = element(app, "store.item.skill/nova")
+        XCTAssertTrue(skill.waitForExistence(timeout: 5))
+        XCTAssertFalse(skill.label.contains(Self.comingSoon), "an owned skill's row: \(skill.label)")
+        let hire = element(app, "store.item.agent/scout")
+        XCTAssertTrue(hire.waitForExistence(timeout: 5))
+        XCTAssertFalse(hire.label.contains(Self.comingSoon), "an owned hire's row: \(hire.label)")
+        XCTAssertTrue(hire.label.contains(Self.owned), "an owned hire's row: \(hire.label)")
+        keepScreenshot("U-Store-Z2-owned-rows-light-default-vi", of: app)
+        openItem("skill/nova", in: app)
+        XCTAssertTrue(element(app, "store.detail.soon").waitForExistence(timeout: 8),
+                      "Lan doesn't own the skill, so its sheet is Coming soon")
+        XCTAssertFalse(element(app, "store.detail.acquire").exists)
     }
 
     @MainActor

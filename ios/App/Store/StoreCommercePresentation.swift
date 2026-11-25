@@ -135,6 +135,32 @@ enum StorePurchaseGate {
     }
 }
 
+/// Hires and skills wait for beta accounts (desktop #132
+/// `storeItemComingSoon`, owner 2026-11-25). Without the account's beta
+/// features (`LiveAppModel.betaFeatures`, false when unknown) an assistant or
+/// skill it doesn't own reads "Coming soon": the row dims its art and shows
+/// the words in place of the price, and the sheet keeps what the item is with
+/// a disabled Coming soon in place of any way to get it. Pets and apps are
+/// unchanged, and anything already owned stays usable. Presentation only: the
+/// platform authorizes every acquisition.
+enum StoreBetaGate {
+    /// Desktop `.atum-store-card--soon`: the art and the price button at 55%.
+    static let dimmedOpacity = 0.55
+
+    /// `owned` is the account's ownership for a row (a skill on any of its
+    /// assistants) and the chosen assistant's in a sheet.
+    static func comingSoon(_ kind: LiveProductStoreItemKind, betaFeatures: Bool, owned: Bool) -> Bool {
+        !betaFeatures && !owned && (kind == .agent || kind == .skill)
+    }
+
+    /// A row's trailing value: only a price gives way to "Coming soon". Open
+    /// and a delivery under way are something the account already has.
+    static func rowStatus(_ status: StoreItemRow.Status, kind: LiveProductStoreItemKind,
+                          betaFeatures: Bool, owned: Bool) -> StoreItemRow.Status {
+        status == .price && comingSoon(kind, betaFeatures: betaFeatures, owned: owned) ? .comingSoon : status
+    }
+}
+
 /// A notice's meaning, kept apart from SwiftUI so each outcome's wording is
 /// tested: a definite refusal says nothing was charged; an unanswered write
 /// never does, and keeps its original key for Check status.

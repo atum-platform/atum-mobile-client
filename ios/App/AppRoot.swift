@@ -165,6 +165,8 @@ struct AppRoot: View {
         .foregroundStyle(design.color("ink", scheme: scheme))
         .tint(design.color("ink", scheme: scheme))
         .atumDesign(design)
+        // The account's beta features for every Store under the shell (W4-Z2).
+        .environment(\.atumBetaFeatures, model.betaFeatures)
         .focusEffectDisabled()
         .task {
             configureRouter()
@@ -1054,6 +1056,7 @@ struct AppRoot: View {
                 hire: { await model.hireListing($0, name: $1, hireConfirmed: $2, account: $3) },
                 hireFlow: listingHire,
                 hireAccount: model.listingHireAccount,
+                betaFeatures: model.betaFeatures,
                 appNames: model.appCatalogNames,
                 chatReady: { model.hiredAssistantChatReady($0) }
             ) : nil,
