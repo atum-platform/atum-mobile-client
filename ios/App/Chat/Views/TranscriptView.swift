@@ -249,7 +249,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private var cancelRouteOnReport = false
     private var detachOnReport = false
     private var dismissedKeyboardOnDrag = false
-    private var keyboardPull: (entry: CGFloat, height: CGFloat)?
+    private var keyboardPull: (entry: CGFloat, height: CGFloat, travel: CGFloat)?
     private var reportKeyboardPanEnd = false
     #if DEBUG
     private var loggedInset: CGFloat?
@@ -288,11 +288,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         }
         list.willLayout = { [weak self] in self?.beforeLayout() }
         list.didLayout = { [weak self] in self?.afterLayout() }
-        list.windowChanged = { [weak self, weak list] in
-            // Have the window track the keyboard before the first pull.
-            _ = list?.window?.keyboardLayoutGuide
-            self?.scheduleReport()
-        }
+        list.windowChanged = { [weak self] in self?.scheduleReport() }
         return list
     }
 
@@ -421,18 +417,22 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         guard let list, let dataSource else { return nil }
         let top = list.contentOffset.y + list.adjustedContentInset.top
         let bottom = list.contentOffset.y + list.bounds.height - list.adjustedContentInset.bottom
-        var covering: Anchor?
+        var coveringEvent: Anchor?
+        var fallback: Anchor?
         for path in list.indexPathsForVisibleItems.sorted() {
             guard let frame = layout.layoutAttributesForItem(at: path)?.frame,
                   frame.maxY > top, frame.minY < bottom,
                   let id = dataSource.itemIdentifier(for: path),
-                  rows[id]?.item.kind != .loadingEarlier,
+                  let kind = rows[id]?.item.kind, kind != .loadingEarlier,
                   nextRows?[id] != nil || nextRows == nil else { continue }
             let anchor = Anchor(id: id, viewportY: frame.minY - top)
-            if frame.minY >= top - 0.5 { return anchor }
-            covering = anchor
+            if fallback == nil { fallback = anchor }
+            if kind.isEventContent {
+                if frame.minY >= top - 0.5 { return anchor }
+                coveringEvent = anchor
+            }
         }
-        return covering
+        return coveringEvent ?? fallback
     }
 
     private func rowFrame(_ id: String) -> CGRect? {
@@ -523,6 +523,8 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         if let pull = keyboardPull, travel < 0 || travel > pull.height {
             keyboardPull = nil
             scheduleReport()
+        } else {
+            keyboardPull?.travel = travel
         }
         guard !dismissedKeyboardOnDrag, travel > 24 else { return }
         dismissedKeyboardOnDrag = true
@@ -542,14 +544,17 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     /// A short pull from the transcript into the keyboard dismisses it
     /// while keeping the latest row. A drag starting farther up or moving
     /// more than a keyboard height reads older messages as usual.
-    private func candidateKeyboardPull(in scrollView: UIScrollView) -> (entry: CGFloat, height: CGFloat)? {
+    private func candidateKeyboardPull(in scrollView: UIScrollView) -> (entry: CGFloat, height: CGFloat, travel: CGFloat)? {
         guard store.follow.isFollowing, let window = scrollView.window else { return nil }
-        let keyboard = window.keyboardLayoutGuide.layoutFrame
+        // The collection ignores container insets and ends at the keyboard.
+        let keyboardTop = scrollView.convert(scrollView.bounds, to: window).maxY
+        let keyboardHeight = window.bounds.maxY - keyboardTop
         let pan = scrollView.panGestureRecognizer
         let startY = pan.location(in: window).y - pan.translation(in: window).y
-        let distance = keyboard.minY - startY
-        guard keyboard.height > window.safeAreaInsets.bottom, (0...keyboard.height).contains(distance) else { return nil }
-        return (entry: distance, height: keyboard.height)
+        let distance = keyboardTop - startY
+        traceKeyboardPull("begin entry=\(distance) height=\(keyboardHeight)")
+        guard keyboardHeight > window.safeAreaInsets.bottom, (0...keyboardHeight).contains(distance) else { return nil }
+        return (entry: distance, height: keyboardHeight, travel: 0)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -564,7 +569,9 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if let pull = keyboardPull {
             keyboardPull = nil
-            let travel = scrollView.panGestureRecognizer.translation(in: scrollView).y
+            let finalTravel = scrollView.panGestureRecognizer.translation(in: scrollView).y
+            let travel = finalTravel == 0 ? pull.travel : finalTravel
+            traceKeyboardPull("end entry=\(pull.entry) height=\(pull.height) travel=\(travel)")
             if (pull.entry...pull.height).contains(travel) {
                 if decelerate { scrollView.stopScrollingAndZooming() }
                 endMotion()
@@ -856,6 +863,12 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         if UITestProbe.folder != nil {
             UITestProbe.append("search.\(event) row=\(rowID)", to: "search-placement.txt")
         }
+        #endif
+    }
+
+    private func traceKeyboardPull(_ event: String) {
+        #if DEBUG
+        if UITestProbe.folder != nil { UITestProbe.append(event, to: "keyboard-pull.txt") }
         #endif
     }
 

@@ -785,10 +785,10 @@ final class MessageMenuUITests: WS3UITestCase {
     @MainActor
     private func openSelectText(_ app: XCUIApplication) {
         openMenu(app, text: "Xem thêm tại")
-        let select = menuButton(app, "Chọn văn bản")
-        XCTAssertTrue(select.waitForExistence(timeout: Self.waitSeconds), "no select-text item")
+        let select = element(app, "menu.items").buttons["Chọn văn bản"].firstMatch
+        XCTAssertTrue(select.wait(for: \.isHittable, toEqual: true, timeout: 8), "no hittable select-text item")
         select.tap()
-        XCTAssertTrue(element(app, "selectText.body").waitForExistence(timeout: Self.waitSeconds), "no sheet")
+        XCTAssertTrue(element(app, "selectText.body").waitForExistence(timeout: 8), "no sheet")
     }
 
     /// A link inside the select-text sheet (never the transcript's own,

@@ -159,7 +159,7 @@ final class TranscriptUITests: TranscriptUITestCase {
         var sawReaction = false
         for _ in 0..<12 {
             drag(app, by: screen * 0.8)
-            guard let reading = readingRow(app) else { continue }
+            guard let reading = settledTopVisibleRow(app) else { continue }
             wait(2) // a scripted page takes 0.4 s, its quotes and the reaction 0.8 s more
             if !sawReaction { sawReaction = chips.firstMatch.exists }
             let now = row(app, String(reading.id.dropFirst(4)))
@@ -185,7 +185,7 @@ final class TranscriptUITests: TranscriptUITestCase {
     /// visible above the composer.
     @MainActor
     func testU7KeyboardKeepsTheLastRowVisible() {
-        let app = launchChat(ScriptedScenario.chatKeyboard.rawValue)
+        let app = launchChat(ScriptedScenario.chatKeyboard.rawValue, extra: probeArguments)
         composerField(app).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3), "U7: no keyboard")
         wait(0.8)
