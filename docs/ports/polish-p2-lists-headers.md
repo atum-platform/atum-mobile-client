@@ -346,6 +346,36 @@ shard's `ui-3` xcresult: the failure hierarchy, screenshots and recording.
     by its own exit code, after the commit.
   - The hosted shards still have to confirm.
 
+## PR #110 hosted UI shards 1 and 2 (run 45609426502, head e5d867e)
+
+- **Shard 1, `ChatInfoUITests.testAPersonalityEditKeepsTheOtherDevicesPurposeInDarkAtAX5`:**
+  a real P2 defect. The shard's xcresult (hierarchy plus screen recording)
+  shows that at AX5, with the long scripted persona, the "What you do" row was
+  840 pt tall. That is taller than the 797 pt list. Its vertical `TextField`
+  (`lineLimit(3...10)`, about 68 pt a line) filled the viewport with its own
+  scrolling text. Every swipe from the screen centre scrolled the field's text,
+  never the list. The list stopped at 51 %, so the Personality row below was
+  never built.
+  - Product fix (`AssistantCard.swift`, `fieldLines`): at the accessibility
+    text sizes, the purpose, instructions and personality fields stop growing
+    at four lines and scroll their own text, so a row stays shorter than the
+    list. Non-accessibility sizes are unchanged.
+  - Test fix (`ChatInfoUITests.scrollCardList`): the AX5 test scrolls the
+    card's list by dragging its side margin, which belongs to the list alone,
+    instead of swiping the screen centre. A centre swipe can still start on a
+    field that scrolls its own text. The assumption that "the screen centre
+    scrolls the card" dates from the old `ScrollView`. No assertion changed.
+- **Shard 2, `AppSidePanelUITests.testUnlinkedAppPanelConnectReturnsToTheChat`:**
+  the recording shows the `chat.title` tap highlight the title, and then no
+  sheet presentation starts at all, not even partly. The app's hierarchy has
+  no sheet. The presentation path (`ChatScreen` `.sheet(isPresented:)`,
+  `ChatPanelHost`, `AppPanelPages.swift`) has no P2 change. The sibling tests
+  that use the same launch passed on the same runner. No code changed for it.
+  It is judged by the local repeat runs below.
+- **Verification:** `polish-p2/ci110b-run.sh`, run under the heavy-build lock
+  (Debug `build-for-testing`; both tests ×3; the other `ChatInfoUITests` and
+  `AppSidePanelUITests` cases once). The results are in the session log below.
+
 ## Known gaps
 
 - **Lazy rows in the UI tests:** the test changes above were reasoned from

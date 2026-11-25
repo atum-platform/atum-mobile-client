@@ -87,6 +87,21 @@ final class ChatInfoUITests: TranscriptUITestCase {
         return app
     }
 
+    /// Scroll the card's list up by dragging its own side margin. The card is
+    /// a system list (UX polish P2) whose persona fields scroll their own long
+    /// text; a swipe from the screen's centre can start on such a field and
+    /// scroll only its text, never the list (AX5, a long persona). The margin
+    /// beside the groups belongs to the list alone.
+    @MainActor
+    private func scrollCardList(_ app: XCUIApplication) {
+        let list = panelList(app)
+        guard list.exists else { app.swipeUp(); return }
+        let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.6))
+            .withOffset(CGVector(dx: 6, dy: 0))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -list.frame.height * 0.4)),
+                    withVelocity: .slow, thenHoldForDuration: 0.1)
+    }
+
     @MainActor
     private func leaveField(_ app: XCUIApplication) {
         let done = app.buttons.matching(identifier: "assistant.card.keyboard.done").firstMatch
@@ -125,13 +140,13 @@ final class ChatInfoUITests: TranscriptUITestCase {
                                   size: "UICTContentSizeCategoryAccessibilityXXXL", dark: true,
                                   extra: ["-AtumScriptedPersonaElsewhere", "-AtumScriptedPersonaLong"])
         let personality = app.buttons.matching(identifier: "assistant.card.personality").firstMatch
-        for _ in 0..<10 where !(personality.exists && personality.isHittable) { app.swipeUp() }
+        for _ in 0..<10 where !(personality.exists && personality.isHittable) { scrollCardList(app) }
         XCTAssertTrue(personality.waitForExistence(timeout: 5)); personality.tap()
         let field = element(app, "assistant.card.personality.field")
         XCTAssertTrue(field.waitForExistence(timeout: 3))
         // At AX5 the opened field can sit under the keyboard's edge: bring it
         // into view and tap until it takes keyboard focus.
-        for _ in 0..<4 where !field.isHittable { app.swipeUp() }
+        for _ in 0..<4 where !field.isHittable { scrollCardList(app) }
         for _ in 0..<3 where !app.keyboards.firstMatch.exists {
             field.tap()
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
@@ -150,7 +165,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(saves.first?.contains("Writes the weekly report.") == true, "the other field was reverted")
         XCTAssertFalse(saves.first?.contains("Plans and writes.") == true, "the other field was reverted")
         let hint = element(app, "assistant.card.long-persona")
-        for _ in 0..<12 where !(hint.exists && hint.isHittable) { app.swipeUp() }
+        for _ in 0..<12 where !(hint.exists && hint.isHittable) { scrollCardList(app) }
         XCTAssertTrue(hint.exists && hint.isHittable, "the length hint is not reachable at AX5")
         XCTAssertTrue(app.staticTexts["Trợ lý có thể chỉ đọc một phần hướng dẫn này."].exists)
         keepScreenshot("w4-e4-persona-long-dark-ax5", of: app)

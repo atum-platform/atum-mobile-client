@@ -591,7 +591,7 @@ struct AssistantCard: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
             TextField(copy.text(.purposePlaceholder), text: $whatEdit.draft, axis: .vertical)
-                .lineLimit(3...10)
+                .lineLimit(fieldLines(3...10))
                 .focused($focused, equals: .what)
                 .disabled(!editable)
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -608,7 +608,7 @@ struct AssistantCard: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(atum.color(.soft, scheme: scheme))
             TextField(copy.text(.purposePlaceholder), text: $instructionsEdit.draft, axis: .vertical)
-                .lineLimit(3...12)
+                .lineLimit(fieldLines(3...12))
                 .focused($focused, equals: .instructions)
                 .disabled(!editable)
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
@@ -650,11 +650,21 @@ struct AssistantCard: View {
 
     private var personalityField: some View {
         TextField(copy.text(.personalityPlaceholder), text: $whoEdit.draft, axis: .vertical)
-            .lineLimit(2...8)
+            .lineLimit(fieldLines(2...8))
             .focused($focused, equals: .who)
             .disabled(!editable)
             .foregroundStyle(atum.color(.ink, scheme: scheme))
             .accessibilityIdentifier("assistant.card.personality.field")
+    }
+
+    /// The persona fields' visible lines. At the accessibility text sizes a
+    /// field stops growing at four lines and scrolls its own text, so its row
+    /// stays shorter than the list: a row taller than the screen fills the
+    /// viewport with the field, and a drag there scrolls only the field's text,
+    /// never the list past it (PR #110, AX5).
+    private func fieldLines(_ lines: ClosedRange<Int>) -> ClosedRange<Int> {
+        guard dynamicTypeSize.isAccessibilitySize else { return lines }
+        return lines.lowerBound...min(lines.upperBound, 4)
     }
 
     private var whoValue: String {
