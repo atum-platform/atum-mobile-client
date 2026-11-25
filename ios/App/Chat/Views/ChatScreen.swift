@@ -119,6 +119,10 @@ struct ChatScreen: View {
                                      name: info?.title ?? store.title,
                                      kind: Self.avatarKind(store.kind), roomID: store.roomID)
         TranscriptView(store: store, chrome: chrome, covered: covered, search: search)
+            // Polish P3: while the message menu is up, the finger that opened
+            // it may slide on to an action (`MessageMenuModifier`); the
+            // transcript under the dimmed chat must not scroll meanwhile.
+            .scrollDisabled(presenter.actionsOverlay != nil)
             .overlay {
                 if Self.isEmptyChat(rows: store.snapshot.rows, pagination: store.pagination) {
                     if let founderIntro {

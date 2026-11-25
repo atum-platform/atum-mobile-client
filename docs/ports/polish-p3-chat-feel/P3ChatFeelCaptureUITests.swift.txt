@@ -1,0 +1,247 @@
+import AtumChat
+import XCTest
+
+/// Polish P3 capture (chat feel). Evidence only, never a check: the locked
+/// script copies it into ios/UITests for one run and removes it again; it is
+/// not compiled in CI. Animations stay ON so the recordings show real motion.
+/// Screenshots go to $P3_ROOT/<phase>/shots; recordings are made by the host
+/// script through a file handshake in $P3_ROOT/ctl (as the UX audit's harness).
+final class P3ChatFeelCaptureUITests: TranscriptUITestCase {
+    static let base = ProcessInfo.processInfo.environment["P3_ROOT"] ?? NSTemporaryDirectory()
+    static let phase = ProcessInfo.processInfo.environment["P3_PHASE"] ?? "after"
+    static let root = URL(fileURLWithPath: base, isDirectory: true)
+    static let shots = root.appendingPathComponent("\(phase)/shots", isDirectory: true)
+    static let ctl = root.appendingPathComponent("ctl", isDirectory: true)
+    static let probe = root.appendingPathComponent("\(phase)/probe", isDirectory: true)
+    static let large = "UICTContentSizeCategoryAccessibilityL"
+    static let normal = "UICTContentSizeCategoryL"
+
+    /// en/vi × light/dark × default/AX-L.
+    struct Variant {
+        let lang: String
+        let dark: Bool
+        let ax: Bool
+        var tag: String { "\(lang)-\(dark ? "dark" : "light")-\(ax ? "axl" : "default")" }
+        /// The one variant that is also recorded.
+        var records: Bool { lang == "en" && !dark && !ax }
+    }
+
+    static let variants: [Variant] = ["en", "vi"].flatMap { lang in
+        [false, true].flatMap { dark in [false, true].map { Variant(lang: lang, dark: dark, ax: $0) } }
+    }
+
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = true
+        try? FileManager.default.createDirectory(at: Self.shots, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: Self.ctl, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: Self.probe, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        stopRecording()
+        MainActor.assumeIsolated { XCUIDevice.shared.appearance = .light }
+        super.tearDown()
+    }
+
+    // MARK: Helpers
+
+    @MainActor
+    func open(_ scenario: String, _ variant: Variant) -> XCUIApplication {
+        XCUIDevice.shared.appearance = variant.dark ? .dark : .light
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: scenario, disablesAnimations: false)
+            + ["-AppleLanguages", "(\(variant.lang))", "-AppleLocale", variant.lang == "vi" ? "vi_VN" : "en_US",
+               "-UIPreferredContentSizeCategoryName", variant.ax ? Self.large : Self.normal,
+               "-atum.appearance", variant.dark ? "dark" : "light",
+               // The menu follower's probe lines (`menu-press.txt`).
+               "-AtumUITestProbeDir", Self.probe.path]
+        app.launch()
+        _ = app.descendants(matching: .any)[AccessibilityID.transcript].firstMatch.waitForExistence(timeout: 30)
+        return app
+    }
+
+    @MainActor
+    func shot(_ name: String) {
+        let screenshot = XCUIScreen.main.screenshot()
+        try? screenshot.pngRepresentation.write(to: Self.shots.appendingPathComponent("\(name).png"))
+    }
+
+    private var recording: String?
+
+    func startRecording(_ name: String) {
+        stopRecording()
+        let marker = Self.ctl.appendingPathComponent("started.\(Self.phase)-\(name)")
+        try? FileManager.default.removeItem(at: marker)
+        try? Data().write(to: Self.ctl.appendingPathComponent("start.\(Self.phase)-\(name)"))
+        let deadline = Date().addingTimeInterval(8)
+        while !FileManager.default.fileExists(atPath: marker.path), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        Thread.sleep(forTimeInterval: 0.6)
+        recording = name
+    }
+
+    func stopRecording() {
+        guard let name = recording else { return }
+        recording = nil
+        Thread.sleep(forTimeInterval: 0.8)
+        let stopped = Self.ctl.appendingPathComponent("stopped.\(Self.phase)-\(name)")
+        try? Data().write(to: Self.ctl.appendingPathComponent("stop.\(Self.phase)-\(name)"))
+        let deadline = Date().addingTimeInterval(12)
+        while !FileManager.default.fileExists(atPath: stopped.path), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+    }
+
+    @MainActor func id(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    @MainActor func focusComposer(_ app: XCUIApplication) -> XCUIElement? {
+        let field = id(app, AccessibilityID.composerField)
+        guard field.waitForExistence(timeout: 15) else { return nil }
+        for _ in 0..<3 {
+            field.tap()
+            if app.keyboards.firstMatch.waitForExistence(timeout: 15) { break }
+        }
+        return field
+    }
+
+    @MainActor func done(_ app: XCUIApplication) {
+        stopRecording()
+        app.terminate()
+        _ = app.wait(for: .notRunning, timeout: 5)
+    }
+
+    // MARK: Issue 2: send
+
+    @MainActor
+    func test01Send() {
+        for variant in Self.variants {
+            let app = open("chat.send", variant)
+            wait(1.5)
+            guard let field = focusComposer(app) else { done(app); continue }
+            field.typeText(variant.lang == "vi" ? "Tóm tắt giúp mình ba tin gần nhất nhé?"
+                                                : "Can you summarise the last three messages?")
+            wait(0.8)
+            shot("02-send-draft-\(variant.tag)")
+            if variant.records { startRecording("02-send") }
+            let send = id(app, AccessibilityID.composerSend)
+            if send.waitForExistence(timeout: 5) { send.tap() }
+            wait(0.1)
+            shot("02-send-t010-\(variant.tag)")
+            wait(0.15)
+            shot("02-send-t025-\(variant.tag)")
+            wait(0.5)
+            shot("02-send-t075-\(variant.tag)")
+            wait(1.5)
+            shot("02-send-settled-\(variant.tag)")
+            done(app)
+        }
+    }
+
+    // MARK: Issue 5: long-press menu
+
+    @MainActor
+    func test02Menu() {
+        for variant in Self.variants {
+            let app = open("chat.actions", variant)
+            wait(2)
+            // The later answer: on screen at every size (the first answer
+            // sits partly under the title bar at the bottom of the chat).
+            let row = id(app, "row.chat.actions.0005")
+            guard row.waitForExistence(timeout: 10) else { done(app); continue }
+            let bubble = row.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@", "Kết luận")).firstMatch
+            let target = bubble.waitForExistence(timeout: 3) ? bubble : row
+            guard target.isHittable else { shot("05-menu-unreachable-\(variant.tag)"); done(app); continue }
+            if variant.records { startRecording("05-menu-press-open-close") }
+            target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).press(forDuration: 1.2)
+            wait(1.2)
+            shot("05-menu-open-\(variant.tag)")
+            // Where 👍 sits while the menu is open (the layout may move the copy).
+            let thumbsFrame = id(app, "menu.reactions").buttons
+                .matching(NSPredicate(format: "label ENDSWITH %@", "👍")).firstMatch.frame
+            // Close by tapping the dimmed chat, near the top.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+            wait(1.2)
+            shot("05-menu-closed-\(variant.tag)")
+            stopRecording()
+            if variant.records, !thumbsFrame.isEmpty {
+                // Press, slide on to the first reaction, rest, let go.
+                let origin = app.coordinate(withNormalizedOffset: .zero)
+                let start = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                let thumbs = origin.withOffset(CGVector(dx: thumbsFrame.midX, dy: thumbsFrame.midY))
+                startRecording("05-menu-press-slide-reaction")
+                start.press(forDuration: 1.6, thenDragTo: thumbs, withVelocity: .slow, thenHoldForDuration: 1.0)
+                wait(1.5)
+                shot("05-menu-after-slide-\(variant.tag)")
+                stopRecording()
+            }
+            done(app)
+        }
+    }
+
+    // MARK: Fix round 2: the reply chip goes and the glass follows
+
+    /// Reply from the menu, then cancel the chip: frames every 50 ms show the
+    /// glass outline shrinking with the chip (en, light, default size only).
+    @MainActor
+    func test04ReplyChipCancel() {
+        let variant = Variant(lang: "en", dark: false, ax: false)
+        let app = open("chat.actions", variant)
+        wait(2)
+        let row = id(app, "row.chat.actions.0005")
+        guard row.waitForExistence(timeout: 10) else { done(app); return }
+        let bubble = row.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Kết luận")).firstMatch
+        let target = bubble.waitForExistence(timeout: 3) ? bubble : row
+        target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).press(forDuration: 1.2)
+        wait(1.2)
+        let reply = id(app, "menu.items").buttons
+            .matching(NSPredicate(format: "label == %@ OR label == %@", "Reply", "Trả lời")).firstMatch
+        guard reply.waitForExistence(timeout: 5) else { shot("r2-reply-no-menu"); done(app); return }
+        reply.tap()
+        let cancel = id(app, "composer.reply.cancel")
+        guard cancel.waitForExistence(timeout: 10) else { shot("r2-reply-no-chip"); done(app); return }
+        wait(1.2)
+        shot("r2-reply-chip-\(variant.tag)")
+        startRecording("r2-reply-chip-cancel")
+        cancel.tap()
+        for step in 1...6 {
+            wait(0.05)
+            shot("r2-reply-cancel-t\(String(format: "%03d", step * 50))-\(variant.tag)")
+        }
+        wait(1)
+        shot("r2-reply-cancel-settled-\(variant.tag)")
+        done(app)
+    }
+
+    // MARK: Issue 9: the empty chat's greeting at large text
+
+    @MainActor
+    func test03Greeting() {
+        for variant in Self.variants {
+            let app = open("chat.empty", variant)
+            wait(1.5)
+            shot("09-greeting-\(variant.tag)")
+            if variant.ax && !variant.dark && variant.lang == "en" { startRecording("09-greeting-axl-keyboard") }
+            if focusComposer(app) != nil {
+                wait(1.2)
+                shot("09-greeting-keyboard-\(variant.tag)")
+                if variant.ax {
+                    // The greeting scrolls when it cannot fit.
+                    let window = app.windows.firstMatch
+                    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+                        .press(forDuration: 0.05,
+                               thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)),
+                               withVelocity: .slow, thenHoldForDuration: 0.3)
+                    wait(1)
+                    shot("09-greeting-keyboard-scrolled-\(variant.tag)")
+                }
+            }
+            done(app)
+        }
+    }
+}
