@@ -366,11 +366,10 @@ struct AgentDeskPage: View {
 
     private func toggleRow(glyph: AtumGlyph, title: String, id: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
-            Label {
-                Text(verbatim: title).font(.body)
-            } icon: {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(glyph))
                     .accessibilityHidden(true)
+                Text(verbatim: title).font(.body)
             }
             .foregroundStyle(atum.color(.ink, scheme: scheme))
         }

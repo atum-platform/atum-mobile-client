@@ -250,6 +250,9 @@ desktop shows, it is left as it is and proposed here.
 - **25 Nov 2026, P2 UI sub-agent (Opus):**
   - Branch `feat/polish-p2-lists-headers` from `9f54045`. Local commits only:
     no push, PR or CI.
+  - First capture run: in these list rows `Label` drew its title only, so
+    Chat Info and the desk lost their row glyphs. Rows now draw an explicit
+    glyph-and-text `HStack`, the column they had before.
   - Stayed out of P3's files (Composer, MessageMenu, MessageBubbleRow,
     DeliveryLine, ChatRowView, EmptyChatGreeting, ChatScreen), the avatar views
     (`ChatInfoAvatar`, `HomeAvatar`), `AtumAvatar.swift` and `RootTabs.swift`.

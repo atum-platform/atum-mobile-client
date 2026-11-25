@@ -597,10 +597,9 @@ struct ChatInfoHome: View {
     /// "N members" opens the group's Members page inside the panel.
     private func membersRow(count: Int) -> some View {
         NavigationLink(value: ChatPanelPolicy.Page.members) {
-            Label {
-                Text(design.text(PersonInfoKey.members, arguments: [.number(Int64(count))]))
-            } icon: {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(.users))
+                Text(design.text(PersonInfoKey.members, arguments: [.number(Int64(count))]))
             }
             .foregroundStyle(ink)
         }
@@ -610,10 +609,9 @@ struct ChatInfoHome: View {
     private func teamSpacesSection(_ spaces: [String]) -> some View {
         Section {
             ForEach(Array(spaces.enumerated()), id: \.offset) { _, name in
-                Label {
-                    Text(verbatim: name)
-                } icon: {
+                HStack(spacing: kit.space(.s3)) {
                     Image(atum.symbol(.briefcase))
+                    Text(verbatim: name)
                 }
                 .foregroundStyle(ink)
                 // A container per row, so the name stays its own text.
@@ -673,10 +671,9 @@ struct ChatInfoHome: View {
                 renameRequest = request
             }
         } label: {
-            Label {
-                Text(copy(.rename))
-            } icon: {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(.pencil))
+                Text(copy(.rename))
             }
             .foregroundStyle(ink)
         }
@@ -689,10 +686,9 @@ struct ChatInfoHome: View {
     }
 
     private func factRow(glyph: AtumGlyph, text: String, id: String) -> some View {
-        Label {
-            Text(verbatim: text)
-        } icon: {
+        HStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(glyph))
+            Text(verbatim: text)
         }
         .foregroundStyle(ink)
         .accessibilityElement(children: .combine)
@@ -702,10 +698,9 @@ struct ChatInfoHome: View {
     private func switchRow(glyph: AtumGlyph, title: String, isOn: Bool, isEnabled: Bool,
                            id: String, set: @escaping (Bool) -> Void) -> some View {
         Toggle(isOn: Binding(get: { isOn }, set: { set($0) })) {
-            Label {
-                Text(verbatim: title)
-            } icon: {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(glyph))
+                Text(verbatim: title)
             }
         }
         .tint(atum.color(.actionStrong, scheme: scheme))
@@ -816,11 +811,10 @@ struct ChatInfoHome: View {
     private var assistantAccessSection: some View {
         Section {
             VStack(alignment: .leading, spacing: kit.space(.s2)) {
-                Label {
+                HStack(spacing: kit.space(.s3)) {
+                    Image(atum.symbol(.keyRound))
                     Text(copy(.infoAssistantAccessTitle))
                         .font(.footnote.weight(.semibold))
-                } icon: {
-                    Image(atum.symbol(.keyRound))
                 }
                 .foregroundStyle(ink)
 
@@ -943,10 +937,9 @@ struct ChatInfoHome: View {
     private func actionRow(glyph: AtumGlyph, title: String, tone: AtumColorRole, id: String,
                            action: @escaping () -> Void) -> some View {
         Button(role: tone == .danger ? .destructive : nil, action: action) {
-            Label {
-                Text(verbatim: title)
-            } icon: {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(glyph))
+                Text(verbatim: title)
             }
             .foregroundStyle(atum.color(tone, scheme: scheme))
         }
@@ -956,10 +949,9 @@ struct ChatInfoHome: View {
     private var deleteSection: some View {
         Section {
             Button(role: .destructive) { confirmation = .deleteApp } label: {
-                Label {
-                    Text(copy(.deleteChat))
-                } icon: {
+                HStack(spacing: kit.space(.s3)) {
                     Image(atum.symbol(.trash))
+                    Text(copy(.deleteChat))
                 }
                 .foregroundStyle(atum.color(.danger, scheme: scheme))
             }
