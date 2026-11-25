@@ -374,11 +374,14 @@ class TranscriptUITestCase: AtumUITestCase {
     /// content down (scrolls up, towards older messages).
     @MainActor
     func drag(_ app: XCUIApplication, by points: CGFloat) {
-        let view = transcript(app)
-        // Upward drags start above the jump pill, which floats over the
-        // bottom of the transcript.
-        let startY: CGFloat = points > 0 ? 0.2 : 0.7
-        let start = view.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+        let window = app.windows.firstMatch
+        let top = visibleTop(app)
+        let bottom = visibleBottom(app)
+        // The collection extends under the chrome. With the keyboard up,
+        // a normalized point in its full frame can hit the navigation bar.
+        let fraction: CGFloat = points > 0 ? 0.1 : 0.7
+        let start = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: top + (bottom - top) * fraction))
         let end = start.withOffset(CGVector(dx: 0, dy: points))
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: XCUIGestureVelocity(rawValue: 2500), thenHoldForDuration: 0.25)
     }
@@ -650,6 +653,16 @@ class TranscriptUITestCase: AtumUITestCase {
             return false
         }
         let underEdge = frame.minY < top || frame.maxY > bottom
+        if inChat, !underEdge, !frame.isEmpty,
+           transcript(app).descendants(matching: .any).matching(identifier: "quote")
+            .allElementsBoundByIndex.contains(where: { $0.frame.contains(frame) }) {
+            // Xcode reports contrast for legible footnote-size quote text
+            // (docs/ports/quote-contrast.md). Measure the reported text
+            // region directly and keep the WCAG AA threshold.
+            let ratio = ChatKindsUITests.inkContrast(app.screenshot(), in: frame)
+            print("MEASURE audit.quote.contrast=\(ratio) \(label) \(frame)")
+            if ratio >= 4.5 { return true }
+        }
         let ignored = underEdge || emojiOnly
         print("MEASURE audit.contrast \(ignored ? "ignored" : "FAILED") \(underEdge ? "edge" : emojiOnly ? "emoji" : "") \(label) \(frame)"
               + (ignored ? "" : " | \(issue.detailedDescription) | top \(top) bottom \(bottom)"))

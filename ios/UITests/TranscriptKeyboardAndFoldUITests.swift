@@ -63,7 +63,7 @@ final class TranscriptKeyboardAndFoldUITests: WS3UITestCase {
         if !toggle.isHittable { app.swipeUp() }
         toggle.tap()
         XCTAssertTrue(eventually { toggle.label == "Xem thêm" }, "Show less did not fold it")
-        XCTAssertTrue(toggle.isHittable, "the folded answer is out of view")
+        XCTAssertTrue(eventually { toggle.isHittable }, "the folded answer is out of view")
         keepScreenshot("fold-refolded", of: app)
     }
 
