@@ -377,11 +377,13 @@ class TranscriptUITestCase: AtumUITestCase {
         let window = app.windows.firstMatch
         let top = visibleTop(app)
         let bottom = visibleBottom(app)
-        // The collection extends under the chrome. With the keyboard up,
-        // a normalized point in its full frame can hit the navigation bar.
+        // Begin in the unobscured side margin. This also keeps XCUITest's
+        // synthetic press clear of message menus and nested code scrollers.
+        let sideMargin: CGFloat = 8
         let fraction: CGFloat = points > 0 ? 0.1 : 0.7
         let start = window.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: window.frame.midX, dy: top + (bottom - top) * fraction))
+            .withOffset(CGVector(dx: window.frame.width - sideMargin,
+                                 dy: top - window.frame.minY + (bottom - top) * fraction))
         let end = start.withOffset(CGVector(dx: 0, dy: points))
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: XCUIGestureVelocity(rawValue: 2500), thenHoldForDuration: 0.25)
     }
