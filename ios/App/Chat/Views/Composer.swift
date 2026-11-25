@@ -548,19 +548,28 @@ private struct ComposerModelChoiceButton: View {
 
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destination: ManagedModelDestinationSnapshot?
-    /// The row a successful pick wrote, so the chip names it at once.
-    @State private var pickedModel: String?
+    /// The row a successful pick wrote, so the chip names it at once with
+    /// that row's own name and mark. A newer readback that saves something
+    /// else drops it (`PhoneModelPickerProjection.reconciled`).
+    @State private var picked: PhoneModelPickerProjection.ChipPick?
+    /// The account's subscription status, last read here or by the picker:
+    /// the catalog that names a subscription model as the list names it.
+    @State private var account: PhoneSubscriptionAccount?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
+        let warning = face?.planUnavailable.map { PhoneModelPickerCopy(design: design).planWarning($0) }
         // The desktop's chip (model-picker-spec.json `trigger`, #119): a plain
         // capsule, the answering model's mark before its name, weight 500,
         // no chevron. The name is `.subheadline` ink-2.
         Button { presented = true } label: {
             HStack(spacing: 6) {
-                if let markArt {
+                if warning != nil {
+                    ProviderMark(design: design, art: .template(asset: atum.symbol(.alertCircle),
+                                                                color: atum.color(.danger, scheme: scheme)))
+                } else if let markArt {
                     ProviderMark(design: design, art: markArt, size: 16)
                 }
                 Text(verbatim: label)
@@ -574,16 +583,22 @@ private struct ComposerModelChoiceButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label)
+        .accessibilityLabel(warning.map { "\(label) · \($0)" } ?? label)
         .accessibilityIdentifier(AccessibilityID.composerModel)
         .sheet(isPresented: $presented) {
             NavigationStack {
                 PhoneConversationModelPicker(
                     design: design, actions: actions, destinations: destinations,
                     initialSnapshot: snapshot, initialDestination: destination,
-                    onSnapshot: { snapshot = $0 },
-                    onDestination: { destination = $0 },
-                    onPick: { pickedModel = $0 }
+                    onSnapshot: { adopt(offer: $0) },
+                    onDestination: { adopt(destination: $0) },
+                    onAccount: { account = $0 },
+                    onPick: { row in
+                        picked = row.map {
+                            .init(row: $0, destinationRevision: destination?.revision,
+                                  offerRevision: snapshot?.revision)
+                        }
+                    }
                 )
                 // KitPhone › Sheet: a trailing close circle, not a text button.
                 .toolbar {
@@ -606,67 +621,44 @@ private struct ComposerModelChoiceButton: View {
     }
 
     private func read() async {
-        if let actions, case let .value(value) = await actions.read() { snapshot = value }
-        if let destinations, case let .value(value) = await destinations.read() { destination = value.snapshot }
+        if let actions, case let .value(value) = await actions.read() { adopt(offer: value) }
+        if let destinations, case let .value(value) = await destinations.read() { adopt(destination: value.snapshot) }
+        // A saved subscription is named by the account's catalog, as the list
+        // names it (desktop `relayCurrentName`). An Atum choice needs no read.
+        if destination?.choice(for: Self.cloud)?.source.isSubscription == true,
+           let readAccount = destinations?.subscriptions?.read {
+            let value = await readAccount()
+            guard !Task.isCancelled else { return }
+            account = value
+        }
     }
 
-    private var label: String {
-        if let pickedModel, let name = ManagedModelLineup.productName(for: pickedModel) {
-            return name
-        }
-        if let pickedModel { return pickedModel }
-        if let choice = destination?.choice(for: cloudDestination),
-           let name = ManagedModelLineup.productName(for: choice.model) {
-            return name
-        }
-        if let choice = destination?.choice(for: cloudDestination), choice.source != .atum {
-            return choice.model
-        }
-        if let alias = snapshot?.choice.model,
-           let name = ManagedModelLineup.productName(for: alias) {
-            return name
-        }
-        if let model = destination?.recommended.model,
-           let name = ManagedModelLineup.productName(for: model) {
-            return name
-        }
-        return design.text("desktop.atum.settings.model")
+    private func adopt(offer: ManagedModelSnapshot) {
+        snapshot = offer
+        picked = PhoneModelPickerProjection.reconciled(picked, destination: destination, offer: offer)
     }
 
-    /// The chip's mark, read from the same facts as its name: Atum's crescent
-    /// for a line-up model, the connection's mark for a subscription or own
-    /// key. Nil (no mark) only while nothing names the choice yet.
+    /// The destination is the authority for the cloud's saved choice: a newer
+    /// one that saves something else ends the pick's hold on the chip.
+    private func adopt(destination value: ManagedModelDestinationSnapshot) {
+        destination = value
+        picked = PhoneModelPickerProjection.reconciled(picked, destination: value, offer: snapshot)
+    }
+
+    private static var cloud: ManagedModelDestinationID { try! ManagedModelDestinationID("cloud") }
+
+    /// The chip's name and mark facts (`PhoneModelPickerProjection.chip`):
+    /// a pick still current, else the saved choice's, never a raw id.
+    private var face: PhoneModelPickerProjection.ChipFace? {
+        PhoneModelPickerProjection.chip(pick: picked, destination: destination, offer: snapshot, account: account)
+    }
+
+    private var label: String { face?.name ?? design.text("desktop.atum.settings.model") }
+
+    /// The same mark the picker row draws, its connection label included.
+    /// Nil (no mark) only while nothing names the choice yet.
     private var markArt: ProviderMark.Art? {
-        let saved = destination?.choice(for: cloudDestination)
-        if let pickedModel {
-            if ManagedModelLineup.productName(for: pickedModel) != nil { return .atum }
-            if let saved, saved.model == pickedModel { return Self.art(saved.source) }
-            return nil
-        }
-        if let saved {
-            if ManagedModelLineup.productName(for: saved.model) != nil { return .atum }
-            if saved.source != .atum { return Self.art(saved.source) }
-        }
-        if let alias = snapshot?.choice.model, ManagedModelLineup.productName(for: alias) != nil {
-            return .atum
-        }
-        if let model = destination?.recommended.model, ManagedModelLineup.productName(for: model) != nil {
-            return .atum
-        }
-        return nil
-    }
-
-    private static func art(_ source: ManagedModelDestinationSource) -> ProviderMark.Art {
-        switch source {
-        case .atum: .atum
-        case .chatGPTPlan: ProviderMark.art(provider: "openai", label: "ChatGPT")
-        case .opencodeGo: ProviderMark.art(provider: "opencode", label: "OpenCode Go")
-        case let .ownKey(provider): ProviderMark.art(provider: provider, label: provider)
-        }
-    }
-
-    private var cloudDestination: ManagedModelDestinationID {
-        try! ManagedModelDestinationID("cloud")
+        face.map { ProviderMark.art(source: $0.source, connectionLabel: $0.connectionLabel) }
     }
 }
 

@@ -29,6 +29,9 @@ public enum FollowInput: Equatable, Sendable {
     /// the store's `PaginationPolicy` (S1b) reads it with `viewportHeight`.
     case geometry(distanceFromBottom: Double, distanceFromTop: Double, viewportHeight: Double,
                   motion: ScrollMotion)
+    /// Reconcile the last measured geometry after an unconfirmed search
+    /// releases its anchor, without requesting a scroll or a history page.
+    case searchPlacementReleased(distanceFromBottom: Double, viewportHeight: Double)
     /// Rows added at the end. `localEcho` only for a send from this device;
     /// `count` is what the pill counts (no notices, nothing from here).
     case appended(count: Int, localEcho: Bool)
@@ -120,13 +123,8 @@ public struct FollowPolicy: Equatable, Sendable {
             return .scrollToBottom(animated: false)
 
         case let .geometry(distance, _, height, motion):
-            guard distance.isFinite else { return .none }
-            distanceFromBottom = distance
-            if height.isFinite { viewportHeight = height }
-            if distance <= Self.nearBottomPoints {
-                follow()
-                return .none
-            }
+            guard recordGeometry(distanceFromBottom: distance, viewportHeight: height),
+                  distance > Self.nearBottomPoints else { return .none }
             switch motion {
             case .animating where jumpInFlight && isFollowing:
                 return .none
@@ -137,6 +135,10 @@ public struct FollowPolicy: Equatable, Sendable {
             case .idle:
                 return isFollowing ? .scrollToBottom(animated: false) : .none
             }
+
+        case let .searchPlacementReleased(distance, height):
+            recordGeometry(distanceFromBottom: distance, viewportHeight: height)
+            return .none
 
         case let .appended(count, localEcho):
             if localEcho {
@@ -164,6 +166,15 @@ public struct FollowPolicy: Equatable, Sendable {
             jumpInFlight = true
             return .scrollToBottom(animated: true)
         }
+    }
+
+    @discardableResult
+    private mutating func recordGeometry(distanceFromBottom distance: Double, viewportHeight height: Double) -> Bool {
+        guard distance.isFinite else { return false }
+        distanceFromBottom = distance
+        if height.isFinite { viewportHeight = height }
+        if distance <= Self.nearBottomPoints { follow() }
+        return true
     }
 
     private mutating func follow() {

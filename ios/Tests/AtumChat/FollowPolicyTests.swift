@@ -39,6 +39,29 @@ final class FollowPolicyTests: XCTestCase {
         XCTAssertEqual(away.pill, .hidden)
     }
 
+    func testFailedSearchPlacementAtTheBottomRestoresFollowingBeforeTheNextMessage() {
+        var policy = FollowPolicy()
+        policy.handle(geometry(0))
+        // Starting placement temporarily reports a position just off the bottom.
+        policy.handle(geometry(FollowPolicy.nearBottomPoints + 1, .user))
+        XCTAssertEqual(policy.state, .detached(newCount: 0))
+        policy.handle(.appended(count: 1, localEcho: false))
+
+        XCTAssertEqual(policy.handle(.searchPlacementReleased(distanceFromBottom: 0, viewportHeight: screen)), .none)
+        XCTAssertEqual(policy.state, .following)
+        XCTAssertEqual(policy.distanceFromBottom, 0)
+        XCTAssertEqual(policy.pill, .hidden)
+        XCTAssertEqual(policy.handle(.appended(count: 1, localEcho: false)), .scrollToBottom(animated: false))
+    }
+
+    func testFailedSearchPlacementAwayFromTheBottomKeepsTheUnreadCount() {
+        var policy = detached()
+        policy.handle(.appended(count: 2, localEcho: false))
+        XCTAssertEqual(policy.handle(.searchPlacementReleased(distanceFromBottom: 500, viewportHeight: screen)), .none)
+        XCTAssertEqual(policy.distanceFromBottom, 500)
+        XCTAssertEqual(policy.state, .detached(newCount: 2))
+    }
+
     func testThePersonScrollingAwayDetachesOnce() {
         var policy = FollowPolicy()
         XCTAssertEqual(policy.handle(geometry(300, .user)), .none)

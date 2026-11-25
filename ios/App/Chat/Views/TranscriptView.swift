@@ -70,6 +70,7 @@ struct TranscriptView: View {
             }
         }
         .task(id: target) { await focusRoutedMessage(target) }
+        .onChange(of: store.timelineGeneration) { _, _ in releaseStaleRoutedPlacement() }
         .sensoryFeedback(.error, trigger: routeFocusFailed)
     }
 
@@ -430,10 +431,7 @@ struct TranscriptView: View {
     }
 
     private func snapshotChanged(from old: Snapshot, to new: Snapshot) {
-        if let placement = scratch.routedPlacement, !placement.match.isCurrent(in: routedSearchSnapshot) {
-            stopSearchPlacement()
-            scheduleSettle(after: Self.settleSeconds)
-        }
+        releaseStaleRoutedPlacement()
         if store.pagination == .idle(hitTimelineStart: true),
            new.rows.contains(where: { $0.item.kind == .timelineStart }),
            !old.rows.contains(where: { $0.item.kind == .timelineStart }) {
@@ -562,13 +560,20 @@ struct TranscriptView: View {
         return snapshot.generation == store.timelineGeneration ? snapshot : .empty
     }
 
+    private func releaseStaleRoutedPlacement() {
+        guard let placement = scratch.routedPlacement,
+              !placement.match.isCurrent(in: routedSearchSnapshot) else { return }
+        stopSearchPlacement()
+        scheduleSettle(after: Self.settleSeconds)
+    }
+
     private func focusRoutedMessage(_ eventID: String?) async {
         guard let eventID, !Task.isCancelled else { return }
-        let answer = await ChatHistorySearch.find(eventID: eventID, snapshot: { routedSearchSnapshot },
+        let answer = await ChatHistorySearch.find(eventID: eventID, snapshot: { store.snapshot },
                                                   timelineGeneration: { store.timelineGeneration }, loadPage: {
             guard store.searchTargetEventID == eventID else { return .failed }
             return await store.loadOlderPageForSearch()
-        }, placeMatch: { await placeRoutedMatch($0) })
+        }, placeMatch: { try await placeRoutedMatch($0) })
         guard answer.phase != .found, !Task.isCancelled, store.searchTargetEventID == eventID else { return }
         routeFocusFailed += 1
         store.searchTargetEventID = nil
@@ -577,20 +582,20 @@ struct TranscriptView: View {
 
     /// The walk waits for a layout-confirmed placement. A replaced projection
     /// releases the waiter so the same walk can find the reply again.
-    private func placeRoutedMatch(_ match: ChatHistorySearch.RoutedMatch) async -> Bool {
+    private func placeRoutedMatch(_ match: ChatHistorySearch.RoutedMatch) async throws -> Bool {
         guard !Task.isCancelled, store.searchTargetEventID == match.eventID,
               match.isCurrent(in: routedSearchSnapshot), showSearchMatch(match.rowID) else { return false }
-        let (result, completion) = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let generation = scratch.searchGeneration
-        scratch.routedPlacement = (match, completion)
-        routedHighlightRowID = match.rowID
-        var iterator = result.makeAsyncIterator()
-        let placed = await iterator.next() == true
-        // AsyncStream also unblocks when SwiftUI cancels the route task.
-        if generation == scratch.searchGeneration, scratch.routedPlacement != nil {
-            stopSearchPlacement()
+        defer {
+            if generation == scratch.searchGeneration, scratch.routedPlacement != nil {
+                stopSearchPlacement()
+            }
         }
-        return placed
+        // Allow the full scroll retry sequence and time for layout to catch up.
+        return try await ChatHistorySearch.waitForRoutedPlacement { completion in
+            scratch.routedPlacement = (match, completion)
+            routedHighlightRowID = match.rowID
+        }
     }
 
     /// The person asked for this match, so the chat leaves the bottom first
@@ -624,10 +629,21 @@ struct TranscriptView: View {
         scratch.searchAttempts = 0
         scratch.searchHasScrolled = false
         scratch.searchTickScheduled = false
-        let completion = scratch.routedPlacement?.completion
+        let placement = scratch.routedPlacement
         scratch.routedPlacement = nil
         routedHighlightRowID = nil
-        completion?.finish()
+        if let placement {
+            // Placement suppressed follow updates. Restore the measured
+            // position now, even if the scroll view sends no further layout.
+            let geometry = scratch.geometry
+            if scratch.isOnScreen, geometry.viewportHeight > 0 {
+                chooseAnchor(geometry)
+                store.handle(.searchPlacementReleased(distanceFromBottom: geometry.distanceFromBottom,
+                                                      viewportHeight: geometry.viewportHeight))
+                syncFollowState()
+            }
+            placement.completion.finish()
+        }
         updateBottomVisible()
     }
 
@@ -684,10 +700,11 @@ struct TranscriptView: View {
                                        distanceFromTop: geometry.distanceFromTop,
                                        viewportHeight: geometry.viewportHeight, motion: scratch.motion))
                 syncFollowState()
-                if let placement = scratch.routedPlacement {
+                // A timed-out waiter has already failed; its cleanup clears the placement.
+                if let placement = scratch.routedPlacement,
+                   case .enqueued = placement.completion.yield(()) {
                     scratch.routedPlacement = nil
                     store.searchTargetEventID = nil
-                    placement.completion.yield(true)
                     placement.completion.finish()
                 }
                 updateBottomVisible()
@@ -850,7 +867,8 @@ private final class TranscriptScratch {
     /// HC-6: the explicitly requested match owns the anchor until cancelled.
     var placingSearchMatch: Bool { searchRowID != nil }
     var searchRowID: String?
-    var routedPlacement: (match: ChatHistorySearch.RoutedMatch, completion: AsyncStream<Bool>.Continuation)?
+    var routedPlacement: (match: ChatHistorySearch.RoutedMatch,
+                          completion: AsyncThrowingStream<Void, Error>.Continuation)?
     var searchAttempts = 0
     var searchHasScrolled = false
     var searchTickScheduled = false
