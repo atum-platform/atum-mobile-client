@@ -158,5 +158,29 @@ Test fixes found in the first locked run (`85d96f7`):
   the words at that size) stayed under it. The tap focused search, which hides the lines. The test now
   reveals Try again itself before tapping.
 
-Verification (fix round r2): pending the locked rerun `/Volumes/AtumTestFlight/w4-x2/verify-fix-r2c.sh`.
+Verification (fix round r2). Every locked run used `TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k
+/Volumes/AtumTestFlight/.heavy-build.lock`:
+- `verify-fix-r2.sh` on `85d96f7`. Swift package tests passed (110 tests, 0 failures, exit 0) with the
+  picker filters, including the new projection and status cases. `build-for-testing` succeeded for
+  arm64 Debug. The settled suite passed 8 of 10 (the dark-en and AX failures above). The regression set
+  passed 8 of 10, and its 2 failures were the stale W4-R IDs. The run exited 65.
+- `verify-fix-r2b.sh` on `acdcbad`. Swift tests were skipped because the package was unchanged.
+  `build-for-testing` succeeded. The regression set passed 10 of 10: `ChatInfoUITests` (5 model
+  tests), `ComposerUITests/testTheModelSheetListsTheAccountSubscriptions`, `ChatGPTTrainingUITests`,
+  `AccountConnectionsPickerUITests/testThePickerOffersToConnectEachPlanWithNothingToPick` and
+  `PhoneModelPickerVisualsUITests` (2). This confirms that drawing Atum rows read-only while the
+  destination loads breaks no existing pick flow. The settled suite passed 9 of 10 (the AX Try again
+  above).
+- `verify-fix-r2c.sh` on `4bc2e86`. `build-for-testing` succeeded. `PhoneModelPickerSettledReadsUITests`
+  passed both tests in light-en, light-vi, dark-en, dark-vi and light-en AccessibilityXL, 10 of 10. The
+  run exited 0, and the simulators were shut down afterwards.
+- Captures were refreshed in `/Volumes/AtumTestFlight/w4-x2/ui-scratch/ui-evidence/`: `chatgpt-failed`,
+  `work-handoff`, `work-handoff-sheet`, `destination-failed` and `destination-failed-catalog`, each
+  `w4x2-{en,vi}-{light,dark}` plus `-en-light-ax`. `destination-failed-catalog-w4x2-en-light` shows
+  Nguyệt Thực and Nhật Thực greyed and "View only", with no check and no Default word.
+  `chatgpt-failed-w4x2-vi-dark` shows "Gói ChatGPT" with Thử lại only, and the Claude hand-off with no
+  ChatGPT group. Logs are in `logs-fix-r2*/`, with result bundles alongside them.
+- Unlocked checks: `python3 scripts/design_lint.py` passed (OK, exit 0). Its only note is a pre-existing
+  baseline improvement in `Composer.swift`, which this lane did not touch. The copy-key pin test passed
+  (7 OK). `python3 scripts/public_guard.py --base origin/main --head HEAD` passed (exit 0).
 
