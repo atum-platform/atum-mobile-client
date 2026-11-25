@@ -23,16 +23,18 @@ Search holds the selected row at its viewport position while sizes resolve. A ro
 
 Explicit animated scrolls use UIKit's scroll animation. The two legacy G-scroll launch arguments exercise this same renderer while retaining the existing test entry points.
 
-## Hitch baseline
+## Scroll replay
 
 The original audit used `simctl io recordVideo` with animations enabled and scripted data. The table aggregates `ffprobe` frame-presentation gaps inside the audit's motion bursts. A gap of 250 ms or more separates bursts, and a burst must contain six or more frames. The percentages use the number of gaps as the denominator. The audit highlighted individual paging bursts in the 15–26% range, while the table also includes the faster bursts. Simulator recording and XCUITest overhead make these relative measurements.
 
-| Scenario | Baseline motion bursts | Baseline gaps over 34 ms | Baseline worst gap |
-| --- | ---: | ---: | ---: |
-| Long scroll | 9 | 39/720 (5.4%) | 233 ms |
-| Paging older history | 12 | 60/546 (11.0%) | 243 ms |
+| Scenario | Baseline bursts | Baseline gaps over 34 ms | Baseline worst gap | P4 bursts | P4 gaps over 34 ms | P4 worst gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Long scroll | 9 | 39/720 (5.4%) | 233 ms | 9 | 35/1,053 (3.3%) | 225 ms |
+| Paging older history | 12 | 60/546 (11.0%) | 243 ms | 14 | 40/1,408 (2.8%) | 173 ms |
 
 The first collection replay at `eeb7457` measured 24 of 936 gaps (2.6%, worst 177 ms) on long scroll and 38 of 697 gaps (5.5%, worst 230 ms) on paging. Its screenshot comparison also identified clipping at the navigation glass, which prompted the viewport-inset change.
+
+The P4 column uses `d98d492` on the audit's iPhone 17 with iOS 27.0. It repeated the two scripted scenarios with animations enabled and the audit's five long-scroll flings and eight paging flings. The recording steps, clips and frame-gap counts are under `/Volumes/AtumTestFlight/dd-polish-p4`. The paging probe recorded 14 applied offset corrections and zero missed corrections. All 14 occurred during user motion. The initial long-scroll screenshot shows transcript content behind the navigation glass with a 116-point top inset.
 
 ## Local verification
 
@@ -40,6 +42,7 @@ The first collection replay at `eeb7457` measured 24 of 936 gaps (2.6%, worst 17
 - Debug build-for-testing passed on iOS 27.0 at the first implementation, after the interaction changes and after the viewport change.
 - The revised smoke run passed all three selected tests for press-and-slide, keyboard dismissal with draft retention, and opening the latest row and finding a day divider.
 - The first audit scroll replay passed. Its supplementary animations-enabled send capture failed when XCUITest lost composer focus before entering text.
+- The replay after the viewport change passed its one audit test, which recorded both scroll scenarios.
 - Two attempts to start a dedicated simulator on the external volume stalled in LaunchServices migration. The existing audit iPhone 17 booted successfully. Derived data, test scratch, result bundles and recordings use `/Volumes/AtumTestFlight/dd-polish-p4`, and the build, test and capture scripts take the shared heavy-build lock.
 
 ## Session log
@@ -48,3 +51,4 @@ The first collection replay at `eeb7457` measured 24 of 936 gaps (2.6%, worst 17
 - 2026-11-26. Implemented the collection adapter and recovered the audit's baseline from the original two recordings. The transcript type-checked against local iOS Simulator modules with the current routed-search API, and design lint passed. The Debug build and Swift package run were queued on the shared build lock.
 - 2026-11-26. The initial smoke run reached the latest row and reported three failures. The press-and-slide menu and keyboard dismissal failed, and the day-divider check queried a recycled offscreen row. Limited environment forwarding to the values used by the row, restored the original simultaneous tap recognizer, and made the divider assertion scroll the row into view after checking the initial position. The superseded smoke run was interrupted during pagination.
 - 2026-11-26. All three smoke regressions passed on the revised build. The first scroll replay recorded lower hitch rates in both scenarios. Compared the initial viewport against the audit and added insets for drawing under the glass. Added separate diagnostics for the timeline-start clamps exposed by the paging replay and excluded the transient loading row from anchor selection.
+- 2026-11-26. Replayed both scroll scenarios at `d98d492`, verified drawing under the navigation glass, and recorded the frame-gap and paging anchor results above. Started the full local UI run on this build.
