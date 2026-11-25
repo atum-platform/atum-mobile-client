@@ -28,3 +28,13 @@ account scope and domain client checks discard replies from retired sessions.
   sign-out, account separation and late replies.
 - Run the Swift package suite and the app's Debug build-for-testing under the
   shared TestFlight lock. Run the public guard and design lint independently.
+
+## Review r1 fix (Sol HOLD, coordinator fix)
+
+- Finding: a retired client's `/me` 401 could force a grant refresh that
+  races the replacement client's coordinator and pushes the account service
+  into reauthentication.
+- Fix: `me(for:)` passes `retriesUnauthenticated: false`, so this optional
+  presentation read never forces a refresh; a 401 keeps the cached flag.
+- Test: `OIDCSignInTests.testRestoredMeReadNeverForcesRefreshOn401`
+  (one normal authorization, zero forced refreshes, one `/me` request).

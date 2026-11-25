@@ -284,6 +284,34 @@ final class OIDCSignInTests: XCTestCase {
         }
     }
 
+    /// W4-Z1 review r1: the optional /me beta read must never force a grant
+    /// rotation, so a retired client's 401 cannot race its replacement.
+    @MainActor func testRestoredMeReadNeverForcesRefreshOn401() async throws {
+        let fixture = try Fixture(directory: directory()), signIn = fixture.coordinator(), store = fixture.store()
+        _ = try await signIn.domain(matrix: fixture.custodyTicket(phase: .ready),
+                                    installation: fixture.installation, store: store)
+        let restored = try store.resume(installation: fixture.marker)
+        var forcedRefreshes = 0, authorizations = 0
+        let client = NativeDomainClient(testAuthorization: { force in
+            authorizations += 1
+            if force { forcedRefreshes += 1 }
+            return "restored-domain"
+        }, protocolClasses: [MASProtocol.self])
+        let unauthenticated = Data("{\"error\":\"matrix_401\"}".utf8)
+        MASProtocol.state.reset()
+        MASProtocol.state.handler = { _ in .init(status: 401, chunks: [unauthenticated]) }
+        do {
+            _ = try await client.me(for: restored.account)
+            XCTFail("A 401 /me read cannot succeed")
+        } catch let failure as NativeDomainClientFailure {
+            guard case let .http(http) = failure else { return XCTFail("Unexpected failure \(failure)") }
+            XCTAssertEqual(http.response.error, .unauthenticated)
+        }
+        XCTAssertEqual(authorizations, 1)
+        XCTAssertEqual(forcedRefreshes, 0)
+        XCTAssertEqual(MASProtocol.state.requests.filter { $0.url == MASHTTP.domainMeURL }.count, 1)
+    }
+
     @MainActor func testSubjectMismatchRevokesOnlyDomainAndNeverLinks() async throws {
         for mismatch in ["id-token", "me"] {
             MASProtocol.state.reset()
