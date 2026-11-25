@@ -49,11 +49,30 @@ enum CompanyRoomRemovalFence {
 }
 
 enum RoomPushDecision {
+    /// `awaitsDirectory`: the room claims the company conversation type and
+    /// the directory that could vouch for it has not finished. It stays held
+    /// (never opens under Chats); the directory then routes it to Team Space
+    /// or denies it.
     static func decide(canOpen: Bool,
-                       destination: RoomRootDestination?) -> Router.PendingRoomDecision {
+                       destination: RoomRootDestination?,
+                       awaitsDirectory: Bool = false) -> Router.PendingRoomDecision {
+        if awaitsDirectory { return .pending }
         guard canOpen else { return .deny }
         return destination == nil ? .pending : .allow
     }
+}
+
+/// The inputs a pending last-chat restore reads; a change retries it.
+private struct ChatRestoreSignals: Equatable {
+    let intentID: UUID?
+    /// Matrix readiness (initial sync included) and each room publication:
+    /// a remembered room can become eligible without the roster changing.
+    let matrixReady: Bool
+    let roomPublication: UInt64
+    let claimRevision: UInt64
+    let hasAgentRoster: Bool
+    let classificationRevision: UInt64
+    let waiting: Bool
 }
 
 struct AppRoot: View {
@@ -74,6 +93,8 @@ struct AppRoot: View {
     @State private var legalLinks = ChatLinkRouter()
     @State private var roomlessAppFallback: AppBotContinueRequest?
     @State private var appliedAccountScopeGeneration: UInt64?
+    /// The account the applied scope belongs to; nil before the first one.
+    @State private var appliedAccountScopeID: String?
     /// TS-6b: the one thread panel and the thread drafts.
     @State private var companyThreads = CompanyThreadsCoordinator()
     private let design = try! LiveDesign()
@@ -100,9 +121,26 @@ struct AppRoot: View {
                                retry: beginDomainSignIn, signOut: nil)
             case let .signedIn(account):
                 if router.pendingDeepLinkIsCold {
+                    // A cold notification holds the boot screen no longer
+                    // than a launch restore. Past it the shell mounts at its
+                    // roster; the notification stays held and the mounted
+                    // shell's validation still routes it once it is known.
                     S6BootWait(design: design)
+                        .task {
+                            do { try await Task.sleep(for: Router.coldDeepLinkHold) } catch { return }
+                            router.releaseColdDeepLinkHold()
+                        }
                 } else {
+                    // W4-V2: launch keeps the boot screen up while the last
+                    // chat can still be restored, so the person lands
+                    // straight in it instead of seeing the roster first.
+                    let coversLaunch = router.chatRestoreIntent?.entry == .launch
+                        && router.coversChatsRootForRestore
                     product(account)
+                        .accessibilityHidden(coversLaunch)
+                        .overlay {
+                            if coversLaunch { S6BootWait(design: design) }
+                        }
                 }
             case .recoveryRequired, .unavailable:
                 // W4 E3 (coordinator decisions 5 and 11): a launch that could
@@ -152,6 +190,16 @@ struct AppRoot: View {
             LiveRemoteNotificationRelay.shared.update(screen: screen)
         }
         .onChange(of: model.pushRoutingReady) { _, _ in validatePendingPush() }
+        // Room classification runs whether or not the shell is mounted: a cold
+        // notification is validated behind the boot screen, before the shell.
+        .task(id: roomClassificationInput) {
+            reconcileRoomClassification()
+            validatePendingPush()
+            attemptChatRestore()
+        }
+        .onChange(of: model.companyWorkspace.classificationRevision) { _, _ in
+            validatePendingPush()
+        }
         .fullScreenCover(item: $legalLinks.presented) { page in
             SafariView(url: page.url).ignoresSafeArea()
         }
@@ -233,7 +281,12 @@ struct AppRoot: View {
         .onChange(of: model.accountScopeGeneration, initial: true) { _, _ in
             guard appliedAccountScopeGeneration != model.accountScopeGeneration else { return }
             appliedAccountScopeGeneration = model.accountScopeGeneration
-            router.resetAccountScope()
+            // Only a scope that replaces a signed-in account discards its
+            // routes. The first account after none keeps a notification
+            // tapped while booting; each scope then reopens its last chat.
+            let replacesAccount = appliedAccountScopeID != nil
+            appliedAccountScopeID = model.accountScopeID
+            router.applyAccountScope(replacesAccount: replacesAccount)
         }
         // A listing hire belongs to the account it was picked under: a new
         // (or no) account lets it go, mid-hire included.
@@ -316,6 +369,8 @@ struct AppRoot: View {
                 titles: model.assistantTitles
             )
         )
+        let coversChatsTap = router.chatRestoreIntent?.entry == .chatsTap
+            && router.coversChatsRootForRestore
         return RootTabs(
             router: router,
             design: design,
@@ -337,6 +392,12 @@ struct AppRoot: View {
                                router.presentationChanged(active)
                            }
                        })
+                // A Chats tap whose restore is still deciding shows the
+                // ground, not a roster the chat would replace a moment later.
+                .accessibilityHidden(coversChatsTap)
+                .overlay {
+                    if coversChatsTap { design.color("ground", scheme: scheme).ignoresSafeArea() }
+                }
                 .onAppear {
                     model.recordChatListSnapshot(accountID: account.matrixUserID,
                                                  rows: home.rows)
@@ -356,6 +417,7 @@ struct AppRoot: View {
                 }
                 .navigationDestination(for: String.self) { roomID in
                     chatHost(account, roomID: roomID)
+                        .toolbarVisibility(.hidden, for: .tabBar)
                 }
         } drive: {
             DriveScreen(design: design, router: router, model: model.drive)
@@ -371,7 +433,8 @@ struct AppRoot: View {
                 },
                 commerce: model.storeCommerce,
                 shelfRequest: router.storeShelfRequest,
-                onShelfShown: { router.storeShelfShown() }
+                onShelfShown: { router.storeShelfShown() },
+                onOpenPurchased: { router.openStorePurchased() }
             )
         } teamSpace: {
             TeamSpaceScreen(
@@ -462,6 +525,7 @@ struct AppRoot: View {
             )
             .navigationDestination(for: String.self) { roomID in
                 chatHost(account, roomID: roomID)
+                    .toolbarVisibility(.hidden, for: .tabBar)
             }
         } account: {
             AccountScreen(design: design,
@@ -537,6 +601,24 @@ struct AppRoot: View {
         .task(id: rosterSnapshot) {
             rosterStore.apply(rosterSnapshot)
             validatePendingPush()
+            attemptChatRestore()
+        }
+        // A pending restore retries under the same intent ID whenever an
+        // input it reads changes.
+        .onChange(of: ChatRestoreSignals(
+            intentID: router.chatRestoreIntent?.id,
+            matrixReady: model.personalChatRestoreMatrixReady,
+            roomPublication: model.personalChatRestoreRoomPublication,
+            claimRevision: model.personalChatRestoreRevision,
+            hasAgentRoster: model.hasPersonalChatAgentRoster,
+            classificationRevision: model.companyWorkspace.classificationRevision,
+            waiting: model.personalChatRestoreIsWaiting
+        ), initial: true) { _, _ in attemptChatRestore() }
+        // The hold is bounded: past it the roster shows and the intent ends.
+        .task(id: router.chatRestoreIntent?.id) {
+            guard let intent = router.chatRestoreIntent else { return }
+            do { try await Task.sleep(for: Router.chatRestoreHold(for: intent.entry)) } catch { return }
+            router.endChatRestore(intent.id)
         }
         // Communication notifications: what only the app knows about a room
         // (assistant/app faces, Team Space names and logos) for the extension.
@@ -552,18 +634,6 @@ struct AppRoot: View {
             await NotificationRoomPublisher.publish(input, design: design) { uri, side in
                 await model.avatarThumbnail(uri: uri, pixelSide: side)
             }
-        }
-        .task(id: RoomClassificationInput(
-            roomIDs: presentation.rooms.rooms.map(\.id).sorted(),
-            typeClaims: presentation.rooms.rooms.filter(\.claimsConversationType).map(\.id).sorted(),
-            revision: model.companyWorkspace.classificationRevision
-        )) {
-            model.companyWorkspace.reconcileMatrixRooms(
-                Set(presentation.rooms.rooms.map(\.id)),
-                conversationTypeClaims: Set(presentation.rooms.rooms
-                    .filter(\.claimsConversationType).map(\.id))
-            )
-            validatePendingPush()
         }
         .onChange(of: router.homePath.count) { _, count in
             if count == 0 { router.didPopHomeRoom() }
@@ -587,9 +657,6 @@ struct AppRoot: View {
             ) {
                 router.popTeamSpaceToRoot()
             }
-        }
-        .onChange(of: model.companyWorkspace.classificationRevision) { _, _ in
-            validatePendingPush()
         }
     }
 
@@ -920,7 +987,6 @@ struct AppRoot: View {
             AppBotRoomOpeningView(opening: opening, design: design) {
                 model.retryAppBotJoin(roomID: roomID)
             }
-            .toolbar(.hidden, for: .tabBar)
         } else {
             design.color("ground", scheme: scheme).ignoresSafeArea()
         }
@@ -1284,7 +1350,14 @@ struct AppRoot: View {
             case .teamSpace: router.teamSpaceRoomID
             case .drive, .store: nil
             }
-            if let retainedRoomID { requestRoomOpen(retainedRoomID) }
+            if let retainedRoomID {
+                requestRoomOpen(retainedRoomID)
+            } else if tab == .home {
+                // An explicit Chats tap at its root reopens the last chat
+                // (desktop #121). Each tap is a new intent.
+                router.beginChatRestore(.chatsTap)
+                attemptChatRestore()
+            }
         }
         router.dismissPresentation = {
             dismissChatPresentationRequest &+= 1
@@ -1319,6 +1392,24 @@ struct AppRoot: View {
         }
     }
 
+    /// One try of the pending restore intent. The model opens the room and
+    /// Router publishes it to Chats' path in the same turn. When nothing can
+    /// apply any more, the intent ends and the roster shows.
+    private func attemptChatRestore() {
+        let roomID = router.attemptChatRestore(
+            hasExplicitRoute: model.appOnboardingReadyRoomID != nil
+        ) { entry, intentID, hasExplicitRoute, stillCurrent in
+            model.restorePersonalChat(for: entry, intentID: intentID,
+                                      hasExplicitRoute: hasExplicitRoute, stillCurrent: stillCurrent)
+        }
+        if let roomID {
+            Task { await LivePushRouting.removeDeliveredNotifications(for: roomID) }
+        } else if let intent = router.chatRestoreIntent, router.chatRestoreIsCurrent(intent),
+                  case .signedIn = model.stage, !model.personalChatRestoreIsWaiting {
+            router.endChatRestore(intent.id)
+        }
+    }
+
     private func handlePushRoomIntent(_ roomID: String) {
         if router.activeRoomID == roomID {
             model.scrollConversationToLatest()
@@ -1330,13 +1421,39 @@ struct AppRoot: View {
         validatePendingPush()
     }
 
+    /// The signed-in room list's classification input; nil without an account.
+    private var roomClassificationInput: RoomClassificationInput? {
+        guard case .signedIn = model.stage else { return nil }
+        let rooms = model.presentation().rooms.rooms
+        return RoomClassificationInput(
+            roomIDs: rooms.map(\.id).sorted(),
+            typeClaims: rooms.filter(\.claimsConversationType).map(\.id).sorted(),
+            revision: model.companyWorkspace.classificationRevision
+        )
+    }
+
+    /// Registers the rooms and their conversation-type claims with the
+    /// company workspace. Idempotent; it bumps the classification revision
+    /// only when something changed.
+    private func reconcileRoomClassification() {
+        guard let input = roomClassificationInput else { return }
+        model.companyWorkspace.reconcileMatrixRooms(Set(input.roomIDs),
+                                                    conversationTypeClaims: Set(input.typeClaims))
+    }
+
     private func validatePendingPush() {
+        // The claims are registered before the decision reads them, so a
+        // company-typed DM is never classified before its claim is known
+        // (a cold notification can validate before the classification task
+        // has run).
+        if router.pendingDeepLinkRoomID != nil { reconcileRoomClassification() }
         router.validatePendingDeepLink(
             sessionAndRosterAreReady: model.pushRoutingReady
         ) {
             RoomPushDecision.decide(
                 canOpen: model.canOpenPushedRoom($0),
-                destination: roomDestination(for: $0)
+                destination: roomDestination(for: $0),
+                awaitsDirectory: model.companyWorkspace.awaitsConversationDirectory($0)
             )
         }
     }

@@ -61,6 +61,7 @@ requires its own plan-scoped agent and Mac grant or renewal through the native W
   follows the offer. Subscription writes can use a ready destination while the offer is pending.
 - Derived Mac hand-off groups from the existing Connections registry for W4-X2. The SwiftUI list
   treatment and native Work grant or renewal UI are W4-X2 work.
+- Integrated W4-T at `3d3759e` before the locked verification.
 
 ## Verification
 

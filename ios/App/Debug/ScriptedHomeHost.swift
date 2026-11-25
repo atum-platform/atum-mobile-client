@@ -226,7 +226,7 @@ struct ScriptedHomeHost: View {
                             .font(.headline)
                     }
                     .accessibilityIdentifier("home.scripted.destination")
-                    .toolbar(.hidden, for: .tabBar)
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 }
             } drive: {
                 if ScriptedDrive.enabled {
@@ -237,7 +237,8 @@ struct ScriptedHomeHost: View {
                 }
             } store: {
                 StoreScreen(design: design, store: scriptedStore,
-                            onRefresh: {}, onOpenRoom: { router.open(roomId: $0) })
+                            onRefresh: {}, onOpenRoom: { router.open(roomId: $0) },
+                            onOpenPurchased: { router.openStorePurchased() })
             } teamSpace: {
                 TeamSpaceScreen(
                     design: design,
@@ -280,6 +281,7 @@ struct ScriptedHomeHost: View {
                         Text(verbatim: roomID).font(.headline)
                     }
                     .accessibilityIdentifier("teamSpace.scripted.destination")
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 }
             } account: {
                 AccountScreen(
@@ -317,6 +319,15 @@ struct ScriptedHomeHost: View {
         .tint(design.color("ink", scheme: scheme))
         .focusEffectDisabled()
         .task { applyDebugSurface() }
+        // F2: the live shell's pop hooks (`AppRoot`), so a Back or swipe-back
+        // here clears Router's typed room mirror exactly as the app does and
+        // a second tap on the same row pushes again.
+        .onChange(of: router.homePath.count) { _, count in
+            if count == 0 { router.didPopHomeRoom() }
+        }
+        .onChange(of: router.teamSpacePath.count) { _, count in
+            if count == 0 { router.didPopTeamSpaceRoom() }
+        }
     }
 
     /// Screenshot-only preselection for the scripted host. It never ships in

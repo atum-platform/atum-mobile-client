@@ -24,6 +24,10 @@ struct StoreScreen: View {
     /// `onShelfShown` clears the request.
     var shelfRequest: StoreSectionKind? = nil
     var onShelfShown: (() -> Void)? = nil
+    /// The shell pushes Purchased on its Store path (`Router.openStorePurchased`),
+    /// so a shelf route that resets the path also leaves Purchased (#101).
+    /// Hosts without a Router path keep the local destination.
+    var onOpenPurchased: (() -> Void)? = nil
 
     @Environment(\.protonTopUp) private var topUp
     /// Apple checkout, mirrored from the coordinator: the balance opens the
@@ -67,9 +71,10 @@ struct StoreScreen: View {
             StoreItemSheet(design: design, item: item, commerce: commerce,
                            openRoom: onOpenRoom)
         }
-        .navigationDestination(isPresented: $showsPurchased) {
-            if let commerce {
-                StorePurchasedScreen(design: design, commerce: commerce, title: itemTitle)
+        .navigationDestination(isPresented: $showsPurchased) { purchasedDestination }
+        .navigationDestination(for: Router.StoreDestination.self) { destination in
+            switch destination {
+            case .purchased: purchasedDestination
             }
         }
         .task(id: commerce?.journalReady) {
@@ -188,9 +193,17 @@ struct StoreScreen: View {
         return commerce.journalReady || commerce.readState != .unavailable
     }
 
+    @ViewBuilder private var purchasedDestination: some View {
+        if let commerce {
+            StorePurchasedScreen(design: design, commerce: commerce, title: itemTitle)
+        }
+    }
+
     private var purchasedSection: some View {
         Section {
-            Button { showsPurchased = true } label: {
+            Button {
+                if let onOpenPurchased { onOpenPurchased() } else { showsPurchased = true }
+            } label: {
                 StorePurchasedEntry(design: design,
                                     checking: !(commerce?.unresolvedAttempts.isEmpty ?? true))
             }

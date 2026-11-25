@@ -167,10 +167,27 @@ class TranscriptUITestCase: AtumUITestCase {
     /// Pass `up: nil` to scroll toward the target's current position.
     @MainActor
     func revealByScrolling(_ target: XCUIElement, in container: XCUIElement,
-                           up: Bool? = true, maxSwipes: Int = 6, verticalInset: CGFloat = 0) -> Bool {
+                           up: Bool? = true, maxSwipes: Int = 6, verticalInset: CGFloat = 0,
+                           above ceiling: XCUIElement? = nil) -> Bool {
         func visible() -> Bool {
             target.exists && target.isHittable && !target.frame.isEmpty
                 && container.frame.insetBy(dx: 0, dy: verticalInset).contains(target.frame)
+        }
+        // `swipeUp()` starts at the container's centre. A form that runs under
+        // the keyboard and a pinned bottom control (the new-assistant sheet's
+        // Create button) can have that centre on the control, which does not
+        // scroll. With a `ceiling`, each drag stays in the visible rows
+        // between the container's top and the control's top.
+        func swipe(up: Bool) {
+            let band = ceiling.map { $0.exists ? min($0.frame.minY, container.frame.maxY) - container.frame.minY : 0 } ?? 0
+            guard band > 88 else {
+                if up { container.swipeUp(velocity: .slow) } else { container.swipeDown(velocity: .slow) }
+                return
+            }
+            let start = container.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: container.frame.width / 2, dy: band * (up ? 0.8 : 0.3)))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: band * (up ? -0.5 : 0.5))),
+                        withVelocity: .slow, thenHoldForDuration: 0)
         }
         for _ in 0..<maxSwipes {
             if visible() { return true }
@@ -181,8 +198,7 @@ class TranscriptUITestCase: AtumUITestCase {
                 guard target.exists && container.exists else { return false }
                 swipeUp = target.frame.midY >= container.frame.midY
             }
-            if swipeUp { container.swipeUp(velocity: .slow) }
-            else { container.swipeDown(velocity: .slow) }
+            swipe(up: swipeUp)
         }
         return visible()
     }
