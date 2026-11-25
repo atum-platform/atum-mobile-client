@@ -18,11 +18,15 @@ enum AtumScriptedLaunch {
 
     static func configure(arguments: [String]) {
         selection = ScriptedScenarios.selection(arguments: arguments)
-        guard let flag = arguments.firstIndex(of: "-AtumScriptedLeadIn"),
-              flag + 1 < arguments.count,
-              let seconds = TimeInterval(arguments[flag + 1]), seconds > 0,
-              var chat = selection?.chat else { return }
-        chat.steps = chat.steps.map { ScriptedStep(at: $0.at + seconds, $0.event) }
+        func positiveValue(_ flag: String) -> TimeInterval? {
+            guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count,
+                  let value = TimeInterval(arguments[index + 1]), value.isFinite, value > 0 else { return nil }
+            return value
+        }
+        let leadIn = positiveValue("-AtumScriptedLeadIn") ?? 0
+        let stepScale = positiveValue("-AtumScriptedStepScale") ?? 1
+        guard var chat = selection?.chat, leadIn > 0 || stepScale != 1 else { return }
+        chat.steps = chat.steps.map { ScriptedStep(at: $0.at * stepScale + leadIn, $0.event) }
         selection?.chat = chat
     }
 

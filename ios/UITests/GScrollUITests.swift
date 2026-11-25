@@ -18,10 +18,16 @@ final class GScrollUITests: TranscriptUITestCase {
     @MainActor
     private func runChatLong(mechanism: String) {
         let tag = "mech-" + mechanism
+        // The proof compares positions across scripted phases. Leave time
+        // for the accessibility requests and screenshots in each phase,
+        // including the first two snapshots before the typing row arrives.
+        let stepScale: TimeInterval = 2
         let (app, start) = launchTimedChat(ScriptedScenario.chatLong.rawValue,
-                                           extra: ["-AtumTranscriptMechanism", mechanism] + probeArguments
-                                               + (ProcessInfo.processInfo.environment["WS2_EXTRA"].map { [$0] } ?? []))
-        func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
+                                           extra: ["-AtumTranscriptMechanism", mechanism,
+                                                   "-AtumScriptedStepScale", String(stepScale)] + probeArguments
+                                               + (ProcessInfo.processInfo.environment["WS2_EXTRA"].map { [$0] } ?? []),
+                                           leadIn: 25)
+        func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds * stepScale) }
 
         // Check 1: open lands at the bottom with no visible jump (0 s vs 1 s).
         XCTAssertTrue(latest(app).waitForExistence(timeout: 2))
@@ -42,7 +48,7 @@ final class GScrollUITests: TranscriptUITestCase {
         // answer to land.
         wait(until: at(4.1))
         let typing = element(app, AccessibilityID.rowTyping)
-        if typing.waitForExistence(timeout: 1.2) {
+        if typing.waitForExistence(timeout: 1.2 * stepScale) {
             record("g2.typingObserved.\(tag)", true)
             keepScreenshot("g2-dots-\(tag)", of: app)
         } else {

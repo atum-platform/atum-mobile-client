@@ -249,6 +249,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private var dismissedKeyboardOnDrag = false
     #if DEBUG
     private var loggedInset: CGFloat?
+    private var loggedLatestDistance: Double?
     #endif
 
     init(store: LiveConversationStore, chrome: ChatChrome) {
@@ -608,6 +609,15 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
             loggedInset = CGFloat(geometry.insetTop)
             UITestProbe.append(String(format: "insetTop=%.1f", geometry.insetTop), to: "geometry.txt")
         }
+        if UITestProbe.folder != nil, onScreen, motion == .idle,
+           let latest = snapshot.rows.last(where: \.isLatest), let frame = rowFrame(latest.id) {
+            let visibleBottom = list.contentOffset.y + list.bounds.height - list.adjustedContentInset.bottom
+            let distance = TranscriptGeometry.half(max(0, frame.minY - visibleBottom))
+            if distance != loggedLatestDistance {
+                loggedLatestDistance = distance
+                UITestProbe.append(String(format: "distanceFromLatest=%.1f", distance), to: "geometry.txt")
+            }
+        }
         #endif
     }
 
@@ -836,13 +846,14 @@ private struct TranscriptGeometry: Equatable {
     @MainActor
     init(_ list: UICollectionView) {
         let insets = list.adjustedContentInset
-        func half(_ value: CGFloat) -> Double { (Double(value) * 2).rounded() / 2 }
-        offsetY = half(list.contentOffset.y)
-        insetTop = half(insets.top)
-        viewportHeight = half(max(0, list.bounds.height - insets.top - insets.bottom))
-        distanceFromTop = half(list.contentOffset.y + insets.top)
-        distanceFromBottom = half(list.contentSize.height - list.contentOffset.y - list.bounds.height + insets.bottom)
+        offsetY = Self.half(list.contentOffset.y)
+        insetTop = Self.half(insets.top)
+        viewportHeight = Self.half(max(0, list.bounds.height - insets.top - insets.bottom))
+        distanceFromTop = Self.half(list.contentOffset.y + insets.top)
+        distanceFromBottom = Self.half(list.contentSize.height - list.contentOffset.y - list.bounds.height + insets.bottom)
     }
+
+    static func half(_ value: CGFloat) -> Double { (Double(value) * 2).rounded() / 2 }
 }
 
 /// A tap on the transcript resigns the composer's first responder, while

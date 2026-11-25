@@ -218,7 +218,7 @@ final class TranscriptUITests: TranscriptUITestCase {
     /// only a view-level check proves the jump (`FollowPolicy` alone is T).
     @MainActor
     func testB6SendWhileScrolledFarUpGoesToMyBubble() {
-        let app = launchChat(ScriptedScenario.chatKeyboard.rawValue)
+        let app = launchChat(ScriptedScenario.chatKeyboard.rawValue, extra: probeArguments)
         XCTAssertTrue(latest(app).waitForExistence(timeout: 3))
         let field = composerField(app)
         field.tap()

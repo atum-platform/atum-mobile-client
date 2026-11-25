@@ -327,8 +327,7 @@ class TranscriptUITestCase: AtumUITestCase {
         return rows.filter { $0.frame.minY < top && $0.frame.maxY > bottom }.first.map { ($0.identifier, $0.frame) }
     }
 
-    /// Some of the element is between the navigation bar and the composer
-    /// (`exists` is true for every loaded row: the stack is eager).
+    /// Some of the element is between the navigation bar and the composer.
     @MainActor
     func isOnScreen(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
         guard element.exists else { return false }
@@ -360,8 +359,15 @@ class TranscriptUITestCase: AtumUITestCase {
     @MainActor
     func topVisibleRowDistance(_ app: XCUIApplication) -> CGFloat {
         let newest = latest(app)
-        guard newest.exists else { return -1 }
-        return max(0, newest.frame.minY - visibleBottom(app))
+        if newest.exists {
+            return max(0, newest.frame.minY - visibleBottom(app))
+        }
+        // UIKit may have recycled the latest cell. Its layout still knows
+        // the row's position, which the app records when the scroll is idle.
+        let prefix = "distanceFromLatest="
+        let measurement = probeLines("geometry.txt").last { $0.text.hasPrefix(prefix) }
+        guard let measurement, let distance = Double(measurement.text.dropFirst(prefix.count)) else { return -1 }
+        return CGFloat(distance)
     }
 
     /// Drags the transcript by `points` without a fling: positive moves the
