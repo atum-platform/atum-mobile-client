@@ -52,12 +52,14 @@ struct ChatComposer: View {
     @Environment(\.chatMediaPresenter) private var mediaPresenter
     @Environment(\.chatMediaAccess) private var mediaAccess
     @Environment(\.chatAttachmentsClosedReason) private var attachmentsClosedReason
-    @Environment(\.chatReducesMotion) private var reduceMotion
     @Environment(\.appBotPresentation) private var appBot
     @Environment(\.appBotPresenter) private var appBotPresenter
     @State private var photoSelection = [PhotosPickerItem]()
     @State private var attachSheetPresented = false
     @State private var dictation: ComposerDictation
+    /// §3.4's 36 pt circle, grown with Dynamic Type (polish P3, audit issue 9)
+    /// up to `maxCircle`, so the glyphs inside it can follow the text.
+    @ScaledMetric(relativeTo: .body) private var scaledCircle: CGFloat = 36
 
     init(store: LiveConversationStore, design: LiveDesign, haptics: ChatHaptics,
          modelActions: AssistantModelActions?,
@@ -101,9 +103,13 @@ struct ChatComposer: View {
             ComposerMentionPicker(store: store, design: design)
             pill
         }
-        .padding(.horizontal, 12)
+        // Polish P3 (audit issue 2): the lines above the pill (a refusal, the
+        // stop notice, the typing line, the @ picker) come and go with a quick
+        // fade instead of popping.
+        .chatMotion(.quick, value: lineState)
+        .padding(.horizontal, design.kit.space(.s3))
         .padding(.top, 6)
-        .padding(.bottom, 8)
+        .padding(.bottom, design.kit.space(.s2))
         // B3: the composer growing (a new line, a chip, the typing line)
         // keeps the newest row visible while following. Handed over after
         // the layout pass: the store reads and writes its observed follow
@@ -193,12 +199,19 @@ struct ChatComposer: View {
                 }
                 // The circle appearing never changes this controls row's
                 // height; the text field grows independently above it.
-                .frame(minHeight: Self.circle)
+                .frame(minHeight: circle)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 4)
+        .padding(.horizontal, design.kit.space(.s1))
+        .padding(.vertical, design.kit.space(.s1))
         .modifier(LiveGlass(design: design, radius: pillRadius))
+        // Polish P3 (audit issue 2): send, Stop, "Stopping…", the mic's
+        // listening state, the reply and edit chips and the field shrinking
+        // back to one line after a send all move with `Motion.quick` instead
+        // of swapping between frames. Outside the glass (fix round 2), so the
+        // glass shape resizes in the same animation as what it holds and
+        // nothing draws past its edge while a chip or the tray goes.
+        .chatMotion(.quick, value: pillState)
         // The glass pill itself, for U7 and U8 (where the newest row sits,
         // no height jump on focus); its controls stay their own elements. A
         // container's accessibility frame is otherwise the union of its
@@ -210,6 +223,41 @@ struct ChatComposer: View {
                             ? ChatCopy.text(design, ChatCopy.Key.turnRunning) : "")
         .accessibilityIdentifier(Self.pillID)
     }
+
+    /// What the pill shows; a change animates (`Motion.quick`).
+    private struct PillState: Equatable {
+        var reply: String?
+        var editing: Bool
+        var send: Bool
+        var stop: AssistantTurnStop.Control
+        var recording: Bool
+        var attachments: Int
+    }
+
+    private var pillState: PillState {
+        PillState(reply: store.replyTarget, editing: store.editTarget != nil, send: showsSendButton,
+                  stop: stopControl, recording: dictation.isRecording,
+                  attachments: store.mediaComposer.items.count)
+    }
+
+    /// What the lines above the pill show; a change animates (`Motion.quick`).
+    private struct LineState: Equatable {
+        var refusal: MediaAttachmentRefusal?
+        var dictation: String?
+        var turn: String?
+        var mentions: Bool
+    }
+
+    private var lineState: LineState {
+        LineState(refusal: store.mediaComposer.refusal, dictation: dictationRefusalLine, turn: turnLine,
+                  mentions: !store.mentionSuggestions.isEmpty)
+    }
+
+    /// §3.4's circle at this text size: 36 pt at the default size, at most
+    /// `maxCircle`, so the controls row stays one row.
+    private var circle: CGFloat { min(max(scaledCircle, Self.minCircle), Self.maxCircle) }
+    /// Every control's tap target: never under 44 pt.
+    private var target: CGFloat { max(Self.minTarget, circle) }
 
     /// The room's Stop state (`LiveConversationStore.turnStop`).
     private var turnStop: AssistantTurnStop { store.turnStop.stop }
@@ -239,9 +287,14 @@ struct ChatComposer: View {
         let editing = store.editTarget != nil
         return Button(action: send) {
             Image(design.symbol(editing ? "Check" : "ArrowUp"))
-                .font(.system(size: 16, weight: .regular))
+                // Polish P3 (audit issue 9): the glyph follows the text (callout
+                // is the old 16 pt at the default size), capped with the circle.
+                .font(.callout)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                // Send ↔ Save morphs as one glyph.
+                .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(design.color("onInk", scheme: scheme))
-                .frame(width: Self.circle, height: Self.circle)
+                .frame(width: circle, height: circle)
                 .background(Circle().fill(design.color("ink", scheme: scheme)))
                 .contentShape(Circle())
         }
@@ -250,6 +303,7 @@ struct ChatComposer: View {
         .opacity(canSend ? 1 : 0.4)
         .accessibilityLabel(ChatCopy.text(design, editing ? ChatCopy.Key.saveEdit : ChatCopy.Key.send))
         .accessibilityIdentifier(AccessibilityID.composerSend)
+        .chatMotionTransition(ChatMotion.controlSwap)
     }
 
     /// Review C1 and Wave 4 E5: the send circle's Stop state as the desktop
@@ -265,22 +319,23 @@ struct ChatComposer: View {
         case let .stop(enabled):
             Button(action: stopTurn) {
                 Image(design.symbol("StopFilled"))
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.subheadline)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .foregroundStyle(design.color("onInk", scheme: scheme))
-                    .frame(width: Self.circle, height: Self.circle)
+                    .frame(width: circle, height: circle)
                     .background(Circle().fill(design.color("ink", scheme: scheme)))
-                    // The visual stays a 36 pt circle and the row keeps its
+                    // The visual stays the circle and the row keeps its
                     // height; the target is 44 pt each way (review C7): 44 wide
                     // in the layout, and 4 pt above and below by its shape.
-                    .frame(width: Self.target, height: Self.circle)
-                    .contentShape(Rectangle().inset(by: -(Self.target - Self.circle) / 2))
+                    .frame(width: target, height: circle)
+                    .contentShape(Rectangle().inset(by: -(target - circle) / 2))
             }
             .buttonStyle(.plain)
             .disabled(!enabled)
             .opacity(enabled ? 1 : Self.disabledStopOpacity)
             .accessibilityLabel(ChatCopy.text(design, ChatCopy.Key.stopTurn))
             .accessibilityIdentifier(Self.stopID)
-            .transition(.opacity)
+            .chatMotionTransition(ChatMotion.controlSwap)
         case .stopping:
             let stopping = ChatCopy.text(design, ChatCopy.Key.turnStopping)
             Button(action: stopTurn) {
@@ -289,10 +344,10 @@ struct ChatComposer: View {
                     .lineLimit(1)
                     .foregroundStyle(design.color("onInk", scheme: scheme))
                     .padding(.horizontal, 14)
-                    .frame(minHeight: Self.circle)
+                    .frame(minHeight: circle)
                     .background(Capsule().fill(design.color("ink", scheme: scheme)))
                     .fixedSize()
-                    .contentShape(Rectangle().inset(by: -(Self.target - Self.circle) / 2))
+                    .contentShape(Rectangle().inset(by: -(target - circle) / 2))
             }
             .buttonStyle(.plain)
             // A bar control: uncapped, the label ran 305 pt wide off a 402 pt
@@ -308,7 +363,7 @@ struct ChatComposer: View {
             // when it starts (`announceStopping`).
             .accessibilityLabel(stopping)
             .accessibilityIdentifier(Self.stopID)
-            .transition(.opacity)
+            .chatMotionTransition(ChatMotion.controlSwap)
         }
     }
 
@@ -316,8 +371,9 @@ struct ChatComposer: View {
     /// info glyph, ink text (`[data-matrix-composer-dock] > .notice-band`).
     private func turnNotice(_ line: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
+            // The glyph takes the text style of the line beside it.
             Image(design.symbol("Info"))
-                .font(.system(size: 14, weight: .regular))
+                .font(.subheadline)
                 .foregroundStyle(design.color("soft", scheme: scheme))
                 .accessibilityHidden(true)
             Text(line)
@@ -413,15 +469,17 @@ struct ChatComposer: View {
     private var addButton: some View {
         Button { attachSheetPresented = true } label: {
             Image(design.symbol("Plus"))
-                .font(.system(size: 22, weight: .light))
+                // title2 is the old 22 pt at the default size.
+                .font(.title2.weight(.light))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(design.color("ink", scheme: scheme))
-                .frame(width: Self.circle, height: Self.circle)
-                .contentShape(Rectangle().inset(by: -4))
+                .frame(width: circle, height: circle)
+                .contentShape(Rectangle().inset(by: -(target - circle) / 2))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(appBot?.composerAction?.label ?? ChatCopy.text(design, .addFiles))
         .accessibilityIdentifier(AccessibilityID.mediaAdd)
-        .transition(.opacity)
+        .chatMotionTransition(ChatMotion.controlSwap)
         .sheet(isPresented: $attachSheetPresented) {
             AttachSheet(design: design,
                         appAction: appComposerAction,
@@ -454,10 +512,12 @@ struct ChatComposer: View {
             dictation.toggle(draft: { store.draft }, setDraft: { store.draft = $0 })
         } label: {
             Image(design.symbol("Mic"))
-                .font(.system(size: 19, weight: .light))
+                // title3 (20 pt at the default size) stands in for the old 19.
+                .font(.title3.weight(.light))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(recording ? design.color("ground", scheme: scheme)
                                            : design.color("ink", scheme: scheme))
-                .frame(width: Self.circle, height: Self.circle)
+                .frame(width: circle, height: circle)
                 .background(Circle().fill(recording ? design.color("ink", scheme: scheme) : .clear))
                 .contentShape(Circle())
         }
@@ -477,7 +537,9 @@ struct ChatComposer: View {
             .padding(.leading, 16)
             .accessibilityIdentifier(AccessibilityID.mediaRefusal)
             .transition(.opacity)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: refusal)
+            // A new refusal replacing the last one fades over (`Motion.quick`);
+            // its arrival is the composer's `lineState`.
+            .chatMotion(.quick, value: refusal)
     }
 
     private func refusalText(_ refusal: MediaAttachmentRefusal) -> String {
@@ -518,10 +580,13 @@ struct ChatComposer: View {
         focused = true
     }
 
-    /// §3.4: a 36 pt ink circle.
-    private static let circle: CGFloat = 36
+    /// §3.4: a 36 pt ink circle at the default text size, never smaller.
+    private static let minCircle: CGFloat = 36
+    /// The circle stops growing here (the Kit's phone control height), so a
+    /// large text size never makes the controls row two rows.
+    private static let maxCircle: CGFloat = 44
     /// The Kit's phone control height: the least a control may take to tap.
-    private static let target: CGFloat = 44
+    private static let minTarget: CGFloat = 44
     static let stopID = "composer.stop"
     /// Desktop `disabled:opacity-30` on the composer Stop.
     static let disabledStopOpacity = 0.3

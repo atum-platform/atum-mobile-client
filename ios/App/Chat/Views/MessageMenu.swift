@@ -36,6 +36,82 @@ final class MessageActionsPresenter {
     var reportRequest: ReportMessageRequest?
     /// The message-actions overlay on screen, if any.
     var actionsOverlay: MessageOverlayRequest?
+    /// The row whose lifted copy the overlay draws now; that row hides itself
+    /// while the copy is up (polish P3), and only then, so it never blinks out
+    /// before the cover is on screen.
+    var liftedRowID: String?
+    /// The overlay part under the finger that opened the menu, while that
+    /// finger slides (polish P3: press, slide on to an action, let go).
+    var highlighted: MessageMenuTarget?
+    /// Where each overlay part sits on screen (global), for the sliding finger.
+    @ObservationIgnored var targetFrames: [MessageMenuTarget: CGRect] = [:]
+    /// Runs one overlay part, as a tap on it does; the overlay sets it while it shows.
+    @ObservationIgnored var commitTarget: ((MessageMenuTarget) -> Void)?
+    /// What a menu item still has to do once the cover has gone: a sheet or the
+    /// delete alert can only be presented then (`fullScreenCover`'s `onDismiss`).
+    @ObservationIgnored var afterOverlay: (() -> Void)?
+
+    /// Where the opening finger was when the menu opened (global).
+    @ObservationIgnored private var pressStart: CGPoint?
+    /// A finger must travel this far before it selects anything, so a press
+    /// released where it began never runs the part that landed under it
+    /// (the system's menus behave the same).
+    static let slideDistance: CGFloat = 10
+
+    /// The menu opened under a finger that is still down at `location`.
+    func pressBegan(at location: CGPoint) {
+        pressStart = location
+    }
+
+    /// The opening finger moved: highlight the part under it, if any.
+    func slide(to location: CGPoint) {
+        guard actionsOverlay != nil, let start = pressStart,
+              hypot(location.x - start.x, location.y - start.y) >= Self.slideDistance else { return }
+        let hit = targetFrames.first { $0.value.contains(location) }?.key
+        if hit != highlighted { highlighted = hit }
+    }
+
+    /// The opening finger lifted at `location`: on a part, run it (tested
+    /// again here, since a quick flick can arrive before the parts are laid
+    /// out); anywhere else the menu stays open for a tap, as the system's does.
+    func release(at location: CGPoint) {
+        slide(to: location)
+        #if DEBUG
+        // `-AtumUITestProbeDir` only: the lift against the parts' frames, for the P3 captures.
+        let frames = targetFrames.map { "\($0.key)=\(Int($0.value.minX)),\(Int($0.value.minY)),"
+            + "\(Int($0.value.width))x\(Int($0.value.height))" }.sorted().joined(separator: " ")
+        UITestProbe.append("release at=\(Int(location.x)),\(Int(location.y)) start=\(String(describing: pressStart)) "
+                           + "hit=\(String(describing: highlighted)) frames=\(frames)", to: "menu-press.txt")
+        #endif
+        pressStart = nil
+        guard let target = highlighted else { return }
+        highlighted = nil
+        commitTarget?(target)
+    }
+
+    /// The opening finger's press was cancelled or failed (the system took
+    /// the touch): nothing runs, the menu stays open for a tap, and no part
+    /// stays highlighted.
+    func pressCancelled() {
+        pressStart = nil
+        highlighted = nil
+    }
+
+    /// The cover has gone: forget the overlay's parts and run what waited for it.
+    func overlayDismissed() {
+        pressStart = nil
+        // The row stayed sunk under its copy until now (`MessageMenuModifier`
+        // counts `liftedRowID` as pressed); it springs back here, animated.
+        // The cover went in a transaction with animations off, so this one
+        // starts fresh and the row's own press animation applies.
+        withTransaction(Transaction()) { liftedRowID = nil }
+        highlighted = nil
+        targetFrames = [:]
+        commitTarget = nil
+        let after = afterOverlay
+        afterOverlay = nil
+        after?()
+    }
     /// A link tapped in the select-text sheet (B17): the sheet closes first
     /// and the link is routed once it has gone, because the chat screen
     /// presents the in-app page or the held-link line, and SwiftUI presents
@@ -108,6 +184,12 @@ extension View {
     }
 }
 
+/// One part of the overlay a finger can slide on to: a menu row or a reaction.
+enum MessageMenuTarget: Hashable {
+    case item(MessageMenuItem)
+    case reaction(String)
+}
+
 /// One long press on an event row opens the actions overlay for it.
 struct MessageOverlayRequest: Identifiable {
     let row: ChatRow
@@ -132,6 +214,19 @@ private struct MessageMenuModifier: ViewModifier {
     let presenter: MessageActionsPresenter
 
     @State private var frame: CGRect = .zero
+    /// The finger is down on the row and the press has not reached the menu yet.
+    @GestureState private var pressing = false
+    @Environment(\.chatReducesMotion) private var reduceMotion
+
+    /// How long a press takes to open the menu.
+    static let pressDuration: Double = 0.35
+    /// The row shrinks to this while pressed, as the system's previews and
+    /// Telegram's bubbles do; the overlay's copy lifts from it.
+    static let pressedScale: CGFloat = 0.96
+    /// A touch that is only passing (a scroll, a tap) shows no shrink.
+    static let pressDelay: Double = 0.08
+    /// The lifted row: invisible, but still hit-testable.
+    static let liftedOpacity: Double = 0.001
 
     func body(content: Content) -> some View {
         let items = MessageMenuRules.items(for: row.item, in: kind, threads: presenter.openThread != nil)
@@ -142,15 +237,34 @@ private struct MessageMenuModifier: ViewModifier {
             // original is hidden and only the overlay's copy shows (the
             // system context menu does the same). The overlay is modal, so
             // VoiceOver never reaches the hidden row either.
-            let lifted = presenter.actionsOverlay?.id == row.id
+            let source = presenter.actionsOverlay?.id == row.id
+            let lifted = source && presenter.liftedRowID == row.id
+            // Polish P3 (audit issue 5): press anticipation. The row sinks
+            // while the finger is down and stays sunk under its lifted copy,
+            // so the copy rises from it and lands back on it. It stays sunk
+            // until the cover has gone (`liftedRowID` is cleared in
+            // `overlayDismissed`, animated), so it springs back from 0.96
+            // instead of snapping to full size with the cover's last frame
+            // (fix round 2). Under Reduce Motion it never sinks.
+            let pressed = (pressing || source || presenter.liftedRowID == row.id) && !reduceMotion
             content
-                .opacity(lifted ? 0 : 1)
-                .accessibilityHidden(lifted)
+                .scaleEffect(pressed ? Self.pressedScale : 1)
+                .animation(pressAnimation(down: pressed), value: pressed)
+                // Measured outside the shrink: the overlay places the copy at
+                // the row's own size.
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+                // Not 0: SwiftUI stops hit-testing a fully transparent view,
+                // and the finger that opened the menu is still on this row
+                // (`MenuPressFollower`). The overlay's opaque copy and its
+                // blur cover what is left.
+                .opacity(lifted ? Self.liftedOpacity : 1)
+                .accessibilityHidden(lifted)
                 // Simultaneous, so the answer's own text views (links, the
                 // markdown renderer) never swallow the press.
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.35).onEnded { _ in open(items) })
-                .sensoryFeedback(.impact(weight: .medium), trigger: presenter.actionsOverlay?.id == row.id)
+                .simultaneousGesture(pressGesture(items))
+                .gesture(followRecognizer(items))
+                // One medium tick when the menu opens, never when it closes.
+                .sensoryFeedback(.impact(weight: .medium), trigger: source) { _, opened in opened }
                 // VoiceOver: every item is an action on the message itself.
                 .accessibilityActions {
                     ForEach(items.filter { $0 != .react }, id: \.self) { item in
@@ -167,13 +281,112 @@ private struct MessageMenuModifier: ViewModifier {
         }
     }
 
+    /// Down: a gentle sink that starts only once the touch has stayed a beat.
+    /// Up: a quick return.
+    private func pressAnimation(down: Bool) -> Animation? {
+        down ? ChatMotion.animation(.standard, reduceMotion: reduceMotion)?.delay(Self.pressDelay)
+             : ChatMotion.animation(.quick, reduceMotion: reduceMotion)
+    }
+
+    /// Hold to open: the row sinks while the finger is down (`pressing`) and
+    /// the menu opens at the threshold. A touch that moves first is a scroll
+    /// and fails the press.
+    private func pressGesture(_ items: [MessageMenuItem]) -> some Gesture {
+        LongPressGesture(minimumDuration: Self.pressDuration)
+            .updating($pressing) { value, state, _ in state = value }
+            .onEnded { _ in open(items) }
+    }
+
+    /// The same press, followed after the threshold, as the system's context
+    /// menus behave: keep the finger down, slide on to an action or a
+    /// reaction and let go to run it; letting go anywhere else leaves the
+    /// menu open for a tap. The transcript stops scrolling while the menu is
+    /// up. UIKit's long press, because it is continuous (began at the
+    /// threshold, changed while the finger moves, ended on lift). The lift is
+    /// hit-tested again where it happens: a finger that reached its target
+    /// before the menu had laid its parts out still runs it (P3 run 5's
+    /// probe: a quick flick arrives before the targets exist).
+    private func followRecognizer(_ items: [MessageMenuItem]) -> MenuPressFollower {
+        MenuPressFollower(duration: Self.pressDuration,
+                          began: { location in
+                              open(items)
+                              guard presenter.actionsOverlay?.id == row.id else { return }
+                              presenter.pressBegan(at: location)
+                          },
+                          moved: { location in
+                              guard presenter.actionsOverlay?.id == row.id else { return }
+                              presenter.slide(to: location)
+                          },
+                          ended: { location in
+                              guard presenter.actionsOverlay?.id == row.id else { return }
+                              presenter.release(at: location)
+                          },
+                          cancelled: {
+                              guard presenter.actionsOverlay?.id == row.id else { return }
+                              presenter.pressCancelled()
+                          })
+    }
+
     private func open(_ items: [MessageMenuItem]) {
+        guard presenter.actionsOverlay == nil else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             presenter.actionsOverlay = MessageOverlayRequest(row: row, kind: kind, roomTitle: roomTitle,
                                                              ownUserID: ownUserID, parsedBody: parsedBody,
                                                              items: items, sourceFrame: frame)
+        }
+    }
+}
+
+/// UIKit's continuous long press on a row, beside every other touch (links,
+/// the markdown renderer, the transcript's own recognizers): it never delays
+/// or cancels a touch. `began` at the threshold, `moved` with the finger's
+/// place on screen (global), `ended` when it lifts. A cancelled or failed
+/// press only reports `cancelled` (the highlight goes); the menu stays open.
+private struct MenuPressFollower: UIGestureRecognizerRepresentable {
+    let duration: Double
+    let began: @MainActor (CGPoint) -> Void
+    let moved: @MainActor (CGPoint) -> Void
+    let ended: @MainActor (CGPoint) -> Void
+    let cancelled: @MainActor () -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = duration
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesBegan = false
+        recognizer.delaysTouchesEnded = false
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        recognizer.minimumPressDuration = duration
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        #if DEBUG
+        // `-AtumUITestProbeDir` only: what the follower saw, for the P3 captures.
+        let point = context.converter.location(in: .global)
+        UITestProbe.append(String(format: "follower state=%d x=%.0f y=%.0f", recognizer.state.rawValue,
+                                  point.x, point.y), to: "menu-press.txt")
+        #endif
+        switch recognizer.state {
+        case .began: began(context.converter.location(in: .global))
+        case .changed: moved(context.converter.location(in: .global))
+        case .ended: ended(context.converter.location(in: .global))
+        case .cancelled, .failed: cancelled()
+        default: break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
         }
     }
 }
@@ -208,6 +421,16 @@ enum MessageMenuActions {
         // warning circle is the Kit's nearest mark.
         case .report: .alertCircle
         case .delete: .trash
+        }
+    }
+
+    /// Whether an item runs only once the menu's cover has gone: everything
+    /// that presents (a sheet, the delete alert, the thread panel) or moves the
+    /// keyboard on to the composer (Reply, Edit). Copy runs at once.
+    static func waitsForCover(_ item: MessageMenuItem) -> Bool {
+        switch item {
+        case .copy, .react: false
+        case .reply, .replyInThread, .selectText, .edit, .report, .delete: true
         }
     }
 
@@ -251,11 +474,16 @@ struct MessageActionsOverlay: View {
     let presenter: MessageActionsPresenter
 
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chatReducesMotion) private var reduceMotion
     @State private var shown = false
+    @State private var closing = false
     @State private var reactionsHeight: CGFloat = 0
     @State private var previewHeight: CGFloat = 0
     @State private var menuHeight: CGFloat = 0
+    /// The band's height when the menu opened. A slide towards older messages
+    /// may put the keyboard away under the cover; the parts stay where the
+    /// finger expects them.
+    @State private var frozenHeight: CGFloat?
     /// Review A2: the palette and the menu follow Dynamic Type, within limits
     /// that keep six reactions on one line of a phone.
     @ScaledMetric(relativeTo: .title2) private var emojiSize: CGFloat = 26
@@ -268,29 +496,47 @@ struct MessageActionsOverlay: View {
     private var menuRows: [MessageMenuItem] { request.items.filter { $0 != .react } }
 
     /// Space kept from the safe area's edges, and between the parts.
-    private static let margin: CGFloat = 8
-    private static let gap: CGFloat = 8
+    private var margin: CGFloat { kit.space(.s2) }
+    private var gap: CGFloat { kit.space(.s2) }
+    /// The capsule and the menu grow out of the copy from this scale.
+    private static let partScale: CGFloat = 0.6
 
+    // Polish P3 (audit issue 5): the copy is drawn where the row was from the
+    // first frame, at the row's pressed size, and springs (`Motion.send`) to
+    // its full size and its laid-out place while the capsule and the menu grow
+    // out of it; closing runs the same motion back (`Motion.quick`), and the
+    // row takes over in the same place. Under Reduce Motion nothing moves or
+    // scales: the copy sits at its place and the rest fades.
     var body: some View {
         GeometryReader { proxy in
-            let origin = proxy.frame(in: .global).minY
-            let top = Double(Self.margin)
-            let bottom = Double(max(Self.margin, proxy.size.height - Self.margin))
+            let bounds = proxy.frame(in: .global)
+            let height = frozenHeight ?? proxy.size.height
+            let top = Double(margin)
+            let bottom = Double(max(margin, height - margin))
+            let sourceTop = Double(request.sourceFrame.minY - bounds.minY)
             let layout = MessageMenuLayout.place(
-                sourceTop: Double(request.sourceFrame.minY - origin), bounds: top...bottom,
+                sourceTop: sourceTop, bounds: top...bottom,
                 reactions: hasReactions ? Double(reactionsHeight) : nil,
-                preview: Double(previewHeight), menu: Double(menuHeight), gap: Double(Self.gap))
+                preview: Double(previewHeight), menu: Double(menuHeight), gap: Double(gap))
             // The most the copy may take, whatever its own height.
-            let room = bottom - top - (hasReactions ? Double(reactionsHeight + Self.gap) : 0)
-                - (menuRows.isEmpty ? 0 : Double(menuHeight + Self.gap))
+            let room = bottom - top - (hasReactions ? Double(reactionsHeight + gap) : 0)
+                - (menuRows.isEmpty ? 0 : Double(menuHeight + gap))
             let measured = previewHeight > 0 && (menuRows.isEmpty || menuHeight > 0)
                 && (!hasReactions || reactionsHeight > 0)
+            let settled = shown || reduceMotion
+            let menuAbove = layout.arrangement == .menuAbove
+            // How far the row's own edge sits from the copy's laid-out edge.
+            let sourceShift = own
+                ? request.sourceFrame.maxX - (bounds.maxX - ChatLayout.sideMargin)
+                : request.sourceFrame.minX - (bounds.minX + ChatLayout.sideMargin)
             ZStack(alignment: .topLeading) {
                 backdrop
                 ZStack(alignment: .topLeading) {
                     if hasReactions {
                         reactions
                             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { reactionsHeight = $0 }
+                            .scaleEffect(settled ? 1 : Self.partScale, anchor: partAnchor(below: menuAbove))
+                            .opacity(shown && measured ? 1 : 0)
                             .modifier(Placed(top: layout.reactionsTop ?? 0, own: own))
                     }
                     MessageMenuPreview(row: request.row, kind: request.kind, parsedBody: request.parsedBody,
@@ -298,26 +544,67 @@ struct MessageActionsOverlay: View {
                         .contentShape(Rectangle())
                         .onTapGesture { close() }
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewHeight = $0 }
-                        .modifier(Placed(top: layout.previewTop, own: own))
+                        .scaleEffect(settled ? 1 : MessageMenuModifier.pressedScale)
+                        .offset(x: settled ? 0 : sourceShift)
+                        .opacity(reduceMotion && !shown ? 0 : 1)
+                        .modifier(Placed(top: settled && measured ? layout.previewTop : sourceTop, own: own))
                     if !menuRows.isEmpty {
                         menu(width: min(menuWidth, proxy.size.width - 2 * ChatLayout.sideMargin))
                             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
+                            .scaleEffect(settled ? 1 : Self.partScale, anchor: partAnchor(below: !menuAbove))
+                            .opacity(shown && measured ? 1 : 0)
                             .modifier(Placed(top: layout.menuTop, own: own))
                     }
                 }
-                .scaleEffect(shown || reduceMotion ? 1 : 0.96)
-                // Nothing shows until every part has been measured once, so
-                // the first frame never draws a part in the wrong place.
-                .opacity(shown && measured ? 1 : 0)
+            }
+            .onChange(of: measured, initial: true) { _, ready in
+                guard ready, !shown, !closing else { return }
+                frozenHeight = proxy.size.height
+                withAnimation(ChatMotion.animation(.send, reduceMotion: reduceMotion)) { shown = true }
             }
         }
         .onAppear {
-            withAnimation(reduceMotion ? .linear(duration: 0.12) : .spring(duration: 0.28, bounce: 0.18)) {
-                shown = true
-            }
+            // The copy is on screen from this frame: the row may hide now.
+            presenter.liftedRowID = request.id
+            presenter.commitTarget = { perform($0) }
         }
+        .sensoryFeedback(.selection, trigger: presenter.highlighted) { _, new in new != nil }
         .accessibilityAction(.escape) { close() }
         .atumDesign(design)
+    }
+
+    /// A part grows from its edge nearest the copy, on the message's side.
+    private func partAnchor(below: Bool) -> UnitPoint {
+        switch (below, own) {
+        case (true, true): .topTrailing
+        case (true, false): .topLeading
+        case (false, true): .bottomTrailing
+        case (false, false): .bottomLeading
+        }
+    }
+
+    /// One part, tapped or slid on to and released.
+    private func perform(_ target: MessageMenuTarget) {
+        switch target {
+        case let .reaction(key):
+            actions.toggleReaction(request.row.id, key)
+            close()
+        case let .item(item):
+            let request = request
+            let actions = actions
+            let presenter = presenter
+            let run = {
+                MessageMenuActions.perform(item, row: request.row, kind: request.kind,
+                                           roomTitle: request.roomTitle, parsedBody: request.parsedBody,
+                                           actions: actions, presenter: presenter)
+            }
+            if MessageMenuActions.waitsForCover(item) {
+                close(then: run)
+            } else {
+                run()
+                close()
+            }
+        }
     }
 
     /// The material dim: blur, then the Kit scrim over it.
@@ -339,29 +626,34 @@ struct MessageActionsOverlay: View {
         let target = min(reactionTarget, 52)
         return HStack(spacing: 2) {
             ForEach(choices, id: \.key) { choice in
+                let highlighted = presenter.highlighted == .reaction(choice.key)
                 Button {
-                    actions.toggleReaction(request.row.id, choice.key)
-                    close()
+                    perform(.reaction(choice.key))
                 } label: {
                     Text(verbatim: choice.key)
                         .font(.system(size: min(emojiSize, 34)))
+                        // The emoji under a sliding finger grows, as the
+                        // system's and Telegram's reaction bars do.
+                        .scaleEffect(highlighted && !reduceMotion ? Self.highlightedEmojiScale : 1)
                         // At least 44 pt to tap (the Kit's phone control height).
                         .frame(width: target, height: target)
                         .background {
-                            if choice.isSelected {
-                                Circle().fill(kit.color(.fillSelected, scheme: scheme)).padding(4)
+                            if choice.isSelected || highlighted {
+                                Circle().fill(kit.color(.fillSelected, scheme: scheme)).padding(kit.space(.s1))
                             }
                         }
                         .contentShape(Circle())
+                        .chatMotion(.quick, value: highlighted)
                 }
                 .buttonStyle(.plain)
+                .modifier(TargetFrame(target: .reaction(choice.key), presenter: presenter))
                 .accessibilityLabel(ChatCopy.text(design, ChatCopy.Key.reactWith, [.text(choice.key)]))
                 .accessibilityAddTraits(choice.isSelected ? .isSelected : [])
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .modifier(LiveGlass(design: design, radius: 26))
+        .padding(.vertical, kit.space(.s1))
+        .padding(.horizontal, kit.space(.s2))
+        .modifier(LiveGlass(design: design, radius: Double(kit.phoneRadius(.full))))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(Self.reactionsID)
     }
@@ -373,61 +665,87 @@ struct MessageActionsOverlay: View {
                     Rectangle()
                         .fill(kit.color(.line, scheme: scheme))
                         .frame(height: 0.5)
-                        .padding(.leading, 16)
+                        .padding(.leading, kit.space(.s4))
                 }
                 Button {
-                    close()
-                    let request = request
-                    let run = {
-                        MessageMenuActions.perform(item, row: request.row, kind: request.kind,
-                                                   roomTitle: request.roomTitle, parsedBody: request.parsedBody,
-                                                   actions: actions, presenter: presenter)
-                    }
-                    // A sheet or the delete alert can only be presented once
-                    // the cover has gone; the rest act at once.
-                    if item == .selectText || item == .delete || item == .report || item == .replyInThread {
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(120))
-                            run()
-                        }
-                    } else {
-                        run()
-                    }
+                    perform(.item(item))
                 } label: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: kit.space(.s3)) {
                         Text(MessageMenuActions.title(item, design: design))
                             .font(.body)
-                        Spacer(minLength: 8)
+                        Spacer(minLength: kit.space(.s2))
                         Image(design.symbol(MessageMenuActions.glyph(item).rawValue))
                             .font(.body)
                             .accessibilityHidden(true)
                     }
                     .foregroundStyle(kit.color(item == .delete ? .danger : .ink, scheme: scheme))
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, kit.space(.s4))
                     .frame(minHeight: 46)
+                    // The row under a sliding finger shows the system's
+                    // pressed fill.
+                    .background(presenter.highlighted == .item(item)
+                                ? kit.color(.fillSelected, scheme: scheme) : .clear)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .modifier(TargetFrame(target: .item(item), presenter: presenter))
                 .accessibilityLabel(MessageMenuActions.title(item, design: design))
             }
         }
         .frame(width: width)
-        .modifier(LiveGlass(design: design, radius: 22))
+        .clipShape(RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
+        .modifier(LiveGlass(design: design, radius: Double(kit.phoneRadius(.lg))))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(Self.menuID)
     }
 
-    private func close() {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { presenter.actionsOverlay = nil }
+    /// Closes the menu: the parts shrink back into the copy and the copy
+    /// returns to the row (`Motion.quick`), then the cover goes and the row
+    /// shows again in the same place. `then` runs once the cover has gone
+    /// (a sheet or the delete alert needs that), with no timed wait.
+    private func close(then after: (() -> Void)? = nil) {
+        guard !closing else { return }
+        closing = true
+        presenter.highlighted = nil
+        presenter.commitTarget = nil
+        if let after { presenter.afterOverlay = after }
+        let presenter = presenter
+        let finish = {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presenter.actionsOverlay = nil }
+        }
+        guard shown, let animation = ChatMotion.animation(.quick, reduceMotion: reduceMotion) else {
+            finish()
+            return
+        }
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            shown = false
+        } completion: {
+            finish()
+        }
     }
+
+    /// The emoji under a sliding finger.
+    private static let highlightedEmojiScale: CGFloat = 1.25
 
     /// The overlay's parts, for UI tests (beside the frozen row IDs).
     static let reactionsID = "menu.reactions"
     static let previewID = "menu.preview"
     static let menuID = "menu.items"
     static let backdropID = "menu.backdrop"
+
+    /// Hands one part's frame on screen to the presenter, for the sliding finger.
+    private struct TargetFrame: ViewModifier {
+        let target: MessageMenuTarget
+        let presenter: MessageActionsPresenter
+
+        func body(content: Content) -> some View {
+            content.onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                presenter.targetFrames[target] = frame
+            }
+        }
+    }
 
     /// One part at its layout top, on the message's side of the screen.
     private struct Placed: ViewModifier {
@@ -619,7 +937,7 @@ private struct MessageActionSheets: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .fullScreenCover(item: $presenter.actionsOverlay) { request in
+            .fullScreenCover(item: $presenter.actionsOverlay, onDismiss: { presenter.overlayDismissed() }) { request in
                 MessageActionsOverlay(request: request, design: design, actions: actions, presenter: presenter)
                     .presentationBackground(.clear)
             }
