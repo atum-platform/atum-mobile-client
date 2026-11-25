@@ -43,11 +43,12 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
     }
 
     private func snapshot(profile: String = "atum.model-choice/1.5",
-                          cloudChoice: [String: Any]? = nil) throws -> ManagedModelDestinationSnapshot {
+                          cloudChoice: [String: Any]? = nil,
+                          revision: Int = 7) throws -> ManagedModelDestinationSnapshot {
         try decode(ManagedModelDestinationSnapshot.self, [
             "profile": profile,
             "agentPrincipal": "00000000-0000-4000-8000-bd7662a5eeb4",
-            "revision": 7,
+            "revision": revision,
             "policyDigest": String(repeating: "b", count: 64),
             "recommended": ["source": "atum", "model": "nguyet-thuc", "effort": "medium"],
             "choices": [cloudChoice ?? ["destination": "cloud", "source": "atum",
@@ -156,12 +157,40 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
 
     // MARK: The composer chip (W4-T)
 
+    private func chatGPT(_ model: String) -> [String: Any] {
+        ["destination": "cloud", "source": "chatgpt_plan", "model": model, "effort": "medium"]
+    }
+
+    /// The 1.1 offer; only its choice and revision matter to the chip (its
+    /// unavailable grant keeps the fixture to the contract's invariants).
+    private func offer(choice: String, revision: Int) throws -> ManagedModelSnapshot {
+        func row(_ alias: String) -> [String: Any] {
+            ["alias": alias, "displayName": alias, "providerModel": "provider/hidden",
+             "contextBudget": 120_000, "outputBudget": 16_384,
+             "efforts": ["low", "medium", "high"], "defaultEffort": "medium",
+             "cost": ["currency": "USD", "inputPerMtok": "1.00", "outputPerMtok": "2.00",
+                      "maxTurnMicroProtons": 1],
+             "eligibility": ["state": "unavailable", "reason": "provider_unavailable"],
+             "inputModalities": ["text"], "supportsTools": true]
+        }
+        return try decode(ManagedModelSnapshot.self, [
+            "profile": "atum.model-choice/1.1",
+            "agentPrincipal": "00000000-0000-4000-8000-bd7662a5eeb4",
+            "revision": revision, "source": "saved", "policyVersion": "2026-10-17.1",
+            "policyDigest": String(repeating: "a", count: 64),
+            "choice": ["v": 2, "source": "atum", "model": choice, "effort": "medium"],
+            "models": [row("nguyet-thuc"), row("nhat-thuc")],
+            "runtimes": [["runtime": "cloud"]],
+            "grant": ["profile": "atum.model-grant/1", "state": "unavailable",
+                      "reason": "provider_unavailable", "policyDigest": String(repeating: "a", count: 64)],
+        ])
+    }
+
     /// The chip names a saved ChatGPT-plan model by its display name, not the
     /// raw id the W4-R captures showed ("gpt-6.1"), before any account read.
     func testTheChipNamesASavedPlanModelByItsDisplayNameNeverTheRawID() throws {
-        let saved = try snapshot(cloudChoice: ["destination": "cloud", "source": "chatgpt_plan",
-                                               "model": "gpt-6.1", "effort": "medium"])
-        let face = try XCTUnwrap(PhoneModelPickerProjection.chip(picked: nil, destination: saved, offer: nil))
+        let saved = try snapshot(cloudChoice: chatGPT("gpt-6.1"))
+        let face = try XCTUnwrap(PhoneModelPickerProjection.chip(pick: nil, destination: saved, offer: nil))
         XCTAssertEqual(face.name, "GPT-6.1")
         XCTAssertEqual(face.source, .chatGPTPlan)
         XCTAssertNil(face.connectionLabel)
@@ -169,37 +198,127 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         let go = try snapshot(profile: "atum.model-choice/1.4",
                               cloudChoice: ["destination": "cloud", "source": "opencode_go",
                                             "model": "glm-5.2", "effort": "high"])
-        XCTAssertEqual(PhoneModelPickerProjection.chip(picked: nil, destination: go, offer: nil)?.name, "GLM 5.2")
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: nil, destination: go, offer: nil)?.name, "GLM 5.2")
     }
 
-    /// A pick hands the chip its row: the chip says what the list said, and its
-    /// mark is matched from the row's own connection label.
-    func testThePickedRowNamesTheChipWithItsOwnNameAndConnectionLabel() throws {
+    /// Review r1: the relay names "gpt-6.1-mini" "GPT-6.1 mini", the id alone
+    /// reads "GPT-6.1 Mini". Once the account's status is loaded the chip uses
+    /// the list's own row, cold or after a pick, so the two never disagree.
+    func testTheChipAndTheListNameASubscriptionModelTheSameWayOnceTheCatalogIsLoaded() throws {
+        let saved = try snapshot(cloudChoice: chatGPT("gpt-6.1-mini"))
+        let status = try account(relay: relay(enabled: true), connections: connections(connected: true))
+        let listed = try XCTUnwrap(PhoneModelPickerProjection.subscriptions(saved, destination: cloud, account: status)
+            .first { $0.selected })
+        XCTAssertEqual(listed.displayName, "GPT-6.1 mini")
+
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: nil, destination: saved, offer: nil)?.name,
+                       "GPT-6.1 Mini", "no catalog yet: the desktop's words for the id, as the list's saved row")
+        let cold = PhoneModelPickerProjection.chip(pick: nil, destination: saved, offer: nil, account: status)
+        XCTAssertEqual(cold, .init(name: listed.displayName, source: listed.source,
+                                   connectionLabel: listed.connectionLabel))
+
+        // A pick's row from an older catalog yields to the list's current row.
+        let stale = PhoneModelPickerProjection.Row(
+            favoriteID: nil, source: .chatGPTPlan, model: "gpt-6.1-mini", displayName: "GPT-6.1 Mini",
+            selected: true, selectable: false, isSubscription: true)
+        let pick = PhoneModelPickerProjection.ChipPick(row: stale, destinationRevision: 6, offerRevision: nil)
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: saved, offer: nil, account: status)?.name,
+                       "GPT-6.1 mini")
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: saved, offer: nil)?.name,
+                       "GPT-6.1 Mini", "with no account read the pick keeps its own row's name")
+    }
+
+    /// Review r1 blocker: pick ChatGPT's mini in the composer, then choose
+    /// Atum from Assistant Info. The composer's next destination readback is
+    /// newer than the pick and saves Atum, so the pick no longer names the chip.
+    func testANewerReadbackThatSavesSomethingElseEndsThePicksHold() throws {
+        let before = try snapshot(cloudChoice: chatGPT("gpt-6.1"), revision: 7)
+        let status = try account(relay: relay(enabled: true), connections: nil)
+        let row = try XCTUnwrap(PhoneModelPickerProjection.subscriptions(before, destination: cloud, account: status)
+            .first { $0.model == "gpt-6.1-mini" })
+        let pick = PhoneModelPickerProjection.ChipPick(row: row.selecting(true), destinationRevision: 7,
+                                                       offerRevision: 3)
+
+        // The write's own readback saves the pick: it keeps naming the chip.
+        let written = try snapshot(cloudChoice: chatGPT("gpt-6.1-mini"), revision: 8)
+        XCTAssertEqual(PhoneModelPickerProjection.reconciled(pick, destination: written, offer: nil), pick)
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: written, offer: nil, account: status),
+                       .init(name: "GPT-6.1 mini", source: .chatGPTPlan))
+        // A readback no newer than the pick never drops it.
+        XCTAssertEqual(PhoneModelPickerProjection.reconciled(pick, destination: before, offer: nil), pick)
+
+        // Assistant Info chose Atum: name and mark follow the newer readback.
+        let info = try snapshot(revision: 9)
+        XCTAssertNil(PhoneModelPickerProjection.reconciled(pick, destination: info, offer: nil))
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: info, offer: nil, account: status),
+                       .init(name: "Nguyệt Thực", source: .atum))
+        // A newer readback with no saved cloud choice answers with the recommendation.
+        let none = try decode(ManagedModelDestinationSnapshot.self, [
+            "profile": "atum.model-choice/1.5", "agentPrincipal": "00000000-0000-4000-8000-bd7662a5eeb4",
+            "revision": 9, "policyDigest": String(repeating: "b", count: 64),
+            "recommended": ["source": "atum", "model": "nguyet-thuc", "effort": "medium"], "choices": [],
+            "dailyCap": ["dailyProtons": 0, "timeZone": "Asia/Ho_Chi_Minh",
+                         "warningPercent": 80, "counts": "atum_billed_only"],
+            "spend": ["day": "2026-11-11", "usedProtons": 0, "state": "normal", "notice": "none"],
+        ])
+        XCTAssertNil(PhoneModelPickerProjection.reconciled(pick, destination: none, offer: nil))
+    }
+
+    /// An Atum pick over the 1.1 offer: the destination read may lag the 1.1
+    /// write, so only a newer readback that saves another model drops it.
+    func testAnAtumPickYieldsOnlyToANewerReadbackThatSavesAnotherModel() throws {
+        let stale = try snapshot(cloudChoice: chatGPT("gpt-6.1"), revision: 7)
+        let row = try XCTUnwrap(PhoneModelPickerProjection.conversation(
+            offer: nil, destination: stale, destinationID: cloud).first { $0.model == ManagedModelLineup.hardAlias })
+        let pick = PhoneModelPickerProjection.ChipPick(row: row, destinationRevision: 7, offerRevision: 3)
+        let written = try offer(choice: ManagedModelLineup.hardAlias, revision: 4)
+
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: stale, offer: written)?.name,
+                       "Nhật Thực", "the destination read has not caught up with the 1.1 write")
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: stale, offer: written)?.source, .atum)
+        XCTAssertNil(PhoneModelPickerProjection.reconciled(pick, destination: stale,
+                                                           offer: try offer(choice: "nguyet-thuc", revision: 5)))
+        let elsewhere = try snapshot(cloudChoice: chatGPT("gpt-6.1"), revision: 8)
+        XCTAssertNil(PhoneModelPickerProjection.reconciled(pick, destination: elsewhere, offer: written))
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: elsewhere, offer: written)?.name,
+                       "GPT-6.1")
+    }
+
+    /// Review r1: the composer lists only Atum's line-up and the cloud's
+    /// subscriptions, never an own-key row (desktop `chipRoute` is the current
+    /// route, and a cloud assistant's picker has no own-key route). The chip's
+    /// mark facts are exactly those of the row the list draws.
+    func testTheChipsMarkFactsAreTheListedRowsOwn() throws {
         let saved = try snapshot()
-        let status = try account(relay: relay(enabled: true, models: [model("gpt-6.1-mini", "GPT-6.1 mini")]),
-                                 connections: nil)
-        let row = try XCTUnwrap(PhoneModelPickerProjection.subscriptions(saved, destination: cloud,
-                                                                          account: status).first)
-        let face = PhoneModelPickerProjection.chip(picked: row, destination: saved, offer: nil)
-        XCTAssertEqual(face?.name, "GPT-6.1 mini", "the server's own name, as the row")
-        XCTAssertEqual(face?.source, .chatGPTPlan)
-
-        let ownKey = PhoneModelPickerProjection.Row(
-            favoriteID: nil, source: .ownKey("custom"), model: "claude-opus-5-5", displayName: "Claude Opus 5.5",
-            selected: true, selectable: true, connectionID: "conn-1", connectionLabel: "Anthropic")
-        let keyed = PhoneModelPickerProjection.chip(picked: ownKey, destination: saved, offer: nil)
-        XCTAssertEqual(keyed, .init(name: "Claude Opus 5.5", source: .ownKey("custom"), connectionLabel: "Anthropic"))
-
-        let atum = try XCTUnwrap(PhoneModelPickerProjection.conversation(
-            offer: nil, destination: saved, destinationID: cloud).first { $0.model == ManagedModelLineup.hardAlias })
-        XCTAssertEqual(PhoneModelPickerProjection.chip(picked: atum, destination: saved, offer: nil)?.name,
-                       "Nhật Thực", "Atum's line-up keeps its product name on the chip")
+        let status = try account(relay: relay(enabled: true), connections: connections(connected: true))
+        let rows = PhoneModelPickerProjection.conversation(offer: nil, destination: saved, destinationID: cloud)
+            .filter { !$0.announced }
+            + PhoneModelPickerProjection.subscriptions(saved, destination: cloud, account: status)
+        XCTAssertFalse(rows.contains { if case .ownKey = $0.source { true } else { false } })
+        for row in rows {
+            let face = try XCTUnwrap(PhoneModelPickerProjection.chip(
+                pick: .init(row: row, destinationRevision: 7, offerRevision: nil),
+                destination: saved, offer: nil, account: status))
+            XCTAssertEqual(face.source, row.source, row.model)
+            XCTAssertEqual(face.connectionLabel, row.connectionLabel, row.model)
+        }
     }
 
     func testTheChipNamesAtumsLineUpAndNothingBeforeAnyRead() throws {
-        XCTAssertNil(PhoneModelPickerProjection.chip(picked: nil, destination: nil, offer: nil))
-        let face = PhoneModelPickerProjection.chip(picked: nil, destination: try snapshot(), offer: nil)
+        XCTAssertNil(PhoneModelPickerProjection.chip(pick: nil, destination: nil, offer: nil))
+        let face = PhoneModelPickerProjection.chip(pick: nil, destination: try snapshot(), offer: nil)
         XCTAssertEqual(face, .init(name: "Nguyệt Thực", source: .atum))
+    }
+
+    /// The desktop card's `external.modelLabel` for a saved model with no
+    /// catalog row (`model-destinations.test.ts`).
+    func testASavedExternalModelIsLabelledAsTheDesktopCardLabelsIt() {
+        XCTAssertEqual(ModelDisplayName.destinationLabel(model: "openai/gpt-6.1-sol"), "Openai GPT 6.1 Sol")
+        XCTAssertEqual(ModelDisplayName.destinationLabel(model: "glm-5.2"), "Glm 5.2")
+        XCTAssertEqual(ModelDisplayName.destinationLabel(model: "GPT_4o"), "GPT 4o")
+        XCTAssertEqual(ModelDisplayName.destinationLabel(model: "Claude--opus"), "Claude Opus")
+        XCTAssertEqual(ModelDisplayName.destinationLabel(model: "openai/gpt-6.1-sol", displayName: "GPT-6.1 Sol"),
+                       "GPT-6.1 Sol", "a catalog row's own label wins")
     }
 
     /// The desktop's `matrixModelDisplayName`, case for case.

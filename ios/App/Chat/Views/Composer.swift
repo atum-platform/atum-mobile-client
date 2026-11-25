@@ -549,8 +549,12 @@ private struct ComposerModelChoiceButton: View {
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destination: ManagedModelDestinationSnapshot?
     /// The row a successful pick wrote, so the chip names it at once with
-    /// that row's own name and mark.
-    @State private var picked: PhoneModelPickerProjection.Row?
+    /// that row's own name and mark. A newer readback that saves something
+    /// else drops it (`PhoneModelPickerProjection.reconciled`).
+    @State private var picked: PhoneModelPickerProjection.ChipPick?
+    /// The account's subscription status, last read here or by the picker:
+    /// the catalog that names a subscription model as the list names it.
+    @State private var account: PhoneSubscriptionAccount?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -582,9 +586,13 @@ private struct ComposerModelChoiceButton: View {
                 PhoneConversationModelPicker(
                     design: design, actions: actions, destinations: destinations,
                     initialSnapshot: snapshot, initialDestination: destination,
-                    onSnapshot: { snapshot = $0 },
-                    onDestination: { destination = $0 },
-                    onPick: { picked = $0 }
+                    onSnapshot: { adopt(offer: $0) },
+                    onDestination: { adopt(destination: $0) },
+                    onAccount: { account = $0 },
+                    onPick: {
+                        picked = .init(row: $0, destinationRevision: destination?.revision,
+                                       offerRevision: snapshot?.revision)
+                    }
                 )
                 // KitPhone › Sheet: a trailing close circle, not a text button.
                 .toolbar {
@@ -607,14 +615,36 @@ private struct ComposerModelChoiceButton: View {
     }
 
     private func read() async {
-        if let actions, case let .value(value) = await actions.read() { snapshot = value }
-        if let destinations, case let .value(value) = await destinations.read() { destination = value.snapshot }
+        if let actions, case let .value(value) = await actions.read() { adopt(offer: value) }
+        if let destinations, case let .value(value) = await destinations.read() { adopt(destination: value.snapshot) }
+        // A saved subscription is named by the account's catalog, as the list
+        // names it (desktop `relayCurrentName`). An Atum choice needs no read.
+        if destination?.choice(for: Self.cloud)?.source.isSubscription == true,
+           let readAccount = destinations?.subscriptions?.read {
+            let value = await readAccount()
+            guard !Task.isCancelled else { return }
+            account = value
+        }
     }
 
+    private func adopt(offer: ManagedModelSnapshot) {
+        snapshot = offer
+        picked = PhoneModelPickerProjection.reconciled(picked, destination: destination, offer: offer)
+    }
+
+    /// The destination is the authority for the cloud's saved choice: a newer
+    /// one that saves something else ends the pick's hold on the chip.
+    private func adopt(destination value: ManagedModelDestinationSnapshot) {
+        destination = value
+        picked = PhoneModelPickerProjection.reconciled(picked, destination: value, offer: snapshot)
+    }
+
+    private static var cloud: ManagedModelDestinationID { try! ManagedModelDestinationID("cloud") }
+
     /// The chip's name and mark facts (`PhoneModelPickerProjection.chip`):
-    /// the picked row's own, else the saved choice's, never a raw id.
+    /// a pick still current, else the saved choice's, never a raw id.
     private var face: PhoneModelPickerProjection.ChipFace? {
-        PhoneModelPickerProjection.chip(picked: picked, destination: destination, offer: snapshot)
+        PhoneModelPickerProjection.chip(pick: picked, destination: destination, offer: snapshot, account: account)
     }
 
     private var label: String { face?.name ?? design.text("desktop.atum.settings.model") }

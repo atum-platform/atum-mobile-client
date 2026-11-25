@@ -47,6 +47,9 @@ struct PhoneConversationModelPicker: View {
     var initialDestination: ManagedModelDestinationSnapshot?
     var onSnapshot: (ManagedModelSnapshot) -> Void = { _ in }
     var onDestination: (ManagedModelDestinationSnapshot) -> Void = { _ in }
+    /// The account's subscription status each time a read lands, so the
+    /// composer chip names a subscription model as this list does.
+    var onAccount: (PhoneSubscriptionAccount) -> Void = { _ in }
     /// The row a successful write made current, so the composer chip draws
     /// that row's own name and mark.
     var onPick: (PhoneModelPickerProjection.Row) -> Void = { _ in }
@@ -97,6 +100,7 @@ struct PhoneConversationModelPicker: View {
          initialDestination: ManagedModelDestinationSnapshot? = nil,
          onSnapshot: @escaping (ManagedModelSnapshot) -> Void = { _ in },
          onDestination: @escaping (ManagedModelDestinationSnapshot) -> Void = { _ in },
+         onAccount: @escaping (PhoneSubscriptionAccount) -> Void = { _ in },
          onPick: @escaping (PhoneModelPickerProjection.Row) -> Void = { _ in }) {
         self.design = design
         self.actions = actions
@@ -105,6 +109,7 @@ struct PhoneConversationModelPicker: View {
         self.initialDestination = initialDestination
         self.onSnapshot = onSnapshot
         self.onDestination = onDestination
+        self.onAccount = onAccount
         self.onPick = onPick
         _snapshot = State(initialValue: initialSnapshot)
         _destination = State(initialValue: initialDestination)
@@ -128,6 +133,9 @@ struct PhoneConversationModelPicker: View {
         // the list giving way to the training card.
         ZStack { content }
             .onDisappear(perform: retire)
+            .onChange(of: accountState.value) { _, value in
+                if let value { onAccount(value) }
+            }
     }
 
     private var content: some View {

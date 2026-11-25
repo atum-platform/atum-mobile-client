@@ -49,4 +49,25 @@ public enum ModelDisplayName {
         if let known = words[word.lowercased()] { return known }
         return word.prefix(1).uppercased() + word.dropFirst()
     }
+
+    /// The desktop assistant card's words for a saved external model with no
+    /// catalog row (`matrixModelDestinationsView`, `external.modelLabel`):
+    /// split on `-`, `_` and `/`; "gpt" is "GPT"; an all-lowercase ASCII word
+    /// gets a capital first letter; anything else stays as written. So
+    /// "openai/gpt-6.1-sol" reads "Openai GPT 6.1 Sol", as the desktop draws it.
+    /// A catalog row's own label wins when one is given.
+    public static func destinationLabel(model: String, displayName: String? = nil) -> String {
+        if let named = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !named.isEmpty {
+            return named
+        }
+        let lowercase = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz")
+        let words = model.components(separatedBy: CharacterSet(charactersIn: "-_/"))
+            .filter { !$0.isEmpty }
+            .map { word -> String in
+                if word.lowercased() == "gpt" { return "GPT" }
+                guard word.unicodeScalars.allSatisfy(lowercase.contains) else { return word }
+                return word.prefix(1).uppercased() + word.dropFirst()
+            }
+        return words.joined(separator: " ")
+    }
 }
