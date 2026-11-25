@@ -550,6 +550,9 @@ final class LiveConversationStore: ConversationStore {
         }
     }
 
+    /// Changes as soon as a timeline is detached, even before its replacement projects.
+    var timelineGeneration: UInt64 { generation }
+
     /// HC-6: join an existing search page, or claim one after the current
     /// scroll/background page finishes. Query cancellation never opens a
     /// second page slot while the first page is still reaching the rows.

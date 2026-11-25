@@ -356,6 +356,7 @@ struct AppRoot: View {
                 }
                 .navigationDestination(for: String.self) { roomID in
                     chatHost(account, roomID: roomID)
+                        .toolbarVisibility(.hidden, for: .tabBar)
                 }
         } drive: {
             DriveScreen(design: design, router: router, model: model.drive)
@@ -462,6 +463,7 @@ struct AppRoot: View {
             )
             .navigationDestination(for: String.self) { roomID in
                 chatHost(account, roomID: roomID)
+                    .toolbarVisibility(.hidden, for: .tabBar)
             }
         } account: {
             AccountScreen(design: design,
@@ -920,7 +922,6 @@ struct AppRoot: View {
             AppBotRoomOpeningView(opening: opening, design: design) {
                 model.retryAppBotJoin(roomID: roomID)
             }
-            .toolbar(.hidden, for: .tabBar)
         } else {
             design.color("ground", scheme: scheme).ignoresSafeArea()
         }

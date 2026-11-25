@@ -322,11 +322,15 @@ final class LiveAppModel {
         walletRead.condition == .fresh ? walletRead.value?.balances.available : nil
     }
 
-    private func refreshApplePurchaseWallet() async {
+    func refreshApplePurchaseWallet() async {
         guard let client = domainClient else { return }
+        let request = beginWalletRefresh()
         let result = await readWallet(using: client)
-        guard domainClient === client else { return }
-        apply(result, to: &walletRead)
+        applyWalletRefresh(result, request: request, client: client)
+    }
+
+    init(domainClient: NativeDomainClient? = nil) {
+        self.domainClient = domainClient
     }
 
     /// Directory-proven bare handles. Observation tracks reads through handle(for:)
@@ -419,6 +423,7 @@ final class LiveAppModel {
     let storeCommerce = LiveStoreCommerce()
     private var storeCatalogRead = NativeRead<StoreCatalogResponse>()
     private var walletRead = NativeRead<WalletResponse>()
+    @ObservationIgnored private var walletRefreshGeneration = 0
     private var routineSnapshots = [NativeID: AgentRoutinesSnapshot]()
     private var lastLoggedRecoveryState: String?
     private var hiddenRooms = MobileHiddenRoomLedger()
@@ -6870,6 +6875,7 @@ final class LiveAppModel {
         async let officialAccountsResponse = readOfficialAccounts(if: readOfficial,
                                                                   using: domainClient)
         async let storeCatalogResponse = readStoreCatalog(using: domainClient)
+        let walletRequest = beginWalletRefresh()
         async let walletResponse = readWallet(using: domainClient)
         let lifecycleGeneration = assistantLifecycleGeneration
         async let lifecycleCapability = readAssistantLifecycleCapability(using: domainClient)
@@ -6886,7 +6892,7 @@ final class LiveAppModel {
         apply(appsResult, to: &appsRead)
         refreshConversationIdentity()
         apply(storeCatalogResult, to: &storeCatalogRead)
-        apply(walletResult, to: &walletRead)
+        applyWalletRefresh(walletResult, request: walletRequest, client: domainClient)
         if self.domainClient === domainClient, let accountID = context?.runtime.ticket.session.userID {
             let targets = (agentsRead.value?.agents ?? []).filter { $0.status == .active }.map { agent in
                 LiveStoreCommerce.Target(id: agent.id, principal: agent.principal, name: agent.displayName,
@@ -6999,6 +7005,17 @@ final class LiveAppModel {
     private func readWallet(using client: NativeDomainClient) async -> ProductReadResult<WalletResponse> {
         do { return .success(try await client.wallet()) }
         catch { return .failure(domainCondition(for: error, value: WalletResponse.self)) }
+    }
+
+    private func beginWalletRefresh() -> Int {
+        walletRefreshGeneration += 1
+        return walletRefreshGeneration
+    }
+
+    private func applyWalletRefresh(_ result: ProductReadResult<WalletResponse>,
+                                    request: Int, client: NativeDomainClient) {
+        guard request == walletRefreshGeneration, domainClient === client else { return }
+        apply(result, to: &walletRead)
     }
 
     /// Capability is a closed read; an unavailable or invalid answer hides the

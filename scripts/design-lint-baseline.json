@@ -101,7 +101,7 @@
     "ios/App/Chat/Views/Composer.swift": {
       "padding": 19,
       "spacing": 8,
-      "font-size": 7,
+      "font-size": 6,
       "animation": 1
     },
     "ios/App/Chat/Views/DayDividerRow.swift": {
@@ -220,9 +220,8 @@
       "radius": 3
     },
     "ios/App/Shell/RootTabs.swift": {
-      "padding": 1,
       "spacing": 1,
-      "font-size": 2
+      "font-size": 1
     }
   }
 }

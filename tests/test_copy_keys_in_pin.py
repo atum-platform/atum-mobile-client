@@ -37,6 +37,10 @@ PENDING = {
     "src.matrix.model-picker-copy.COPY.taglineEveryday",
     "src.matrix.model-picker-copy.COPY.taglineHard",
     "src.matrix.model-picker-copy.COPY.taglineFlagship",
+    "src.matrix.model-picker-copy.COPY.efforts.none",
+    "src.matrix.model-picker-copy.COPY.efforts.minimal",
+    "src.matrix.model-picker-copy.COPY.efforts.xhigh",
+    "src.matrix.model-picker-copy.COPY.efforts.max",
 
     # App panel pages
     "src.matrix.app-bots.panel.panelCopy.failed",
@@ -154,9 +158,9 @@ class CopyKeysInPinTests(unittest.TestCase):
     def test_catalog_matches_the_copy_pin(self):
         pin = json.loads((ROOT / "atum-design.lock").read_text())
         strings, _ = pin_key_sets()
-        self.assertEqual(pin["revision"], "de08405bae1f208f891eb04d5a324b150a169c5c")
-        self.assertEqual(pin["manifestSha256"], "6defd148e9c09a4cb0f840212be145d3a18d9002c8d8e048a7633d75eefd663c")
-        self.assertEqual(len(strings), 4134)
+        self.assertEqual(pin["revision"], "a13e7275f88d12b9011b646303a05437a582d739")
+        self.assertEqual(pin["manifestSha256"], "2f1c4ea3c95f4b9612817198956306851e2951b123d3873cc851b8d59fa64dc1")
+        self.assertEqual(len(strings), 4138)
 
     def test_every_copy_key_in_the_app_is_in_the_pinned_export(self):
         literals = list(key_literals())

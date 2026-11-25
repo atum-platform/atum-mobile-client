@@ -174,13 +174,17 @@ public final class CompanySearchService {
               !Task.isCancelled,
               let found = CompanyMessageSearch.page(responseJSON: data, companyID: companyID, tab: tab,
                                                     query: query, targets: rooms, limit: limit) else { return nil }
+        // The token has advanced past results we may no longer show. Reusing
+        // it could skip those results if a requested room becomes eligible again.
+        let eligibility = environment.eligibility()
+        let allRoomsStillEligible = Self.stillEligible(rooms, companyID: companyID, eligibility).count == rooms.count
         let cursor = found.nextBatch.flatMap { token -> CompanySearchCursor? in
-            guard token != nextBatch else { return nil }
+            guard token != nextBatch, allRoomsStillEligible else { return nil }
             return CompanySearchCursor(token: token, companyID: companyID, query: query,
                                 channelsByRoom: channelsByRoom, senders: senders)
         }
         // Asked for the rooms eligible then; shown only for the rooms eligible now.
-        return CompanySearchPage(results: environment.eligibility().retained(found.results),
+        return CompanySearchPage(results: eligibility.retained(found.results),
                                  continuation: cursor, replacesPreviousResults: continuation != nil && nextBatch == nil)
     }
 

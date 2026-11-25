@@ -133,3 +133,9 @@ the `client` job of `.github/workflows/public-client.yml`.
   heavy-build lock. It compiles the app and the new AppTests. No Swift package
   was touched, so no `swift test` run was needed.
 - `python3 scripts/public_guard.py --base origin/main --head HEAD`: exit 0.
+
+## Review r1 (Sol): MERGE, follow-ups
+
+- **Reduce Motion and spatial changes:** under Reduce Motion the tokens still animate offset, scale and scroll changes over 0.15 s (for example a migrated jump-to-bottom). Spatial updates should be immediate; only insert/remove fades through `.motionTransition`.
+- **Lint parser gaps:** argument matching stops at the first `)`, so a partly tokenized `EdgeInsets(...)` or `RectangleCornerRadii(...)` hides later literals; the allow directive matches inside strings, accepts no reason, and is ignored beside a value on a later line of a multi-line call; raw strings containing `.padding(12)` and Charts' `.interpolationMethod(.linear)` false-fail; `withAnimation(reduceMotion ? nil : .default)` passes.
+- **Renames:** a renamed file with findings starts at zero under its new path, so a rename needs `--update`.

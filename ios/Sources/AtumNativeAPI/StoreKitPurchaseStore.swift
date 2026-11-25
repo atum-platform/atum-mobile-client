@@ -69,7 +69,7 @@ import StoreKit
         let environment = purchaseEnvironment(transaction.environment)
         return .init(id: String(transaction.id), productID: transaction.productID,
                      environment: environment, accountToken: transaction.appAccountToken,
-                     signedTransaction: result.jwsRepresentation,
+                     signedTransaction: result.jwsRepresentation, isRevoked: transaction.revocationDate != nil,
                      finish: { await transaction.finish() })
     }
 }

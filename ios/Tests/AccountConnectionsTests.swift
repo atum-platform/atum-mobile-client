@@ -50,6 +50,17 @@ final class AccountConnectionsTests: XCTestCase {
         XCTAssertNil(value.connections[3].plan)
     }
 
+    func testClaudeRegistryAndPickerIDsResolveToTheSamePlan() throws {
+        for alias in [Self.fixture, mutated(#""claude""#, #""claude-plan""#),
+                      mutated(#""id":"claude""#, #""id":"claude-plan""#)] {
+            let value = try registry(alias)
+            XCTAssertEqual(value.connections[1].plan, .claude)
+            XCTAssertEqual(AccountConnectionsView.planRow(value, .claude).state, .stale)
+        }
+        XCTAssertEqual(AccountPlan.claude.pickerID, "claude-plan")
+        XCTAssertEqual(AccountPlan.claude.rawValue, "claude")
+    }
+
     func testAnAnswerOutsideTheContractIsNotShownAtAll() {
         let broken: [(String, String)] = [
             (#""profile":"atum.account-connections/1""#, #""profile":"atum.account-connections/2""#),
