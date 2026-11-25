@@ -92,13 +92,20 @@ final class ChatInfoUITests: TranscriptUITestCase {
     /// text; a swipe from the screen's centre can start on such a field and
     /// scroll only its text, never the list (AX5, a long persona). The margin
     /// beside the groups belongs to the list alone.
+    ///
+    /// Going back the drag is short. Once the list reaches its top, the rest of
+    /// a drag pulls the sheet itself down, and a long one (0.4 of the list,
+    /// about 320 pt on a 390 x 844 phone) leaves it at its medium detent: the
+    /// rows under the header are then off screen and the next drags start
+    /// above the sheet, until one closes it (hosted iPhone 16e, PR #110, 26
+    /// Nov). A short overshoot settles back at the large detent.
     @MainActor
     private func scrollCardList(_ app: XCUIApplication, back: Bool = false) {
         let list = panelList(app)
         guard list.exists else { if back { app.swipeDown() } else { app.swipeUp() }; return }
         let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: back ? 0.2 : 0.6))
             .withOffset(CGVector(dx: 6, dy: 0))
-        let travel = list.frame.height * 0.4 * (back ? 1 : -1)
+        let travel = list.frame.height * (back ? 0.18 : -0.4)
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: travel)),
                     withVelocity: .slow, thenHoldForDuration: 0.1)
     }
@@ -161,10 +168,12 @@ final class ChatInfoUITests: TranscriptUITestCase {
         // row are both built: the band between them would then be built too.
         let saved = element(app, "assistant.card.saved")
         let handle = element(app, "assistant.card.handle")
-        for _ in 0..<8 where !(saved.exists && saved.isHittable && handle.exists) {
+        // Back-drags are short (see scrollCardList), so allow more of them.
+        for _ in 0..<16 where !(saved.exists && saved.isHittable && handle.exists) {
             scrollCardList(app, back: true)
         }
-        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        XCTAssertTrue(saved.waitForExistence(timeout: 5),
+                      "Saved is not in the card header; card list at \(panelList(app).frame)")
         XCTAssertTrue(handle.exists, "the handle row under the band is not on screen")
         XCTAssertFalse(element(app, "assistant.card.persona-conflict").exists)
         let saves = probeLines("persona-save.txt").map(\.text)

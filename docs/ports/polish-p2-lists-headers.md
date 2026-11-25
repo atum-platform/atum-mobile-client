@@ -399,6 +399,56 @@ shard's `ui-3` xcresult: the failure hierarchy, screenshots and recording.
   presentation began. If it recurs, look at `ChatScreen`'s sheet presentation
   under a transcript update (P3 owns `ChatScreen`), not at the panel list.
 
+## PR #110 hosted UI shard 1, again (run 45658840730, head 5ba6ad8)
+
+- **Failure:** the AX5 test failed again on hosted shard 1. It failed at the
+  Saved check (`XCTAssertTrue(saved.waitForExistence(timeout: 5))`) after
+  97 s. It was the shard's only failure.
+- **Evidence:** the shard's xcresult (activity log, screen recording, final
+  hierarchy).
+  - **The app was right.** The recording shows "Đã lưu" (Saved) in the card
+    header after the edit, and no conflict band. The save fired.
+  - **The test closed the sheet.** On the first back-drag, the list reached
+    its top partway through the drag. The rows above Personality had not been
+    built, and they came in shorter than their estimates. The rest of the
+    320 pt drag (0.4 of the list) then pulled the sheet itself down. The
+    sheet settled at its medium detent, with the list's top at y 393.6 instead
+    of 47. The handle row was then off screen, so the loop kept going. Its
+    next drags started at y 206, above the sheet, on the chat behind it. Once
+    XCTest saw the new frame, a drag closed the sheet. The loop then fell
+    back to `app.swipeDown()`. Saved was left only as a stale node with an
+    infinite frame.
+  - **Locally the same test passed.** The repro run at `5ba6ad8` on the iPhone
+    16e passed 2 of 2. There the first two drags stopped short of the top,
+    so nothing overshot. On hosted, the jump to the top came within one drag.
+- **Proof of the mechanism (temporary probe tests, not committed):** the card
+  opens at AX5 with the list at its top. One back-drag from the list margin:
+  - 0.4 of the list: the list's top moved from 47 to 393.6 (the hosted
+    frame), and the handle row was gone. 2 of 2.
+  - 0.18 of the list: the list's top stayed at 47, and the handle row stayed
+    built. 2 of 2.
+- **Fix (test only; the app's behaviour is desktop's):** in
+  `ChatInfoUITests.scrollCardList`, a back-drag travels 0.18 of the list
+  (about 143 pt), not 0.4. An overshoot at the top then snaps back to the
+  large detent. The AX5 test allows up to 16 back-drags, up from 8, and the
+  loop exits as soon as Saved and the handle row are both on screen. Its Saved
+  assertion now reports the list's frame, so a dropped sheet shows in the
+  failure message.
+- **Nothing weakened:** the test still checks the following.
+  - Exactly one `persona-save.txt` line.
+  - The personality holds both "Calm." and "Vui vẻ.".
+  - The other device's purpose is kept, and the stale one is not written.
+  - No conflict band.
+  - Saved is in the header.
+  - The length hint can be reached.
+- **Verification:** `/Volumes/AtumTestFlight/p2-chatinfo-ax5.sh`, run under
+  the heavy-build lock on the iPhone 16e (390 x 844, the hosted size), with
+  derived data in `dd-polish-p2`. Logs are in `dd-polish-p2/logs/*-{repro16e,fix3x,fixall,probe}.log`.
+  - **fix3x:** build exit 0. The AX5 test passed 3 of 3 (88, 54 and 54 s).
+  - **fixall:** build exit 0. All 14 `ChatInfoUITests` and 5
+    `AppSidePanelUITests` cases passed, 19 of 19.
+  - `python3 scripts/design_lint.py`: exit 0.
+
 ## Known gaps
 
 - **Lazy rows in the UI tests:** the test changes above were reasoned from
@@ -441,3 +491,12 @@ shard's `ui-3` xcresult: the failure hierarchy, screenshots and recording.
   - The unlinked app panel test passed 3 of 3 locally, and no P2 code is in
     its path.
   - Local commits only: no push, PR or CI rerun.
+- **26 Nov 2026, PR #110 shard 1 re-fail, test sub-agent (Opus):**
+  - The cause came from the hosted xcresult and was proven by probe tests.
+    The test's 0.4 back-drag overshot the list's top and dropped the sheet to
+    its medium detent. The app saved and showed Saved correctly.
+  - The fix is test-only: back-drags are now 0.18 of the list, with up to 16
+    of them.
+  - Local results: the AX5 test passed 3 of 3, and ChatInfo + AppSidePanel
+    passed 19 of 19.
+  - Local commit only: no push, PR edit or CI rerun.
