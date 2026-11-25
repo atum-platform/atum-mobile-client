@@ -313,6 +313,79 @@ final class ChatSearchTests: XCTestCase {
     }
 
     @MainActor
+    func testRoutedSearchRetriesAfterAStalePlacementTimesOutBeforeReplacementProjects() async {
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var replacement = reply
+        replacement.id = "replacement-reply"
+        var snapshot = Snapshot(rows: rows([reply]), change: .reset, generation: 1)
+        var liveGeneration: UInt64 = 1
+        var attempted = [String]()
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot },
+                                                  timelineGeneration: { liveGeneration }, loadPage: {
+            XCTAssertEqual(liveGeneration, 2)
+            XCTAssertEqual(snapshot.generation, 1, "detaching retains the displayed rows")
+            XCTAssertEqual(attempted, [reply.id], "the stale row must not be placed again")
+            snapshot = Snapshot(rows: self.rows([replacement]), change: .reset, generation: liveGeneration)
+            return .loaded(hasMore: true)
+        }, placeMatch: { match in
+            attempted.append(match.rowID)
+            guard match.rowID == reply.id else { return true }
+            return try await ChatHistorySearch.waitForRoutedPlacement(timeout: .milliseconds(20)) { _ in
+                liveGeneration = 2
+            }
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 1)
+        XCTAssertEqual(attempted, [reply.id, replacement.id])
+    }
+
+    @MainActor
+    func testRoutedSearchTriesTheReplacementProjectionBeforeLoadingAnotherPage() async {
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        var replacement = reply
+        replacement.id = "replacement-reply"
+        var snapshot = Snapshot(rows: rows([reply]), change: .reset, generation: 1)
+        var attempted = [String]()
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: { snapshot }, loadPage: {
+            XCTFail("the replacement already contains the event")
+            return .failed
+        }, placeMatch: { match in
+            attempted.append(match.rowID)
+            guard match.rowID == reply.id else { return true }
+            return try await ChatHistorySearch.waitForRoutedPlacement(timeout: .milliseconds(20)) { _ in
+                snapshot = Snapshot(rows: self.rows([replacement]), change: .reset, generation: 2)
+            }
+        })
+        XCTAssertEqual(result.phase, .found)
+        XCTAssertEqual(result.pages, 0)
+        XCTAssertEqual(attempted, [reply.id, replacement.id])
+    }
+
+    @MainActor
+    func testRoutedSearchBoundsPlacementRetriesEvenWhenNoPageIsNeeded() async {
+        let reply = F.text("reply", from: F.agent, "launch", threadRoot: "$thread")
+        let replyRows = rows([reply])
+        var generation: UInt64 = 1
+        var attempts = 0
+        let result = await ChatHistorySearch.find(eventID: "$reply", snapshot: {
+            Snapshot(rows: replyRows, change: .reset, generation: generation)
+        }, loadPage: {
+            XCTFail("every generation already contains the event")
+            return .failed
+        }, placeMatch: { _ in
+            attempts += 1
+            guard attempts <= ChatHistorySearch.maximumPages + 1 else { return true }
+            return try await ChatHistorySearch.waitForRoutedPlacement { completion in
+                generation += 1
+                completion.finish()
+            }
+        })
+        XCTAssertEqual(result.phase, .failed)
+        XCTAssertEqual(result.pages, 0)
+        XCTAssertEqual(attempts, ChatHistorySearch.maximumPages + 1)
+    }
+
+    @MainActor
     func testTimelineReplacementDoesNotResetTheRoutedSearchBudget() async {
         var calls = 0
         let result = await ChatHistorySearch.find(eventID: "$missing", snapshot: { .empty }, loadPage: {

@@ -303,7 +303,7 @@ public enum ChatHistorySearch {
     }
 
     /// Wait for layout to confirm placement. Finishing the stream without a
-    /// value lets the walk retry. A timeout ends the walk even if layout stops.
+    /// value lets the walk retry. A timeout fails a placement that is still current.
     @MainActor
     public static func waitForRoutedPlacement(
         timeout: Duration = .seconds(3),
@@ -332,11 +332,13 @@ public enum ChatHistorySearch {
                             loadPage: @MainActor () async -> Page,
                             placeMatch: @MainActor (RoutedMatch) async throws -> Bool = { _ in true }) async -> Progress {
         var replacedGeneration: UInt64?
+        var placementAttempts = 0
         func currentProjection() -> Snapshot {
             let current = snapshot()
             // The transcript keeps drawing the old rows until the replacement
             // projects. Those rows cannot complete the routed search.
             guard current.generation != Snapshot.empty.generation,
+                  current.generation == (timelineGeneration?() ?? current.generation),
                   current.generation != replacedGeneration else { return .empty }
             return current
         }
@@ -349,10 +351,18 @@ public enum ChatHistorySearch {
                                  guard current.generation != Snapshot.empty.generation,
                                        let row = current.rows.first(where: { $0.item.eventID == eventID })
                                  else { return nil }
+                                 // Timeline churn can retry without loading a page.
+                                 // Bound placements across the walk as well.
+                                 guard placementAttempts <= maximumPages else { return .failed }
+                                 placementAttempts += 1
                                  let match = RoutedMatch(rowID: row.id, eventID: eventID,
                                                          generation: current.generation)
                                  do {
                                      if try await placeMatch(match) { return .found }
+                                 } catch is PlacementTimedOut {
+                                     if Task.isCancelled { return .cancelled }
+                                     if match.isCurrent(in: currentProjection()) { return .failed }
+                                     continue
                                  } catch {
                                      return Task.isCancelled ? .cancelled : .failed
                                  }
@@ -392,12 +402,12 @@ public enum ChatHistorySearch {
             if Task.isCancelled { return report(.cancelled, pages) }
             if let phase = await acceptMatch() { return report(phase, pages) }
             if Task.isCancelled { return report(.cancelled, pages) }
+            if generation() != pageGeneration { continue }
             switch page {
             case .failed: return report(.failed, pages)
             case .loaded(hasMore: false):
                 // SDK status and diffs have separate listeners. Give the final
                 // projection a short grace period before declaring no results.
-                if generation() != pageGeneration { continue }
                 do { try await Task.sleep(for: .milliseconds(300)) }
                 catch { return report(.cancelled, pages) }
                 if let phase = await acceptMatch() { return report(phase, pages) }

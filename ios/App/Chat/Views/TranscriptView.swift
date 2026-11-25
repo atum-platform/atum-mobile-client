@@ -70,6 +70,7 @@ struct TranscriptView: View {
             }
         }
         .task(id: target) { await focusRoutedMessage(target) }
+        .onChange(of: store.timelineGeneration) { _, _ in releaseStaleRoutedPlacement() }
         .sensoryFeedback(.error, trigger: routeFocusFailed)
     }
 
@@ -430,10 +431,7 @@ struct TranscriptView: View {
     }
 
     private func snapshotChanged(from old: Snapshot, to new: Snapshot) {
-        if let placement = scratch.routedPlacement, !placement.match.isCurrent(in: routedSearchSnapshot) {
-            stopSearchPlacement()
-            scheduleSettle(after: Self.settleSeconds)
-        }
+        releaseStaleRoutedPlacement()
         if store.pagination == .idle(hitTimelineStart: true),
            new.rows.contains(where: { $0.item.kind == .timelineStart }),
            !old.rows.contains(where: { $0.item.kind == .timelineStart }) {
@@ -562,9 +560,16 @@ struct TranscriptView: View {
         return snapshot.generation == store.timelineGeneration ? snapshot : .empty
     }
 
+    private func releaseStaleRoutedPlacement() {
+        guard let placement = scratch.routedPlacement,
+              !placement.match.isCurrent(in: routedSearchSnapshot) else { return }
+        stopSearchPlacement()
+        scheduleSettle(after: Self.settleSeconds)
+    }
+
     private func focusRoutedMessage(_ eventID: String?) async {
         guard let eventID, !Task.isCancelled else { return }
-        let answer = await ChatHistorySearch.find(eventID: eventID, snapshot: { routedSearchSnapshot },
+        let answer = await ChatHistorySearch.find(eventID: eventID, snapshot: { store.snapshot },
                                                   timelineGeneration: { store.timelineGeneration }, loadPage: {
             guard store.searchTargetEventID == eventID else { return .failed }
             return await store.loadOlderPageForSearch()
@@ -624,10 +629,21 @@ struct TranscriptView: View {
         scratch.searchAttempts = 0
         scratch.searchHasScrolled = false
         scratch.searchTickScheduled = false
-        let completion = scratch.routedPlacement?.completion
+        let placement = scratch.routedPlacement
         scratch.routedPlacement = nil
         routedHighlightRowID = nil
-        completion?.finish()
+        if let placement {
+            // Placement suppressed follow updates. Restore the measured
+            // position now, even if the scroll view sends no further layout.
+            let geometry = scratch.geometry
+            if scratch.isOnScreen, geometry.viewportHeight > 0 {
+                chooseAnchor(geometry)
+                store.handle(.searchPlacementReleased(distanceFromBottom: geometry.distanceFromBottom,
+                                                      viewportHeight: geometry.viewportHeight))
+                syncFollowState()
+            }
+            placement.completion.finish()
+        }
         updateBottomVisible()
     }
 

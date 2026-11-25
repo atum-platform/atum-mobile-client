@@ -37,9 +37,20 @@ The SwiftPM and Xcode builds run under the shared heavy-build lock.
 
 Once the walk finds a candidate, the transcript gives layout three seconds to
 confirm placement. That covers the 14 scroll commands (about 1.9 seconds) and
-allows time for a late layout pass. If confirmation never arrives, the walk
-fails, clears the pending event, and resumes bottom visibility tracking from
-the last geometry. A replaced projection can still retry within the original
-40-page walk and its 300 ms end-of-history grace period.
+allows time for a late layout pass. If the current candidate times out, the
+walk fails and clears the pending event. Releasing an unconfirmed placement
+reconciles the last measured position with the follow policy and updates
+bottom visibility. At the bottom the next incoming message scrolls into view.
+Away from the bottom the unread count is preserved.
 
-Coordinator follow-up: when layout confirms after the waiter already timed out, the callback no longer returns early, so `updateBottomVisible()` still runs on that tick.
+A change in live timeline generation releases a stale placement even while the
+old rows are still on screen. If the timeout arrives first, the walk checks the
+live generation and projection again. The walk tries an already projected
+replacement reply before loading another page. It retains the original 40-page
+limit and 300 ms end-of-history grace period, with at most 41 placement attempts
+across the walk to bound retries during repeated timeline changes.
+
+Package regressions cover timeouts before and after the replacement projects,
+the placement attempt limit, and follow state on release both at and away from
+the bottom. The Debug simulator build checks the live store and transcript
+wiring.
