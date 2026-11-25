@@ -31,9 +31,10 @@ failure and acceptance notes.
 
 Use the source-specific states when rendering status for each provider. The existing saved ChatGPT
 row already consumes `.loading`, `.failed` and the disabled relay's unavailable treatment through
-the pinned model strings. Go keeps its pinned reconnect treatment. `destinationReadState` in each
-picker owns write eligibility independently of the account catalog. Keep the catalog list visible
-with that state at `.unavailable` or `.failed`, and use `Row.selectable` for model actions.
+the pinned model strings. Go keeps its pinned reconnect treatment and exposes read failures through
+`openCodeGoState` for later UI wiring. `destinationReadState` in each picker owns write eligibility
+independently of the account catalog. Keep the catalog list visible with that state at
+`.unavailable` or `.failed`, and use `Row.selectable` for model actions.
 
 ## Follow-ups
 

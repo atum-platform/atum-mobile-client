@@ -279,8 +279,7 @@ public enum PhoneModelPickerProjection {
                 rows.append(savedRow(savedGo, unavailable: nil))
             }
         case .ready?: rows += served(.opencodeGo, account?.openCodeGo?.models ?? [])
-        case .failed?: rows += savedGo.map { [savedRow($0, unavailable: .failed)] } ?? []
-        case .unavailable?, nil:
+        case .failed?, .unavailable?, nil:
             let reason: Row.Unavailable? = account?.openCodeGo?.state == .disconnected ? .signedOut : nil
             rows += savedGo.map { [savedRow($0, unavailable: reason)] } ?? []
         }

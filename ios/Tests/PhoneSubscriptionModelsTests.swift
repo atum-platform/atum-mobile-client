@@ -522,6 +522,13 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
         let rows = PhoneModelPickerProjection.subscriptions(try snapshot(), destination: cloud, account: state.value)
         XCTAssertEqual(rows.map(\.model), ["gpt-6.1", "gpt-6.1-mini"])
         XCTAssertTrue(rows.allSatisfy(\.selectable))
+        let savedGo = try snapshot(cloudChoice: ["destination": "cloud", "source": "opencode_go",
+                                                 "model": "glm-5.2", "effort": "high"])
+        let savedRow = try XCTUnwrap(PhoneModelPickerProjection.subscriptions(
+            savedGo, destination: cloud, account: state.value
+        ).first { $0.source == .opencodeGo })
+        XCTAssertFalse(savedRow.selectable)
+        XCTAssertNil(savedRow.unavailable, "Go's failure state is available to the UI lane without changing this row")
     }
 
     @available(macOS 14.0, *)
