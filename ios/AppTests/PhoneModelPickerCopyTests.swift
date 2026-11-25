@@ -12,6 +12,8 @@ final class PhoneModelPickerCopyTests: XCTestCase {
     private func arguments(for key: PhonePickerCopyKey) -> [AtumCopy.Argument] {
         switch key {
         case .planAccount, .filterWith: [.text("X")]
+        case .planUnavailableNoMac: [.text("ChatGPT")]
+        case .planUnavailableReconnect: [.text("OpenCode Go")]
         default: []
         }
     }

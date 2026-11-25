@@ -169,6 +169,7 @@ Each command ran under `TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/Atu
   from the known-unavailable plans covered here.
 - Focused verification uses `PhoneModelPickerProjectionTests` for the actual idempotent replay and same-revision
   refresh and `PhoneSubscriptionModelsTests` for both unavailable reasons and healthy or unread status. The
+  app's copy contract test supplies both plan-name arguments when resolving the new keys. The
   single locked run records Swift tests (`-j 2`) and Debug `build-for-testing` in `swift-test-r3.log` and
   `build-r3.log` under `/Volumes/AtumTestFlight/dd-w4-t`. The copy-key check passed all 7 tests. Design lint
   from `origin/main` reports existing `RootTabs.swift` drift. Lint counts in the changed app files match
