@@ -301,7 +301,7 @@ final class LiveConversationStore: ConversationStore {
     /// the next (`DisplayIdentityTable`).
     @ObservationIgnored private var identityAliases = [String: String]()
     @ObservationIgnored private var room: Room?
-    @ObservationIgnored private var generation: UInt64 = 0
+    private var generation: UInt64 = 0
     @ObservationIgnored private var lastSequence: UInt64 = 0
     @ObservationIgnored private var isClosed = false
     @ObservationIgnored private var sendTail: Task<Void, Never>?
