@@ -522,6 +522,158 @@ final class AvatarArtMemoTests: XCTestCase {
         XCTAssertEqual(before.identity, after.identity, "but the same person, so the photo stays")
     }
 
+    // MARK: Review r1 (fix round 2)
+
+    private func pngData() throws -> Data {
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8,
+                                              bytesPerRow: 0, space: space,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        return try XCTUnwrap(UIImage(cgImage: try XCTUnwrap(context.makeImage())).pngData())
+    }
+
+    /// A Matrix URI is not a secret: account B asking for the URI account A
+    /// decoded must not be served A's bitmap, on its first frame or ever.
+    func testSignOutEmptiesTheMemoAndASwitchedAccountStartsEmpty() {
+        let memo = AtumAvatarArtMemo(capacity: 8)
+        let source = AtumAvatarSource(matrixURI: "mxc://atum.test/shared", avatar: nil, sha256: nil, declared: [])
+        memo.beginAccountScope("@a:atum.test")
+        memo.store(art(.red), origin: .matrix("mxc://atum.test/shared"), pixelSide: 216)
+        memo.store(art(.blue), origin: .remote(LiveProductRemoteArt(url: photoURL, sha256: nil)), pixelSide: 216)
+        memo.beginAccountScope("@a:atum.test")
+        XCTAssertNotNil(memo.hit(for: source, pixelSide: 96, matrixLoads: true),
+                        "the same account starting its product again keeps its faces")
+
+        memo.endAccountScope()
+        XCTAssertEqual(memo.count, 0, "sign-out drops every decoded face")
+        XCTAssertNil(memo.hit(for: source, pixelSide: 96, matrixLoads: true))
+
+        memo.beginAccountScope("@a:atum.test")
+        memo.store(art(.red), origin: .matrix("mxc://atum.test/shared"), pixelSide: 216)
+        memo.beginAccountScope("@b:atum.test")
+        XCTAssertNil(memo.hit(for: source, pixelSide: 96, matrixLoads: true),
+                     "an account switch without a sign-out in between drops A's faces too")
+    }
+
+    func testADecodeFromASignedOutAccountIsNeitherRememberedNorShown() {
+        let memo = AtumAvatarArtMemo(capacity: 8)
+        let source = AtumAvatarSource(matrixURI: "mxc://atum.test/shared", avatar: nil, sha256: nil, declared: [])
+        memo.beginAccountScope("@a:atum.test")
+        let scopeA = memo.scope
+        memo.endAccountScope()
+        XCTAssertFalse(memo.store(art(.red), origin: .matrix("mxc://atum.test/shared"), pixelSide: 216,
+                                  scope: scopeA))
+        memo.beginAccountScope("@b:atum.test")
+        XCTAssertFalse(memo.store(art(.red), origin: .matrix("mxc://atum.test/shared"), pixelSide: 216,
+                                  scope: scopeA), "nor once account B has begun")
+        XCTAssertNil(memo.hit(for: source, pixelSide: 96, matrixLoads: true))
+        XCTAssertTrue(memo.store(art(.green), origin: .matrix("mxc://atum.test/shared"), pixelSide: 216,
+                                 scope: memo.scope))
+        XCTAssertEqual(memo.hit(for: source, pixelSide: 96, matrixLoads: true)?.art.backplate, .green)
+    }
+
+    func testAnInFlightLoadThatOutlivesSignOutDoesNotWriteTheMemo() async throws {
+        let memo = AtumAvatarArtMemo(capacity: 8)
+        let data = try pngData()
+        let source = AtumAvatarSource(matrixURI: "mxc://atum.test/shared", avatar: nil, sha256: nil, declared: [])
+        memo.beginAccountScope("@a:atum.test")
+        // The thumbnail arrives after account A signed out and B signed in.
+        let outcome = await memo.load(source: source, pixelSide: 48, loadMatrixThumbnail: { _, _ in
+            await memo.endAccountScope()
+            await memo.beginAccountScope("@b:atum.test")
+            return data
+        })
+        guard case .scopeEnded = outcome else { return XCTFail("expected .scopeEnded, got \(outcome)") }
+        XCTAssertEqual(memo.count, 0, "A's decode never reaches B's memo")
+        XCTAssertNil(memo.hit(for: source, pixelSide: 48, matrixLoads: true))
+
+        let current = await memo.load(source: source, pixelSide: 48, loadMatrixThumbnail: { _, _ in data })
+        guard case .loaded = current else { return XCTFail("expected .loaded, got \(current)") }
+        XCTAssertEqual(memo.hit(for: source, pixelSide: 48, matrixLoads: true)?.isFinal, true,
+                       "B's own load is remembered")
+    }
+
+    func testASmallerSeedIsReplacedWhenTheLargerLoadSucceedsAndKeptWhenItFails() async throws {
+        let memo = AtumAvatarArtMemo(capacity: 8)
+        let data = try pngData()
+        let source = AtumAvatarSource(matrixURI: "mxc://atum.test/luna", avatar: nil, sha256: nil, declared: [])
+        memo.store(art(.red), origin: .matrix("mxc://atum.test/luna"), pixelSide: 96)
+        let seed = try XCTUnwrap(memo.hit(for: source, pixelSide: 192, matrixLoads: true))
+        XCTAssertEqual(seed.art.backplate, .red, "the 64 pt greeting wears the title's copy at once")
+        XCTAssertFalse(seed.isFinal, "and still asks for its own size")
+
+        let failed = await memo.load(source: source, pixelSide: 192, loadMatrixThumbnail: { _, _ in nil })
+        guard case .failed = failed else { return XCTFail("expected .failed, got \(failed)") }
+        XCTAssertEqual(AtumAvatarArtTransition.finish(loaded: nil, hit: seed.art)?.backplate, .red,
+                       "a failed larger load keeps the smaller copy")
+
+        let loaded = await memo.load(source: source, pixelSide: 192, loadMatrixThumbnail: { _, _ in data })
+        guard case let .loaded(larger) = loaded else { return XCTFail("expected .loaded, got \(loaded)") }
+        XCTAssertNotEqual(larger.backplate, .red)
+        let after = memo.hit(for: source, pixelSide: 192, matrixLoads: true)
+        XCTAssertEqual(after?.isFinal, true, "the larger decode replaces the seed")
+        XCTAssertEqual(after?.art.backplate, larger.backplate)
+    }
+
+    /// A group row or Seen mark starts as a `.person` face from the event or
+    /// receipt, then resolves as a `.member` with a new photo URI once the
+    /// member list loads: the same Matrix user, so the photo stays.
+    func testTheSameMatrixUserKeepsTheirPhotoAcrossAKindChange() {
+        let reader = ChatReader(userID: "@minh:atum.test", name: "Minh", avatarURI: "mxc://atum.test/receipt")
+        let before = ChatFace.reader(reader, kind: .group, roomFace: nil, members: [:])
+        let member = ChatInfoMember(userID: reader.userID, name: "Minh Nguyen",
+                                    matrixAvatarURI: "mxc://atum.test/member", isAssistant: false,
+                                    isCurrentUser: false)
+        let after = ChatFace.reader(reader, kind: .group, roomFace: nil, members: [reader.userID: member])
+        XCTAssertEqual(before.kind, .person)
+        XCTAssertEqual(after.kind, .member(isApp: false, isAssistant: false))
+        XCTAssertNotEqual(before.source, after.source)
+        XCTAssertEqual(before.identity, after.identity, "one Matrix user, whatever kind and name")
+
+        let sent = ChatItem(id: "m1", kind: .message, sender: reader.userID)
+        let row = ChatFace.incoming(sent, kind: .group, roomTitle: "Team", roomFace: nil, members: [:])
+        let resolved = ChatFace.incoming(sent, kind: .group, roomTitle: "Team", roomFace: nil,
+                                         members: [reader.userID: member])
+        XCTAssertEqual(row.identity, resolved.identity, "the transcript row too")
+        XCTAssertEqual(row.identity, before.identity, "and the row and Seen mark are one person")
+
+        let old = art(.red)
+        XCTAssertEqual(AtumAvatarArtTransition.render(stored: old, sameIdentity: before.identity == after.identity,
+                                                      hasSource: true, hit: { nil })?.backplate, .red,
+                       "the first frame after the change still wears the photo")
+        XCTAssertEqual(AtumAvatarArtTransition.start(hit: nil, current: old,
+                                                     sameIdentity: before.identity == after.identity,
+                                                     hasSource: true)?.backplate, .red)
+
+        let other = ChatFace.reader(ChatReader(userID: "@lan:atum.test", name: "Minh"), kind: .group,
+                                    roomFace: nil, members: [:])
+        XCTAssertNotEqual(other.identity, before.identity, "a namesake is a different person")
+        let title = ChatFace.room(nil, matrixURI: nil, sha256: nil, candidates: [], name: "Team", kind: .group,
+                                  roomID: "!team")
+        let titled = ChatFace.room(nil, matrixURI: "mxc://atum.test/team", sha256: nil, candidates: [],
+                                   name: "Team Space", kind: .group, roomID: "!team")
+        XCTAssertEqual(title.identity, titled.identity, "the room face survives its title changing")
+    }
+
+    /// The body decides synchronously: a reused view never draws the former
+    /// person's photo for the frame before its task runs.
+    func testADifferentPersonOrARemovedPhotoClearsOnTheFirstFrame() {
+        let old = art(.red)
+        XCTAssertNil(AtumAvatarArtTransition.render(stored: old, sameIdentity: false, hasSource: true,
+                                                    hit: { nil }),
+                     "a different person never wears the former face's photo")
+        XCTAssertEqual(AtumAvatarArtTransition.render(stored: old, sameIdentity: false, hasSource: true,
+                                                      hit: { self.art(.green) })?.backplate, .green,
+                       "the new person's memoised photo shows instead")
+        XCTAssertNil(AtumAvatarArtTransition.render(stored: old, sameIdentity: true, hasSource: false,
+                                                    hit: { self.art(.green) }),
+                     "a removed photo shows the placeholder at once")
+        XCTAssertEqual(AtumAvatarArtTransition.render(stored: nil, sameIdentity: true, hasSource: true,
+                                                      hit: { self.art(.green) })?.backplate, .green)
+    }
+
     func testTheTrackedLoaderReportsWhichSourceDecoded() async throws {
         let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8,

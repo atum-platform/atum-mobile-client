@@ -280,6 +280,11 @@ struct AvatarArtLRU<Key: Hashable, Value> {
 
     func contains(_ key: Key) -> Bool { values[key] != nil }
 
+    mutating func removeAll() {
+        values.removeAll()
+        order.removeAll()
+    }
+
     /// The value without marking it used (a view's initializer, which runs
     /// on every parent update, reads with this).
     func peek(_ key: Key) -> Value? { values[key] }
@@ -463,6 +468,15 @@ struct AtumAvatarSource: Hashable {
 /// async load (owner report 25 Nov 2026: opening a chat blinked the agent's
 /// photo out and back). It holds what `AtumAvatarArtDecoder` decoded; it
 /// never fetches. One entry per origin keeps the sharpest copy.
+///
+/// The memo is one account's data: Matrix photos are read with that
+/// account's session (personal and Team Space faces), and a Matrix URI is
+/// not a secret, so another account asking for the same URI must never be
+/// served the first account's bitmap. `LiveAppModel` begins a scope when an
+/// account's product starts and ends it on every sign-out path; either
+/// empties the memo. A load captures `scope` when it starts and `store`
+/// drops its result once that scope has ended, so a decode that finishes
+/// after sign-out cannot repopulate it.
 @MainActor
 final class AtumAvatarArtMemo {
     static let shared = AtumAvatarArtMemo(capacity: 200)
@@ -479,11 +493,32 @@ final class AtumAvatarArtMemo {
         let isFinal: Bool
     }
 
+    /// The account the entries belong to; a new value for every begin or end.
+    struct Scope: Equatable {
+        let generation: UInt64
+        let accountID: String?
+    }
+
     private var cache: AvatarArtLRU<AtumAvatarArtOrigin, Entry>
+    private(set) var scope = Scope(generation: 0, accountID: nil)
 
     init(capacity: Int) { cache = AvatarArtLRU(capacity: capacity) }
 
     var count: Int { cache.count }
+
+    /// An account's product started. Another account's faces are dropped.
+    func beginAccountScope(_ accountID: String) {
+        guard scope.accountID != accountID else { return }
+        reset(accountID: accountID)
+    }
+
+    /// The account signed out (or its session ended): drop every face.
+    func endAccountScope() { reset(accountID: nil) }
+
+    private func reset(accountID: String?) {
+        cache.removeAll()
+        scope = Scope(generation: scope.generation &+ 1, accountID: accountID)
+    }
 
     /// The best art already decoded for `source`: its first origin that has
     /// any. `touch: false` reads without reordering the LRU.
@@ -495,12 +530,47 @@ final class AtumAvatarArtMemo {
         return nil
     }
 
-    func store(_ art: AtumAvatarArt, origin: AtumAvatarArtOrigin, pixelSide: Int) {
+    /// Remembers a decode made under `loadScope` (the `scope` read when the
+    /// load began); a load from an ended scope is dropped. Returns whether
+    /// the art may still be shown.
+    @discardableResult
+    func store(_ art: AtumAvatarArt, origin: AtumAvatarArtOrigin, pixelSide: Int, scope loadScope: Scope) -> Bool {
+        guard loadScope == scope else { return false }
         if let existing = cache.peek(origin), existing.pixelSide > pixelSide {
             _ = cache.value(for: origin)
-            return
+            return true
         }
         cache.insert(Entry(art: art, pixelSide: pixelSide), for: origin)
+        return true
+    }
+
+    func store(_ art: AtumAvatarArt, origin: AtumAvatarArtOrigin, pixelSide: Int) {
+        store(art, origin: origin, pixelSide: pixelSide, scope: scope)
+    }
+
+    enum LoadOutcome {
+        /// The face's sources decoded this (now remembered).
+        case loaded(AtumAvatarArt)
+        /// Nothing decoded: the photo is gone or unreadable.
+        case failed
+        /// The request was replaced; the newer one decides what shows.
+        case cancelled
+        /// The account the load began under has signed out meanwhile.
+        case scopeEnded
+    }
+
+    /// Loads `source` and remembers what decoded, fenced to the scope that
+    /// was current when the load began.
+    func load(source: AtumAvatarSource, pixelSide: Int,
+              loadMatrixThumbnail: ((String, Int) async -> Data?)?) async -> LoadOutcome {
+        let loadScope = scope
+        let loaded = await AtumAvatarCandidateLoader.load(source: source, pixelSide: pixelSide,
+                                                           loadMatrixThumbnail: loadMatrixThumbnail)
+        if Task.isCancelled { return .cancelled }
+        guard loadScope == scope else { return .scopeEnded }
+        guard let loaded else { return .failed }
+        store(loaded.art, origin: loaded.origin, pixelSide: pixelSide, scope: loadScope)
+        return .loaded(loaded.art)
     }
 }
 
@@ -520,6 +590,15 @@ enum AtumAvatarArtTransition {
     static func finish(loaded: AtumAvatarArt?, hit: AtumAvatarArt?) -> AtumAvatarArt? {
         loaded ?? hit
     }
+
+    /// The frame's art before the task has run: the stored photo only for
+    /// the same person with a source; a different person or a removed photo
+    /// never draws it, not even for one frame.
+    static func render(stored: AtumAvatarArt?, sameIdentity: Bool, hasSource: Bool,
+                       hit: () -> AtumAvatarArt?) -> AtumAvatarArt? {
+        guard hasSource else { return nil }
+        return sameIdentity ? stored ?? hit() : hit()
+    }
 }
 
 /// The one loading face, used by Home rows, the chat title and info sheet
@@ -532,13 +611,16 @@ struct AtumSourcedAvatar: View {
     let placeholder: AtumAvatar.Placeholder
     let size: CGFloat
     let source: AtumAvatarSource
-    /// Who the face is (a room or user ID, or a name): a change of person
-    /// drops the old photo at once.
+    /// Who the face is (a room or Matrix user ID, else a name): a change of
+    /// person drops the old photo on that same frame.
     let identity: String
     let pixelSide: Int
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
 
     @State private var art: AtumAvatarArt?
+    /// Whose photo `art` is. The body checks it before drawing `art`, so a
+    /// reused view never shows the previous person for a frame while its
+    /// task has not run yet.
     @State private var shownIdentity: String
 
     init(kind: AtumAvatarKind, name: String, mark: AgentMark? = nil,
@@ -562,8 +644,8 @@ struct AtumSourcedAvatar: View {
     }
 
     var body: some View {
-        AtumAvatar(kind: kind, name: name, art: art, mark: mark, placeholder: placeholder, size: size)
-            .task(id: Load(source: source, pixelSide: pixelSide)) {
+        AtumAvatar(kind: kind, name: name, art: displayedArt, mark: mark, placeholder: placeholder, size: size)
+            .task(id: Load(source: source, pixelSide: pixelSide, identity: identity)) {
                 let memo = AtumAvatarArtMemo.shared
                 let matrixLoads = loadMatrixThumbnail != nil
                 let hasSource = !source.origins(matrixLoads: matrixLoads).isEmpty
@@ -573,19 +655,43 @@ struct AtumSourcedAvatar: View {
                                                     hasSource: hasSource)
                 shownIdentity = identity
                 guard hasSource, hit?.isFinal != true else { return }
-                let loaded = await AtumAvatarCandidateLoader.load(source: source, pixelSide: pixelSide,
-                                                                   loadMatrixThumbnail: loadMatrixThumbnail)
-                // A cancelled request for the former source cannot replace
-                // what a newer request shows.
-                guard !Task.isCancelled else { return }
-                if let loaded { memo.store(loaded.art, origin: loaded.origin, pixelSide: pixelSide) }
-                art = AtumAvatarArtTransition.finish(loaded: loaded?.art, hit: hit?.art)
+                // A smaller or second-choice copy is on screen; the face's
+                // own size and first choice still load and replace it.
+                switch await memo.load(source: source, pixelSide: pixelSide,
+                                       loadMatrixThumbnail: loadMatrixThumbnail) {
+                case let .loaded(loaded):
+                    art = loaded
+                case .failed:
+                    art = AtumAvatarArtTransition.finish(loaded: nil, hit: hit?.art)
+                case .cancelled:
+                    // The newer request for this face decides what shows.
+                    return
+                case .scopeEnded:
+                    // Nothing the signed-out account decoded stays on a face.
+                    art = nil
+                }
             }
     }
 
+    /// What this frame draws, decided synchronously: the stored photo only
+    /// while it is still this person's and the face still has a source;
+    /// otherwise whatever the memo already holds for the new face, else the
+    /// placeholder. The task then settles `art` to the same answer.
+    private var displayedArt: AtumAvatarArt? {
+        AtumAvatarArtTransition.render(
+            stored: art, sameIdentity: shownIdentity == identity,
+            hasSource: !source.origins(matrixLoads: loadMatrixThumbnail != nil).isEmpty,
+            hit: { AtumAvatarArtMemo.shared.hit(for: source, pixelSide: pixelSide,
+                                                matrixLoads: loadMatrixThumbnail != nil, touch: false)?.art })
+    }
+
+    /// Identity is part of the key so a new person with the same source
+    /// (two members without photos, a reused row) settles `shownIdentity`.
+    /// Identities are IDs, not names, so a name-only update never reloads.
     private struct Load: Hashable {
         let source: AtumAvatarSource
         let pixelSide: Int
+        let identity: String
     }
 }
 

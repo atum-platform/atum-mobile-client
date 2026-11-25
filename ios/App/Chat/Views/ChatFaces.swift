@@ -12,6 +12,14 @@ struct ChatFace: Equatable {
     var avatar: LiveProductAvatar?
     var sha256: String?
     var candidates: [LiveProductRemoteArt]
+    /// The sender's or reader's Matrix user ID; nil for the room's own face.
+    /// A row's face can change kind (a sender first drawn from the event,
+    /// then as a member once the member list loads) and photo URI; this
+    /// keeps it the same person, so its photo is not dropped in between.
+    var userID: String? = nil
+    /// The room's own face: its Matrix room ID, so the title changing from
+    /// the store's to the room info's is still the same face.
+    var roomID: String? = nil
 
     /// Desktop MatrixPersonAvatar uses an identified agent's roster photo
     /// before its Matrix member photo. Other members use their Matrix photo.
@@ -23,9 +31,9 @@ struct ChatFace: Equatable {
 
     static func room(_ avatar: LiveProductAvatar?, matrixURI: String?, sha256: String?,
                      candidates: [LiveProductRemoteArt], name: String,
-                     kind: AtumAvatarKind) -> ChatFace {
+                     kind: AtumAvatarKind, roomID: String? = nil) -> ChatFace {
         ChatFace(name: name, kind: kind, matrixAvatarURI: matrixURI, avatar: avatar,
-                 sha256: sha256, candidates: candidates)
+                 sha256: sha256, candidates: candidates, roomID: roomID)
     }
 
     /// An incoming sender's face: in a 1:1 chat the room's agent or app keeps
@@ -37,17 +45,18 @@ struct ChatFace: Equatable {
         if let member = members[item.sender] {
             return memberFace(member, kind: kind, roomFace: roomFace)
         }
+        let userID = item.sender.isEmpty ? nil : item.sender
         if let roomFace, kind.senderWearsRoomFace {
             let name = item.senderName?.isEmpty == false ? item.senderName! : roomTitle
             return ChatFace(name: name, kind: roomFace.kind,
                             matrixAvatarURI: item.senderAvatarURI ?? roomFace.matrixAvatarURI,
                             avatar: roomFace.avatar, sha256: roomFace.sha256,
-                            candidates: roomFace.candidates)
+                            candidates: roomFace.candidates, userID: userID)
         }
         let name = item.senderName?.isEmpty == false ? item.senderName! : roomTitle
         return ChatFace(name: name, kind: kind == .assistant ? .assistant : .person,
                         matrixAvatarURI: item.senderAvatarURI, avatar: nil, sha256: nil,
-                        candidates: [])
+                        candidates: [], userID: userID)
     }
 
     /// A reader in a Seen row, as desktop's `MatrixSendState` draws one: the
@@ -70,10 +79,10 @@ struct ChatFace: Equatable {
             return ChatFace(name: reader.name ?? roomFace.name, kind: roomFace.kind,
                             matrixAvatarURI: reader.avatarURI ?? roomFace.matrixAvatarURI,
                             avatar: roomFace.avatar, sha256: roomFace.sha256,
-                            candidates: roomFace.candidates)
+                            candidates: roomFace.candidates, userID: reader.userID)
         }
         return ChatFace(name: readerName(reader), kind: .person, matrixAvatarURI: reader.avatarURI,
-                        avatar: nil, sha256: nil, candidates: [])
+                        avatar: nil, sha256: nil, candidates: [], userID: reader.userID)
     }
 
     /// The reader's name for the tap list and the monogram: the member's,
@@ -92,12 +101,12 @@ struct ChatFace: Equatable {
             return ChatFace(name: member.name.isEmpty ? roomFace.name : member.name,
                             kind: roomFace.kind, matrixAvatarURI: member.matrixAvatarURI,
                             avatar: roomFace.avatar, sha256: roomFace.sha256,
-                            candidates: roomFace.candidates)
+                            candidates: roomFace.candidates, userID: member.userID)
         }
         return ChatFace(name: member.name,
                         kind: .member(isApp: member.isApp, isAssistant: member.isAssistant),
                         matrixAvatarURI: member.matrixAvatarURI, avatar: nil, sha256: nil,
-                        candidates: [])
+                        candidates: [], userID: member.userID)
     }
 }
 
@@ -106,7 +115,8 @@ struct ChatFace: Equatable {
 /// owns that (and its cache), as on Home and in the info sheet.
 /// `AtumSourcedAvatar` draws a photo Home already decoded on the first frame
 /// and keeps it while the same face's source changes. The task key is the
-/// source alone: name-only profile updates never blank or reload the photo.
+/// source and the Matrix user ID: name-only profile updates never blank or
+/// reload the photo.
 struct ChatFaceView: View {
     let face: ChatFace
     let size: CGFloat
@@ -126,8 +136,14 @@ extension ChatFace {
                          declared: candidates, prefersRemote: prefersRosterPhoto)
     }
 
-    /// Who the face is, for `AtumSourcedAvatar`: the faces carry no user ID,
-    /// so the kind and name stand in. The room face before and after its info
-    /// arrives keeps both, so its photo is never dropped in between.
-    var identity: String { "\(kind)|\(name)" }
+    /// Who the face is, for `AtumSourcedAvatar`: a sender's or reader's
+    /// Matrix user ID, whatever kind or photo URI the face has meanwhile
+    /// (a `.person` from the event becoming a `.member` from the member
+    /// list). The room's own face is its room ID; without either, its kind
+    /// and name stand in.
+    var identity: String {
+        if let userID { return "user|\(userID)" }
+        if let roomID { return "room|\(roomID)" }
+        return "face|\(kind)|\(name)"
+    }
 }

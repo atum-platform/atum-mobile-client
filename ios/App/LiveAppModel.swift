@@ -4427,6 +4427,9 @@ final class LiveAppModel {
     }
 
     private func beginCompanyAccountScope(_ accountID: String) {
+        // Decoded faces (Matrix photos read with this account's session)
+        // belong to the account; another account's are dropped here.
+        AtumAvatarArtMemo.shared.beginAccountScope(accountID)
         guard companyAccountID != accountID else { return }
         companyWorkspace.beginAccountScope(accountID)
         companyAccountID = accountID
@@ -4436,6 +4439,11 @@ final class LiveAppModel {
     }
 
     private func clearCompanyAccountScope() {
+        // Every path that ends the account (sign-out, sign in again, a
+        // forced session end) passes here: the next account must not be
+        // served this one's decoded faces, and loads still in flight are
+        // fenced out of the memo.
+        AtumAvatarArtMemo.shared.endAccountScope()
         companyWorkspace.clear()
         companyAccountID = nil
         companyLeftRooms.removeAll()
