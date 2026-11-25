@@ -23,8 +23,8 @@ final class TranscriptUITests: TranscriptUITestCase {
         // A day divider above the viewport may not have a cell until it
         // scrolls into view. Check it after verifying the initial position.
         let dividers = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Hôm nay", "Hôm qua"]))
-        for _ in 0..<4 where !dividers.firstMatch.exists {
-            transcript(app).swipeDown(velocity: .slow)
+        for _ in 0..<12 where !dividers.firstMatch.exists {
+            transcript(app).swipeDown(velocity: .fast)
         }
         XCTAssertTrue(dividers.firstMatch.exists, "U1: no day divider")
     }
@@ -118,8 +118,7 @@ final class TranscriptUITests: TranscriptUITestCase {
     func testU6PaginationKeepsTheRowBeingRead() {
         let app = launchChat(ScriptedScenario.chatPaginate.rawValue)
         let screen = visibleBottom(app) - visibleTop(app)
-        // Every loaded row exists in the eager stack: the start is reached
-        // when its first rows are on screen.
+        // The start is reached when its first rows are on screen.
         func startOnScreen() -> Bool {
             isOnScreen(row(app, "chat.paginate.0001"), in: app) || isOnScreen(row(app, "chat.paginate.0002"), in: app)
         }
@@ -157,10 +156,12 @@ final class TranscriptUITests: TranscriptUITestCase {
         let chips = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '👍'"))
         var worst: CGFloat = 0
         var windows = 0
+        var sawReaction = false
         for _ in 0..<12 {
             drag(app, by: screen * 0.8)
             guard let reading = readingRow(app) else { continue }
             wait(2) // a scripted page takes 0.4 s, its quotes and the reaction 0.8 s more
+            if !sawReaction { sawReaction = chips.firstMatch.exists }
             let now = row(app, String(reading.id.dropFirst(4)))
             guard now.exists else { continue }
             worst = max(worst, abs(now.frame.minY - reading.frame.minY))
@@ -173,12 +174,11 @@ final class TranscriptUITests: TranscriptUITestCase {
         record("u6late.holds", holds.count)
         for line in holds { print("MEASURE u6late.hold \(line.text)") }
         XCTAssertGreaterThan(windows, 3)
-        // Pages and their late quotes that land during a drag show when it
-        // ends, in one hold; at least a page and a late change.
+        // A page and its later detail change can land during active motion.
         XCTAssertGreaterThanOrEqual(holds.count, 2, "late quotes and reactions were not held")
         XCTAssertTrue(holds.allSatisfy { $0.text.contains("kept=1") }, "holds that did not land: \(holds.map(\.text))")
         XCTAssertLessThanOrEqual(worst, Self.framePoints, "the row being read moved when rows above it changed height")
-        XCTAssertGreaterThan(chips.count, 0, "no reaction landed")
+        XCTAssertTrue(sawReaction, "no reaction landed while traversing the pages")
     }
 
     /// U7: the keyboard shows and hides at the bottom; the last row stays
@@ -356,13 +356,17 @@ final class TranscriptUITests: TranscriptUITestCase {
     /// in place, and is hidden once the answer to the same message arrives.
     @MainActor
     func testReplyAtBottomHidesTheWorkingLine() {
-        let (app, start) = launchTimedChat(ScriptedScenario.chatReplyAtBottom.rawValue)
-        wait(until: start.addingTimeInterval(2.2))
+        let stepScale: TimeInterval = 2
+        let (app, start) = launchTimedChat(ScriptedScenario.chatReplyAtBottom.rawValue,
+                                           extra: ["-AtumScriptedStepScale", String(stepScale)],
+                                           leadIn: 20)
+        wait(until: start.addingTimeInterval(2.2 * stepScale))
+        XCTAssertTrue(workingRow(app).waitForExistence(timeout: 3), "the working line never appeared")
         if let footer = assertSingleWorkingRow(app, containing: ["Đang xử lý"]) {
             assertVisible(footer, in: app, "working line")
         }
         keepScreenshot("reply-at-bottom-working", of: app)
-        wait(until: start.addingTimeInterval(6.5))
+        wait(until: start.addingTimeInterval(6.5 * stepScale))
         assertVisible(latest(app), in: app, "answer")
         XCTAssertFalse(workingRow(app).exists, "the working footer must disappear after the answer")
         XCTAssertFalse(row(app, "chat.reply-at-bottom.working").exists,

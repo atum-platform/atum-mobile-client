@@ -2,7 +2,7 @@ import AtumChat
 import XCTest
 
 /// Gate G-scroll (plan §2.4): checks 1–9 on the scripted `chat.long`, with
-/// screenshots and measured numbers, under both pinning mechanisms; check 10
+/// screenshots and measured numbers, through both legacy test entry points; check 10
 /// (memory) is read from the probe log after the fling to the top. The
 /// decision record is `docs/decisions/2026-10-11-g-scroll.md`.
 ///
@@ -194,13 +194,9 @@ final class GScrollUITests: TranscriptUITestCase {
         keepScreenshot(reachedStart ? "g10-start-\(tag)" : "g10-cap-\(tag)", of: app)
 
         // Check 4, flinging: the flings above asked for page after page.
-        // While a detached chat moves, the rows on screen do not change
-        // (`TranscriptView.heldRows`); what arrived lands when the scroll
-        // stops, and the row being read is held then. For every hold the
-        // app wrote how the next frame landed (`HoldProbe`): exactly where it
-        // was put, or (if the scroll was still moving) moved on only by the
-        // fling's own motion. A hold the scroll view ignored would be off by
-        // the height that landed.
+        // The collection can apply pages during motion. Its probe measures
+        // the difference between the requested correction and the offset
+        // applied in that layout transaction.
         let holds = probeLines("holds.txt")
         let missed = holds.filter { !$0.text.contains("kept=1") }
         record("g4.holds.\(tag)", holds.count)
