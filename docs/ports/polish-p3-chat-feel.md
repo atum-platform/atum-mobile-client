@@ -68,8 +68,9 @@ that capsule. The overlay now behaves like the system menu Home uses:
    (from 0.6, anchored on the copy's side). The row hides only once the copy
    is on screen (`liftedRowID`), so nothing blinks. Before, everything waited
    behind an opacity gate for a measuring pass, then appeared in one frame.
-4. **Slide to select.** The SwiftUI `LongPressGesture` still opens the menu
-   and drives the sink. Beside it, `MenuPressFollower` follows the same press
+4. **Slide to select.** The SwiftUI `LongPressGesture` still opens the menu.
+   The sink comes from `MenuPressSink`, a UIKit long press at 0.08 s (see
+   the CI fix below). Beside them, `MenuPressFollower` follows the same press
    after the threshold. It is a `UILongPressGestureRecognizer` (through
    `UIGestureRecognizerRepresentable`) that recognises alongside every other
    recognizer and never cancels a touch.
@@ -262,6 +263,66 @@ run; logs are `polish-p3/r2-run.log` and `polish-p3/logs/r2-*`):
   this lane. `python3 scripts/public_guard.py --base origin/main --head HEAD`
   exited 0.
 
+## CI fix: PR #109 hosted UI shard 2
+
+Hosted run 45562847668 (head `4fe85c4`) failed two tests in shard 2.
+
+1. **`ChatKindsUITests.testQuotesInBothBubblesMeetContrast`: caused by P3, fixed.**
+   - **What failed:** the test hides the keyboard with a slow drag. That can
+     leave the transcript scrolled towards older rows, and the test swipes up
+     to get back. On the P3 head, those swipes did not move the transcript.
+     The newest row stayed below the composer ("both quotes are on screen").
+     The hierarchy at the failure showed a detached transcript with
+     `row.latest` at y≈897 on an 874 pt screen.
+   - **Bisect (iPhone 17, iOS 27, one test per run):**
+
+     | Build | Passed |
+     | --- | --- |
+     | main `9f54045` | 3/3 |
+     | P3 with main's `MessageMenu.swift` | 5/5 |
+     | P3 without the composer and delivery `chatMotion` | 0/5 |
+     | P3 without `MenuPressFollower` | 3/5 |
+     | P3 head `4fe85c4` | 4/8 |
+
+     Every head failure had 4 swipes that did not scroll. Main and the
+     main-menu variant recovered with one swipe.
+   - **Cause:** the row's SwiftUI `LongPressGesture` with
+     `.updating($pressing)`, the `@GestureState` behind the press sink. It was
+     on every row of the transcript.
+   - **Fix:** the sink is now driven by `MenuPressSink`, a UIKit
+     `UILongPressGestureRecognizer` at `pressDelay` (0.08 s). Like
+     `MenuPressFollower`, it recognizes alongside every other recognizer and
+     never cancels a touch.
+     - It sets `pressing` when the press begins.
+     - It clears it on lift, on cancel, or when the finger then travels past
+       the allowable movement (a scroll that started from rest).
+     - The plain `LongPressGesture` still opens the menu at 0.35 s, as before
+       P3. The down animation lost its own 0.08 s delay, because the
+       recognizer already waits that long.
+   - **Verification with the fix:** the quote test passed 15/16, mostly
+     recovering with one swipe as main does. All 7 `MessageMenuUITests` passed
+     (press and slide, reply chip, reactions, people, group, assistant and
+     bot menus), and so did the Drive capture.
+   - **Residual:** in 1/16 runs the swipes still did not scroll, and the
+     resting touch of a swipe then opened the menu. The variant without the
+     follower showed it too (1/8). See the session log for the main
+     comparison.
+   - **Separate test fragility:** one variant run (D-2) failed the contrast
+     check instead (ratio 1.05). There, XCTest reported my quote hittable while
+     it sat under the composer glass, so the test skipped its swipe and
+     measured the background.
+2. **`DriveRevampUITests.testCaptureDriveSurfaces`: not caused by P3, no change.**
+   - **What failed:** "no tappable group choice Kind", in the Group submenu
+     of Drive's native View menu. The hierarchy at the failure shows the
+     menu closed.
+   - **Why it isn't P3:** P3 touches no Drive code. This is the same submenu
+     race recorded as #82 (`docs/ports/w4-flaky-ui-81-82.md`), whose hosted
+     verification on iOS 26.2 is still open.
+   - **Local result:** passed 3/3 on the P3 head and with the fix.
+
+Logs and bundles: `/Volumes/AtumTestFlight/polish-p3/ci109*` and
+`ci-109*` (hosted bundle export). Scripts: `/Volumes/AtumTestFlight/polish-p3/ci109-run*.sh`.
+
 ## Follow-ups
 
 - **Review r1, item 4: a fast lift can lose its target.** If the lift comes
@@ -315,3 +376,17 @@ run; logs are `polish-p3/r2-run.log` and `polish-p3/logs/r2-*`):
   (see Fix round 2) and recorded items 4 to 9 as follow-ups. Ran one locked
   run (`locked-r2.sh`, which got the lock at 13:11 ICT): build, 3 UI tests and
   1 capture, all green. No push, no PR.
+- **25 Nov 2026, CI fix for PR #109 (Opus sub-agent):** diagnosed hosted
+  shard 2 (see "CI fix: PR #109 hosted UI shard 2"). Seven locked rounds on
+  iPhone 17 / iOS 27, with derived data in `/Volumes/AtumTestFlight/polish-p3/dd-*`:
+  1. Head and main rerun.
+  2. Head against main.
+  3. Head against the variant without the follower.
+  4. Bisect variants B and C.
+  5. Variant D.
+  6. The fix.
+  7. The fix against variant F.
+
+  Experiments used throwaway detached worktrees under
+  `/Volumes/AtumTestFlight/polish-p3/`. Design lint and the public guard ran
+  unlocked. No push, no PR.

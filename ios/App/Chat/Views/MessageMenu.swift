@@ -215,7 +215,11 @@ private struct MessageMenuModifier: ViewModifier {
 
     @State private var frame: CGRect = .zero
     /// The finger is down on the row and the press has not reached the menu yet.
-    @GestureState private var pressing = false
+    /// Set by `MenuPressSink` (UIKit), not a SwiftUI `@GestureState`: a long
+    /// press with `.updating` on every row left the transcript unable to
+    /// scroll after the keyboard went (PR #109's hosted shard 2,
+    /// `testQuotesInBothBubblesMeetContrast`).
+    @State private var pressing = false
     @Environment(\.chatReducesMotion) private var reduceMotion
 
     /// How long a press takes to open the menu.
@@ -262,6 +266,7 @@ private struct MessageMenuModifier: ViewModifier {
                 // Simultaneous, so the answer's own text views (links, the
                 // markdown renderer) never swallow the press.
                 .simultaneousGesture(pressGesture(items))
+                .gesture(MenuPressSink(delay: Self.pressDelay) { pressing = $0 })
                 .gesture(followRecognizer(items))
                 // One medium tick when the menu opens, never when it closes.
                 .sensoryFeedback(.impact(weight: .medium), trigger: source) { _, opened in opened }
@@ -281,19 +286,18 @@ private struct MessageMenuModifier: ViewModifier {
         }
     }
 
-    /// Down: a gentle sink that starts only once the touch has stayed a beat.
-    /// Up: a quick return.
+    /// Down: a gentle sink (the touch has already stayed `pressDelay`, see
+    /// `MenuPressSink`). Up: a quick return.
     private func pressAnimation(down: Bool) -> Animation? {
-        down ? ChatMotion.animation(.standard, reduceMotion: reduceMotion)?.delay(Self.pressDelay)
+        down ? ChatMotion.animation(.standard, reduceMotion: reduceMotion)
              : ChatMotion.animation(.quick, reduceMotion: reduceMotion)
     }
 
-    /// Hold to open: the row sinks while the finger is down (`pressing`) and
-    /// the menu opens at the threshold. A touch that moves first is a scroll
-    /// and fails the press.
+    /// Hold to open: the menu opens at the threshold. A touch that moves
+    /// first is a scroll and fails the press. The sink while the finger is
+    /// down comes from `MenuPressSink`.
     private func pressGesture(_ items: [MessageMenuItem]) -> some Gesture {
         LongPressGesture(minimumDuration: Self.pressDuration)
-            .updating($pressing) { value, state, _ in state = value }
             .onEnded { _ in open(items) }
     }
 
@@ -335,6 +339,68 @@ private struct MessageMenuModifier: ViewModifier {
             presenter.actionsOverlay = MessageOverlayRequest(row: row, kind: kind, roomTitle: roomTitle,
                                                              ownUserID: ownUserID, parsedBody: parsedBody,
                                                              items: items, sourceFrame: frame)
+        }
+    }
+}
+
+/// Whether a finger is resting on a row (polish P3's press anticipation):
+/// `true` once a touch has stayed `delay` without moving, `false` when it
+/// lifts, is cancelled (the transcript's pan took it) or drifts past UIKit's
+/// allowable movement. UIKit, beside every other touch and never delaying or
+/// cancelling one, like `MenuPressFollower`: it only observes.
+private struct MenuPressSink: UIGestureRecognizerRepresentable {
+    let delay: Double
+    let changed: @MainActor (Bool) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = delay
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesBegan = false
+        recognizer.delaysTouchesEnded = false
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        recognizer.minimumPressDuration = delay
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        let coordinator = context.coordinator
+        switch recognizer.state {
+        case .began:
+            coordinator.start = recognizer.location(in: nil)
+            coordinator.down = true
+            changed(true)
+        case .changed:
+            // Resting first and then dragging is a scroll: the row comes back up.
+            guard coordinator.down, let start = coordinator.start else { return }
+            let point = recognizer.location(in: nil)
+            if hypot(point.x - start.x, point.y - start.y) > recognizer.allowableMovement {
+                coordinator.down = false
+                changed(false)
+            }
+        case .ended, .cancelled, .failed:
+            coordinator.start = nil
+            if coordinator.down {
+                coordinator.down = false
+                changed(false)
+            }
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var start: CGPoint?
+        var down = false
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
         }
     }
 }
