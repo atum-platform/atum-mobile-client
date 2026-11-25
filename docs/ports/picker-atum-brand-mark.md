@@ -158,3 +158,33 @@ crescent there either, so round 2 replaces it.
   locally; the hosted shards run them.
 - `ProviderMarkTests.testAtumWearsTheDesktopsInsetBrandMark` was not run
   locally (the lane builds only); it runs on hosted CI.
+
+### Round 2 verification (25 Nov 2026)
+
+- Locked run (`lockf` on the heavy-build lock, script
+  `/Volumes/AtumTestFlight/atum-mark/r2-verify.sh`), simulator
+  CB24FAE2-75F9-4E19-A856-0F5A9F036C0B, derived data
+  `/Volumes/AtumTestFlight/dd-atum-mark`: AtumMobile Debug build succeeded
+  (`r2-build.log`); `AtumMobileStateTests` with
+  `-only-testing:` `ProviderMarkTests` and `AvatarArtTests`: 22 tests, 0
+  failures (`r2-tests.log`), including both new tests.
+- After that run, `@MainActor` was added to the two `ProviderMarkTests`
+  methods that call `AtumAvatar` / `AtumBrandTile` statics, to clear Swift 6
+  actor-isolation warnings. That is an annotation only and was not rebuilt
+  locally; hosted CI covers it.
+- `python3 scripts/design_lint.py`: OK. `public_guard.py --base origin/main
+  --head HEAD`: exit 0.
+- Screenshots (scripted host, `/Volumes/AtumTestFlight/atum-mark/`):
+  `r2-roster-{light,dark}.png` (`home.roster`: Atum's row, inset logo on the
+  dark circle), `r2-chat-messages-{light,dark}.png` (`chat.long`: title
+  capsule face and composer chip), `r2-chat-title-dark.png` and
+  `r2-chat-greeting-dark.png` (`chat.empty`: title capsule, the 64 pt
+  greeting face, chip). The light `chat.empty` launch came up blank twice
+  (`blank-*.png`, a launch that had not settled), so the light greeting face
+  is not captured; it is the same `AtumAvatar(.atum)` 70% face as the dark
+  capture. `stale-*.png` are a capture pass made after another lane installed
+  its own build on the shared simulator (they show the old crescent); they
+  are not evidence for this change. The capture script now reinstalls this
+  lane's build before shooting.
+- Not captured locally: the info sheet, Seen marks and message sender faces
+  need taps or specific scenarios; they draw the same `AtumAvatar(.atum)`.
