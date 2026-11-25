@@ -72,6 +72,10 @@ per-source errors, read-only catalogs without destination readback, account chan
 retirement, a stalled offer, native hand-off rows and Connect-sheet landings. The deadline tests use
 controlled reply and timer continuations, including replies that can finish after cancellation.
 
+Round 2 passed on the assembled code at `bde82ab`. The locked run passed 101 SwiftPM tests,
+the arm64 Debug simulator build and all 10 picker copy tests. The separate public guard exited 0
+against `origin/main`. The logs are in `/Volumes/AtumTestFlight/w4-x1/r2-*.log`.
+
 ## Follow-ups
 
 - Wire provider-level settled presentation and any destination retry affordance over the still-visible
