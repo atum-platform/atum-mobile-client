@@ -204,6 +204,7 @@ final class LiveMatrixSession {
     let sharedCollectionsRegistry = SharedCollectionsRegistry()
     /// Internal for the company notes-to-self glue (`CompanyWorkspaceModel.swift`).
     let runtime: MatrixLiveRuntime
+    let avatarThumbnailScope: MatrixAvatarThumbnailCache.Scope
     private var syncService: SyncService?
     private var roomList: RoomList?
     private var roomEntries: RoomListEntriesWithDynamicAdaptersResult?
@@ -225,8 +226,10 @@ final class LiveMatrixSession {
     private(set) var personalChatClaimRevision: UInt64 = 0
 
     init(runtime: MatrixLiveRuntime,
+         avatarThumbnailScope: MatrixAvatarThumbnailCache.Scope,
          displaySnapshot: LiveMatrixSessionDisplaySnapshot? = nil) {
         self.runtime = runtime
+        self.avatarThumbnailScope = avatarThumbnailScope
         if let displaySnapshot { rooms = displaySnapshot.rooms }
     }
 
@@ -1056,22 +1059,20 @@ final class LiveMatrixSession {
     /// Matrix room/member avatars use the SDK media repository and its cache;
     /// no raw `mxc` URL is handed to URLSession.
     func avatarThumbnail(uri: String, pixelSide: Int) async -> Data? {
-        guard pixelSide > 0 else { return nil }
-        if let cached = await MatrixAvatarThumbnailCache.shared.data(uri: uri,
-                                                                     pixelSide: pixelSide) {
-            return cached
-        }
-        do {
-            try runtime.requireCurrent()
-            let source = try MediaSource.fromUrl(url: uri)
-            let data = try await runtime.client.getMediaThumbnail(
-                mediaSource: source, width: UInt64(pixelSide), height: UInt64(pixelSide)
-            )
-            try runtime.requireCurrent()
-            await MatrixAvatarThumbnailCache.shared.store(data, uri: uri, pixelSide: pixelSide)
-            return data
-        } catch {
-            return nil
+        guard (try? runtime.requireCurrent()) != nil else { return nil }
+        return await MatrixAvatarThumbnailCache.shared.thumbnail(
+            uri: uri, pixelSide: pixelSide, scope: avatarThumbnailScope
+        ) {
+            do {
+                let source = try MediaSource.fromUrl(url: uri)
+                let data = try await runtime.client.getMediaThumbnail(
+                    mediaSource: source, width: UInt64(pixelSide), height: UInt64(pixelSide)
+                )
+                try runtime.requireCurrent()
+                return data
+            } catch {
+                return nil
+            }
         }
     }
 
