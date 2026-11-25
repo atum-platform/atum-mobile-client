@@ -470,7 +470,7 @@ struct ChatScreen: View {
     }
 
     /// The assistant's face for its empty chat (desktop `--atum-avatar-lg`):
-    /// the title capsule's own face, so Atum's crescent, a photo or a mark
+    /// the title capsule's own face, so Atum's logo, a photo or a mark
     /// look the same in both places.
     @ViewBuilder private func greetingFace(_ roomFace: ChatFace) -> some View {
         if let info {
