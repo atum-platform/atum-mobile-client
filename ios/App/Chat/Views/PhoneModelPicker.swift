@@ -50,9 +50,9 @@ struct PhoneConversationModelPicker: View {
     /// The account's subscription status each time a read lands, so the
     /// composer chip names a subscription model as this list does.
     var onAccount: (PhoneSubscriptionAccount) -> Void = { _ in }
-    /// The row a successful write made current, so the composer chip draws
-    /// that row's own name and mark.
-    var onPick: (PhoneModelPickerProjection.Row) -> Void = { _ in }
+    /// The row a successful write made current. Nil clears the chip's
+    /// cached pick so it follows the returned destination.
+    var onPick: (PhoneModelPickerProjection.Row?) -> Void = { _ in }
 
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destination: ManagedModelDestinationSnapshot?
@@ -101,7 +101,7 @@ struct PhoneConversationModelPicker: View {
          onSnapshot: @escaping (ManagedModelSnapshot) -> Void = { _ in },
          onDestination: @escaping (ManagedModelDestinationSnapshot) -> Void = { _ in },
          onAccount: @escaping (PhoneSubscriptionAccount) -> Void = { _ in },
-         onPick: @escaping (PhoneModelPickerProjection.Row) -> Void = { _ in }) {
+         onPick: @escaping (PhoneModelPickerProjection.Row?) -> Void = { _ in }) {
         self.design = design
         self.actions = actions
         self.destinations = destinations
@@ -264,8 +264,8 @@ struct PhoneConversationModelPicker: View {
             savingEffort = nil
             switch result {
             case let .saved(value):
-                pickedAtumModel = model
-                reportAtumPick(model)
+                pickedAtumModel = value.choice.model
+                reportAtumPick(value.choice.model)
                 apply(value)
                 writes.settled()
             case let .conflict(latest):
@@ -294,9 +294,9 @@ struct PhoneConversationModelPicker: View {
             savingRowID = nil
             switch result {
             case let .saved(value):
-                pickedAtumModel = model
-                reportAtumPick(model)
+                pickedAtumModel = nil
                 applyDestination(value)
+                onPick(nil)
                 destinationWrites.settled()
             case .cancelled: break
             case let .refused(latest), let .consentRequired(_, latest):
@@ -385,9 +385,8 @@ struct PhoneConversationModelPicker: View {
             switch result {
             case let .saved(value):
                 pickedAtumModel = nil
-                // The chip names the subscription model by this row's name and mark.
-                onPick(row.selecting(true))
                 applyDestination(value)
+                onPick(PhoneModelPickerProjection.settledDestinationPick(row, destination: value))
                 subscriptionWrites.settled()
             case .cancelled: break
             case let .consentRequired(status, latest):

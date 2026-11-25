@@ -560,12 +560,16 @@ private struct ComposerModelChoiceButton: View {
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
+        let warning = face?.planUnavailable.map { PhoneModelPickerCopy(design: design).planWarning($0) }
         // The desktop's chip (model-picker-spec.json `trigger`, #119): a plain
         // capsule, the answering model's mark before its name, weight 500,
         // no chevron. The name is `.subheadline` ink-2.
         Button { presented = true } label: {
             HStack(spacing: 6) {
-                if let markArt {
+                if warning != nil {
+                    ProviderMark(design: design, art: .template(asset: atum.symbol(.alertCircle),
+                                                                color: atum.color(.danger, scheme: scheme)))
+                } else if let markArt {
                     ProviderMark(design: design, art: markArt, size: 16)
                 }
                 Text(verbatim: label)
@@ -579,7 +583,7 @@ private struct ComposerModelChoiceButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label)
+        .accessibilityLabel(warning.map { "\(label) · \($0)" } ?? label)
         .accessibilityIdentifier(AccessibilityID.composerModel)
         .sheet(isPresented: $presented) {
             NavigationStack {
@@ -589,9 +593,11 @@ private struct ComposerModelChoiceButton: View {
                     onSnapshot: { adopt(offer: $0) },
                     onDestination: { adopt(destination: $0) },
                     onAccount: { account = $0 },
-                    onPick: {
-                        picked = .init(row: $0, destinationRevision: destination?.revision,
-                                       offerRevision: snapshot?.revision)
+                    onPick: { row in
+                        picked = row.map {
+                            .init(row: $0, destinationRevision: destination?.revision,
+                                  offerRevision: snapshot?.revision)
+                        }
                     }
                 )
                 // KitPhone › Sheet: a trailing close circle, not a text button.

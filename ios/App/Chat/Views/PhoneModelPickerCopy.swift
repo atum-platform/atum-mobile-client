@@ -26,6 +26,8 @@ enum PhonePickerCopyKey: String, CaseIterable {
     case noMatches = "src.matrix.model-picker-copy.COPY.noMatches"
     case noModels = "src.matrix.model-picker-copy.COPY.noModels"
     case planAccount = "src.matrix.model-picker-copy.COPY.planAccount"
+    case planUnavailableNoMac = "src.matrix.model-picker-copy.COPY.planUnavailable.no_mac"
+    case planUnavailableReconnect = "src.matrix.model-picker-copy.COPY.planUnavailable.reconnect"
     case searchPlaceholder = "src.matrix.model-picker-copy.COPY.searchPlaceholder"
     case thisMac = "src.matrix.model-picker-copy.COPY.thisMac"
     case unfavorite = "src.matrix.model-picker-copy.COPY.unfavorite"
@@ -70,6 +72,14 @@ struct PhoneModelPickerCopy {
     }
 
     func state(_ key: PhoneModelPickerStateCopyKey) -> String { design.text(key.rawValue) }
+
+    /// The desktop chip's availability warning, with its provider's service name.
+    func planWarning(_ reason: PhoneModelPickerProjection.ChipFace.PlanUnavailable) -> String {
+        switch reason {
+        case .noMac: text(.planUnavailableNoMac, [.text("ChatGPT")])
+        case .reconnect: text(.planUnavailableReconnect, [.text("OpenCode Go")])
+        }
+    }
 
     /// Desktop's words for a subscription model the cloud cannot run now.
     func unavailable(_ reason: PhoneModelPickerProjection.Row.Unavailable) -> String {

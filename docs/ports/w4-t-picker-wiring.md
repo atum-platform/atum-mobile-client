@@ -141,6 +141,39 @@ Each command ran under `TMPDIR=/Volumes/AtumTestFlight/tmp lockf -k /Volumes/Atu
 - `python3 scripts/public_guard.py --base origin/main --head HEAD` runs on the commit (result in the handoff).
 - No local UI suites ran.
 
+## Fix round 3
+
+- A cloud destination save settles from the snapshot returned by the save layer. `PhoneConversationModelPicker`
+  applies it before publishing a chip pick. `settledDestinationPick` preserves the tapped row's catalog
+  metadata only when the returned choice agrees on both source and model. On a mismatch, the composer clears
+  its cached pick and shows the returned choice. This covers a lost ChatGPT write response, a newer Atum
+  choice on another device, and the original receipt replaying under the same request ID. Refreshes at the
+  newer revision keep the chip on Atum. Destination-only Atum saves also use the returned snapshot, and a
+  1.1 Atum save updates the local check from its returned model.
+- The chip applies desktop `chipDown` (`model-picker.tsx`, `matrixCurrentPlanAvailability`) when it names a
+  saved plan and the phone's provider status says that plan cannot answer. A disabled ChatGPT relay maps to
+  `no_mac`, and a disconnected OpenCode Go connection maps to `reconnect`. It keeps the saved model name.
+  Missing status, a healthy plan and an Atum chip produce no warning. The warning describes plan availability.
+  Revision 0433 of the platform can separately send a turn to Atum under Atum billing while keeping the
+  subscription choice. The chip warning makes no claim about the route or cost of an individual turn.
+- The existing leading mark slot shows the red alert glyph in place of the provider mark, as on desktop.
+  VoiceOver reads the warning with the model name. The localized templates are the pinned
+  `src.matrix.model-picker-copy.COPY.planUnavailable.no_mac` and
+  `src.matrix.model-picker-copy.COPY.planUnavailable.reconnect`, with the corresponding desktop service name.
+  The chip layout has no secondary text slot. If a UI lane adds a visible explanation, it can use
+  `ChipFace.planUnavailable` and `PhoneModelPickerCopy.planWarning` to present the same localized reason.
+- Phone 1.3–1.5 destination reads carry the saved choice and omit desktop's subscription status. The phone
+  relay read distinguishes enabled and disabled and does not distinguish an offline registered Mac. The chip
+  therefore has no signal for desktop's `mac_offline` warning. Desktop's separate latest-reply fallback,
+  relay-rate-limit and held-run warning states have no input in this chip projection. These gaps are separate
+  from the known-unavailable plans covered here.
+- Focused verification uses `PhoneModelPickerProjectionTests` for the actual idempotent replay and same-revision
+  refresh and `PhoneSubscriptionModelsTests` for both unavailable reasons and healthy or unread status. The
+  single locked run records Swift tests (`-j 2`) and Debug `build-for-testing` in `swift-test-r3.log` and
+  `build-r3.log` under `/Volumes/AtumTestFlight/dd-w4-t`. The copy-key check passed all 7 tests. Design lint
+  from `origin/main` reports existing `RootTabs.swift` drift. Lint counts in the changed app files match
+  `7458fbe`. The public boundary guard runs unlocked on the committed revision. No local UI suites.
+
 ## Follow-ups
 
 - `ModelDisplayName.name` capitalises a word with Swift's `prefix(1).uppercased()`, the whole first
