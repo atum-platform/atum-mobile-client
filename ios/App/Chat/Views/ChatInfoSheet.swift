@@ -1027,50 +1027,24 @@ struct ChatInfoAvatar: View {
     let size: CGFloat
     let loadMatrixThumbnail: ((String, Int) async -> Data?)?
 
-    @State private var art: AtumAvatarArt?
-
     var body: some View {
-        Group {
-            if info.isFounder {
-                FounderRavenAvatar(size: size, fallbackName: info.title)
-            } else {
-                AtumAvatar(kind: info.avatarKind, name: info.title, art: art,
-                           mark: info.avatar?.agentMark, size: size)
-                    .task(id: Request(avatar: info.avatar, matrixURI: info.matrixAvatarURI,
-                                      sha256: info.avatarSHA256,
-                                      candidates: info.avatarCandidates, size: size)) {
-                        art = nil
-                        let pixelSide = AtumAvatar.thumbnailPixelSide(for: size)
-                        art = await AtumAvatarCandidateLoader.load(
-                            matrixURI: info.matrixAvatarURI,
-                            pixelSide: pixelSide,
-                            loadMatrixThumbnail: loadMatrixThumbnail,
-                            remoteCandidates: AtumAvatarCandidateLoader.candidates(
-                                avatar: info.avatar,
-                                sha256: info.avatarSHA256,
-                                declared: info.avatarCandidates
-                            )
-                        )
-                    }
-            }
+        if info.isFounder {
+            FounderRavenAvatar(size: size, fallbackName: info.title)
+        } else {
+            // Seeded from the memo: the Home row's photo is on the title's
+            // first frame (before 25 Nov 2026 it started blank every time the
+            // view was made, so the face blinked as the chat opened).
+            AtumSourcedAvatar(kind: info.avatarKind, name: info.title, mark: info.avatar?.agentMark,
+                              size: size, source: info.avatarSource, identity: info.roomID,
+                              loadMatrixThumbnail: loadMatrixThumbnail)
         }
     }
+}
 
-    private struct Request: Hashable {
-        let avatarDescription: String
-        let matrixURI: String?
-        let sha256: String?
-        let candidates: [LiveProductRemoteArt]
-        let size: CGFloat
-
-        init(avatar: LiveProductAvatar?, matrixURI: String?, sha256: String?,
-             candidates: [LiveProductRemoteArt], size: CGFloat) {
-            avatarDescription = String(describing: avatar)
-            self.matrixURI = matrixURI
-            self.sha256 = sha256
-            self.candidates = candidates
-            self.size = size
-        }
+extension ChatInfoPresentation {
+    @MainActor var avatarSource: AtumAvatarSource {
+        AtumAvatarSource(matrixURI: matrixAvatarURI, avatar: avatar, sha256: avatarSHA256,
+                         declared: avatarCandidates)
     }
 }
 

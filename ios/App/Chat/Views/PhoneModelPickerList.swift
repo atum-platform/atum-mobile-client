@@ -590,7 +590,7 @@ struct PhoneModelPickerList: View {
             .accessibilityHidden(true)
     }
 
-    /// The row's mark: Atum's crescent for Atum's line-up, else the
+    /// The row's mark: Atum's logo tile for Atum's line-up, else the
     /// connection's provider (desktop `PickerRouteMark`), the same one the
     /// composer chip draws for this row.
     private func markArt(_ row: Row) -> ProviderMark.Art { ProviderMark.art(for: row) }
