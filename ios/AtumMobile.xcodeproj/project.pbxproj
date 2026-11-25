@@ -199,6 +199,7 @@
 		AB04F912D2B46AC1968F4354 /* ConcurrencyExtras-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 2EFA8574785BD123D4370DE8 /* ConcurrencyExtras-LICENSE.txt */; };
 		AE7D9EF90761D538DE094614 /* MatrixAvatarThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41709887A661B2844962F90D /* MatrixAvatarThumbnailCache.swift */; };
 		B15C2E7D990B421063B3B19F /* LiveRosterRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */; };
+		B15C2E7D990B421063B3B200 /* PersonalChatRestore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335569E8FE2821CC21B60D50 /* PersonalChatRestore.swift */; };
 		B4FBA601A2C1C139359B2F53 /* Sentry-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 2AD275C49D2EBAA73DE4EFFA /* Sentry-LICENSE.txt */; };
 		B511169B2E7A874AD5DEB0D3 /* ScriptedSharedCollectionsScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 063B1C239670DA214B9AFBFF /* ScriptedSharedCollectionsScope.swift */; };
 		D7F0C11D5AE957357C54F531 /* ScriptedAppPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF4C280E1ADD572263A9ABC /* ScriptedAppPanel.swift */; };
@@ -428,6 +429,7 @@
 		E2C0A1B2C3D4E5F601234502 /* ChatGPTTrainingConfirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTTrainingConfirm.swift; sourceTree = "<group>"; };
 		3321C10CB12E085D9D92FF11 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRosterRows.swift; sourceTree = "<group>"; };
+		335569E8FE2821CC21B60D50 /* PersonalChatRestore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalChatRestore.swift; sourceTree = "<group>"; };
 		3553821F25D476C4DB869723 /* ComposerDictationCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerDictationCopy.swift; sourceTree = "<group>"; };
 		3680C4853A6454B341ABC067 /* TranscriptUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUITests.swift; sourceTree = "<group>"; };
 		3CD6FBB9D92465A29802E123 /* MathFonts-EmbeddedNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "MathFonts-EmbeddedNotices.txt"; sourceTree = "<group>"; };
@@ -938,6 +940,7 @@
 				C10AAA4D763F43361B56ED7E /* LiveDesign.swift */,
 				C556E604E3FCF2BBD412F45D /* LiveMatrixSession.swift */,
 				335569E8FE2821CC21B60D49 /* LiveRosterRows.swift */,
+				335569E8FE2821CC21B60D50 /* PersonalChatRestore.swift */,
 				D2FE0A337D7F9A239000E290 /* MASWebAuthPresenter.swift */,
 				023052D06543345DF0DC9F77 /* MatrixLiveRuntime.swift */,
 				55FD517430985EDE52675D60 /* NativeRichText.swift */,
@@ -1750,6 +1753,7 @@
 				539C6229A0FD734258D70CD0 /* LiveProductModels.swift in Sources */,
 				21EF3F77E989BD727A6D49BE /* LiveReporting.swift in Sources */,
 				B15C2E7D990B421063B3B19F /* LiveRosterRows.swift in Sources */,
+				B15C2E7D990B421063B3B200 /* PersonalChatRestore.swift in Sources */,
 				30E9A2996EE40C1BE148E7C7 /* LiveSharedCollections.swift in Sources */,
 				C475E35DE3168E0E18519B28 /* LiveStoreCommerce.swift in Sources */,
 				A3D0C1E2B4F5061728394A53 /* ProtonAmountFormat.swift in Sources */,
