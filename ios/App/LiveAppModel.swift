@@ -110,6 +110,12 @@ final class LiveAppModel {
         }
     }()
     private(set) var stage: LiveAppStage = .booting
+    private let betaFeatureState = AccountBetaFeatures()
+    /// Account-scoped presentation flag from the native /me response.
+    var betaFeatures: Bool {
+        guard case .signedIn = stage, !signOutInProgress else { return false }
+        return betaFeatureState.isEnabled
+    }
     /// Settings › Your devices › Approve on this iPhone for the signed-in
     /// account (phone approvals slice 2b). Nil without a domain client.
     private(set) var phoneApprovals: PhoneApprovalSettingsModel?
@@ -275,8 +281,12 @@ final class LiveAppModel {
     private var metadata: MASMetadata?
     private var context: Context? {
         didSet {
-            if oldValue?.runtime.ticket.session.userID != context?.runtime.ticket.session.userID {
+            let accountChanged = oldValue?.runtime.ticket.session.userID != context?.runtime.ticket.session.userID
+            if accountChanged {
                 applePurchases.bind(accountID: nil, api: nil)
+            }
+            if accountChanged || oldValue?.installation != context?.installation {
+                betaFeatureState.endAccountScope()
             }
         }
     }
@@ -5113,7 +5123,7 @@ final class LiveAppModel {
                                        runtime: runtime,
                                        domainRefresh: domain.refresh)
                 context = signedIn
-                publishSignedIn(signedIn)
+                publishSignedIn(signedIn, betaFeatures: domain.betaFeatures)
                 LiveReporting.shared.signInCompleted()
                 LiveAuthDiagnostics.recordSuccess()
             } catch {
@@ -5159,7 +5169,7 @@ final class LiveAppModel {
                                    runtime: context.runtime,
                                    domainRefresh: domain.refresh)
             self.context = signedIn
-            publishSignedIn(signedIn)
+            publishSignedIn(signedIn, betaFeatures: domain.betaFeatures)
             LiveReporting.shared.signInCompleted()
             LiveAuthDiagnostics.recordSuccess()
         } catch {
@@ -5219,6 +5229,7 @@ final class LiveAppModel {
                                    domainRefresh: domain.refresh)
             context = repaired
             domainClient = makeDomainClient(refresh: domain.refresh, metadata: metadata)
+            betaFeatureState.record(domain.betaFeatures)
             domainRecoveryState = .available
             LiveAuthDiagnostics.recordSuccess()
             await refreshDomainReads()
@@ -5326,11 +5337,13 @@ final class LiveAppModel {
                               domainRefresh: nil)
             var domainFailure: (any Error)?
             var restoredDomainRefresh: OIDCGrantRefresh?
+            var restoredDomainAccount: OIDCRestoredAccount?
             do {
                 failurePhase = "bootstrap_domain"
                 let domain = try domainStore.resume(installation: marker)
                 try domain.account.reconcile(matrix: runtime.ticket)
                 restoredDomainRefresh = try OIDCGrantRefresh(resuming: domain)
+                restoredDomainAccount = domain.account
                 domainRecoveryState = .available
             } catch {
                 domainFailure = error
@@ -5351,7 +5364,7 @@ final class LiveAppModel {
                                     code: LiveAuthDiagnostics.code(domainFailure))
                 publishSignedIn(resumed)
             } else {
-                publishSignedIn(resumed)
+                publishSignedIn(resumed, restoredAccount: restoredDomainAccount)
                 LiveAuthDiagnostics.recordSuccess()
             }
         } catch {
@@ -5413,7 +5426,8 @@ final class LiveAppModel {
             .signIn(clients: clients, metadata: metadata, transport: transport)
     }
 
-    private func publishSignedIn(_ current: Context) {
+    private func publishSignedIn(_ current: Context, betaFeatures: Bool? = nil,
+                                 restoredAccount: OIDCRestoredAccount? = nil) {
         personalChatRestoreSession.begin(installationID: current.installation.id)
         if appAccountInstallationID != current.installation.id {
             invalidateAppAccount(nextInstallationID: current.installation.id)
@@ -5423,10 +5437,12 @@ final class LiveAppModel {
         handleStore.bind(owner: fallback.matrixUserID)
         ownerTimeZone.begin(accountID: fallback.matrixUserID)
         loadChatListSnapshot(accountID: fallback.matrixUserID)
+        betaFeatureState.beginAccountScope(fallback.matrixUserID)
+        if let betaFeatures { betaFeatureState.record(betaFeatures) }
         stage = .signedIn(fallback)
         launchFailureOutcome = nil
         renewalRetry = MobileSessionContinuityPolicy.RenewalRetry()
-        beginProduct(current)
+        beginProduct(current, restoredAccount: restoredAccount)
         Task { @MainActor [weak self] in
             guard let self,
                   let profile = await current.runtime.currentProfile(),
@@ -5559,6 +5575,17 @@ final class LiveAppModel {
         )
     }
 
+    private func readBetaFeatures(using client: NativeDomainClient, account: OIDCRestoredAccount) {
+        Task { @MainActor [weak self] in
+            guard let self, self.domainClient === client, !self.signOutInProgress else { return }
+            await self.betaFeatureState.refresh {
+                let me = try await client.me(for: account)
+                guard self.domainClient === client, !self.signOutInProgress else { throw CancellationError() }
+                return me.betaFeatures
+            }
+        }
+    }
+
     /// Pull-to-refresh and foreground return may repair discovery, a locked
     /// Keychain, or another temporary local failure. A definitive interrupted
     /// spend is never retried silently; Home keeps the one sign-in action.
@@ -5579,7 +5606,9 @@ final class LiveAppModel {
             try resume.account.reconcile(matrix: current.runtime.ticket)
             let refresh = try OIDCGrantRefresh(resuming: resume)
             guard context?.installation == current.installation else { return }
-            domainClient = makeDomainClient(refresh: refresh, metadata: metadata)
+            let client = makeDomainClient(refresh: refresh, metadata: metadata)
+            domainClient = client
+            readBetaFeatures(using: client, account: resume.account)
             domainRecoveryState = .available
             LiveFlowLog.session(.continuity, outcome: "account_service_restored_silently")
         } catch {
@@ -5592,7 +5621,7 @@ final class LiveAppModel {
         }
     }
 
-    private func beginProduct(_ current: Context) {
+    private func beginProduct(_ current: Context, restoredAccount: OIDCRestoredAccount?) {
         beginCompanyAccountScope(current.runtime.ticket.session.userID)
         let avatarThumbnailScope = MatrixAvatarThumbnailCache.shared.beginAccountScope(
             sessionGeneration: current.runtime.ticket.generation
@@ -5671,14 +5700,19 @@ final class LiveAppModel {
                 throw OIDCFailure.invalidConfiguration
             }
             let refresh: OIDCGrantRefresh
+            let account: OIDCRestoredAccount?
             if let established = current.domainRefresh {
                 refresh = established
+                account = restoredAccount
             } else {
                 let resume = try current.domainStore.resume(installation: marker)
                 try resume.account.reconcile(matrix: current.runtime.ticket)
                 refresh = try OIDCGrantRefresh(resuming: resume)
+                account = resume.account
             }
-            domainClient = makeDomainClient(refresh: refresh, metadata: metadata)
+            let client = makeDomainClient(refresh: refresh, metadata: metadata)
+            domainClient = client
+            if let account { readBetaFeatures(using: client, account: account) }
             domainRecoveryState = .available
         } catch {
             storeCommerce.reset()
@@ -6847,7 +6881,9 @@ final class LiveAppModel {
         guard domainClient == nil, let metadata else { return }
         do {
             let refresh = try OIDCGrantRefresh(resuming: resume)
-            domainClient = makeDomainClient(refresh: refresh, metadata: metadata)
+            let client = makeDomainClient(refresh: refresh, metadata: metadata)
+            domainClient = client
+            readBetaFeatures(using: client, account: resume.account)
             domainRecoveryState = .available
             LiveFlowLog.session(.continuity, outcome: "account_service_restored")
             Task { @MainActor [weak self] in

@@ -15,7 +15,12 @@ public struct OIDCMatrixSignIn: Sendable, CustomStringConvertible, CustomDebugSt
 @MainActor public struct OIDCDomainSignIn: CustomStringConvertible, CustomDebugStringConvertible {
     public let binding: OIDCAccountBinding
     public let refresh: OIDCGrantRefresh
-    fileprivate init(binding: OIDCAccountBinding, refresh: OIDCGrantRefresh) { self.binding = binding; self.refresh = refresh }
+    public let betaFeatures: Bool
+    fileprivate init(binding: OIDCAccountBinding, refresh: OIDCGrantRefresh, betaFeatures: Bool) {
+        self.binding = binding
+        self.refresh = refresh
+        self.betaFeatures = betaFeatures
+    }
     public nonisolated var description: String { "OIDCDomainSignIn(<identity and secrets redacted>)" }
     public nonisolated var debugDescription: String { description }
 }
@@ -167,7 +172,7 @@ public struct OIDCMatrixSignIn: Sendable, CustomStringConvertible, CustomDebugSt
             try Task.checkCancellation()
             let binding = try bind(delivery.grant.identity, me)
             try store.bind(binding, domainGrant: delivery.grant, installation: installation)
-            return OIDCDomainSignIn(binding: binding, refresh: refresh)
+            return OIDCDomainSignIn(binding: binding, refresh: refresh, betaFeatures: me.betaFeatures)
         } catch {
             // Cleanup must run even if the caller task is cancelled. It only
             // addresses this unbound domain record; durable failure remains
