@@ -117,7 +117,7 @@ struct ChatScreen: View {
                                      sha256: info?.avatarSHA256,
                                      candidates: info?.avatarCandidates ?? [],
                                      name: info?.title ?? store.title,
-                                     kind: Self.avatarKind(store.kind))
+                                     kind: Self.avatarKind(store.kind), roomID: store.roomID)
         TranscriptView(store: store, chrome: chrome, covered: covered, search: search)
             // Polish P3: while the message menu is up, the finger that opened
             // it may slide on to an action (`MessageMenuModifier`); the
@@ -474,7 +474,7 @@ struct ChatScreen: View {
     }
 
     /// The assistant's face for its empty chat (desktop `--atum-avatar-lg`):
-    /// the title capsule's own face, so Atum's crescent, a photo or a mark
+    /// the title capsule's own face, so Atum's logo, a photo or a mark
     /// look the same in both places.
     @ViewBuilder private func greetingFace(_ roomFace: ChatFace) -> some View {
         if let info {

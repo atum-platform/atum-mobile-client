@@ -136,7 +136,9 @@ public enum PhoneModelPickerProjection {
                 favoriteID: nil,
                 source: saved.source,
                 model: saved.model,
-                displayName: saved.model,
+                // The desktop card's words for a saved external model
+                // (`matrixModelDestinationsView` `external.modelLabel`).
+                displayName: ModelDisplayName.destinationLabel(model: saved.model),
                 selected: true,
                 selectable: false,
                 isSubscription: saved.source.isSubscription
@@ -245,7 +247,8 @@ public enum PhoneModelPickerProjection {
                 let current = saved?.source == source && saved?.model == model.id
                 let effort = refreshing ? nil : model.writeEffort
                 return Row(favoriteID: nil, source: source, model: model.id,
-                           displayName: model.displayName, selected: current, selectable: !current && effort != nil,
+                           displayName: ModelDisplayName.name(model: model.id, displayName: model.displayName),
+                           selected: current, selectable: !current && effort != nil,
                            isSubscription: true, subscriptionEffort: effort,
                            unavailable: current && refreshing ? .loading : nil)
             }
@@ -277,7 +280,8 @@ public enum PhoneModelPickerProjection {
     /// The saved subscription model when the phone cannot offer it: current
     /// only while nothing says it stopped working, and never choosable.
     private static func savedRow(_ choice: ManagedModelDestinationChoice, unavailable: Row.Unavailable?) -> Row {
-        Row(favoriteID: nil, source: choice.source, model: choice.model, displayName: choice.model,
+        Row(favoriteID: nil, source: choice.source, model: choice.model,
+            displayName: ModelDisplayName.name(model: choice.model),
             selected: unavailable == nil || unavailable == .loading, selectable: false, isSubscription: true,
             unavailable: unavailable)
     }
@@ -329,6 +333,140 @@ public enum PhoneModelPickerProjection {
             $0.source == .atum && $0.model == model && $0.selectable && !$0.selected
         }
     }
+
+    // MARK: - The composer chip
+
+    /// What the composer chip draws: its name, provider mark and any known
+    /// reason the named plan cannot answer right now (desktop `chipDown`).
+    public struct ChipFace: Equatable, Sendable {
+        public enum PlanUnavailable: Equatable, Sendable {
+            case noMac
+            case reconnect
+        }
+
+        public let name: String
+        public let source: ManagedModelDestinationSource
+        public let connectionLabel: String?
+        public let planUnavailable: PlanUnavailable?
+
+        public init(name: String, source: ManagedModelDestinationSource, connectionLabel: String? = nil,
+                    planUnavailable: PlanUnavailable? = nil) {
+            self.name = name
+            self.source = source
+            self.connectionLabel = connectionLabel
+            self.planUnavailable = planUnavailable
+        }
+
+        fileprivate init(subscription row: Row) {
+            let reason: PlanUnavailable? = switch row.unavailable {
+            case .notReady: .noMac
+            case .signedOut: .reconnect
+            default: nil
+            }
+            self.init(name: row.displayName, source: row.source, connectionLabel: row.connectionLabel,
+                      planUnavailable: reason)
+        }
+    }
+
+    /// A replay can return a snapshot ahead of the write receipt. Keep the
+    /// tapped row's catalog metadata only if the returned cloud choice names it.
+    public static func settledDestinationPick(_ row: Row, destination: ManagedModelDestinationSnapshot) -> Row? {
+        guard let saved = destination.choice(for: cloudID),
+              saved.source == row.source, saved.model == row.model else { return nil }
+        return row.selecting(true)
+    }
+
+    /// A row a pick wrote, with the readbacks it was made over. The chip names
+    /// it at once, before the server's next read, and only until a newer
+    /// authoritative read says something else is saved.
+    public struct ChipPick: Equatable, Sendable {
+        public let row: Row
+        /// The 1.3+ destination revision the composer held when the pick
+        /// landed; nil when it held none.
+        public let destinationRevision: Int64?
+        /// The 1.1 offer revision the composer held when the pick landed.
+        public let offerRevision: Int64?
+
+        public init(row: Row, destinationRevision: Int64?, offerRevision: Int64?) {
+            self.row = row
+            self.destinationRevision = destinationRevision
+            self.offerRevision = offerRevision
+        }
+    }
+
+    /// The pick, unless a readback newer than it names another saved choice.
+    /// The 1.3+ destination is the authority for the cloud's choice (a
+    /// subscription or an Atum model); the 1.1 offer also answers for an Atum
+    /// pick. A readback no newer than the pick (the same revision, or a 1.1
+    /// write the destination read has not caught up with) never drops it.
+    public static func reconciled(_ pick: ChipPick?,
+                                  destination: ManagedModelDestinationSnapshot?,
+                                  offer: ManagedModelSnapshot?) -> ChipPick? {
+        guard let pick else { return nil }
+        if let destination, destination.revision > pick.destinationRevision ?? .min {
+            let saved = destination.choice(for: cloudID)
+            let agrees = saved.map { $0.source == pick.row.source && $0.model == pick.row.model }
+                ?? (pick.row.source == .atum && pick.row.model == destination.recommended.model)
+            if !agrees { return nil }
+        }
+        if pick.row.source == .atum, let offer, offer.revision > pick.offerRevision ?? .min,
+           offer.choice.model != pick.row.model {
+            return nil
+        }
+        return pick
+    }
+
+    /// The chip's face for the cloud conversation (desktop `chipLabel` and
+    /// `chipRoute`). A pick still current wins; Atum's line-up is named by its
+    /// product name. A subscription model is named by the row the list draws
+    /// for it (`subscriptions`): the account's catalog name when that status is
+    /// loaded (desktop `relayCurrentName`), else the desktop's words for an
+    /// id-only entry, never its raw id. Its mark is matched from that same row.
+    /// Nil while nothing names the choice.
+    public static func chip(pick: ChipPick?,
+                            destination: ManagedModelDestinationSnapshot?,
+                            offer: ManagedModelSnapshot?,
+                            account: PhoneSubscriptionAccount? = nil) -> ChipFace? {
+        if let row = reconciled(pick, destination: destination, offer: offer)?.row {
+            if row.source == .atum, let name = ManagedModelLineup.productName(for: row.model) {
+                return ChipFace(name: name, source: .atum, connectionLabel: row.connectionLabel)
+            }
+            if let listed = listedSubscription(row.source, model: row.model, destination: destination, account: account) {
+                return ChipFace(subscription: listed)
+            }
+            return ChipFace(name: row.displayName, source: row.source, connectionLabel: row.connectionLabel)
+        }
+        if let saved = destination?.choice(for: cloudID) {
+            if saved.source == .atum, let name = ManagedModelLineup.productName(for: saved.model) {
+                return ChipFace(name: name, source: .atum)
+            }
+            if saved.source != .atum {
+                if let listed = listedSubscription(saved.source, model: saved.model,
+                                                   destination: destination, account: account) {
+                    return ChipFace(subscription: listed)
+                }
+                return ChipFace(name: ModelDisplayName.name(model: saved.model), source: saved.source)
+            }
+        }
+        for model in [offer?.choice.model, destination?.recommended.model].compactMap({ $0 }) {
+            if let name = ManagedModelLineup.productName(for: model) { return ChipFace(name: name, source: .atum) }
+        }
+        return nil
+    }
+
+    /// The subscription row the conversation picker lists for this model once
+    /// the account's status is loaded, so the chip and the list never name one
+    /// model two ways. Nil before that read: a pick keeps its own row's name.
+    private static func listedSubscription(_ source: ManagedModelDestinationSource, model: String,
+                                           destination: ManagedModelDestinationSnapshot?,
+                                           account: PhoneSubscriptionAccount?) -> Row? {
+        guard source.isSubscription, let destination, let account else { return nil }
+        return subscriptions(destination, destination: cloudID, account: account).first {
+            $0.source == source && $0.model == model
+        }
+    }
+
+    private static var cloudID: ManagedModelDestinationID { try! ManagedModelDestinationID("cloud") }
 
     // MARK: - Thinking level and the way back to Atum
 

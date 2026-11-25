@@ -4448,6 +4448,9 @@ final class LiveAppModel {
     }
 
     private func beginCompanyAccountScope(_ accountID: String) {
+        // Decoded faces (Matrix photos read with this account's session)
+        // belong to the account; another account's are dropped here.
+        AtumAvatarArtMemo.shared.beginAccountScope(accountID)
         guard companyAccountID != accountID else { return }
         companyWorkspace.beginAccountScope(accountID)
         companyAccountID = accountID
@@ -4457,6 +4460,9 @@ final class LiveAppModel {
     }
 
     private func clearCompanyAccountScope() {
+        // Retire both avatar caches together on every account-ending route.
+        MatrixAvatarThumbnailCache.shared.endAccountScope()
+        AtumAvatarArtMemo.shared.endAccountScope()
         companyWorkspace.clear()
         companyAccountID = nil
         companyLeftRooms.removeAll()
@@ -5608,6 +5614,9 @@ final class LiveAppModel {
 
     private func beginProduct(_ current: Context) {
         beginCompanyAccountScope(current.runtime.ticket.session.userID)
+        let avatarThumbnailScope = MatrixAvatarThumbnailCache.shared.beginAccountScope(
+            sessionGeneration: current.runtime.ticket.generation
+        )
         productTask?.cancel()
         productTask = nil
         assistantPlacementTask?.cancel()
@@ -5668,7 +5677,7 @@ final class LiveAppModel {
         roomMutationQueue.cancelAll()
         roomPublicationRevision = 0
 
-        let matrix = LiveMatrixSession(runtime: current.runtime)
+        let matrix = LiveMatrixSession(runtime: current.runtime, avatarThumbnailScope: avatarThumbnailScope)
         liveMatrix = matrix
         observeInvites(on: matrix)
         homeHoldTask = Task { @MainActor [weak self] in
@@ -6811,6 +6820,7 @@ final class LiveAppModel {
                 return RenewalAttempt(result: .superseded)
             }
             let replacement = LiveMatrixSession(runtime: runtime,
+                                                avatarThumbnailScope: session.avatarThumbnailScope,
                                                 displaySnapshot: session.displaySnapshot)
             observeInvites(on: replacement)
             let replacementContext = Context(installation: current.installation,
@@ -7123,11 +7133,9 @@ final class LiveAppModel {
         chatListSnapshots.clear()
     }
 
-    /// Avatar bytes and chat-row text are one account's data. Sign-out clears
-    /// both disk caches so the next person on this phone cannot read a face or
-    /// a preview left by the previous one.
+    /// Sign-out removes catalog avatar bytes, legacy thumbnail files and the
+    /// notification room directory. Matrix media lives in the SDK store.
     private func clearAccountCaches() async {
-        await MatrixAvatarThumbnailCache.shared.removeAll()
         await AvatarDiskCache().removeAll()
         NotificationRoomPublisher.removeAll()
     }
