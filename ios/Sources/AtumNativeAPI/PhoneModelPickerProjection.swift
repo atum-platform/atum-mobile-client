@@ -136,7 +136,7 @@ public enum PhoneModelPickerProjection {
                 favoriteID: nil,
                 source: saved.source,
                 model: saved.model,
-                displayName: saved.model,
+                displayName: ModelDisplayName.name(model: saved.model),
                 selected: true,
                 selectable: false,
                 isSubscription: saved.source.isSubscription
@@ -245,7 +245,8 @@ public enum PhoneModelPickerProjection {
                 let current = saved?.source == source && saved?.model == model.id
                 let effort = refreshing ? nil : model.writeEffort
                 return Row(favoriteID: nil, source: source, model: model.id,
-                           displayName: model.displayName, selected: current, selectable: !current && effort != nil,
+                           displayName: ModelDisplayName.name(model: model.id, displayName: model.displayName),
+                           selected: current, selectable: !current && effort != nil,
                            isSubscription: true, subscriptionEffort: effort,
                            unavailable: current && refreshing ? .loading : nil)
             }
@@ -277,7 +278,8 @@ public enum PhoneModelPickerProjection {
     /// The saved subscription model when the phone cannot offer it: current
     /// only while nothing says it stopped working, and never choosable.
     private static func savedRow(_ choice: ManagedModelDestinationChoice, unavailable: Row.Unavailable?) -> Row {
-        Row(favoriteID: nil, source: choice.source, model: choice.model, displayName: choice.model,
+        Row(favoriteID: nil, source: choice.source, model: choice.model,
+            displayName: ModelDisplayName.name(model: choice.model),
             selected: unavailable == nil || unavailable == .loading, selectable: false, isSubscription: true,
             unavailable: unavailable)
     }
@@ -328,6 +330,52 @@ public enum PhoneModelPickerProjection {
         ).contains {
             $0.source == .atum && $0.model == model && $0.selectable && !$0.selected
         }
+    }
+
+    // MARK: - The composer chip
+
+    /// What the composer chip draws (desktop `chipLabel` and `chipRoute`): a
+    /// name, and the source and connection label its mark is matched from.
+    public struct ChipFace: Equatable, Sendable {
+        public let name: String
+        public let source: ManagedModelDestinationSource
+        public let connectionLabel: String?
+
+        public init(name: String, source: ManagedModelDestinationSource, connectionLabel: String? = nil) {
+            self.name = name
+            self.source = source
+            self.connectionLabel = connectionLabel
+        }
+    }
+
+    /// The chip's face for the cloud conversation. A row a pick just wrote
+    /// wins with its own name and connection label, exactly as the list drew
+    /// it; Atum's line-up is named by its product name. A saved connection's
+    /// model the phone has no row for is named the way the desktop names an
+    /// id-only entry, never by its raw id. Nil while nothing names the choice.
+    public static func chip(picked: Row?,
+                            destination: ManagedModelDestinationSnapshot?,
+                            offer: ManagedModelSnapshot?) -> ChipFace? {
+        if let picked {
+            if picked.source == .atum, let name = ManagedModelLineup.productName(for: picked.model) {
+                return ChipFace(name: name, source: .atum, connectionLabel: picked.connectionLabel)
+            }
+            return ChipFace(name: picked.displayName, source: picked.source,
+                            connectionLabel: picked.connectionLabel)
+        }
+        let cloud = try! ManagedModelDestinationID("cloud")
+        if let saved = destination?.choice(for: cloud) {
+            if let name = ManagedModelLineup.productName(for: saved.model) {
+                return ChipFace(name: name, source: .atum)
+            }
+            if saved.source != .atum {
+                return ChipFace(name: ModelDisplayName.name(model: saved.model), source: saved.source)
+            }
+        }
+        for model in [offer?.choice.model, destination?.recommended.model].compactMap({ $0 }) {
+            if let name = ManagedModelLineup.productName(for: model) { return ChipFace(name: name, source: .atum) }
+        }
+        return nil
     }
 
     // MARK: - Thinking level and the way back to Atum

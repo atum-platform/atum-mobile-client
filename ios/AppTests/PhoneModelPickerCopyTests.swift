@@ -43,6 +43,23 @@ final class PhoneModelPickerCopyTests: XCTestCase {
         XCTAssertFalse(try pin.text(key.rawValue, locale: "en").contains("only"))
     }
 
+    /// Every Thinking level reads its `COPY.efforts.*` label from the pin
+    /// (wave 4f), in every locale, never a pending table or the raw level.
+    func testEveryThinkingLevelIsNamedByThePin() throws {
+        let pin = try AtumCopy()
+        for level in ManagedModelEffort.allCases {
+            let key = PhoneModelPickerCopy.effortKey(level)
+            XCTAssertTrue(pin.contains(key), "\(level)")
+            for locale in pin.locales {
+                let name = try pin.text(key, locale: locale)
+                XCTAssertFalse(name.isEmpty, "\(locale) \(level)")
+                XCTAssertNotEqual(name, level.rawValue, "\(locale) \(level)")
+            }
+        }
+        XCTAssertEqual(try pin.text(PhoneModelPickerCopy.effortKey(.xhigh), locale: "en"), "Extra thorough")
+        XCTAssertEqual(try pin.text(PhoneModelPickerCopy.effortKey(.minimal), locale: "vi"), "Tức thì")
+    }
+
     func testPendingCopyIsWrittenInEveryLocaleThePinSupports() throws {
         let locales = try AtumCopy().locales
         XCTAssertEqual(Set(PhoneModelPickerPendingCopy.locales), locales)

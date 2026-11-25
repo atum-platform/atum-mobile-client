@@ -548,8 +548,9 @@ private struct ComposerModelChoiceButton: View {
 
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destination: ManagedModelDestinationSnapshot?
-    /// The row a successful pick wrote, so the chip names it at once.
-    @State private var pickedModel: String?
+    /// The row a successful pick wrote, so the chip names it at once with
+    /// that row's own name and mark.
+    @State private var picked: PhoneModelPickerProjection.Row?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
@@ -583,7 +584,7 @@ private struct ComposerModelChoiceButton: View {
                     initialSnapshot: snapshot, initialDestination: destination,
                     onSnapshot: { snapshot = $0 },
                     onDestination: { destination = $0 },
-                    onPick: { pickedModel = $0 }
+                    onPick: { picked = $0 }
                 )
                 // KitPhone › Sheet: a trailing close circle, not a text button.
                 .toolbar {
@@ -610,63 +611,18 @@ private struct ComposerModelChoiceButton: View {
         if let destinations, case let .value(value) = await destinations.read() { destination = value.snapshot }
     }
 
-    private var label: String {
-        if let pickedModel, let name = ManagedModelLineup.productName(for: pickedModel) {
-            return name
-        }
-        if let pickedModel { return pickedModel }
-        if let choice = destination?.choice(for: cloudDestination),
-           let name = ManagedModelLineup.productName(for: choice.model) {
-            return name
-        }
-        if let choice = destination?.choice(for: cloudDestination), choice.source != .atum {
-            return choice.model
-        }
-        if let alias = snapshot?.choice.model,
-           let name = ManagedModelLineup.productName(for: alias) {
-            return name
-        }
-        if let model = destination?.recommended.model,
-           let name = ManagedModelLineup.productName(for: model) {
-            return name
-        }
-        return design.text("desktop.atum.settings.model")
+    /// The chip's name and mark facts (`PhoneModelPickerProjection.chip`):
+    /// the picked row's own, else the saved choice's, never a raw id.
+    private var face: PhoneModelPickerProjection.ChipFace? {
+        PhoneModelPickerProjection.chip(picked: picked, destination: destination, offer: snapshot)
     }
 
-    /// The chip's mark, read from the same facts as its name: Atum's crescent
-    /// for a line-up model, the connection's mark for a subscription or own
-    /// key. Nil (no mark) only while nothing names the choice yet.
+    private var label: String { face?.name ?? design.text("desktop.atum.settings.model") }
+
+    /// The same mark the picker row draws, its connection label included.
+    /// Nil (no mark) only while nothing names the choice yet.
     private var markArt: ProviderMark.Art? {
-        let saved = destination?.choice(for: cloudDestination)
-        if let pickedModel {
-            if ManagedModelLineup.productName(for: pickedModel) != nil { return .atum }
-            if let saved, saved.model == pickedModel { return Self.art(saved.source) }
-            return nil
-        }
-        if let saved {
-            if ManagedModelLineup.productName(for: saved.model) != nil { return .atum }
-            if saved.source != .atum { return Self.art(saved.source) }
-        }
-        if let alias = snapshot?.choice.model, ManagedModelLineup.productName(for: alias) != nil {
-            return .atum
-        }
-        if let model = destination?.recommended.model, ManagedModelLineup.productName(for: model) != nil {
-            return .atum
-        }
-        return nil
-    }
-
-    private static func art(_ source: ManagedModelDestinationSource) -> ProviderMark.Art {
-        switch source {
-        case .atum: .atum
-        case .chatGPTPlan: ProviderMark.art(provider: "openai", label: "ChatGPT")
-        case .opencodeGo: ProviderMark.art(provider: "opencode", label: "OpenCode Go")
-        case let .ownKey(provider): ProviderMark.art(provider: provider, label: provider)
-        }
-    }
-
-    private var cloudDestination: ManagedModelDestinationID {
-        try! ManagedModelDestinationID("cloud")
+        face.map { ProviderMark.art(source: $0.source, connectionLabel: $0.connectionLabel) }
     }
 }
 

@@ -137,7 +137,8 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
 
         XCTAssertEqual(rows.first?.source, .ownKey("openrouter"))
         XCTAssertEqual(rows.first?.model, "openai/gpt-6.1-sol")
-        XCTAssertEqual(rows.first?.displayName, "openai/gpt-6.1-sol")
+        // The desktop's words for an id-only entry (`matrixModelDisplayName`), never the raw id.
+        XCTAssertEqual(rows.first?.displayName, "Openai GPT-6.1 Sol")
         XCTAssertEqual(rows.first?.selected, true)
         XCTAssertEqual(rows.first?.selectable, false)
         XCTAssertNil(rows.first?.favoriteID, "no opaque controller route exists to favorite yet")

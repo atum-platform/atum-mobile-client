@@ -364,16 +364,9 @@ struct PhoneModelPickerList: View {
     }
 
     /// The row's mark: Atum's crescent for Atum's line-up, else the
-    /// connection's provider (desktop `PickerRouteMark`).
-    private func markArt(_ row: Row) -> ProviderMark.Art {
-        let provider: String = switch row.source {
-        case .atum: "atum"
-        case .chatGPTPlan: "openai"
-        case .opencodeGo: "opencode"
-        case let .ownKey(id): id
-        }
-        return ProviderMark.art(provider: provider, label: row.connectionLabel ?? label(for: row.source))
-    }
+    /// connection's provider (desktop `PickerRouteMark`), the same one the
+    /// composer chip draws for this row.
+    private func markArt(_ row: Row) -> ProviderMark.Art { ProviderMark.art(for: row) }
 
     private func name(_ row: Row) -> some View {
         Text(verbatim: row.displayName).foregroundStyle(atum.color(.ink, scheme: scheme))

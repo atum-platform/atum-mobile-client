@@ -154,6 +154,67 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
                                                                model: "gpt-6.1", effort: .max))
     }
 
+    // MARK: The composer chip (W4-T)
+
+    /// The chip names a saved ChatGPT-plan model by its display name, not the
+    /// raw id the W4-R captures showed ("gpt-6.1"), before any account read.
+    func testTheChipNamesASavedPlanModelByItsDisplayNameNeverTheRawID() throws {
+        let saved = try snapshot(cloudChoice: ["destination": "cloud", "source": "chatgpt_plan",
+                                               "model": "gpt-6.1", "effort": "medium"])
+        let face = try XCTUnwrap(PhoneModelPickerProjection.chip(picked: nil, destination: saved, offer: nil))
+        XCTAssertEqual(face.name, "GPT-6.1")
+        XCTAssertEqual(face.source, .chatGPTPlan)
+        XCTAssertNil(face.connectionLabel)
+
+        let go = try snapshot(profile: "atum.model-choice/1.4",
+                              cloudChoice: ["destination": "cloud", "source": "opencode_go",
+                                            "model": "glm-5.2", "effort": "high"])
+        XCTAssertEqual(PhoneModelPickerProjection.chip(picked: nil, destination: go, offer: nil)?.name, "GLM 5.2")
+    }
+
+    /// A pick hands the chip its row: the chip says what the list said, and its
+    /// mark is matched from the row's own connection label.
+    func testThePickedRowNamesTheChipWithItsOwnNameAndConnectionLabel() throws {
+        let saved = try snapshot()
+        let status = try account(relay: relay(enabled: true, models: [model("gpt-6.1-mini", "GPT-6.1 mini")]),
+                                 connections: nil)
+        let row = try XCTUnwrap(PhoneModelPickerProjection.subscriptions(saved, destination: cloud,
+                                                                          account: status).first)
+        let face = PhoneModelPickerProjection.chip(picked: row, destination: saved, offer: nil)
+        XCTAssertEqual(face?.name, "GPT-6.1 mini", "the server's own name, as the row")
+        XCTAssertEqual(face?.source, .chatGPTPlan)
+
+        let ownKey = PhoneModelPickerProjection.Row(
+            favoriteID: nil, source: .ownKey("custom"), model: "claude-opus-5-5", displayName: "Claude Opus 5.5",
+            selected: true, selectable: true, connectionID: "conn-1", connectionLabel: "Anthropic")
+        let keyed = PhoneModelPickerProjection.chip(picked: ownKey, destination: saved, offer: nil)
+        XCTAssertEqual(keyed, .init(name: "Claude Opus 5.5", source: .ownKey("custom"), connectionLabel: "Anthropic"))
+
+        let atum = try XCTUnwrap(PhoneModelPickerProjection.conversation(
+            offer: nil, destination: saved, destinationID: cloud).first { $0.model == ManagedModelLineup.hardAlias })
+        XCTAssertEqual(PhoneModelPickerProjection.chip(picked: atum, destination: saved, offer: nil)?.name,
+                       "Nhật Thực", "Atum's line-up keeps its product name on the chip")
+    }
+
+    func testTheChipNamesAtumsLineUpAndNothingBeforeAnyRead() throws {
+        XCTAssertNil(PhoneModelPickerProjection.chip(picked: nil, destination: nil, offer: nil))
+        let face = PhoneModelPickerProjection.chip(picked: nil, destination: try snapshot(), offer: nil)
+        XCTAssertEqual(face, .init(name: "Nguyệt Thực", source: .atum))
+    }
+
+    /// The desktop's `matrixModelDisplayName`, case for case.
+    func testAnIDOnlyModelIsNamedAsTheDesktopNamesIt() {
+        XCTAssertEqual(ModelDisplayName.name(model: "gpt-6.1"), "GPT-6.1")
+        XCTAssertEqual(ModelDisplayName.name(model: "gpt-5.6-luna"), "GPT-5.6 Luna")
+        XCTAssertEqual(ModelDisplayName.name(model: "glm-5.2"), "GLM 5.2")
+        XCTAssertEqual(ModelDisplayName.name(model: "deepseek_v4"), "DeepSeek V4")
+        XCTAssertEqual(ModelDisplayName.name(model: "gpt-mini"), "GPT Mini")
+        XCTAssertEqual(ModelDisplayName.name(model: "gpt-6.1", displayName: "GPT-6.1 (plan)"), "GPT-6.1 (plan)")
+        XCTAssertEqual(ModelDisplayName.name(model: "gpt-6.1", displayName: " gpt-6.1 "), "GPT-6.1",
+                       "a catalog that repeats the id has no display name of its own")
+        XCTAssertEqual(ModelDisplayName.name(model: "--"), "--")
+    }
+
     // MARK: The picker rows
 
     func testARelayedPlanAndAConnectedOpencodeGoAreChoosableAndTheSavedOneIsCurrent() throws {

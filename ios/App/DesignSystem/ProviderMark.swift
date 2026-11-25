@@ -1,3 +1,4 @@
+import AtumNativeAPI
 import SwiftUI
 
 /// A provider's real mark, as the desktop picker draws it
@@ -89,6 +90,24 @@ struct ProviderMark: View {
             return art
         }
         return .monogram(label.isEmpty ? provider : label)
+    }
+
+    /// A picker row's mark (desktop `PickerRouteMark`): Atum's crescent for
+    /// Atum's line-up, else the connection's provider, matched over its id and
+    /// the row's connection label. The list and the composer chip both draw a
+    /// row's mark through here, so the chip never names a connection by
+    /// anything the row does not.
+    static func art(source: ManagedModelDestinationSource, connectionLabel: String?) -> Art {
+        switch source {
+        case .atum: .atum
+        case .chatGPTPlan: art(provider: "openai", label: connectionLabel ?? "ChatGPT")
+        case .opencodeGo: art(provider: "opencode", label: connectionLabel ?? "OpenCode Go")
+        case let .ownKey(provider): art(provider: provider, label: connectionLabel ?? provider)
+        }
+    }
+
+    static func art(for row: PhoneModelPickerProjection.Row) -> Art {
+        art(source: row.source, connectionLabel: row.connectionLabel)
     }
 
     private static let table: [([String], Art)] = [
