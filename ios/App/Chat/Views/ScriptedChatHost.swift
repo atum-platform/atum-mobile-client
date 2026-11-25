@@ -696,8 +696,12 @@ struct ScriptedChatHost: View {
     /// The scripted subscription actions, only with `-AtumScriptedSubscriptions`.
     private var scriptedSubscriptions: AssistantSubscriptionActions? {
         guard let demo = Self.subscriptionDemo else { return nil }
+        let account = Self.subscriptionAccount(demo)
         return AssistantSubscriptionActions(
-            read: { Self.subscriptionAccount(demo) },
+            read: PhoneSubscriptionAccountReads(
+                chatGPT: { account.chatGPT }, openCodeGo: { account.openCodeGo },
+                accountConnections: { account.accountConnections }
+            ),
             save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
                      effort: ManagedModelEffort, _: NativeID,
                      _: ChatGPTTrainingConsent?, isSelectionCurrent: @escaping @MainActor () -> Bool)

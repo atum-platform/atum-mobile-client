@@ -280,7 +280,7 @@ enum AssistantRenameResult {
     case failed
 }
 
-enum AssistantModelLoadResult {
+enum AssistantModelLoadResult: Sendable {
     case value(ManagedModelSnapshot)
     case unavailable
     case failed
@@ -298,14 +298,14 @@ struct AssistantModelActions {
     let save: (ManagedModelSnapshot, String, ManagedModelEffort, NativeID) async -> AssistantModelSaveResult
 }
 
-struct AssistantModelDestinationValue: Equatable {
+struct AssistantModelDestinationValue: Equatable, Sendable {
     var snapshot: ManagedModelDestinationSnapshot
     /// The cloud aliases the provider says are usable now. Mac destinations
     /// use the locally supported Atum lineup and do not inherit this set.
     let cloudEligibleAliases: Set<String>
 }
 
-enum AssistantModelDestinationLoadResult {
+enum AssistantModelDestinationLoadResult: Sendable {
     case value(AssistantModelDestinationValue)
     case unavailable
     case failed

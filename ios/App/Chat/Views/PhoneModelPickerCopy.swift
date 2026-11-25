@@ -76,6 +76,8 @@ struct PhoneModelPickerCopy {
         switch reason {
         case .loading:
             text(.modelsLoading)
+        case .failed:
+            text(.modelsFailed)
         case .notReady:
             text(.modelsUnavailable)
         case .signedOut:

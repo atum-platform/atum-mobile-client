@@ -15,6 +15,7 @@ public enum PhoneModelPickerProjection {
         /// Why a subscription's model is listed but cannot be chosen now.
         public enum Unavailable: Equatable, Sendable {
             case loading
+            case failed
             case notReady
             case signedOut
         }
@@ -228,16 +229,16 @@ public enum PhoneModelPickerProjection {
     ///   as not ready (the desktop keeps a plan the cloud cannot reach yet).
     /// - A saved OpenCode Go model whose connection was disconnected stays
     ///   listed, not choosable, as signed out (the desktop's Reconnect note).
-    /// - A status the phone could not read (`account` nil, or that provider
-    ///   nil) keeps the saved model read-only and current, never a guess.
+    /// - A status the phone could not read keeps the saved model read-only.
+    /// - With no destination snapshot, known catalog rows are read-only.
     ///
     /// A Mac destination has no subscription write on the phone: its saved
     /// choice stays read-only.
-    public static func subscriptions(_ snapshot: ManagedModelDestinationSnapshot,
+    public static func subscriptions(_ snapshot: ManagedModelDestinationSnapshot?,
                                      destination: ManagedModelDestinationID,
                                      account: PhoneSubscriptionAccount? = nil,
-                                     loading: Bool = false) -> [Row] {
-        let saved = snapshot.choices.first { $0.destination == destination && $0.source.isSubscription }
+                                     destinationReady: Bool = true) -> [Row] {
+        let saved = snapshot?.choices.first { $0.destination == destination && $0.source.isSubscription }
         guard destination.isCloud else { return saved.map { [savedRow($0, unavailable: nil)] } ?? [] }
 
         func served(_ source: ManagedModelDestinationSource,
@@ -245,34 +246,43 @@ public enum PhoneModelPickerProjection {
                     refreshing: Bool = false) -> [Row] {
             models.map { model in
                 let current = saved?.source == source && saved?.model == model.id
-                let effort = refreshing ? nil : model.writeEffort
+                let effort = snapshot != nil && destinationReady && !refreshing ? model.writeEffort : nil
                 return Row(favoriteID: nil, source: source, model: model.id,
                            displayName: ModelDisplayName.name(model: model.id, displayName: model.displayName),
                            selected: current, selectable: !current && effort != nil,
                            isSubscription: true, subscriptionEffort: effort,
-                           unavailable: current && refreshing ? .loading : nil)
+                           unavailable: current && refreshing && source == .chatGPTPlan ? .loading : nil)
             }
         }
 
         var rows: [Row] = []
         let savedPlan = saved?.source == .chatGPTPlan ? saved : nil
-        if loading {
+        switch account?.chatGPTState {
+        case .loading?:
             rows = served(.chatGPTPlan, account?.chatGPT?.models ?? [], refreshing: true)
             if let savedPlan, !rows.contains(where: \.selected) {
                 rows.append(savedRow(savedPlan, unavailable: .loading))
             }
-        } else {
-            switch account?.chatGPT?.state {
-            case .enabled?: rows += served(.chatGPTPlan, account?.chatGPT?.models ?? [])
-            case .disabled?: rows += savedPlan.map { [savedRow($0, unavailable: .notReady)] } ?? []
-            case nil: rows += savedPlan.map { [savedRow($0, unavailable: nil)] } ?? []
-            }
+        case .ready?: rows += served(.chatGPTPlan, account?.chatGPT?.models ?? [])
+        case .failed?: rows += savedPlan.map { [savedRow($0, unavailable: .failed)] } ?? []
+        case .unavailable?, nil:
+            let reason: Row.Unavailable? = account?.chatGPT?.state == .disabled ? .notReady : nil
+            rows += savedPlan.map { [savedRow($0, unavailable: reason)] } ?? []
         }
         let savedGo = saved?.source == .opencodeGo ? saved : nil
-        switch account?.openCodeGo?.state {
-        case .connected?: rows += served(.opencodeGo, account?.openCodeGo?.models ?? [])
-        case .disconnected?: rows += savedGo.map { [savedRow($0, unavailable: .signedOut)] } ?? []
-        case nil: rows += savedGo.map { [savedRow($0, unavailable: nil)] } ?? []
+        switch account?.openCodeGoState {
+        case .loading?:
+            let cached = account?.openCodeGo?.state == .connected ? account?.openCodeGo?.models ?? [] : []
+            let refreshing = served(.opencodeGo, cached, refreshing: true)
+            rows += refreshing
+            if let savedGo, !refreshing.contains(where: \.selected) {
+                rows.append(savedRow(savedGo, unavailable: nil))
+            }
+        case .ready?: rows += served(.opencodeGo, account?.openCodeGo?.models ?? [])
+        case .failed?: rows += savedGo.map { [savedRow($0, unavailable: .failed)] } ?? []
+        case .unavailable?, nil:
+            let reason: Row.Unavailable? = account?.openCodeGo?.state == .disconnected ? .signedOut : nil
+            rows += savedGo.map { [savedRow($0, unavailable: reason)] } ?? []
         }
         return rows
     }
@@ -282,7 +292,7 @@ public enum PhoneModelPickerProjection {
     private static func savedRow(_ choice: ManagedModelDestinationChoice, unavailable: Row.Unavailable?) -> Row {
         Row(favoriteID: nil, source: choice.source, model: choice.model,
             displayName: ModelDisplayName.name(model: choice.model),
-            selected: unavailable == nil || unavailable == .loading, selectable: false, isSubscription: true,
+            selected: unavailable != .notReady && unavailable != .signedOut, selectable: false, isSubscription: true,
             unavailable: unavailable)
     }
 
@@ -291,10 +301,9 @@ public enum PhoneModelPickerProjection {
     /// model as choosable on the cloud.
     public static func canSelectSubscription(_ row: Row,
                                              snapshot: ManagedModelDestinationSnapshot,
-                                             account: PhoneSubscriptionAccount?,
-                                             loading: Bool = false) -> ManagedModelEffort? {
+                                             account: PhoneSubscriptionAccount?) -> ManagedModelEffort? {
         let destination = try! ManagedModelDestinationID("cloud")
-        return subscriptions(snapshot, destination: destination, account: account, loading: loading).first {
+        return subscriptions(snapshot, destination: destination, account: account).first {
             $0.source == row.source && $0.model == row.model && $0.selectable && !$0.selected
         }?.subscriptionEffort
     }

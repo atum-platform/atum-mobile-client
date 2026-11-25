@@ -406,7 +406,7 @@ final class LiveAppModel {
         return state
     }
 
-    private func modelPickerScope(client: NativeDomainClient, roomID: String, principal: NativeID) -> () -> Bool {
+    private func modelPickerScope(client: NativeDomainClient, roomID: String, principal: NativeID) -> @MainActor () -> Bool {
         let generation = accountScopeGeneration
         return { [weak self] in
             self?.accountScopeGeneration == generation && self?.domainClient === client
@@ -2088,11 +2088,12 @@ final class LiveAppModel {
                 )
             },
             subscriptions: AssistantSubscriptionActions(
-                read: { [weak self] in
-                    guard current() else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
-                    return await self?.readSubscriptionAccount()
-                        ?? PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)
-                },
+                read: PhoneSubscriptionAccountReads(
+                    chatGPT: { try await client.chatGPTRelayStatus() },
+                    openCodeGo: { try await client.providerConnectionsStatus() },
+                    accountConnections: { try await client.accountConnections() },
+                    isCurrent: current
+                ),
                 save: { [weak self] snapshot, source, model, effort, requestID, consent, isSelectionCurrent in
                     guard isSelectionCurrent() else { return .cancelled }
                     guard let self, current() else { return .refused(nil) }
@@ -2628,20 +2629,6 @@ final class LiveAppModel {
         case .cancelled: return .cancelled
         case .failed: return .refused(nil)
         }
-    }
-
-    /// The account's subscriptions as the cloud can use them: the two owner
-    /// status reads the desktop makes for a cloud assistant's picker. Each one
-    /// that fails is nil, so the picker keeps a saved choice read-only.
-    private func readSubscriptionAccount() async -> PhoneSubscriptionAccount {
-        guard let client = domainClient else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
-        async let relay = try? client.chatGPTRelayStatus()
-        async let connections = try? client.providerConnectionsStatus()
-        async let registry = try? client.accountConnections()
-        let value = PhoneSubscriptionAccount(chatGPT: await relay, openCodeGo: await connections,
-                                             accountConnections: await registry)
-        guard domainClient === client else { return PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil) }
-        return value
     }
 
     /// The connect sheet's follow-up read, bound to the account session that
