@@ -41,7 +41,7 @@ for Atum.
 - Every `ProviderMark(.atum)` call site picks this up with no edits: the
   picker's Atum rows and the "Switch back to Atum's AI" row
   (`PhoneModelPickerList.swift`) at 20 pt, and the composer chip
-  (`Composer.swift`) at 16 pt.
+  (`Composer.swift`) at 16 pt. The chip's `markArt` doc comment no longer says "crescent".
 - `ios/App/Debug/S6SystemGallery.swift` (Debug only): a row of the Atum mark
   at 16 and 20 pt beside a provider mark, so the system gallery captures it.
 - `ios/AppTests/ProviderMarkTests.swift`: pins the 64% mark and the
@@ -75,12 +75,20 @@ the picker and chip marks; replacing `AtumCrescentFace` with the brand tile
 
 ## Verification
 
-- Locked Debug build, AtumMobile scheme, arm64 simulator "Atum iPhone 16e"
-  (CB24FAE2-75F9-4E19-A856-0F5A9F036C0B), derived data on
-  `/Volumes/AtumTestFlight/dd-atum-mark`: see the lane report for the result
-  and log path (`/Volumes/AtumTestFlight/atum-mark/build.log`).
+- Locked Debug build (`lockf` on the heavy-build lock), AtumMobile scheme,
+  arm64 simulator "Atum iPhone 16e" (CB24FAE2-75F9-4E19-A856-0F5A9F036C0B),
+  derived data on `/Volumes/AtumTestFlight/dd-atum-mark`: BUILD SUCCEEDED.
 - `python3 scripts/design_lint.py`: OK.
 - `python3 scripts/public_guard.py --base origin/main --head HEAD`: exit 0.
-- Screenshots of the system gallery's picker-mark row in light and dark,
-  under `/Volumes/AtumTestFlight/atum-mark/`. UI test suites were not run
+- Screenshots: the scripted `chat.empty` chat (`-AtumScripted chat.empty`)
+  in light and dark. The composer chip shows "Nguyệt Thực" with the logo on
+  its dark tile; the eclipse ring and halo render (Canvas radial gradient),
+  and in dark the tile keeps its edge on the dark composer. The system
+  gallery's picker-mark row sits below the first screen, and scrolling needs
+  UI automation, so it was not captured locally; the hosted
+  `S6SystemUITests` gallery captures (`-bottom`) will include it. The picker
+  sheet itself needs a tap, so it was not captured locally either: its rows
+  use the same `ProviderMark(.atum)` at 20 pt. UI test suites were not run
   locally; the hosted shards run them.
+- `ProviderMarkTests.testAtumWearsTheDesktopsInsetBrandMark` was not run
+  locally (the lane builds only); it runs on hosted CI.

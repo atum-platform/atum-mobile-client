@@ -633,7 +633,7 @@ private struct ComposerModelChoiceButton: View {
         return design.text("desktop.atum.settings.model")
     }
 
-    /// The chip's mark, read from the same facts as its name: Atum's crescent
+    /// The chip's mark, read from the same facts as its name: Atum's logo tile
     /// for a line-up model, the connection's mark for a subscription or own
     /// key. Nil (no mark) only while nothing names the choice yet.
     private var markArt: ProviderMark.Art? {
