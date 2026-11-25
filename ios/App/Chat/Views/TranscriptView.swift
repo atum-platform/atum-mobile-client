@@ -12,11 +12,26 @@ struct TranscriptView: View {
     var search: ChatSearchSession? = nil
 
     var body: some View {
+        GeometryReader { viewport in
+            let visible = viewport.frame(in: .global)
+            GeometryReader { surface in
+                let full = surface.frame(in: .global)
+                collection(insets: UIEdgeInsets(top: max(0, visible.minY - full.minY), left: 0,
+                                                 bottom: max(0, full.maxY - visible.maxY), right: 0))
+            }
+            // UIKit can draw under the glass while its content insets keep
+            // reading, following and pagination inside the unobscured area.
+            .ignoresSafeArea(.container, edges: .vertical)
+        }
+    }
+
+    private func collection(insets: UIEdgeInsets) -> some View {
         TranscriptCollection(
             store: store, chrome: chrome, snapshot: store.snapshot,
             request: store.scrollRequest, followState: store.follow.state,
             covered: covered, pagination: store.pagination, generation: store.timelineGeneration,
-            route: store.searchTargetEventID, focus: search?.focus, highlights: search?.highlights ?? [:]
+            route: store.searchTargetEventID, focus: search?.focus, highlights: search?.highlights ?? [:],
+            insets: insets
         )
         .gesture(TranscriptKeyboardDismissal.Tap())
     }
@@ -41,6 +56,7 @@ private struct TranscriptCollection: UIViewRepresentable {
     let route: String?
     let focus: ChatSearchSession.Focus?
     let highlights: [String: ChatSearchHighlight]
+    let insets: UIEdgeInsets
 
     func makeCoordinator() -> TranscriptEngine { TranscriptEngine(store: store, chrome: chrome) }
 
@@ -247,6 +263,8 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         list.alwaysBounceVertical = true
         list.allowsSelection = false
         list.delaysContentTouches = false
+        list.contentInsetAdjustmentBehavior = .never
+        list.automaticallyAdjustsScrollIndicatorInsets = false
         list.keyboardDismissMode = .interactive
         list.bottomEdgeEffect.style = .soft
         list.accessibilityIdentifier = AccessibilityID.transcript
@@ -276,6 +294,10 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         voiceOver = environment.accessibilityVoiceOverEnabled
         list.isScrollEnabled = environment.isScrollEnabled
         list.accessibilityValue = AccessibilityID.transcriptValue(input.followState)
+        if list.contentInset != input.insets {
+            list.contentInset = input.insets
+            list.verticalScrollIndicatorInsets = input.insets
+        }
 
         let sizeChanged = dynamicTypeSize != environment.dynamicTypeSize
         dynamicTypeSize = environment.dynamicTypeSize
@@ -394,6 +416,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
             guard let frame = layout.layoutAttributesForItem(at: path)?.frame,
                   frame.maxY > top, frame.minY < bottom,
                   let id = dataSource.itemIdentifier(for: path),
+                  rows[id]?.item.kind != .loadingEarlier,
                   nextRows?[id] != nil || nextRows == nil else { continue }
             let anchor = Anchor(id: id, viewportY: frame.minY - top)
             if frame.minY >= top - 0.5 { return anchor }
@@ -410,8 +433,9 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private func restore(_ anchor: Anchor) {
         guard let list, let frame = rowFrame(anchor.id) else { return }
         let before = list.contentOffset.y
-        setOffset(frame.minY - anchor.viewportY - list.adjustedContentInset.top)
-        traceHold(anchor, before: before, after: list.contentOffset.y)
+        let desired = frame.minY - anchor.viewportY - list.adjustedContentInset.top
+        let target = setOffset(desired)
+        traceHold(anchor, before: before, desired: desired, target: target, after: list.contentOffset.y)
     }
 
     private func updateSizingPin() {
@@ -454,18 +478,20 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         scheduleReport()
     }
 
-    private func setOffset(_ proposed: CGFloat, animated: Bool = false) {
-        guard let list, list.bounds.height > 0 else { return }
+    @discardableResult
+    private func setOffset(_ proposed: CGFloat, animated: Bool = false) -> CGFloat {
+        guard let list, list.bounds.height > 0 else { return proposed }
         let inset = list.adjustedContentInset
         let bottom = max(-inset.top, list.contentSize.height - list.bounds.height + inset.bottom)
         let y = min(max(-inset.top, proposed), bottom)
-        guard abs(list.contentOffset.y - y) > 0.5 else { return }
+        guard abs(list.contentOffset.y - y) > 0.5 else { return y }
         if animated && !ChatMotion.disabledForUITests {
             motion = .animating
             list.setContentOffset(CGPoint(x: list.contentOffset.x, y: y), animated: true)
         } else {
             list.contentOffset.y = y
         }
+        return y
     }
 
     private func scrollToBottom(animated: Bool) {
@@ -779,14 +805,20 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         #endif
     }
 
-    private func traceHold(_ anchor: Anchor, before: CGFloat, after: CGFloat) {
+    private func traceHold(_ anchor: Anchor, before: CGFloat, desired: CGFloat, target: CGFloat, after: CGFloat) {
         #if DEBUG
-        guard UITestProbe.folder != nil, let list, let frame = rowFrame(anchor.id) else { return }
-        let desired = frame.minY - anchor.viewportY - list.adjustedContentInset.top
-        let shift = desired - before
+        guard UITestProbe.folder != nil else { return }
+        // A disappearing loading row at the start can place the ideal
+        // offset above the content. Record the clamp separately from a
+        // correction UIKit could perform.
+        if abs(target - desired) > 0.5 {
+            UITestProbe.append(String(format: "boundary row=%@ desired=%.1f limit=%.1f", anchor.id, desired, target),
+                               to: "geometry.txt")
+        }
+        let shift = target - before
         guard abs(shift) > 0.5 else { return }
         traceAnchor(anchor)
-        let residual = after - desired
+        let residual = after - target
         UITestProbe.append(String(format: "hold moving=%d shift=%.1f residual=%.1f motion=0.0 kept=%d",
                                   motion == .user ? 1 : 0, shift, residual, abs(residual) <= 4 ? 1 : 0),
                            to: "holds.txt")
