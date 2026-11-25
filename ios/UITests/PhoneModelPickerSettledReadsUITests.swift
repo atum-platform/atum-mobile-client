@@ -61,9 +61,9 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         XCTAssertTrue(element(app, "phone.model.status.chatGPT.retry").waitForExistence(timeout: Self.waitSeconds))
 
         // Claude reports Work models on the Mac: read-only, with the hand-off.
-        let handoff = reveal(app, "phone.model.handoff.claude.open")
+        let handoff = reveal(app, "phone.model.handoff.claude-plan.open")
         XCTAssertTrue(handoff.label.contains(expected.inWork), handoff.label)
-        XCTAssertTrue(element(app, "phone.model.handoff.claude.model.claude-sonnet-5-5").exists)
+        XCTAssertTrue(element(app, "phone.model.handoff.claude-plan.model.claude-sonnet-5-5").exists)
         keepEvidence("work-handoff-\(tag)", of: app)
         handoff.tap()
         let needsMac = element(app, "connections.sheet.needs-mac")

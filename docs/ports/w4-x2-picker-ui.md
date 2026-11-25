@@ -81,3 +81,8 @@ Data:
 
 Verification runs once under the heavy-build lock, using `/Volumes/AtumTestFlight/w4-x2/verify.sh`.
 Results are recorded below once the run finishes.
+
+- r1 (`88aa1d3`): Swift tests passed (exit 0) and `build-for-testing` succeeded. The destination-failure UI
+  test passed in all five runs. The ChatGPT test failed at the hand-off step in each run: it looked up
+  `phone.model.handoff.claude.open`, but the view uses the plan's picker ID (`claude-plan`). The UI
+  hierarchy shows both hand-off groups rendered as designed. This was a test fix only.
