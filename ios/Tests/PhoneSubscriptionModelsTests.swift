@@ -532,6 +532,44 @@ final class PhoneSubscriptionModelsTests: XCTestCase {
 
     @available(macOS 14.0, *)
     @MainActor
+    func testReopeningAfterFailedDestinationRefreshKeepsSuccessfulPlanReadOnlyUntilFreshReadback() async throws {
+        let cached = try snapshot(cloudChoice: ["destination": "cloud", "source": "chatgpt_plan",
+                                                "model": "gpt-6.1", "effort": "medium"])
+        var refresh = PhoneModelPickerDestinationRead(cached: cached, canRead: true)
+        refresh.settle(.failed)
+        XCTAssertEqual(refresh.state, .failed)
+
+        // The composer kept the snapshot. A new picker must settle its own read.
+        var reopened = PhoneModelPickerDestinationRead(cached: refresh.snapshot, canRead: true)
+        XCTAssertEqual(reopened.state, .loading)
+        let accountState = PhoneModelPickerAccount()
+        await accountState.reload(reads(try account(relay: relay(enabled: true), connections: nil)))
+        XCTAssertEqual(accountState.value?.chatGPTState, .ready)
+
+        func rows() -> [PhoneModelPickerProjection.Row] {
+            PhoneModelPickerProjection.subscriptions(reopened.snapshot, destination: cloud,
+                                                      account: accountState.value,
+                                                      destinationReady: reopened.state == .ready)
+        }
+        XCTAssertEqual(rows().map(\.model), ["gpt-6.1", "gpt-6.1-mini"])
+        XCTAssertTrue(rows().allSatisfy { !$0.selected && !$0.selectable && $0.subscriptionEffort == nil })
+        XCTAssertNil(reopened.readySnapshot)
+
+        reopened.settle(.failed)
+        XCTAssertTrue(rows().allSatisfy { !$0.selected && !$0.selectable })
+        XCTAssertNil(reopened.readySnapshot)
+
+        reopened.begin()
+        reopened.settle(.value(cached))  // A fresh reply can return the same revision.
+        XCTAssertEqual(rows().filter(\.selected).map(\.model), ["gpt-6.1"])
+        let alternative = try XCTUnwrap(rows().first { $0.model == "gpt-6.1-mini" })
+        let readback = try XCTUnwrap(reopened.readySnapshot)
+        XCTAssertEqual(PhoneModelPickerProjection.canSelectSubscription(alternative, snapshot: readback,
+                                                                        account: accountState.value), .medium)
+    }
+
+    @available(macOS 14.0, *)
+    @MainActor
     func testPerSourceFailureLeavesOtherSourcesReady() async throws {
         struct ReadError: Error {}
         let status = try account(relay: relay(enabled: true), connections: connections(connected: true))

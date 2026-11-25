@@ -66,6 +66,29 @@ public enum PhoneModelPickerReadResult<Value: Sendable>: Sendable {
     }
 }
 
+/// A destination can name the saved model from cache while a new picker session
+/// waits for its own readback. Only a settled read or write makes it actionable.
+public struct PhoneModelPickerDestinationRead: Sendable {
+    public private(set) var snapshot: ManagedModelDestinationSnapshot?
+    public private(set) var state: PhoneModelPickerReadState
+
+    public init(cached: ManagedModelDestinationSnapshot? = nil, canRead: Bool) {
+        snapshot = cached
+        state = canRead ? .loading : .unavailable
+    }
+
+    public var readySnapshot: ManagedModelDestinationSnapshot? {
+        state == .ready ? snapshot : nil
+    }
+
+    public mutating func begin() { state = .loading }
+
+    public mutating func settle(_ result: PhoneModelPickerReadResult<ManagedModelDestinationSnapshot>) {
+        state = result.state
+        if case let .value(value) = result { snapshot = value }
+    }
+}
+
 /// A monotonic budget shared by the reads started on a single picker load.
 public struct PhoneModelPickerRead: Sendable {
     private let now: @MainActor @Sendable () -> ContinuousClock.Instant

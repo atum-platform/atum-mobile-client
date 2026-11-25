@@ -63,6 +63,21 @@ requires its own plan-scoped agent and Mac grant or renewal through the native W
   treatment and native Work grant or renewal UI are W4-X2 work.
 - Integrated W4-T at `3d3759e` before the locked verification.
 
+## Fix round 3
+
+- Every conversation picker open starts a new destination read alongside the offer and account
+  reads. A cached composer destination can name a row during that read or after a failure. Current
+  and subscription writes require a successful destination read in the open picker and a ready
+  provider catalog. The destination fallback write uses the same readback gate.
+- The selected Atum row and the 1.1 offer must agree before the picker shows thinking levels or
+  sends an effort change. A tap also has to match the model shown when the control was rendered.
+  The offer and destination each have their own revision counter. The picker follows W4-T's
+  `reconciled` rule for completed 1.1 picks, and an offer older than the currently held offer cannot
+  replace it. A destination fallback write triggers a bounded offer refresh so a late offer for the
+  previous model cannot keep thinking unavailable after a matching offer arrives.
+- W4-X2 can keep using the state and row contract in the UI handoff above. The regressions cover
+  reopening after a failed composer refresh and a late contradictory offer after a default pick.
+
 ## Verification
 
 The locked verification runs the subscription, picker state and preferences, projection and sections
