@@ -89,3 +89,13 @@ Results are recorded below once the run finishes.
 - r2 (`3256176`, after merging W4-X1 `3f9bc7c`): Swift tests passed (107, exit 0). The build failed
   (exit 65) because the merge removed `load(force:)`, so the composer's Retry called a signature that no
   longer existed. The fix is to call `load()`, which is now always a full refresh.
+- r3 (`bb58abf`): Swift tests were skipped because the package code is identical to r2, where they passed
+  (107, 0 failures). `build-for-testing` succeeded (exit 0) for arm64 Debug on the iPhone 18 Pro simulator.
+  `PhoneModelPickerSettledReadsUITests` passed both tests in each of light-en, light-vi, dark-en,
+  dark-vi and light-en at AccessibilityXL, 10 of 10 (exit 0). The simulators were shut down afterwards.
+  The locked run's exit code was 0. Logs are in `/Volumes/AtumTestFlight/w4-x2/logs-r3/` and result
+  bundles in `ui-*.xcresult`. Captures are in `/Volumes/AtumTestFlight/w4-x2/ui-scratch/ui-evidence/`:
+  `chatgpt-failed`, `work-handoff`, `work-handoff-sheet`, `destination-failed` and
+  `destination-failed-catalog`, each tagged `w4x2-{en,vi}-{light,dark}` plus `-en-light-ax`.
+- Unlocked checks: `python3 scripts/design_lint.py` reported OK with no new findings (exit 0). The copy-key
+  pin test passed (7 OK). `python3 scripts/public_guard.py --base origin/main --head HEAD` passed (exit 0).
