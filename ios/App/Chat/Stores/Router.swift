@@ -18,6 +18,29 @@ final class Router: RouterOpening {
         case store
         case teamSpace
     }
+    /// Store destinations live on `storePath`, so a shelf route that resets
+    /// the path also leaves them (#101).
+    enum StoreDestination: Hashable, Sendable {
+        case purchased
+    }
+    /// One attempt to reopen the last personal chat (W4-V2). The ID stays
+    /// the same for the intent's retries; the generation is the navigation
+    /// generation the intent started under.
+    struct ChatRestoreIntent: Equatable {
+        let id: UUID
+        let entry: PersonalChatRestoreEntry
+        let generation: UInt64
+    }
+
+    /// How long Chats keeps its root covered while a restore intent can
+    /// still apply. Past it the roster shows and the intent ends, so a late
+    /// restore never replaces a roster the person is reading.
+    static func chatRestoreHold(for entry: PersonalChatRestoreEntry) -> Duration {
+        switch entry {
+        case .launch: .seconds(3)
+        case .chatsTap: .seconds(1)
+        }
+    }
 
     private(set) var selectedTab: Tab = .home
     var homePath = NavigationPath()
@@ -30,6 +53,7 @@ final class Router: RouterOpening {
     var isAccountPresented = false
 
     func presentAccount() {
+        claimNavigation()
         isAccountPresented = true
     }
 
@@ -45,6 +69,12 @@ final class Router: RouterOpening {
     private(set) var latestPushIntentRoomID: String?
     private(set) var pushIntentGeneration: UInt64 = 0
     private(set) var hasActivePresentation = false
+    /// Every navigation Router performs claims the route. A restore intent
+    /// stays current only while this matches the generation it started on.
+    private(set) var navigationGeneration: UInt64 = 0
+    /// The pending restore intent, if any. Chats keeps its root covered while
+    /// it is pending, so a restore that applies lands straight in the chat.
+    private(set) var chatRestoreIntent: ChatRestoreIntent?
 
     /// The room represented by Home's path.  `NavigationPath` is type-erased,
     /// so retain this small, typed mirror to distinguish replacement from a
@@ -75,6 +105,7 @@ final class Router: RouterOpening {
 
     func open(roomId: String) {
         guard !roomId.isEmpty else { return }
+        claimNavigation()
         dismissPresentation()
         hasActivePresentation = false
         selectedTab = .home
@@ -92,6 +123,7 @@ final class Router: RouterOpening {
 
     func openTeamSpace(roomId: String) {
         guard !roomId.isEmpty else { return }
+        claimNavigation()
         dismissPresentation()
         hasActivePresentation = false
         selectedTab = .teamSpace
@@ -107,6 +139,7 @@ final class Router: RouterOpening {
 
     func open(app: String) {
         guard !app.isEmpty else { return }
+        claimNavigation()
         dismissPresentation()
         hasActivePresentation = false
         selectedTab = .home
@@ -118,6 +151,7 @@ final class Router: RouterOpening {
     /// dismissed. A subsequently validated room replaces this root with one
     /// chat push.
     func showHomeRoot() {
+        claimNavigation()
         dismissPresentation()
         hasActivePresentation = false
         selectedTab = .home
@@ -126,6 +160,7 @@ final class Router: RouterOpening {
     }
 
     func showTeamSpaceRoot() {
+        claimNavigation()
         dismissPresentation()
         hasActivePresentation = false
         selectedTab = .teamSpace
@@ -172,6 +207,8 @@ final class Router: RouterOpening {
     /// ready; this method deliberately does not navigate on its own.
     func holdDeepLink(roomID: String, cold: Bool = false) {
         guard !roomID.isEmpty else { return }
+        // A notification beats a restore that has not landed yet.
+        claimNavigation()
         pendingDeepLinkRoomID = roomID
         pendingDeepLinkIsCold = cold
     }
@@ -196,6 +233,7 @@ final class Router: RouterOpening {
     }
 
     func resetAccountScope() {
+        claimNavigation()
         dismissPresentation()
         hasActivePresentation = false
         selectedTab = .home
@@ -214,6 +252,7 @@ final class Router: RouterOpening {
 
     func stageColdRoom(roomID: String) {
         guard !roomID.isEmpty else { return }
+        claimNavigation()
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
@@ -226,6 +265,7 @@ final class Router: RouterOpening {
 
     func stageColdTeamSpaceRoom(roomID: String) {
         guard !roomID.isEmpty else { return }
+        claimNavigation()
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
@@ -243,6 +283,8 @@ final class Router: RouterOpening {
 
     /// Shows the Store at its root, scrolled to `shelf`.
     func openStore(shelf: StoreSectionKind) {
+        claimNavigation()
+        // Resetting the path also leaves Purchased (#101).
         storePath = NavigationPath()
         storeShelfRequest = shelf
         if selectedTab != .store {
@@ -255,10 +297,17 @@ final class Router: RouterOpening {
         storeShelfRequest = nil
     }
 
+    /// Store's Purchased list, pushed on `storePath` (#101).
+    func openStorePurchased() {
+        claimNavigation()
+        storePath.append(StoreDestination.purchased)
+    }
+
     /// Called by the tab shell for both user selection and a selected-tab
     /// re-tap.  A re-tap pops that tab only; Home at root is the roster's
     /// scroll-to-top affordance.
     func select(tab: Tab) {
+        claimNavigation()
         guard selectedTab == tab else {
             selectedTab = tab
             onUserSelectedTab(tab)
@@ -287,15 +336,84 @@ final class Router: RouterOpening {
         }
     }
 
+    // MARK: Last personal chat (W4-V2)
+
+    /// Starts a restore intent with a fresh ID under the current navigation
+    /// generation. The shell starts `.launch` for each account scope and
+    /// `.chatsTap` when a person switches to Chats at its root.
+    @discardableResult
+    func beginChatRestore(_ entry: PersonalChatRestoreEntry, id: UUID = UUID()) -> ChatRestoreIntent {
+        let intent = ChatRestoreIntent(id: id, entry: entry, generation: navigationGeneration)
+        chatRestoreIntent = intent
+        return intent
+    }
+
+    /// Ends the intent without a restore (its hold expired, or nothing can
+    /// apply). A stale ID leaves a newer intent alone.
+    func endChatRestore(_ id: UUID) {
+        guard chatRestoreIntent?.id == id else { return }
+        chatRestoreIntent = nil
+    }
+
+    /// A pending or held notification route wins over a restore.
+    var hasExplicitRoute: Bool { pendingDeepLinkRoomID != nil }
+
+    /// True while `intent` still owns Chats: no newer navigation, Chats is
+    /// selected at its root, and nothing is presented over it.
+    func chatRestoreIsCurrent(_ intent: ChatRestoreIntent) -> Bool {
+        chatRestoreIntent == intent && navigationGeneration == intent.generation
+            && selectedTab == .home && homePath.isEmpty && homeRoomID == nil
+            && !hasActivePresentation && !isAccountPresented && pendingDeepLinkRoomID == nil
+    }
+
+    /// Whether Chats' root is covered while the pending intent decides.
+    var coversChatsRootForRestore: Bool {
+        guard let chatRestoreIntent else { return false }
+        return chatRestoreIsCurrent(chatRestoreIntent)
+    }
+
+    /// Asks `restore` (the model's `restorePersonalChat`) once for the pending
+    /// intent, reusing its ID. A returned room is already open in the model;
+    /// it is published to Chats' path in the same turn, without a push
+    /// animation, and the intent ends. A `nil` keeps the intent pending.
+    @discardableResult
+    func attemptChatRestore(
+        hasExplicitRoute extraExplicitRoute: Bool = false,
+        _ restore: (PersonalChatRestoreEntry, UUID, Bool, @escaping @MainActor () -> Bool) -> String?
+    ) -> String? {
+        guard let intent = chatRestoreIntent, chatRestoreIsCurrent(intent) else { return nil }
+        let stillCurrent: @MainActor () -> Bool = { [weak self] in
+            self?.chatRestoreIsCurrent(intent) ?? false
+        }
+        guard let roomID = restore(intent.entry, intent.id, hasExplicitRoute || extraExplicitRoute, stillCurrent),
+              !roomID.isEmpty, chatRestoreIsCurrent(intent) else { return nil }
+        claimNavigation()
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            homePath = NavigationPath([roomID])
+            homeRoomID = roomID
+        }
+        return roomID
+    }
+
+    /// A newer navigation owns the route; any pending restore intent ends.
+    private func claimNavigation() {
+        navigationGeneration &+= 1
+        chatRestoreIntent = nil
+    }
+
     /// Home's Back action uses this instead of mutating the type-erased path
     /// directly, so the same-room fast path stays correct afterwards.
     func popHomeToRoot() {
+        claimNavigation()
         hasActivePresentation = false
         homePath = NavigationPath()
         homeRoomID = nil
     }
 
     func popTeamSpaceToRoot() {
+        claimNavigation()
         hasActivePresentation = false
         teamSpacePath = NavigationPath()
         teamSpaceRoomID = nil

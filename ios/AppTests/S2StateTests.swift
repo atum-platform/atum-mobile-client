@@ -1,6 +1,7 @@
 @testable import AtumMobile
 import AtumChat
 import AtumNativeAPI
+import SwiftUI
 import UIKit
 import UserNotifications
 import XCTest
@@ -2756,5 +2757,157 @@ extension S2StateTests {
             locale: "en")).rows
         XCTAssertEqual(shown.map(\.id), [notes])
         XCTAssertEqual(shown.first?.title, "You")
+    }
+
+    // MARK: W4-V2 shell route precedence
+
+    @MainActor
+    func testChatRestoreNotificationBeatsPendingLaunchRestore() {
+        let router = Router()
+        router.beginChatRestore(.launch)
+        var calls = 0
+        var firstStillCurrent: (@MainActor () -> Bool)?
+        // The launch retry waits for a claim read.
+        XCTAssertNil(router.attemptChatRestore { _, _, explicit, stillCurrent in
+            calls += 1
+            XCTAssertFalse(explicit)
+            firstStillCurrent = stillCurrent
+            return nil
+        })
+        XCTAssertTrue(router.coversChatsRootForRestore)
+        XCTAssertEqual(firstStillCurrent?(), true)
+
+        router.holdDeepLink(roomID: "!push:atum.test")
+        XCTAssertEqual(firstStillCurrent?(), false)
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertFalse(router.coversChatsRootForRestore)
+
+        // A later claim revision retries: the notification keeps ownership.
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            calls += 1
+            return "!restored:atum.test"
+        })
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(router.validatePendingDeepLink(sessionAndRosterAreReady: true) { _ in .allow })
+        XCTAssertEqual(router.homeRoomID, "!push:atum.test")
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            calls += 1
+            return "!restored:atum.test"
+        })
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(router.homeRoomID, "!push:atum.test")
+        XCTAssertEqual(router.homePath.count, 1)
+    }
+
+    @MainActor
+    func testChatRestorePassesHeldNotificationAsExplicitRoute() {
+        let router = Router()
+        router.holdDeepLink(roomID: "!push:atum.test")
+        let intent = router.beginChatRestore(.chatsTap)
+        XCTAssertTrue(router.hasExplicitRoute)
+        XCTAssertFalse(router.chatRestoreIsCurrent(intent))
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            XCTFail("A held notification wins over a restore")
+            return "!restored:atum.test"
+        })
+        XCTAssertNil(router.homeRoomID)
+    }
+
+    @MainActor
+    func testChatRestoreNewerNavigationBeatsLateRestore() {
+        let router = Router()
+        router.select(tab: .store)
+        router.select(tab: .home)
+        router.beginChatRestore(.chatsTap)
+        var stillCurrent: (@MainActor () -> Bool)?
+        XCTAssertNil(router.attemptChatRestore { entry, _, _, current in
+            XCTAssertEqual(entry, .chatsTap)
+            stillCurrent = current
+            return nil
+        })
+
+        // A manual tap on another chat claims navigation first.
+        router.showHomeRoot()
+        router.open(roomId: "!tapped:atum.test")
+        XCTAssertEqual(stillCurrent?(), false)
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            XCTFail("A superseded intent must not restore")
+            return "!restored:atum.test"
+        })
+        XCTAssertEqual(router.homeRoomID, "!tapped:atum.test")
+
+        // A restore whose model reply lands after a tab change is discarded.
+        router.popHomeToRoot()
+        router.beginChatRestore(.chatsTap)
+        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
+            router.select(tab: .drive)
+            return "!restored:atum.test"
+        })
+        XCTAssertNil(router.homeRoomID)
+        XCTAssertTrue(router.homePath.isEmpty)
+        XCTAssertEqual(router.selectedTab, .drive)
+    }
+
+    @MainActor
+    func testChatRestoreReusesIntentIDAndLandsLikeATappedChat() {
+        let router = Router()
+        let intent = router.beginChatRestore(.launch)
+        var seen = [UUID]()
+        for _ in 0..<2 {
+            XCTAssertNil(router.attemptChatRestore { _, id, _, _ in seen.append(id); return nil })
+        }
+        XCTAssertEqual(router.attemptChatRestore { _, id, _, _ in
+            seen.append(id)
+            return "!last:atum.test"
+        }, "!last:atum.test")
+        XCTAssertEqual(seen, [intent.id, intent.id, intent.id])
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertEqual(router.homeRoomID, "!last:atum.test")
+        XCTAssertEqual(router.homePath.count, 1)
+        XCTAssertEqual(router.pushScreen, .chat(roomID: "!last:atum.test"))
+        XCTAssertEqual(router.activeRoomID, "!last:atum.test")
+
+        // Back returns to the roster, as from a tapped chat.
+        router.homePath = NavigationPath()
+        router.didPopHomeRoom()
+        XCTAssertNil(router.homeRoomID)
+        XCTAssertEqual(router.pushScreen, .homeRoot)
+
+        // A new Chats tap is a new intent with a new ID.
+        let next = router.beginChatRestore(.chatsTap)
+        XCTAssertNotEqual(next.id, intent.id)
+        router.endChatRestore(intent.id)
+        XCTAssertEqual(router.chatRestoreIntent, next)
+        router.endChatRestore(next.id)
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertFalse(router.coversChatsRootForRestore)
+    }
+
+    @MainActor
+    func testStoreShelfLinkLeavesPurchased() {
+        let router = Router()
+        router.select(tab: .store)
+        router.openStorePurchased()
+        XCTAssertEqual(router.storePath.count, 1)
+
+        // Purchased stays behind the Chats tab; an assistant card's shelf link
+        // resets the Store path, Purchased included (#101).
+        router.select(tab: .home)
+        router.open(roomId: "!assistant:atum.test")
+        router.openStore(shelf: .pets)
+        XCTAssertEqual(router.selectedTab, .store)
+        XCTAssertTrue(router.storePath.isEmpty)
+        XCTAssertEqual(router.storeShelfRequest, .pets)
+
+        router.storeShelfShown()
+        router.openStorePurchased()
+        router.openStore(shelf: .skills)
+        XCTAssertTrue(router.storePath.isEmpty)
+        XCTAssertEqual(router.storeShelfRequest, .skills)
+
+        // A Store re-tap pops Purchased too.
+        router.openStorePurchased()
+        router.select(tab: .store)
+        XCTAssertTrue(router.storePath.isEmpty)
     }
 }

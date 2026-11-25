@@ -121,6 +121,9 @@ struct PersonalChatClaimChecks {
 
     func claim(_ roomID: String) -> PersonalChatCompanyClaim? { claims[roomID] }
 
+    /// A state read for this intent has not answered yet.
+    var isChecking: Bool { claims.values.contains(.checking) }
+
     mutating func start(_ roomID: String) -> UUID {
         claims[roomID] = .checking
         return scopeID

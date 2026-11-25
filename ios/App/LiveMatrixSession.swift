@@ -815,6 +815,8 @@ final class LiveMatrixSession {
         personalChatClaimChecks.claim(roomID)
     }
 
+    var isCheckingPersonalChatCompanyClaim: Bool { personalChatClaimChecks.isChecking }
+
     func checkPersonalChatCompanyClaim(_ roomID: String, stillCurrent: @escaping @MainActor () -> Bool) {
         let scopeID = personalChatClaimChecks.start(roomID)
         let epoch = sessionEpoch

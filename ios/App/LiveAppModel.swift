@@ -7136,6 +7136,25 @@ final class LiveAppModel {
     var personalChatRestoreRevision: UInt64 { liveMatrix?.personalChatClaimRevision ?? 0 }
     var hasPersonalChatAgentRoster: Bool { agentsRead.value != nil }
 
+    /// True while an input the restore policy reads is still arriving: the
+    /// first room publication, the agent roster, workspace classification or
+    /// a claim read. The shell keeps Chats' root covered only while this
+    /// holds, so a launch with nothing to restore shows the roster at once.
+    var personalChatRestoreIsWaiting: Bool {
+        guard case .signedIn = stage, !signOutInProgress else { return false }
+        guard let liveMatrix else { return true }
+        guard liveMatrix.error == nil else { return false }
+        guard liveMatrix.isReady, liveMatrix.hasCompletedInitialSync, liveMatrix.hasPublishedRooms,
+              !liveMatrix.isLoadingRooms else { return true }
+        if agentsRead.value == nil, agentsRead.condition == .loading { return true }
+        switch companyWorkspace.phase {
+        case .hidden, .unavailable: break
+        case .idle, .probing, .ready: if !companyWorkspace.classificationComplete { return true }
+        }
+        _ = personalChatRestoreRevision
+        return liveMatrix.isCheckingPersonalChatCompanyClaim
+    }
+
     /// The shell calls this on launch or on an explicit Chats tap. It owns the
     /// navigation generation and supplies a unique ID for each restore intent.
     /// Opening and returning the canonical room ID happen without suspension.

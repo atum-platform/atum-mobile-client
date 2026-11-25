@@ -56,6 +56,15 @@ enum RoomPushDecision {
     }
 }
 
+/// The inputs a pending last-chat restore reads; a change retries it.
+private struct ChatRestoreSignals: Equatable {
+    let intentID: UUID?
+    let claimRevision: UInt64
+    let hasAgentRoster: Bool
+    let classificationRevision: UInt64
+    let waiting: Bool
+}
+
 struct AppRoot: View {
     @State private var model = LiveAppModel()
     @State private var reporting = LiveReporting.shared
@@ -102,7 +111,16 @@ struct AppRoot: View {
                 if router.pendingDeepLinkIsCold {
                     S6BootWait(design: design)
                 } else {
+                    // W4-V2: launch keeps the boot screen up while the last
+                    // chat can still be restored, so the person lands
+                    // straight in it instead of seeing the roster first.
+                    let coversLaunch = router.chatRestoreIntent?.entry == .launch
+                        && router.coversChatsRootForRestore
                     product(account)
+                        .accessibilityHidden(coversLaunch)
+                        .overlay {
+                            if coversLaunch { S6BootWait(design: design) }
+                        }
                 }
             case .recoveryRequired, .unavailable:
                 // W4 E3 (coordinator decisions 5 and 11): a launch that could
@@ -234,6 +252,8 @@ struct AppRoot: View {
             guard appliedAccountScopeGeneration != model.accountScopeGeneration else { return }
             appliedAccountScopeGeneration = model.accountScopeGeneration
             router.resetAccountScope()
+            // Each account scope (launch, a new sign-in) reopens its last chat.
+            router.beginChatRestore(.launch)
         }
         // A listing hire belongs to the account it was picked under: a new
         // (or no) account lets it go, mid-hire included.
@@ -316,6 +336,8 @@ struct AppRoot: View {
                 titles: model.assistantTitles
             )
         )
+        let coversChatsTap = router.chatRestoreIntent?.entry == .chatsTap
+            && router.coversChatsRootForRestore
         return RootTabs(
             router: router,
             design: design,
@@ -337,6 +359,12 @@ struct AppRoot: View {
                                router.presentationChanged(active)
                            }
                        })
+                // A Chats tap whose restore is still deciding shows the
+                // ground, not a roster the chat would replace a moment later.
+                .accessibilityHidden(coversChatsTap)
+                .overlay {
+                    if coversChatsTap { design.color("ground", scheme: scheme).ignoresSafeArea() }
+                }
                 .onAppear {
                     model.recordChatListSnapshot(accountID: account.matrixUserID,
                                                  rows: home.rows)
@@ -372,7 +400,8 @@ struct AppRoot: View {
                 },
                 commerce: model.storeCommerce,
                 shelfRequest: router.storeShelfRequest,
-                onShelfShown: { router.storeShelfShown() }
+                onShelfShown: { router.storeShelfShown() },
+                onOpenPurchased: { router.openStorePurchased() }
             )
         } teamSpace: {
             TeamSpaceScreen(
@@ -539,6 +568,22 @@ struct AppRoot: View {
         .task(id: rosterSnapshot) {
             rosterStore.apply(rosterSnapshot)
             validatePendingPush()
+            attemptChatRestore()
+        }
+        // A pending restore retries under the same intent ID whenever an
+        // input it reads changes.
+        .onChange(of: ChatRestoreSignals(
+            intentID: router.chatRestoreIntent?.id,
+            claimRevision: model.personalChatRestoreRevision,
+            hasAgentRoster: model.hasPersonalChatAgentRoster,
+            classificationRevision: model.companyWorkspace.classificationRevision,
+            waiting: model.personalChatRestoreIsWaiting
+        ), initial: true) { _, _ in attemptChatRestore() }
+        // The hold is bounded: past it the roster shows and the intent ends.
+        .task(id: router.chatRestoreIntent?.id) {
+            guard let intent = router.chatRestoreIntent else { return }
+            do { try await Task.sleep(for: Router.chatRestoreHold(for: intent.entry)) } catch { return }
+            router.endChatRestore(intent.id)
         }
         // Communication notifications: what only the app knows about a room
         // (assistant/app faces, Team Space names and logos) for the extension.
@@ -566,6 +611,7 @@ struct AppRoot: View {
                     .filter(\.claimsConversationType).map(\.id))
             )
             validatePendingPush()
+            attemptChatRestore()
         }
         .onChange(of: router.homePath.count) { _, count in
             if count == 0 { router.didPopHomeRoom() }
@@ -1285,7 +1331,14 @@ struct AppRoot: View {
             case .teamSpace: router.teamSpaceRoomID
             case .drive, .store: nil
             }
-            if let retainedRoomID { requestRoomOpen(retainedRoomID) }
+            if let retainedRoomID {
+                requestRoomOpen(retainedRoomID)
+            } else if tab == .home {
+                // An explicit Chats tap at its root reopens the last chat
+                // (desktop #121). Each tap is a new intent.
+                router.beginChatRestore(.chatsTap)
+                attemptChatRestore()
+            }
         }
         router.dismissPresentation = {
             dismissChatPresentationRequest &+= 1
@@ -1317,6 +1370,24 @@ struct AppRoot: View {
                       let app = model.appBotPresentation(slug: slug) {
                 roomlessAppFallback = AppBotContinueRequest(app: app, kind: .setup)
             }
+        }
+    }
+
+    /// One try of the pending restore intent. The model opens the room and
+    /// Router publishes it to Chats' path in the same turn. When nothing can
+    /// apply any more, the intent ends and the roster shows.
+    private func attemptChatRestore() {
+        let roomID = router.attemptChatRestore(
+            hasExplicitRoute: model.appOnboardingReadyRoomID != nil
+        ) { entry, intentID, hasExplicitRoute, stillCurrent in
+            model.restorePersonalChat(for: entry, intentID: intentID,
+                                      hasExplicitRoute: hasExplicitRoute, stillCurrent: stillCurrent)
+        }
+        if let roomID {
+            Task { await LivePushRouting.removeDeliveredNotifications(for: roomID) }
+        } else if let intent = router.chatRestoreIntent, router.chatRestoreIsCurrent(intent),
+                  case .signedIn = model.stage, !model.personalChatRestoreIsWaiting {
+            router.endChatRestore(intent.id)
         }
     }
 
