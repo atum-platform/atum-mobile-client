@@ -337,6 +337,33 @@ final class StoreCommercePresentationTests: XCTestCase {
         XCTAssertEqual(api.acquireCalls, 0)
     }
 
+    @MainActor func testNonBetaSkillStatusRetiresAReversedPurchaseKey() async throws {
+        let journal = ScriptedStoreJournal()
+        let api = ScriptedStoreAPI(mode: .acquire)
+        let item = try await api.storeCatalog().items.first { $0.itemID == "skill/nova" }
+        let attempt = try StorePurchaseAttempt(item: XCTUnwrap(item), assistantID: ScriptedStoreAPI.mai,
+            idempotencyKey: NativeID("10000000-0000-4000-8000-000000000005"))
+        try journal.save(attempt, account: ScriptedStoreAPI.account)
+        let commerce = LiveStoreCommerce(journal: journal)
+        var beta = false
+        commerce.configure(account: ScriptedStoreAPI.account, client: api, targets: api.targets) { beta }
+        await commerce.refresh()
+        XCTAssertEqual(commerce.unresolvedAttempts, [attempt])
+
+        api.seedReversedSkillPurchase(attempt)
+        await commerce.retry(attempt)
+
+        let purchase = try XCTUnwrap(commerce.purchases.first)
+        XCTAssertEqual(purchase.state, .reversed)
+        XCTAssertEqual(commerce.state, .result(.purchased(purchase, nil)))
+        XCTAssertTrue(commerce.savedAttempts.isEmpty)
+        XCTAssertTrue(try journal.attempts(account: ScriptedStoreAPI.account).isEmpty)
+        XCTAssertEqual(api.acquireCalls, 0)
+
+        beta = true
+        XCTAssertNoThrow(try commerce.review(itemID: attempt.itemID, assistant: attempt.assistantID))
+    }
+
     @MainActor func testStoreRowOwnershipUsesEntitlementsOnlyWhenCatalogProjectionIsAbsent() async throws {
         let api = ScriptedStoreAPI(mode: .owned)
         let commerce = LiveStoreCommerce(journal: ScriptedStoreJournal())

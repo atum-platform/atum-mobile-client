@@ -149,6 +149,12 @@ import SwiftUI
                                        assistant: assistant.rawValue, amount: 24_000_000, state: "delivery_pending"))
     }
 
+    func seedReversedSkillPurchase(_ attempt: StorePurchaseAttempt) {
+        purchases.append(Self.purchase(id: "50000000-0000-4000-8000-000000000004", item: attempt.itemID,
+                                       offer: attempt.offerID.rawValue, key: attempt.idempotencyKey.rawValue,
+                                       assistant: attempt.assistantID?.rawValue, amount: 24_000_000, state: "reversed"))
+    }
+
     func cancelStoreSubscription(_ id: NativeID) async throws -> StoreEntitlement {
         try await Task.sleep(for: .milliseconds(300))
         guard let index = entitlements.firstIndex(where: { $0["id"] as? String == id.rawValue }),
@@ -362,7 +368,8 @@ struct StoreCommerceScriptedHost: View {
                 refreshWallet: { await commerce.refresh() })
             purchases.bind(accountID: ScriptedStoreAPI.account, api: ScriptedApplePurchasesAPI(store: value))
             topUp = ProtonTopUpContext(purchases: purchases,
-                                       balance: { commerce.wallet?.balances.available })
+                                       balance: { commerce.wallet?.balances.available },
+                                       betaFeatures: { [flag = $betaFeatures] in flag.wrappedValue })
         }
         .task {
             if await AtumDebugLaunch.waitForBetaRevocation() { betaFeatures = false }

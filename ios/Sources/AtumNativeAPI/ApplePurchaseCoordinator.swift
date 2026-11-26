@@ -176,13 +176,14 @@ public extension ApplePurchaseStore {
         }
     }
 
-    public func purchase(_ id: String) async {
+    public func purchase(_ id: String, dispatchGate: NativeDispatchGate? = nil) async {
         guard canPurchase, products.contains(where: { $0.id == id }), let api, let accountID,
-              let environment = acceptedEnvironment else { return }
+              let environment = acceptedEnvironment, dispatchGate?() != false else { return }
         let scope = generation
         purchaseInProgress = true
         awaitingPurchaseProductID = id
         var awaitingApproval = false
+        var dispatched = false
         defer {
             if generation == scope {
                 if !awaitingApproval { awaitingPurchaseProductID = nil }
@@ -198,11 +199,17 @@ public extension ApplePurchaseStore {
                 token = try await api.appleAccountToken().appAccountToken
             }
             guard isCurrent(scope) else { return }
+            // The origin's eligibility may change during the account-token read.
+            guard dispatchGate?() != false else {
+                clearBlockedPurchase(id)
+                return
+            }
             guard checkoutOpen, acceptedEnvironment == environment, deviceEnvironment == environment else {
                 purchaseStates[id] = .unavailable
                 return
             }
             tokens[key] = token
+            dispatched = true
             let result = try await store.purchase(id: id, accountToken: token)
             guard isCurrent(scope) else { return }
             switch result {
@@ -223,8 +230,17 @@ public extension ApplePurchaseStore {
             }
         } catch {
             guard isCurrent(scope) else { return }
+            if !dispatched, dispatchGate?() == false {
+                clearBlockedPurchase(id)
+                return
+            }
             state = .unavailable; purchaseStates[id] = .unavailable
         }
+    }
+
+    private func clearBlockedPurchase(_ id: String) {
+        if purchaseStates[id] == .purchasing { purchaseStates[id] = nil }
+        if state == .purchasing { state = .ready }
     }
 
     /// Forget outcomes the person has already seen, so the next pack sheet

@@ -87,9 +87,8 @@ import Observation
                           try await client.storePurchases(), try await client.wallet())
             guard generation == token else { return }
             catalog = values.0.items; entitlements = values.1.entitlements
-            purchases = values.2.purchases; wallet = values.3
-            try? acquisition?.retireReversed(by: purchases)
-            if let account { loadSavedAttempts(account: account) }
+            applyPurchaseHistory(values.2.purchases)
+            wallet = values.3
             var eligible = Set<NativeID>()
             for target in targets {
                 // An own-key/subscription destination must not buy protected
@@ -112,6 +111,12 @@ import Observation
             default: readState = .unavailable
             }
         }
+    }
+
+    private func applyPurchaseHistory(_ history: [StorePurchase]) {
+        purchases = history
+        try? acquisition?.retireReversed(by: history)
+        if let account { loadSavedAttempts(account: account) }
     }
 
     private func loadSavedAttempts(account: String) {
@@ -219,8 +224,8 @@ import Observation
             let history = try await client.storePurchases()
             let inventory = try await client.storeEntitlements()
             guard generation == token else { return }
-            purchases = history.purchases
             entitlements = inventory.entitlements
+            applyPurchaseHistory(history.purchases)
             let entitlement = entitlements.first {
                 $0.itemID == attempt.itemID && $0.assistantID == attempt.assistantID && $0.isOwned
             }

@@ -147,10 +147,14 @@ enum StoreBetaGate {
     /// Desktop `.atum-store-card--soon`: the art and the price button at 55%.
     static let dimmedOpacity = 0.55
 
+    static func requiresBeta(_ kind: LiveProductStoreItemKind) -> Bool {
+        kind == .agent || kind == .skill
+    }
+
     /// `owned` is the account's ownership for a row (a skill on any of its
     /// assistants) and the chosen assistant's in a sheet.
     static func comingSoon(_ kind: LiveProductStoreItemKind, betaFeatures: Bool, owned: Bool) -> Bool {
-        !betaFeatures && !owned && (kind == .agent || kind == .skill)
+        !betaFeatures && !owned && requiresBeta(kind)
     }
 
     /// A row's trailing value: only a price gives way to "Coming soon". Open

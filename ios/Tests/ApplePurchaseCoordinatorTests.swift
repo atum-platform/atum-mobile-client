@@ -486,6 +486,50 @@ import XCTest
         c.bind(accountID: nil, api: nil)
     }
 
+    func testBetaRevokedWhileTokenLoadsCannotReachStorePurchase() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        let c = await make(store, api)
+        var beta = true
+        api.blockToken = true
+        let purchase = Task { await c.purchase(id, dispatchGate: { beta }) }
+        await settled { api.tokenBlocked != nil }
+        beta = false
+        c.clearSettledOutcomes() // The originating sheet closed on revocation.
+        api.tokenBlocked?.resume(); api.tokenBlocked = nil
+        await purchase.value
+
+        XCTAssertEqual(store.purchaseCalls, 0)
+        XCTAssertEqual(api.posts, 0)
+        XCTAssertEqual(c.state, .ready)
+        XCTAssertEqual(c.purchaseState(for: id), .idle)
+        XCTAssertTrue(c.canPurchase)
+
+        api.blockToken = false
+        await c.purchase(id)
+        XCTAssertEqual(store.purchaseCalls, 1, "generic top-up remains available while beta is off")
+        c.bind(accountID: nil, api: nil)
+    }
+
+    func testBetaRevokedAfterStorePurchaseStartsStillSettlesVerifiedTransaction() async {
+        let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
+        let c = await make(store, api)
+        var beta = true
+        var finishes = 0
+        store.blockPurchase = true
+        let purchase = Task { await c.purchase(id, dispatchGate: { beta }) }
+        await settled { store.purchaseBlocked != nil }
+        beta = false
+        store.purchaseBlocked?.resume(returning: .verified(transaction { finishes += 1 }))
+        store.purchaseBlocked = nil
+        await purchase.value
+        await settled { finishes == 1 && c.state == .succeeded }
+
+        XCTAssertEqual(store.purchaseCalls, 1)
+        XCTAssertEqual(api.posts, 1)
+        XCTAssertTrue(c.transactionOutcomes.values.contains(where: \.isCredited))
+        c.bind(accountID: nil, api: nil)
+    }
+
     func testPostPurchaseEnvironmentCheckStillRejectsWrongTransaction() async {
         let store = PurchaseStoreStub(); let api = PurchaseAPIStub()
         var finishes = 0

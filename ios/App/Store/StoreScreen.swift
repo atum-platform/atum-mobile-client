@@ -85,6 +85,7 @@ struct StoreScreen: View {
         }) { item in
             StoreItemSheet(design: design, item: item, commerce: commerce,
                            openRoom: onOpenRoom, openPurchased: { opensPurchasedAfterDetail = true })
+                .environment(\.protonTopUpRequiresBeta, StoreBetaGate.requiresBeta(item.kind))
         }
         .navigationDestination(isPresented: $showsPurchased) { purchasedDestination }
         .navigationDestination(for: Router.StoreDestination.self) { destination in

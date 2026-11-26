@@ -324,7 +324,8 @@ final class LiveAppModel {
     /// `applePurchases`, with the fresh spendable balance.
     @ObservationIgnored lazy var protonTopUp = ProtonTopUpContext(
         purchases: applePurchases,
-        balance: { [weak self] in self?.freshWalletAvailable }
+        balance: { [weak self] in self?.freshWalletAvailable },
+        betaFeatures: { [weak self] in self?.betaFeatures == true }
     )
 
     /// The ledger balance for purchase authorization, from a fresh wallet read only.

@@ -64,12 +64,17 @@ An open skill review or Researcher confirmation updates when the flag changes.
 When access is revoked, Coming soon and Back replace Confirm, Retry and the
 item-specific top-up where applicable. An in-flight request, a purchase outcome,
 or a hire setting up its chat still shows its current status.
+If beta access changes while the Apple account token is loading, a top-up
+opened from a skill or hire returns to the Coming soon flow without starting
+a StoreKit purchase. StoreKit transactions already underway still settle, and
+general Proton top-ups and pet top-ups stay available under the usual checkout rules.
 
 Store Check status from Detail, Review and Purchased shares one recovery path.
 For a skill while beta is off it reads purchase history and entitlements. A
 journal entry may have been written before any request reached the server. A
 missing server purchase keeps its original key available for recovery when
-beta access returns.
+beta access returns. A matching reversed purchase retires the saved key as a
+full refresh would, allowing a fresh purchase when beta access returns.
 
 ## Wiring
 
@@ -82,6 +87,10 @@ beta access returns.
   saving a hire intent and in its existing account and checkout dispatch gate.
   The transport evaluates both gates just before the first send and any
   replay after a 401.
+- The Store item and Researcher entry scope their top-up sheet to beta access.
+  The pack Buy action passes the live account flag from `ProtonTopUpContext`
+  to `ApplePurchaseCoordinator`, which checks it again after resolving the
+  Apple account token and before calling StoreKit.
 - The scripted Debug hosts use `AtumDebugLaunch.scriptedBetaFeatures`. It is on
   by default, so existing walks are unchanged. `-AtumScriptedBetaFeatures NO`
   turns it off. The revocation walks signal the running host after an enabled
@@ -176,6 +185,21 @@ shelf already uses.
   full run and the focused rerun, all eight UI tests passed. Results and
   captures are under `dd-w4-z2/r2/run-2` and `dd-w4-z2/r2/run-3`. Both
   batches used the same iPhone 16e simulator and shut it down at the end.
+
+### Round r3 verification
+
+- `ApplePurchaseCoordinatorTests` holds the account-token request open across
+  beta revocation and sheet dismissal. It checks for zero StoreKit calls,
+  cleared progress and a subsequent generic top-up. A second test revokes
+  beta after StoreKit starts and checks that the verified transaction settles.
+- `StoreCommercePresentationTests` gives beta-off Check status a reversal
+  matching the saved attempt. It checks that no acquisition request is sent,
+  the saved key is retired and the item can be quoted when beta returns.
+- The focused Swift package suites passed 77 tests. The locked Debug
+  build-for-testing passed, and the iPhone 16e simulator on iOS 27 passed all
+  53 AppTests across `ListingHireStateTests`, `ProtonAmountFormatTests`, and
+  `StoreCommercePresentationTests`. Design lint, its unit tests, and the
+  public guard passed.
 
 ## Decisions
 

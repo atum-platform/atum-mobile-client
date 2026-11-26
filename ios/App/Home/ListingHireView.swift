@@ -234,6 +234,7 @@ struct ListingHireView: View {
                 if checkout == .open {
                     ProtonTopUpButton(design: design, style: .atumPrimary, fullWidth: true,
                                       onFinished: { flow.toppedUp() })
+                        .environment(\.protonTopUpRequiresBeta, true)
                 }
                 backButton
             case .failed(nil):

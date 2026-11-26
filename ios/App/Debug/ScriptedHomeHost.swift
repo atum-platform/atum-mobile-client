@@ -329,7 +329,8 @@ struct ScriptedHomeHost: View {
                 store: ScriptedApplePurchaseStore(), environment: .production, refreshWallet: {})
             let store = ScriptedStoreAPI(mode: .acquire)
             purchases.bind(accountID: ScriptedStoreAPI.account, api: ScriptedApplePurchasesAPI(store: store))
-            topUp = ProtonTopUpContext(purchases: purchases, balance: { nil })
+            topUp = ProtonTopUpContext(purchases: purchases, balance: { nil },
+                                       betaFeatures: { [flag = $betaFeatures] in flag.wrappedValue })
             if await AtumDebugLaunch.waitForBetaRevocation() { betaFeatures = false }
         }
         // F2: the live shell's pop hooks (`AppRoot`), so a Back or swipe-back

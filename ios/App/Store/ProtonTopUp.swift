@@ -13,15 +13,19 @@ import SwiftUI
     /// The account's fresh spendable balance in micro-Protons, or nil when no
     /// fresh read exists. Read inside `body`, so Observation tracks it.
     let balance: @MainActor () -> Int64?
+    let betaFeatures: NativeDispatchGate
 
-    init(purchases: ApplePurchaseCoordinator, balance: @escaping @MainActor () -> Int64?) {
+    init(purchases: ApplePurchaseCoordinator, balance: @escaping @MainActor () -> Int64?,
+         betaFeatures: @escaping NativeDispatchGate) {
         self.purchases = purchases
         self.balance = balance
+        self.betaFeatures = betaFeatures
     }
 }
 
 extension EnvironmentValues {
     @Entry var protonTopUp: ProtonTopUpContext? = nil
+    @Entry var protonTopUpRequiresBeta = false
 }
 
 /// Hosts the pack sheet on a view that outlives the entry that opened it.
@@ -231,6 +235,7 @@ struct ProtonTopUpSheet: View {
 
     @ObservedObject private var purchases: ApplePurchaseCoordinator
     @State private var restoring = false
+    @Environment(\.protonTopUpRequiresBeta) private var requiresBeta
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
 
@@ -374,7 +379,8 @@ struct ProtonTopUpSheet: View {
                 .accessibilityIdentifier("topup.pack.\(row.id)")
                 Spacer(minLength: kit.space(.s3))
                 Button {
-                    Task { await purchases.purchase(row.id) }
+                    let dispatchGate = requiresBeta ? context.betaFeatures : nil
+                    Task { await purchases.purchase(row.id, dispatchGate: dispatchGate) }
                 } label: {
                     ZStack {
                         Text(copy(ProtonTopUpCopyKey.buy)).opacity(working ? 0 : 1)
