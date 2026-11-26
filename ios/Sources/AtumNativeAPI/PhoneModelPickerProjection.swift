@@ -3,6 +3,15 @@ import Foundation
 /// Pure phone presentation derived only from decoded model-choice contracts.
 /// It creates no provider account or remote route identity.
 public enum PhoneModelPickerProjection {
+    public struct WorkPlanHandoff: Equatable, Sendable, Identifiable {
+        public enum Reason: Equatable, Sendable { case openOnMac }
+
+        public let plan: AccountPlan
+        public let models: [AccountConnectionModel]
+        public var id: AccountPlan { plan }
+        public var reason: Reason { .openOnMac }
+    }
+
     public struct Row: Equatable, Sendable {
         /// A small status word drawn beside a model's name. Only data a
         /// phone-visible contract carries is ever drawn: Atum names its default
@@ -15,6 +24,7 @@ public enum PhoneModelPickerProjection {
         /// Why a subscription's model is listed but cannot be chosen now.
         public enum Unavailable: Equatable, Sendable {
             case loading
+            case failed
             case notReady
             case signedOut
         }
@@ -98,6 +108,17 @@ public enum PhoneModelPickerProjection {
             return connectionID + "." + model.replacingOccurrences(of: "/", with: "_")
         }
 
+        /// The same row drawn read-only: not current, not choosable and with no
+        /// Default word, as while the destination readback is not ready (W4-X2).
+        public func readOnly() -> Row {
+            Row(favoriteID: favoriteID, source: source, model: model,
+                displayName: displayName, selected: false, selectable: false,
+                badges: [], connectionID: explicitConnectionID,
+                connectionLabel: connectionLabel, tagline: tagline, announced: announced,
+                isSubscription: isSubscription, subscriptionEffort: nil,
+                unavailable: unavailable)
+        }
+
         /// The same row with the current mark moved by a pick in flight.
         public func selecting(_ selected: Bool) -> Row {
             Row(favoriteID: favoriteID, source: source, model: model,
@@ -157,14 +178,19 @@ public enum PhoneModelPickerProjection {
     /// One 1.3 destination. Cloud remains Atum-only and uses the separately
     /// decoded 1.1 eligibility set; Mac behavior retains truthful external
     /// readback while exposing only Atum aliases for selection.
+    /// `destinationReady` false (a readback still loading or failed, so the
+    /// snapshot may be stale) draws every row read-only and unchecked (W4-X2).
     public static func destination(_ snapshot: ManagedModelDestinationSnapshot,
                                    destination: ManagedModelDestinationID,
                                    cloudEligibleAliases: Set<String>,
-                                   selectedAtumModel: String? = nil) -> [Row] {
-        guard destination.isCloud else { return mac(snapshot, destination: destination) }
-        return cloudDestinationRows(snapshot, destination: destination, selectedAtumModel: selectedAtumModel) {
-            cloudEligibleAliases.contains($0) && snapshot.atumWriteEffort(for: destination, model: $0) != nil
-        }
+                                   selectedAtumModel: String? = nil,
+                                   destinationReady: Bool = true) -> [Row] {
+        let rows = destination.isCloud
+            ? cloudDestinationRows(snapshot, destination: destination, selectedAtumModel: selectedAtumModel) {
+                cloudEligibleAliases.contains($0) && snapshot.atumWriteEffort(for: destination, model: $0) != nil
+            }
+            : mac(snapshot, destination: destination)
+        return destinationReady ? rows : rows.map { $0.readOnly() }
     }
 
     private static func cloudDestinationRows(_ snapshot: ManagedModelDestinationSnapshot,
@@ -194,11 +220,26 @@ public enum PhoneModelPickerProjection {
     /// the 1.1 offer is only eligibility and thinking levels. Either one alone
     /// still yields the full Atum line-up, so a missing older read never
     /// removes the picker. With neither read there is nothing to draw.
+    /// `destinationReady` false (the destination readback is loading or has
+    /// failed) keeps the line-up visible but read-only and unchecked: neither
+    /// the 1.1 offer nor a cached 1.3 snapshot may stand in for it (W4-X2).
     public static func conversation(offer: ManagedModelSnapshot?,
                                     destination: ManagedModelDestinationSnapshot?,
                                     destinationID: ManagedModelDestinationID,
                                     cloudEligibleAliases: Set<String>? = nil,
-                                    selectedAtumModel: String? = nil) -> [Row] {
+                                    selectedAtumModel: String? = nil,
+                                    destinationReady: Bool = true) -> [Row] {
+        let rows = conversationRows(offer: offer, destination: destination, destinationID: destinationID,
+                                    cloudEligibleAliases: cloudEligibleAliases,
+                                    selectedAtumModel: selectedAtumModel)
+        return destinationReady ? rows : rows.map { $0.readOnly() }
+    }
+
+    private static func conversationRows(offer: ManagedModelSnapshot?,
+                                         destination: ManagedModelDestinationSnapshot?,
+                                         destinationID: ManagedModelDestinationID,
+                                         cloudEligibleAliases: Set<String>?,
+                                         selectedAtumModel: String?) -> [Row] {
         guard let destination else {
             guard let offer else { return [] }
             return cloud(offer).map { row in
@@ -217,73 +258,57 @@ public enum PhoneModelPickerProjection {
         }
     }
 
-    /// The cloud's subscription rows, as the desktop lists them for a cloud
-    /// assistant (`cloudSubscriptionRoutes`, `model-picker.tsx`): ChatGPT first,
-    /// then OpenCode Go, each from the account's own status.
-    ///
-    /// - A relayed ChatGPT plan lists every model the relay serves, and a
-    ///   connected OpenCode Go every model it serves. Each is choosable; the
-    ///   saved one is current.
-    /// - A saved ChatGPT model with no relay up stays listed, not choosable,
-    ///   as not ready (the desktop keeps a plan the cloud cannot reach yet).
-    /// - A saved OpenCode Go model whose connection was disconnected stays
-    ///   listed, not choosable, as signed out (the desktop's Reconnect note).
-    /// - A status the phone could not read (`account` nil, or that provider
-    ///   nil) keeps the saved model read-only and current, never a guess.
-    ///
-    /// A Mac destination has no subscription write on the phone: its saved
-    /// choice stays read-only.
-    public static func subscriptions(_ snapshot: ManagedModelDestinationSnapshot,
+    /// Cloud subscription rows come from independent plan catalogs. A saved
+    /// choice can still name a read-only row during a failed or incomplete read.
+    /// Only current catalog membership and destination readback mark it current.
+    public static func subscriptions(_ snapshot: ManagedModelDestinationSnapshot?,
                                      destination: ManagedModelDestinationID,
                                      account: PhoneSubscriptionAccount? = nil,
-                                     loading: Bool = false) -> [Row] {
-        let saved = snapshot.choices.first { $0.destination == destination && $0.source.isSubscription }
-        guard destination.isCloud else { return saved.map { [savedRow($0, unavailable: nil)] } ?? [] }
+                                     destinationReady: Bool = true) -> [Row] {
+        let saved = snapshot?.choices.first { $0.destination == destination && $0.source.isSubscription }
+        guard destination.isCloud else {
+            return saved.map { [savedRow($0, selected: destinationReady, unavailable: nil)] } ?? []
+        }
 
-        func served(_ source: ManagedModelDestinationSource,
-                    _ models: [SubscriptionModelDescriptor],
-                    refreshing: Bool = false) -> [Row] {
-            models.map { model in
-                let current = saved?.source == source && saved?.model == model.id
-                let effort = refreshing ? nil : model.writeEffort
+        func planRows(_ source: ManagedModelDestinationSource,
+                      models: [SubscriptionModelDescriptor], state: PhoneModelPickerReadState?,
+                      unavailable: Row.Unavailable?) -> [Row] {
+            let savedModel = saved?.source == source ? saved : nil
+            let ready = state == .ready && snapshot != nil && destinationReady
+            let reason: Row.Unavailable? = switch state {
+            case .loading?: .loading
+            case .failed?: .failed
+            default: unavailable
+            }
+            var rows = models.map { model in
+                let matchesSaved = savedModel?.model == model.id
+                let effort = ready ? model.writeEffort : nil
                 return Row(favoriteID: nil, source: source, model: model.id,
                            displayName: ModelDisplayName.name(model: model.id, displayName: model.displayName),
-                           selected: current, selectable: !current && effort != nil,
+                           selected: ready && matchesSaved, selectable: !matchesSaved && effort != nil,
                            isSubscription: true, subscriptionEffort: effort,
-                           unavailable: current && refreshing ? .loading : nil)
+                           unavailable: matchesSaved ? reason : nil)
             }
+            if let savedModel, !rows.contains(where: { $0.model == savedModel.model }) {
+                rows.append(savedRow(savedModel, selected: false, unavailable: reason))
+            }
+            return rows
         }
 
-        var rows: [Row] = []
-        let savedPlan = saved?.source == .chatGPTPlan ? saved : nil
-        if loading {
-            rows = served(.chatGPTPlan, account?.chatGPT?.models ?? [], refreshing: true)
-            if let savedPlan, !rows.contains(where: \.selected) {
-                rows.append(savedRow(savedPlan, unavailable: .loading))
-            }
-        } else {
-            switch account?.chatGPT?.state {
-            case .enabled?: rows += served(.chatGPTPlan, account?.chatGPT?.models ?? [])
-            case .disabled?: rows += savedPlan.map { [savedRow($0, unavailable: .notReady)] } ?? []
-            case nil: rows += savedPlan.map { [savedRow($0, unavailable: nil)] } ?? []
-            }
-        }
-        let savedGo = saved?.source == .opencodeGo ? saved : nil
-        switch account?.openCodeGo?.state {
-        case .connected?: rows += served(.opencodeGo, account?.openCodeGo?.models ?? [])
-        case .disconnected?: rows += savedGo.map { [savedRow($0, unavailable: .signedOut)] } ?? []
-        case nil: rows += savedGo.map { [savedRow($0, unavailable: nil)] } ?? []
-        }
-        return rows
+        let relay = account?.chatGPT
+        let go = account?.openCodeGo
+        return planRows(.chatGPTPlan, models: relay?.models ?? [], state: account?.chatGPTState,
+                        unavailable: relay?.state == .disabled ? .notReady : nil)
+            + planRows(.opencodeGo, models: go?.state == .connected ? go?.models ?? [] : [],
+                       state: account?.openCodeGoState,
+                       unavailable: go?.state == .disconnected ? .signedOut : nil)
     }
 
-    /// The saved subscription model when the phone cannot offer it: current
-    /// only while nothing says it stopped working, and never choosable.
-    private static func savedRow(_ choice: ManagedModelDestinationChoice, unavailable: Row.Unavailable?) -> Row {
+    private static func savedRow(_ choice: ManagedModelDestinationChoice, selected: Bool,
+                                 unavailable: Row.Unavailable?) -> Row {
         Row(favoriteID: nil, source: choice.source, model: choice.model,
             displayName: ModelDisplayName.name(model: choice.model),
-            selected: unavailable == nil || unavailable == .loading, selectable: false, isSubscription: true,
-            unavailable: unavailable)
+            selected: selected, selectable: false, isSubscription: true, unavailable: unavailable)
     }
 
     /// The write boundary for a subscription pick, as `canSelectAtumModel` is
@@ -291,10 +316,9 @@ public enum PhoneModelPickerProjection {
     /// model as choosable on the cloud.
     public static func canSelectSubscription(_ row: Row,
                                              snapshot: ManagedModelDestinationSnapshot,
-                                             account: PhoneSubscriptionAccount?,
-                                             loading: Bool = false) -> ManagedModelEffort? {
+                                             account: PhoneSubscriptionAccount?) -> ManagedModelEffort? {
         let destination = try! ManagedModelDestinationID("cloud")
-        return subscriptions(snapshot, destination: destination, account: account, loading: loading).first {
+        return subscriptions(snapshot, destination: destination, account: account).first {
             $0.source == row.source && $0.model == row.model && $0.selectable && !$0.selected
         }?.subscriptionEffort
     }
@@ -484,6 +508,10 @@ public enum PhoneModelPickerProjection {
             self.levels = levels
             self.current = current
         }
+
+        public func canChange(to level: ManagedModelEffort) -> Bool {
+            levels.contains(level) && level != current
+        }
     }
 
     /// Show recognized levels the model can accept. A single option remains
@@ -496,12 +524,20 @@ public enum PhoneModelPickerProjection {
         return Thinking(model: offer.alias, levels: levels, current: snapshot.currentEffort)
     }
 
+    /// The offer can drive thinking only when its choice agrees with the
+    /// selected Atum row. The offer and destination have separate revisions.
+    public static func conversationThinking(offer: ManagedModelSnapshot,
+                                            rows: [Row]) -> Thinking? {
+        guard rows.contains(where: { $0.selected && $0.source == .atum && $0.model == offer.choice.model })
+        else { return nil }
+        return thinking(offer)
+    }
+
     /// The write boundary for a thinking change, as `canSelectAtumModel` is for a
     /// model: the same model, a level it offers, and not the level already saved.
     public static func canChangeThinking(to level: ManagedModelEffort,
                                          snapshot: ManagedModelSnapshot) -> Bool {
-        guard let thinking = thinking(snapshot) else { return false }
-        return thinking.levels.contains(level) && level != thinking.current
+        thinking(snapshot)?.canChange(to: level) == true
     }
 
     /// The Atum model a Mac returns to when its saved choice is a connection's

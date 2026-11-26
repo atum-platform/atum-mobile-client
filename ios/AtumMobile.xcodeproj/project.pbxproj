@@ -235,6 +235,7 @@
 		A3D0C1E2B4F5061728394A53 /* ProtonAmountFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D0C1E2B4F5061728394A54 /* ProtonAmountFormat.swift */; };
 		C8D3197CAA8F1DBADEB85732 /* ComposerAndMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */; };
 		E2C0A1B2C3D4E5F601234505 /* ChatGPTTrainingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0A1B2C3D4E5F601234506 /* ChatGPTTrainingUITests.swift */; };
+		E2C0A1B2C3D4E5F6012345A1 /* PhoneModelPickerSettledReadsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0A1B2C3D4E5F6012345A2 /* PhoneModelPickerSettledReadsUITests.swift */; };
 		E776A5F3F706EEFAE4747D01 /* TranscriptKeyboardAndFoldUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA8E271898B10FFC40A26887 /* TranscriptKeyboardAndFoldUITests.swift */; };
 		C9BACD4F0326BE550F6E2F2B /* S6AuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1B5B7722A21CCE0A6CB3EF /* S6AuthViews.swift */; };
 		CB482E7DDAABC9B72C8E36FB /* CompanyInviteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB9AE3A7A1F74B1E712C872E /* CompanyInviteViews.swift */; };
@@ -571,6 +572,7 @@
 		B0C5457A5495F8263F9B4B28 /* AtumMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AtumMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAndMenuUITests.swift; sourceTree = "<group>"; };
 		E2C0A1B2C3D4E5F601234506 /* ChatGPTTrainingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTTrainingUITests.swift; sourceTree = "<group>"; };
+		E2C0A1B2C3D4E5F6012345A2 /* PhoneModelPickerSettledReadsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneModelPickerSettledReadsUITests.swift; sourceTree = "<group>"; };
 		EA8E271898B10FFC40A26887 /* TranscriptKeyboardAndFoldUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptKeyboardAndFoldUITests.swift; sourceTree = "<group>"; };
 		B50C197752B5EB15B984BC58 /* AccountProfileEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountProfileEditorTests.swift; sourceTree = "<group>"; };
 		B5700387D0A5F802386263D0 /* SDKTimelineSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDKTimelineSource.swift; sourceTree = "<group>"; };
@@ -1067,6 +1069,7 @@
 				9F4F2CD716AF30482AAECA10 /* HomeChatsWave3UITests.swift */,
 				B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */,
 				E2C0A1B2C3D4E5F601234506 /* ChatGPTTrainingUITests.swift */,
+				E2C0A1B2C3D4E5F6012345A2 /* PhoneModelPickerSettledReadsUITests.swift */,
 				EA8E271898B10FFC40A26887 /* TranscriptKeyboardAndFoldUITests.swift */,
 				A3E14C8E07A5220CD1744589 /* GScrollDynamicTypeUITests.swift */,
 				12D964ECFA8E0F284D646944 /* GScrollUITests.swift */,
@@ -1604,6 +1607,7 @@
 				1DE6F7A74851F5D67F404C42 /* HomeChatsWave3UITests.swift in Sources */,
 				C8D3197CAA8F1DBADEB85732 /* ComposerAndMenuUITests.swift in Sources */,
 				E2C0A1B2C3D4E5F601234505 /* ChatGPTTrainingUITests.swift in Sources */,
+				E2C0A1B2C3D4E5F6012345A1 /* PhoneModelPickerSettledReadsUITests.swift in Sources */,
 				E776A5F3F706EEFAE4747D01 /* TranscriptKeyboardAndFoldUITests.swift in Sources */,
 				1FED11C16F6AAF0A823FA3D5 /* GScrollDynamicTypeUITests.swift in Sources */,
 				F72702E8DB3BA69328FAD75F /* GScrollUITests.swift in Sources */,

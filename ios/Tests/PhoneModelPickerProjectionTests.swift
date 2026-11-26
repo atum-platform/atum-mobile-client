@@ -214,11 +214,58 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertEqual(rows.filter(\.selected).map(\.model), [ManagedModelLineup.defaultAlias])
     }
 
+    func testAnUnreadyDestinationDrawsTheConversationLineUpReadOnlyAndUnchecked() throws {
+        // W4-X2 r2: a failed or loading destination readback. Neither the 1.1
+        // offer's eligibility nor a cached 1.3 snapshot's saved choice may
+        // stand in for it: every Atum row is drawn, none is current or choosable.
+        let cloud = try ManagedModelDestinationID("cloud")
+        let snapshot = try NativeAPI.decode(
+            ManagedModelDestinationSnapshot.self, from: fixture("destination.snapshot"))
+        for destination in [snapshot, nil] as [ManagedModelDestinationSnapshot?] {
+            let ready = PhoneModelPickerProjection.conversation(
+                offer: try cloudSnapshot(), destination: destination, destinationID: cloud)
+            XCTAssertTrue(ready.contains(where: \.selectable))
+            XCTAssertTrue(ready.contains(where: \.selected))
+            let rows = PhoneModelPickerProjection.conversation(
+                offer: try cloudSnapshot(), destination: destination, destinationID: cloud,
+                selectedAtumModel: ManagedModelLineup.defaultAlias, destinationReady: false)
+            XCTAssertEqual(rows.map(\.model), ["nguyet-thuc", "nhat-thuc", "thai-cuc"])
+            XCTAssertEqual(rows.map(\.selected), [false, false, false])
+            XCTAssertEqual(rows.map(\.selectable), [false, false, false])
+            XCTAssertEqual(rows.map(\.badges), [[], [], []])
+            XCTAssertNil(PhoneModelPickerProjection.conversationThinking(offer: try cloudSnapshot(), rows: rows))
+        }
+    }
+
+    func testTheCardKeepsAStaleSnapshotReadOnlyAfterALaterFailure() throws {
+        // The card's earlier read succeeded; a later one failed. Its old
+        // snapshot's rows stay listed but greyed and unchecked.
+        let snapshot = try NativeAPI.decode(
+            ManagedModelDestinationSnapshot.self, from: fixture("destination.snapshot"))
+        let cloud = try ManagedModelDestinationID("cloud")
+        let fresh = PhoneModelPickerProjection.destination(
+            snapshot, destination: cloud, cloudEligibleAliases: [ManagedModelLineup.defaultAlias])
+        XCTAssertEqual(fresh.map(\.selectable), [true, false, false])
+        XCTAssertEqual(fresh.filter(\.selected).map(\.model), [ManagedModelLineup.defaultAlias])
+        let stale = PhoneModelPickerProjection.destination(
+            snapshot, destination: cloud, cloudEligibleAliases: [ManagedModelLineup.defaultAlias],
+            destinationReady: false)
+        XCTAssertEqual(stale.map(\.model), fresh.map(\.model))
+        XCTAssertEqual(stale.map(\.selectable), [false, false, false])
+        XCTAssertEqual(stale.map(\.selected), [false, false, false])
+        let mac = PhoneModelPickerProjection.destination(
+            snapshot, destination: try ManagedModelDestinationID("mac:mini-b"), cloudEligibleAliases: [],
+            destinationReady: false)
+        XCTAssertFalse(mac.isEmpty)
+        XCTAssertFalse(mac.contains { $0.selectable || $0.selected })
+    }
+
     // MARK: Thinking level and the way back to Atum
 
     /// A cloud offer whose current model is ready, with the levels it accepts.
     private func readySnapshot(model: String = "nguyet-thuc", effort: String? = "medium",
-                               efforts: [Any] = ["low", "medium", "high"]) throws -> ManagedModelSnapshot {
+                               efforts: [Any] = ["low", "medium", "high"],
+                               revision: Int = 1) throws -> ManagedModelSnapshot {
         let digest = String(repeating: "a", count: 64)
         let ids = efforts.compactMap { $0 as? String }
         let defaultEffort = ids.contains("medium") ? "medium" : ids.first ?? "medium"
@@ -230,7 +277,7 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         let object: [String: Any] = [
             "profile": "atum.model-choice/1.1",
             "agentPrincipal": "00000000-0000-4000-8000-bd7662a5eeb4",
-            "revision": 1, "source": "saved", "policyVersion": "2026-10-17.1", "policyDigest": digest,
+            "revision": revision, "source": "saved", "policyVersion": "2026-10-17.1", "policyDigest": digest,
             "choice": choice, "models": [current], "runtimes": [["runtime": "cloud"]],
             "grant": [
                 "profile": "atum.model-grant/1", "state": "active", "alias": model, "model": model,
@@ -352,6 +399,40 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
             snapshot: try readySnapshot(efforts: ["low", "medium"]), model: "nguyet-thuc", effort: .high))
     }
 
+    func testLateOfferCannotChangeThinkingForThePreviousDestinationModel() throws {
+        let cloud = try ManagedModelDestinationID("cloud")
+        let savedDefault = try destinationSnapshot()
+        var before = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("destination.snapshot")) as? [String: Any])
+        before["revision"] = savedDefault.revision - 1
+        before["choices"] = [["destination": "cloud", "source": "atum", "model": "nhat-thuc", "effort": "medium"]]
+        let prior = try NativeAPI.decode(ManagedModelDestinationSnapshot.self,
+                                         from: JSONSerialization.data(withJSONObject: before))
+        let pending = PhoneModelPickerProjection.conversation(offer: nil, destination: prior, destinationID: cloud)
+        XCTAssertEqual(pending.filter(\.selected).map(\.model), [ManagedModelLineup.hardAlias])
+        XCTAssertEqual(pending.filter { $0.selectable && !$0.selected }.map(\.model), [ManagedModelLineup.defaultAlias])
+
+        // The destination fallback saves the default while the offer read is pending.
+        let late = try readySnapshot(model: ManagedModelLineup.hardAlias, revision: 1)
+        let withLateOffer = PhoneModelPickerProjection.conversation(
+            offer: late, destination: savedDefault, destinationID: cloud
+        )
+        XCTAssertEqual(withLateOffer.filter(\.selected).map(\.model), [ManagedModelLineup.defaultAlias])
+        XCTAssertNil(PhoneModelPickerProjection.conversationThinking(offer: late, rows: withLateOffer))
+
+        // The post-write offer read restores thinking with its own revision fence.
+        let current = try readySnapshot(revision: 2)
+        let rows = PhoneModelPickerProjection.conversation(offer: current, destination: savedDefault, destinationID: cloud)
+        let thinking = try XCTUnwrap(PhoneModelPickerProjection.conversationThinking(offer: current, rows: rows))
+        XCTAssertEqual([thinking.model], rows.filter(\.selected).map(\.model))
+        XCTAssertTrue(thinking.canChange(to: .high))
+        let requestID = try NativeID("00000000-0000-4000-8000-303617b97304")
+        let write = try ManagedModelWrite(requestId: requestID, snapshot: current,
+                                          model: thinking.model, effort: .high)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? [String: Any])
+        XCTAssertEqual((body["choice"] as? [String: Any])?["model"] as? String, ManagedModelLineup.defaultAlias)
+        XCTAssertEqual(body["expectedRevision"] as? Int, 2)
+    }
+
     func testSwitchBackNamesTheRecommendationForAMacOnAConnection() throws {
         let snapshot = try NativeAPI.decode(
             ManagedModelDestinationSnapshot.self, from: fixture("destination.snapshot"))
@@ -423,7 +504,7 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         )
     }
 
-    func testA14SnapshotDecodesAndDrawsTheConnectedSubscriptionAfterTheLineUp() throws {
+    func testA14SnapshotDecodesAndDrawsTheSavedSubscriptionAfterTheLineUp() throws {
         let snapshot = try destinationSnapshot(cloudSource: "opencode_go", model: "glm-5.2")
         let destination = try ManagedModelDestinationID("cloud")
         let lineUp = PhoneModelPickerProjection.conversation(
@@ -431,14 +512,14 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertEqual(lineUp.map(\.model), ["nguyet-thuc", "nhat-thuc", "thai-cuc"],
                        "the line-up stays present when only the 1.4 read answers")
         XCTAssertTrue(lineUp.allSatisfy { !$0.selected },
-                      "the subscription is current, so no Atum row claims the check")
+                      "the saved choice belongs to a subscription")
 
         let subscriptions = PhoneModelPickerProjection.subscriptions(snapshot, destination: destination)
         XCTAssertEqual(subscriptions.count, 1)
         XCTAssertEqual(subscriptions[0].source, .opencodeGo)
         XCTAssertEqual(subscriptions[0].model, "glm-5.2")
         XCTAssertTrue(subscriptions[0].isSubscription)
-        XCTAssertTrue(subscriptions[0].selected)
+        XCTAssertFalse(subscriptions[0].selected)
         XCTAssertFalse(subscriptions[0].selectable,
                        "without the account status the saved choice stays read-only")
     }
