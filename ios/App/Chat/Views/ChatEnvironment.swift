@@ -54,8 +54,9 @@ struct ChatRowInteractions {
     /// P4: whether the transcript's own pan is moving the list. Each row is
     /// hosted in a collection cell that moves with the content, so a row's
     /// own "the finger moved 10 pt" rule never trips during a slow drag; the
-    /// message menu asks this instead (`MessageMenuModifier`).
-    var scroll = ChatScrollSignal.none
+    /// message menu asks this instead (`MessageMenuModifier`). Nil outside
+    /// a transcript, where nothing scrolls the rows.
+    var scroll: ChatScrollSignal?
 }
 
 /// P4: the transcript's scrolling state, shared with every row's press
@@ -65,9 +66,6 @@ struct ChatRowInteractions {
 /// never changes the environment.
 @MainActor
 final class ChatScrollSignal {
-    /// Outside a transcript nothing scrolls the rows.
-    static let none = ChatScrollSignal()
-
     var isScrolling: @MainActor () -> Bool = { false }
     private let presses = NSHashTable<UIGestureRecognizer>.weakObjects()
     private let waitingPresses = NSHashTable<UIGestureRecognizer>.weakObjects()

@@ -165,7 +165,10 @@ private struct TranscriptHostedRow: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(highlight))
             // The hosting cell owns its own SwiftUI view graph and gesture
             // machinery. Copy in only the chat values a row reads.
-            .transformEnvironment(\.self) { TranscriptRowEnvironment.forward(environment, into: &$0) }
+            .transformEnvironment(\.self) { target in
+                // SwiftUI applies the transform during its main-thread update.
+                MainActor.assumeIsolated { TranscriptRowEnvironment.forward(environment, into: &target) }
+            }
             .id(row.id)
     }
 }
@@ -182,26 +185,25 @@ private struct TranscriptHostedRow: View {
 /// (actions, loaders, `openURL`) are rebuilt by every chat screen body while
 /// staying bound to session-stable objects, so on their own they never
 /// re-render rows; they refresh with the next compared change.
+@MainActor
 private enum TranscriptRowEnvironment {
-    struct Key: Sendable {
+    struct Key {
         let name: String
-        let same: @MainActor @Sendable (EnvironmentValues, EnvironmentValues) -> Bool
-        let copy: @Sendable (inout EnvironmentValues, EnvironmentValues) -> Void
+        let same: (EnvironmentValues, EnvironmentValues) -> Bool
+        let copy: (inout EnvironmentValues, EnvironmentValues) -> Void
     }
 
-    static func value<V: Equatable>(_ path: WritableKeyPath<EnvironmentValues, V> & Sendable,
-                                    _ name: String) -> Key {
+    static func value<V: Equatable>(_ path: WritableKeyPath<EnvironmentValues, V>, _ name: String) -> Key {
         Key(name: name, same: { $0[keyPath: path] == $1[keyPath: path] },
             copy: { $0[keyPath: path] = $1[keyPath: path] })
     }
 
-    static func object<V: AnyObject>(_ path: WritableKeyPath<EnvironmentValues, V?> & Sendable,
-                                     _ name: String) -> Key {
+    static func object<V: AnyObject>(_ path: WritableKeyPath<EnvironmentValues, V?>, _ name: String) -> Key {
         Key(name: name, same: { $0[keyPath: path] === $1[keyPath: path] },
             copy: { $0[keyPath: path] = $1[keyPath: path] })
     }
 
-    static func stable<V>(_ path: WritableKeyPath<EnvironmentValues, V> & Sendable, _ name: String) -> Key {
+    static func stable<V>(_ path: WritableKeyPath<EnvironmentValues, V>, _ name: String) -> Key {
         Key(name: name, same: { _, _ in true }, copy: { $0[keyPath: path] = $1[keyPath: path] })
     }
 
@@ -248,7 +250,6 @@ private enum TranscriptRowEnvironment {
         for key in forwarded { key.copy(&target, source) }
     }
 
-    @MainActor
     static func same(_ old: EnvironmentValues, _ new: EnvironmentValues) -> Bool {
         forwarded.allSatisfy { $0.same(old, new) }
     }
