@@ -1,5 +1,15 @@
 # P4 transcript scroll engine
 
+## What this change is for
+
+P4 is about stability and scaling, not about a smoother-feeling scroll. The frame-gap replays below are roughly level with the eager stack; they are a no-regression check, not the reason to ship.
+
+- History never re-lays out. The old transcript was an eager stack that measured and positioned every loaded row; the collection only sizes the rows near the viewport, so cost tracks what is on screen rather than how much history is loaded.
+- The reading position uses UIKit's own anchor. A row that resizes above the reader is corrected in the same layout invalidation (`contentOffsetAdjustment`) instead of by a delayed offset correction, so paging and late detail (quotes, reactions) hold the reading row at 0 pt.
+- Rows update during drags. The old engine held incoming rows until a drag or fling stopped; the collection applies them while the list moves.
+
+The per-row cost of hosting each row in its own SwiftUI graph, and the absolute scaling numbers, are not yet measured on a large fixture; see the measurement plan under Follow-up.
+
 ## Inventory before implementation
 
 - At `80968a9`, `ios/App/Chat/Views/TranscriptView.swift:6–22` identifies the scroll-engine seam. Lines 92–150 host rows in an eager stack. Lines 278–389 track every row's position and correct the offset with delayed settling. Lines 419–427 gate new rows on drag and deceleration. Lines 466–745 cover visibility, replies, folding and routed search.
@@ -15,13 +25,13 @@
 
 ## Design
 
-The representable hosts a transparent, single-column collection with the transcript's 16-point side margins and 8-point top and 12-point bottom padding. Diffable snapshots use existing stable row IDs and reconfigure changed rows in place. Each self-sizing cell hosts the existing `ChatRowView` and receives the chat, design, and media environment values it needs. Its hosting graph manages its own gestures. P3's send entrance animates the bubble inside the SwiftUI row, so the hosting cell can use the existing modifier and its Reduce Motion behavior.
+The representable hosts a transparent, single-column collection with the transcript's 16-point side margins and 8-point top and 12-point bottom padding. Diffable snapshots use existing stable row IDs and reconfigure changed rows in place. Each self-sizing cell hosts the existing `ChatRowView` and receives the chat, design, and media environment values it needs through one table, `TranscriptRowEnvironment.forwarded`; `tests/test_transcript_row_environment.py` fails when an app `@Entry` is neither forwarded nor exempted. The table also decides when a change re-renders the visible rows (value or identity comparison), so a streamed token or a receipt does not re-render every visible row. Its hosting graph manages its own gestures. Because the cell moves with the content, a row cannot see a drag through its own 10 pt movement rule; the transcript hands rows a `ChatScrollSignal` that the message menu checks before opening and that cancels any pending press when the pan begins. P3's send entrance plays on the new row's cell as explicit additive Core Animation (the `send` token's spring, or a 0.15 s fade under Reduce Motion), committed with the cell's first frame, so neither the hosting cell's non-animated update nor the delivery reconfigure that follows can cancel it.
 
 The adapter captures the top visible surviving row before a detached snapshot and restores its distance from the viewport top after the diff. The transient history-loading row is skipped when selecting an anchor. Native layout invalidation supplies offset adjustments for later self-sizing of cells above the reading row. A following chat uses the bottom edge during layout. The collection extends under the glass, with content insets derived from the unobscured SwiftUI viewport. The adapter feeds UIKit scroll motion and rounded geometry to the existing follow, pagination and read-visibility rules. The store can apply incoming rows during drag and deceleration. The debug probe records a timeline-edge clamp separately from an offset correction that UIKit can perform.
 
 Search holds the selected row at its viewport position while sizes resolve. A routed search completes after the current projection's target cell is laid out and visible. A user drag releases placement and cancels the route. The native pan and a simultaneous tap preserve the keyboard-dismissal directions and leave the draft in the composer. A short pull into the keyboard keeps a following transcript attached. A longer pull or one starting farther up continues into history.
 
-Explicit animated scrolls use UIKit's scroll animation. The two legacy G-scroll launch arguments exercise this same renderer while retaining the existing test entry points.
+Explicit animated scrolls use UIKit's scroll animation. Jumping to the latest message from more than two screens up first moves without animation to one screen above the end, lets those rows size, then animates the last screen, so the animation never crosses rows still at their estimated height. Releasing a search placement reconciles follow state with `.searchPlacementReleased` instead of a full geometry report, so it never requests a history page. The two legacy G-scroll launch arguments exercise this same renderer while retaining the existing test entry points.
 
 ## Scroll replay
 
@@ -34,7 +44,7 @@ The original audit used `simctl io recordVideo` with animations enabled and scri
 
 The first collection replay at `eeb7457` measured 2.6% on long scroll and 5.5% on paging. Its screenshot comparison identified clipping at the navigation glass, which prompted the viewport-inset change. The viewport replay at `d98d492` measured 3.3% (worst 225 ms) on long scroll and 2.8% (worst 173 ms) on paging. Its screenshot shows content behind the navigation glass with a 116-point top inset. Its paging probe recorded 14 applied corrections with zero misses, all during user motion.
 
-The P4 column uses the final app build at `2be1e05` on the audit's iPhone 17 with iOS 27.0. It repeated the two scripted scenarios with animations enabled and the audit's five long-scroll flings and eight paging flings. The final paging replay improved on the baseline. The final long-scroll replay had a slightly higher gap rate and the same worst gap. The recording steps, clips and frame-gap counts are under `/Volumes/AtumTestFlight/dd-polish-p4`.
+The P4 column uses the final app build at `2be1e05` on the audit's iPhone 17 with iOS 27.0. It repeated the two scripted scenarios with animations enabled and the audit's five long-scroll flings and eight paging flings. The paging replay measured a lower gap rate than the baseline and the long-scroll replay a slightly higher one with the same worst gap. Single simulator recordings with XCUITest overhead cannot separate these from noise, so read the table as no regression, not as a smoothness gain. The recording steps, clips and frame-gap counts are under `/Volumes/AtumTestFlight/dd-polish-p4`.
 
 ## Local verification
 
@@ -62,6 +72,15 @@ The P4 column uses the final app build at `2be1e05` on the audit's iPhone 17 wit
 The optional G-scroll memory diagnostic reached the start in 41 flings in the first case. In the second case a synthetic fling opened a message menu, and the diagnostic reported the 120-fling cap with that menu still open. Both cases passed their anchor and in-motion offset assertions.
 - Two attempts to start a dedicated simulator on the external volume stalled in LaunchServices migration. The existing audit iPhone 17 booted successfully. Derived data, test scratch, result bundles and recordings use `/Volumes/AtumTestFlight/dd-polish-p4`, and the build, test and capture scripts take the shared heavy-build lock.
 
+## Follow-up: scaling measurement plan
+
+Recorded from review r1; not done in this change.
+
+- Fixture: a scripted chat with 2,000 or more rows of mixed kinds (long answers, quotes, reactions, media, day dividers), opened at the latest row and paged to the start.
+- A/B: the eager stack at `80968a9` and this engine, built once each and run in the same simulator session, alternating, three runs per side. Report medians.
+- Measures per run: time to first frame after open (launch argument to the first transcript frame in the probe log), memory marks at `chat.open`, after each paging step and at `timeline.start` (`ProbeLog.markMemoryFootprint`), frame-gap rates for a long fling and for paging, and main-thread time per incoming row while following.
+- Pass: no metric worse than the baseline's median beyond run-to-run spread, and memory and time to first frame flat as history grows.
+
 ## Session log
 
 - 2026-11-26. Started P4 from `80968a9`, inventoried native APIs and existing behavior before changing the transcript.
@@ -83,3 +102,4 @@ The optional G-scroll memory diagnostic reached the start in 41 flings in the fi
 - 2026-11-26. The first G-scroll case passed all 20 paging windows at 0 pt maximum drift, reached the timeline start, and applied all 57 corrections, 54 while moving. The other case missed the timed detach window after two XCTest idle waits. The select-text probe verified that the tap queued its action but SwiftUI dropped the cover's dismissal callback. Added a cover-disappearance fallback that consumes the pending action once on the next main-actor turn.
 - 2026-11-26. The final focused run passed the three remaining cases, bringing the cumulative result to 72 of 72. Started the final frame-gap and send-motion replay on the same build.
 - 2026-11-26. The final replay passed both cases at `2be1e05`. Recorded the latest frame-gap comparison and verified the existing send entrance in `capture-final-05-own-row-send.mp4`.
+- 2026-11-26. Fix round r2 after review r1 (HOLD). Branch `feat/polish-p4-transcript-engine-r2` from `a9c9f25` with `origin/main` merged. Moved the send entrance onto the cell's layer, added the transcript scroll signal for message presses, the environment forwarding table and its repository test, the far-up jump, search-placement release, duplicate-ID guard, restored mid-width test drags with a dedicated drag-from-a-bubble case, and reverted the quote-contrast audit fallback. The model-picker identifier edit no longer differs from main: main itself moved those tests to `claude-plan`. Verification results follow in the r2 section.

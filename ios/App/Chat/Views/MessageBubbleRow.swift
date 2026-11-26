@@ -1,6 +1,7 @@
 import AtumChat
 import AtumNativeAPI
 import SwiftUI
+import UIKit
 
 /// A bubble row (B16, B17, B19): my messages on the right in the Kit's
 /// `bubble-own` (ink in light, a lifted grey in dark) with `on-bubble-own`
@@ -104,7 +105,6 @@ struct MessageBubbleRow: View {
             .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier(row.accessibilityID)
-            .modifier(SendEntrance(row: row))
         }
     }
 
@@ -148,7 +148,6 @@ struct MessageBubbleRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(row.accessibilityID)
-        .modifier(SendEntrance(row: row))
     }
 
     /// The run's name: the member's own name (mine too), as Slack shows it.
@@ -585,34 +584,42 @@ struct BubbleWithAvatarLayout: Layout {
 /// drawing moves (offset and opacity), so the transcript's follow and anchor
 /// logic sees one insert, as before. Under Reduce Motion the row only fades in;
 /// under the UI-test flag it appears at once.
-private struct SendEntrance: ViewModifier {
-    let row: ChatRow
-
-    @Environment(\.chatReducesMotion) private var reduceMotion
-    @State private var landed = false
-
+///
+/// P4: the transcript plays it on the row's collection cell
+/// (`TranscriptEngine`), as explicit additive layer animations committed with
+/// the cell's first frame. A SwiftUI state change inside the hosting cell was
+/// applied without animation and was cancelled by the delivery update that
+/// lands ~0.2 s after the send, so the row sat low and faded, then snapped.
+enum SendEntrance {
     /// How far below its place the bubble starts: about the composer's
     /// field-to-transcript gap, so it reads as leaving the field.
     static let rise: CGFloat = 28
     /// How recent a sending row must be to count as just sent.
     static let freshSeconds: TimeInterval = 3
 
-    private var plays: Bool {
+    private static let riseKey = "chat.sendEntrance.rise"
+    private static let fadeKey = "chat.sendEntrance.fade"
+
+    static func plays(_ row: ChatRow) -> Bool {
         !ChatMotion.disabledForUITests && row.item.isOwn && row.delivery == .sending
-            && abs(row.item.timestamp.timeIntervalSinceNow) < Self.freshSeconds
+            && abs(row.item.timestamp.timeIntervalSinceNow) < freshSeconds
     }
 
-    func body(content: Content) -> some View {
-        // Read once, when the row first draws: a later state (sent, seen) never
-        // moves a row that has already landed.
-        let pending = plays && !landed
-        content
-            .offset(y: pending && !reduceMotion ? Self.rise : 0)
-            .opacity(pending ? 0 : 1)
-            .onAppear {
-                guard plays, !landed else { return }
-                withAnimation(ChatMotion.animation(.send, reduceMotion: reduceMotion)) { landed = true }
-            }
+    /// Starts the entrance on a layer whose model is already at its final
+    /// place and opacity.
+    static func play(on layer: CALayer, reduceMotion: Bool) {
+        stop(on: layer)
+        if !reduceMotion {
+            layer.add(Motion.send.layerAnimation("transform.translation.y", from: rise, to: 0, additive: true,
+                                                 reduceMotion: false), forKey: riseKey)
+        }
+        layer.add(Motion.send.layerAnimation("opacity", from: 0, to: 1, reduceMotion: reduceMotion), forKey: fadeKey)
+    }
+
+    /// A reused cell never carries another row's entrance.
+    static func stop(on layer: CALayer) {
+        layer.removeAnimation(forKey: riseKey)
+        layer.removeAnimation(forKey: fadeKey)
     }
 }
 

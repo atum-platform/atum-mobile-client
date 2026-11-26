@@ -40,6 +40,35 @@ enum Motion: CaseIterable, Sendable {
     static func transition(_ base: AnyTransition, reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : base
     }
+
+    /// The token as an explicit Core Animation animation of one layer key path,
+    /// for UIKit surfaces whose model value is already final (P4's transcript
+    /// cells): the presentation runs from `from` to `to`. `additive` adds it on
+    /// top of the model value, so layout that changes the layer during the run
+    /// never cancels it. Under Reduce Motion it is the same 0.15 s ease.
+    func layerAnimation(_ keyPath: String, from: CGFloat, to: CGFloat, additive: Bool = false,
+                        reduceMotion: Bool) -> CAAnimation {
+        let animation: CABasicAnimation
+        if reduceMotion {
+            animation = CABasicAnimation(keyPath: keyPath)
+            animation.duration = Self.reducedDuration
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        } else {
+            let spring: CASpringAnimation
+            switch self {
+            case .quick: spring = CASpringAnimation(perceptualDuration: 0.2, bounce: 0)
+            case .standard: spring = CASpringAnimation(perceptualDuration: 0.3, bounce: 0)
+            case .send: spring = CASpringAnimation(perceptualDuration: 0.3, bounce: 0.15)
+            }
+            spring.keyPath = keyPath
+            spring.duration = spring.settlingDuration
+            animation = spring
+        }
+        animation.fromValue = from
+        animation.toValue = to
+        animation.isAdditive = additive
+        return animation
+    }
 }
 
 extension View {

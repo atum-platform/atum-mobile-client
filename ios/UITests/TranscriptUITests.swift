@@ -29,6 +29,43 @@ final class TranscriptUITests: TranscriptUITestCase {
         XCTAssertTrue(dividers.firstMatch.exists, "U1: no day divider")
     }
 
+    /// P4 review B2: each row's cell moves with the content, so a slow drag
+    /// that starts on a bubble never trips the row's own 10 pt movement rule.
+    /// The drag scrolls the transcript and never opens the message menu,
+    /// even though the finger stays on the bubble far past the 0.35 s press.
+    @MainActor
+    func testSlowDragFromABubbleScrollsWithoutOpeningTheMenu() {
+        let app = launchChat(ScriptedScenario.chatPaginate.rawValue)
+        XCTAssertTrue(latest(app).waitForExistence(timeout: 5))
+        wait(1)
+        let top = visibleTop(app)
+        let bottom = visibleBottom(app)
+        let middle = (top + bottom) / 2
+        let bubbles = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "message.body.")).allElementsBoundByIndex
+            .filter { $0.frame.minY > top && $0.frame.maxY < bottom && $0.frame.height > 20 }
+        guard let bubble = bubbles.min(by: { abs($0.frame.midY - middle) < abs($1.frame.midY - middle) }) else {
+            return XCTFail("no bubble inside the viewport")
+        }
+        let identifier = bubble.identifier
+        let before = bubble.frame
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: before.midX - window.frame.minX, dy: before.midY - window.frame.minY))
+        let travel = min((bottom - top) * 0.4, bottom - before.midY - 20)
+        record("b2.dragStart", "\(identifier) \(before.midX),\(before.midY) travel=\(travel)")
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: travel)),
+                    withVelocity: .slow, thenHoldForDuration: 0.8)
+        XCTAssertFalse(element(app, "menu.items").waitForExistence(timeout: 1.5),
+                       "a slow drag that started on a bubble opened its menu")
+        let moved = element(app, identifier)
+        XCTAssertTrue(moved.exists, "the dragged bubble left the transcript")
+        record("b2.bubbleMoved", moved.frame.minY - before.minY)
+        XCTAssertGreaterThan(moved.frame.minY - before.minY, travel * 0.5, "the drag did not scroll the transcript")
+        XCTAssertTrue(followValue(app).hasPrefix("detached"), "not detached after the drag (\(followValue(app)))")
+        keepScreenshot("b2-drag-from-bubble", of: app)
+    }
+
     /// U2: typing dots, then the answer, fully visible; still following.
     @MainActor
     func testU2DotsThenAnswerStayInView() {

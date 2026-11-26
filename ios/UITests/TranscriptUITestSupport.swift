@@ -377,12 +377,14 @@ class TranscriptUITestCase: AtumUITestCase {
         let window = app.windows.firstMatch
         let top = visibleTop(app)
         let bottom = visibleBottom(app)
-        // Begin in the unobscured side margin. This also keeps XCUITest's
-        // synthetic press clear of message menus and nested code scrollers.
-        let sideMargin: CGFloat = 8
+        // Begin mid-width, usually on a bubble, inside the unobscured
+        // viewport: the transcript draws under the navigation glass. A drag
+        // that starts on a row must scroll without opening its menu.
+        // Upward drags start above the jump pill, which floats over the
+        // bottom of the transcript.
         let fraction: CGFloat = points > 0 ? 0.1 : 0.7
         let start = window.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: window.frame.width - sideMargin,
+            .withOffset(CGVector(dx: window.frame.midX - window.frame.minX,
                                  dy: top - window.frame.minY + (bottom - top) * fraction))
         let end = start.withOffset(CGVector(dx: 0, dy: points))
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: XCUIGestureVelocity(rawValue: 2500), thenHoldForDuration: 0.25)
@@ -655,16 +657,6 @@ class TranscriptUITestCase: AtumUITestCase {
             return false
         }
         let underEdge = frame.minY < top || frame.maxY > bottom
-        if inChat, !underEdge, !frame.isEmpty,
-           transcript(app).descendants(matching: .any).matching(identifier: "quote")
-            .allElementsBoundByIndex.contains(where: { $0.frame.contains(frame) }) {
-            // Xcode reports contrast for legible footnote-size quote text
-            // (docs/ports/quote-contrast.md). Measure the reported text
-            // region directly and keep the WCAG AA threshold.
-            let ratio = ChatKindsUITests.inkContrast(app.screenshot(), in: frame)
-            print("MEASURE audit.quote.contrast=\(ratio) \(label) \(frame)")
-            if ratio >= 4.5 { return true }
-        }
         let ignored = underEdge || emojiOnly
         print("MEASURE audit.contrast \(ignored ? "ignored" : "FAILED") \(underEdge ? "edge" : emojiOnly ? "emoji" : "") \(label) \(frame)"
               + (ignored ? "" : " | \(issue.detailedDescription) | top \(top) bottom \(bottom)"))

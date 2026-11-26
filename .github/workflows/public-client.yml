@@ -34,7 +34,7 @@ jobs:
       - name: Design lint (no new raw spacing, radii, font sizes or curves)
         run: |
           python3 scripts/design_lint.py
-          python3 -m unittest tests.test_design_lint
+          python3 -m unittest tests.test_design_lint tests.test_transcript_row_environment
       - name: Verify public push fixtures
         run: |
           python3 scripts/generate-native-push-fixtures.py --check

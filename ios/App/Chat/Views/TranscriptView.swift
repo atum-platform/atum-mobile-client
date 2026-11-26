@@ -157,51 +157,100 @@ private struct TranscriptHostedRow: View {
         let environment = presentation.environment
         let highlight = presentation.routeHighlight == row.id
             ? (environment.chatTheme?.color("ink", environment.colorScheme).opacity(0.12) ?? .clear) : .clear
-        let content = ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
-                                  parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == presentation.latestAnswer,
-                                  searchHighlight: presentation.highlights[row.id],
-                                  isGrowing: presentation.growing.contains(row.id))
+        ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
+                    parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == presentation.latestAnswer,
+                    searchHighlight: presentation.highlights[row.id],
+                    isGrowing: presentation.growing.contains(row.id))
             .equatable()
             .background(RoundedRectangle(cornerRadius: 8).fill(highlight))
-        rowMediaEnvironment(rowChatEnvironment(content, environment), environment).id(row.id)
+            // The hosting cell owns its own SwiftUI view graph and gesture
+            // machinery. Copy in only the chat values a row reads.
+            .transformEnvironment(\.self) { TranscriptRowEnvironment.forward(environment, into: &$0) }
+            .id(row.id)
+    }
+}
+
+/// The chat screen's environment values that a hosted row reads. A cell's
+/// SwiftUI graph does not inherit them, so each key listed in `forwarded`
+/// is copied into it. A key a row reads but this list omits silently falls
+/// back to its default inside the transcript, so every chat `@Entry` must
+/// appear here or in the exemptions of
+/// `tests/test_transcript_row_environment.py`, which checks this list.
+///
+/// `same` decides whether a change re-renders the visible rows: equatable
+/// values compare by value and references by identity. Closure values
+/// (actions, loaders, `openURL`) are rebuilt by every chat screen body while
+/// staying bound to session-stable objects, so on their own they never
+/// re-render rows; they refresh with the next compared change.
+private enum TranscriptRowEnvironment {
+    struct Key: Sendable {
+        let name: String
+        let same: @MainActor @Sendable (EnvironmentValues, EnvironmentValues) -> Bool
+        let copy: @Sendable (inout EnvironmentValues, EnvironmentValues) -> Void
     }
 
-    // The hosting cell owns its own SwiftUI view graph. Forward the values
-    // chat rows use while letting each graph keep its own gesture machinery.
-    private func rowChatEnvironment(_ content: some View, _ environment: EnvironmentValues) -> some View {
-        content
-            .environment(\.atum, environment.atum)
-            .environment(\.atumKit, environment.atumKit)
-            .environment(\.chatTheme, environment.chatTheme)
-            .environment(\.chatActions, environment.chatActions)
-            .environment(\.messageActions, environment.messageActions)
-            .environment(\.chatOwnUserID, environment.chatOwnUserID)
-            .environment(\.chatRoomAvatar, environment.chatRoomAvatar)
-            .environment(\.chatRoomFace, environment.chatRoomFace)
-            .environment(\.chatMembers, environment.chatMembers)
-            .environment(\.chatToday, environment.chatToday)
-            .environment(\.chatReducesMotion, environment.chatReducesMotion)
-            .environment(\.chatFlatRuns, environment.chatFlatRuns)
-            .environment(\.chatRowInteractions, environment.chatRowInteractions)
-            .environment(\.colorScheme, environment.colorScheme)
-            .environment(\.dynamicTypeSize, environment.dynamicTypeSize)
-            .environment(\.locale, environment.locale)
-            .environment(\.layoutDirection, environment.layoutDirection)
-            .environment(\.openURL, environment.openURL)
+    static func value<V: Equatable>(_ path: WritableKeyPath<EnvironmentValues, V> & Sendable,
+                                    _ name: String) -> Key {
+        Key(name: name, same: { $0[keyPath: path] == $1[keyPath: path] },
+            copy: { $0[keyPath: path] = $1[keyPath: path] })
     }
 
-    private func rowMediaEnvironment(_ content: some View, _ environment: EnvironmentValues) -> some View {
-        content
-            .environment(\.chatLoadMatrixThumbnail, environment.chatLoadMatrixThumbnail)
-            .environment(\.appBotPresentation, environment.appBotPresentation)
-            .environment(\.appBotPresenter, environment.appBotPresenter)
-            .environment(\.appBotNoticeDisplays, environment.appBotNoticeDisplays)
-            .environment(\.chatMediaAccess, environment.chatMediaAccess)
-            .environment(\.chatAttachmentsClosedReason, environment.chatAttachmentsClosedReason)
-            .environment(\.chatMediaPresenter, environment.chatMediaPresenter)
-            .environment(\.chatLocalMediaFiles, environment.chatLocalMediaFiles)
-            .environment(\.chatMediaRetryGeneration, environment.chatMediaRetryGeneration)
-            .environment(\.chatMediaNamespace, environment.chatMediaNamespace)
+    static func object<V: AnyObject>(_ path: WritableKeyPath<EnvironmentValues, V?> & Sendable,
+                                     _ name: String) -> Key {
+        Key(name: name, same: { $0[keyPath: path] === $1[keyPath: path] },
+            copy: { $0[keyPath: path] = $1[keyPath: path] })
+    }
+
+    static func stable<V>(_ path: WritableKeyPath<EnvironmentValues, V> & Sendable, _ name: String) -> Key {
+        Key(name: name, same: { _, _ in true }, copy: { $0[keyPath: path] = $1[keyPath: path] })
+    }
+
+    // forwarded-keys:begin
+    static let forwarded: [Key] = [
+        Key(name: "atum", same: { $0.atum?.design === $1.atum?.design },
+            copy: { $0[keyPath: \.atum] = $1[keyPath: \.atum] }),
+        // Derived from `atum`'s design.
+        stable(\.atumKit, "atumKit"),
+        Key(name: "chatTheme", same: { $0.chatTheme?.design === $1.chatTheme?.design
+                                         && $0.chatTheme?.locale == $1.chatTheme?.locale },
+            copy: { $0[keyPath: \.chatTheme] = $1[keyPath: \.chatTheme] }),
+        stable(\.chatActions, "chatActions"),
+        object(\.messageActions, "messageActions"),
+        value(\.chatOwnUserID, "chatOwnUserID"),
+        value(\.chatRoomAvatar, "chatRoomAvatar"),
+        value(\.chatRoomFace, "chatRoomFace"),
+        value(\.chatMembers, "chatMembers"),
+        value(\.chatToday, "chatToday"),
+        value(\.chatReducesMotion, "chatReducesMotion"),
+        value(\.chatFlatRuns, "chatFlatRuns"),
+        // Built once by the engine (`TranscriptEngine.interactions`).
+        stable(\.chatRowInteractions, "chatRowInteractions"),
+        value(\.atumAvatarBrandInset, "atumAvatarBrandInset"),
+        value(\.colorScheme, "colorScheme"),
+        value(\.dynamicTypeSize, "dynamicTypeSize"),
+        value(\.locale, "locale"),
+        value(\.layoutDirection, "layoutDirection"),
+        stable(\.openURL, "openURL"),
+        stable(\.chatLoadMatrixThumbnail, "chatLoadMatrixThumbnail"),
+        value(\.appBotPresentation, "appBotPresentation"),
+        object(\.appBotPresenter, "appBotPresenter"),
+        value(\.appBotNoticeDisplays, "appBotNoticeDisplays"),
+        stable(\.chatMediaAccess, "chatMediaAccess"),
+        value(\.chatAttachmentsClosedReason, "chatAttachmentsClosedReason"),
+        object(\.chatMediaPresenter, "chatMediaPresenter"),
+        value(\.chatLocalMediaFiles, "chatLocalMediaFiles"),
+        value(\.chatMediaRetryGeneration, "chatMediaRetryGeneration"),
+        value(\.chatMediaNamespace, "chatMediaNamespace"),
+    ]
+    // forwarded-keys:end
+
+    static func forward(_ source: EnvironmentValues, into target: inout EnvironmentValues) {
+        for key in forwarded { key.copy(&target, source) }
+    }
+
+    @MainActor
+    static func same(_ old: EnvironmentValues, _ new: EnvironmentValues) -> Bool {
+        forwarded.allSatisfy { $0.same(old, new) }
     }
 }
 
@@ -223,6 +272,14 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private let chrome: ChatChrome
     private let layout = TranscriptLayout()
     private let presentation = TranscriptRowPresentation()
+    private let scroll = ChatScrollSignal()
+    /// The row interactions, built once so forwarding the environment never
+    /// changes them (`TranscriptRowEnvironment`).
+    private var interactions = ChatRowInteractions()
+    private var forwardedEnvironment = false
+    /// Fresh local echoes whose send entrance plays when their cell first
+    /// displays (`SendEntrance`).
+    private var pendingEntrances: Set<String> = []
     private weak var list: TranscriptList?
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>?
     private var snapshot = Snapshot.empty
@@ -248,6 +305,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     private var lastGeometry: TranscriptGeometry?
     private var reportTask: Task<Void, Never>?
     private var cancelRouteOnReport = false
+    private var releasePlacementOnReport = false
     private var detachOnReport = false
     private var dismissedKeyboardOnDrag = false
     private var keyboardPull: (entry: CGFloat, height: CGFloat, travel: CGFloat)?
@@ -276,6 +334,11 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         list.accessibilityIdentifier = AccessibilityID.transcript
         list.delegate = self
         list.panGestureRecognizer.addTarget(self, action: #selector(handleKeyboardDrag(_:)))
+        scroll.isScrolling = { [weak list] in list.map { $0.isDragging || $0.isDecelerating } ?? false }
+        interactions.showOriginal = { [weak self] in self?.showOriginal($0) }
+        interactions.opening = { [weak self] in self?.rowOpening($0) }
+        interactions.folded = { [weak self] in self?.rowFolded($0) }
+        interactions.scroll = scroll
         let cells = UICollectionView.CellRegistration<UICollectionViewCell, String> { [weak self] cell, _, id in
             guard let self, let row = self.rows[id] else { return }
             cell.contentConfiguration = UIHostingConfiguration {
@@ -314,10 +377,13 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         }
         var rowEnvironment = environment
         rowEnvironment.dynamicTypeSize = input.dynamicTypeSize
-        rowEnvironment.chatRowInteractions.showOriginal = { [weak self] in self?.showOriginal($0) }
-        rowEnvironment.chatRowInteractions.opening = { [weak self] in self?.rowOpening($0) }
-        rowEnvironment.chatRowInteractions.folded = { [weak self] in self?.rowFolded($0) }
-        presentation.environment = rowEnvironment
+        rowEnvironment.chatRowInteractions = interactions
+        // Every visible row reads this, so assigning it re-renders them all.
+        // Most updates (a streamed token, a receipt) leave it unchanged.
+        if !forwardedEnvironment || !TranscriptRowEnvironment.same(presentation.environment, rowEnvironment) {
+            forwardedEnvironment = true
+            presentation.environment = rowEnvironment
+        }
         if presentation.highlights != input.highlights { presentation.highlights = input.highlights }
 
         if snapshot != input.snapshot {
@@ -367,11 +433,12 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     }
 
     func close() {
+        stopPlacement()
+        releasePlacementOnReport = false
         reportTask?.cancel()
         reportTask = nil
         routeTask?.cancel()
         routeTask = nil
-        stopPlacement()
         MessageFoldStore.session.readerSees([], among: presentation.growing)
         Task { [weak store] in store?.bottomVisible = false }
     }
@@ -380,20 +447,36 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
 
     private func applySnapshot() {
         guard let list, let dataSource else { return }
-        let nextRows = Dictionary(uniqueKeysWithValues: snapshot.rows.map { ($0.id, $0) })
+        // A diffable snapshot traps on a repeated identifier. The projection
+        // never emits one; keep the first occurrence if it ever does.
+        var seen = Set<String>()
+        let unique = snapshot.rows.filter { seen.insert($0.id).inserted }
+        #if DEBUG
+        if unique.count != snapshot.rows.count {
+            assertionFailure("Transcript snapshot repeats \(snapshot.rows.count - unique.count) row IDs")
+        }
+        #endif
+        let nextRows = Dictionary(unique.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         if let resizedReadingAnchor, nextRows[resizedReadingAnchor.id] == nil {
             self.resizedReadingAnchor = nil
         }
         let keepsBottom = store.follow.isFollowing && motion != .user
         let anchor = keepsBottom || placement != nil
             ? nil : resizedReadingAnchor ?? captureAnchor(keeping: nextRows)
-        let ids = snapshot.rows.map(\.id)
+        let ids = unique.map(\.id)
         let previousIDs = dataSource.snapshot().itemIdentifiers
         let changed = ids.filter { id in
             guard let old = rows[id] else { return false }
             return old != nextRows[id]
         }
         rows = nextRows
+        if !previousIDs.isEmpty {
+            let known = Set(previousIDs)
+            for row in unique where !known.contains(row.id) && SendEntrance.plays(row) {
+                pendingEntrances.insert(row.id)
+            }
+        }
+        pendingEntrances = pendingEntrances.filter { id in rows[id].map { SendEntrance.plays($0) } ?? false }
         let growing = MessageFold.growingIDs(in: snapshot.rows)
         if presentation.growing != growing { presentation.growing = growing }
         let latestAnswer = store.kind == .assistant || store.kind == .appBot
@@ -515,7 +598,24 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
 
     private func scrollToBottom(animated: Bool) {
         guard let list, list.bounds.height > 0, !rows.isEmpty else { return }
-        setOffset(list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom, animated: animated)
+        let bottom = { list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom }
+        let viewport = list.bounds.height - list.adjustedContentInset.top - list.adjustedContentInset.bottom
+        let jumped = animated && !ChatMotion.disabledForUITests && bottom() - list.contentOffset.y > viewport * 2
+        if jumped {
+            // From far up, an animated scroll would cross rows still at their
+            // estimated heights and land short as they size. Jump to one
+            // screen above the end, let those rows size, then animate the
+            // last screen. The bottom pin keeps that screen's distance.
+            motion = .animating
+            layout.pin = .bottom
+            list.contentOffset.y = max(-list.adjustedContentInset.top, bottom() - viewport)
+            list.layoutIfNeeded()
+        }
+        let before = list.contentOffset.y
+        let target = setOffset(bottom(), animated: animated)
+        // Nothing was left to animate after the jump, so no animation end
+        // will arrive: the scroll is over.
+        if jumped, abs(before - target) <= 0.5 { endMotion() }
     }
 
     // MARK: Scroll input, visibility and message folds
@@ -538,6 +638,9 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // The rows move with the content, so their own press rules never see
+        // this drag: cancel any press before it opens a menu.
+        scroll.panBegan()
         motion = .user
         foldingAnchor = nil
         replyJumpID = nil
@@ -601,6 +704,21 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         return true
     }
 
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell,
+                        forItemAt indexPath: IndexPath) {
+        guard let id = dataSource?.itemIdentifier(for: indexPath) else { return }
+        guard pendingEntrances.remove(id) != nil, let row = rows[id], SendEntrance.plays(row) else {
+            SendEntrance.stop(on: cell.layer)
+            return
+        }
+        SendEntrance.play(on: cell.layer, reduceMotion: presentation.environment.chatReducesMotion)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell,
+                        forItemAt indexPath: IndexPath) {
+        SendEntrance.stop(on: cell.layer)
+    }
+
     func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
         list?.setNeedsLayout()
     }
@@ -643,6 +761,12 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
                 markMemory("chat.open")
             }
             let clampedToSearch = placement != nil
+            if releasePlacementOnReport, !clampedToSearch {
+                releasePlacementOnReport = false
+                lastGeometry = geometry
+                store.handle(.searchPlacementReleased(distanceFromBottom: geometry.distanceFromBottom,
+                                                      viewportHeight: geometry.viewportHeight))
+            }
             if keyboardPull == nil, !resizeAtEstimatedEnd,
                geometry != lastGeometry || detachOnReport || reportKeyboardPanEnd {
                 lastGeometry = geometry
@@ -778,7 +902,11 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         presentation.routeHighlight = nil
         placement.routed?.completion.finish()
         readingAnchor = captureAnchor()
-        lastGeometry = nil
+        // While placed, reports clamp the distance from the bottom. Reconcile
+        // the measured geometry with the follow policy on the next report,
+        // without a full geometry report that could request a history page.
+        releasePlacementOnReport = true
+        scheduleReport()
     }
 
     private func placeSearchMatch() {

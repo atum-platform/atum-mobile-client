@@ -1,5 +1,6 @@
 import AtumChat
 import SwiftUI
+import UIKit
 
 /// What every chat row reads from the environment (plan §2.6 "Rendering"):
 /// the design, the copy, the row actions and the few view-only interactions.
@@ -50,9 +51,51 @@ struct ChatRowInteractions {
     /// A long message was folded with Show less (`MessageFold`); the
     /// transcript brings its top back if it had scrolled away.
     var folded: @MainActor (String) -> Void = { _ in }
+    /// P4: whether the transcript's own pan is moving the list. Each row is
+    /// hosted in a collection cell that moves with the content, so a row's
+    /// own "the finger moved 10 pt" rule never trips during a slow drag; the
+    /// message menu asks this instead (`MessageMenuModifier`).
+    var scroll = ChatScrollSignal.none
+}
+
+/// P4: the transcript's scrolling state, shared with every row's press
+/// recognizers. The transcript sets `isScrolling` once and calls
+/// `panBegan()` from `scrollViewWillBeginDragging`, which cancels any press
+/// that has not yet opened its menu. A reference, so handing it to rows
+/// never changes the environment.
+@MainActor
+final class ChatScrollSignal {
+    /// Outside a transcript nothing scrolls the rows.
+    static let none = ChatScrollSignal()
+
+    var isScrolling: @MainActor () -> Bool = { false }
+    private let presses = NSHashTable<UIGestureRecognizer>.weakObjects()
+    private let waitingPresses = NSHashTable<UIGestureRecognizer>.weakObjects()
+
+    /// A row's press recognizer, cancelled when the pan begins.
+    /// `onlyWaiting`: only while it has not recognized yet (the menu
+    /// follower keeps a press that has already opened the menu).
+    func track(_ recognizer: UIGestureRecognizer, onlyWaiting: Bool) {
+        (onlyWaiting ? waitingPresses : presses).add(recognizer)
+    }
+
+    func panBegan() {
+        let waiting = waitingPresses.allObjects.filter { $0.state == .possible }
+        let active = presses.allObjects.filter { $0.state != .failed && $0.state != .cancelled }
+        for recognizer in waiting + active {
+            // Disabling cancels a recognized press and fails one still waiting.
+            recognizer.isEnabled = false
+            recognizer.isEnabled = true
+        }
+    }
 }
 
 extension EnvironmentValues {
+    // P4: the transcript hosts each row in its own UIKit cell, and a cell's
+    // SwiftUI graph does not inherit the chat screen's environment. Every key
+    // a row reads must be listed in `TranscriptRowEnvironment.forwarded`
+    // (TranscriptView.swift); `tests/test_transcript_row_environment.py`
+    // fails when a key declared here is neither forwarded nor exempted.
     @Entry var chatTheme: ChatTheme?
     @Entry var chatActions: ChatActions = .none
     /// This account's Matrix user ID: which reaction chips are mine (B22).

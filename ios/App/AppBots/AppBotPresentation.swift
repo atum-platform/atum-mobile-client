@@ -125,6 +125,9 @@ final class AppBotPresenter {
 }
 
 extension EnvironmentValues {
+    // P4: a key a transcript row reads must also be listed in
+    // `TranscriptRowEnvironment.forwarded` (TranscriptView.swift); the hosted
+    // cells do not inherit it. tests/test_transcript_row_environment.py checks.
     @Entry var appBotPresentation: AppBotPresentation?
     @Entry var appBotPresenter: AppBotPresenter?
     @Entry var appBotNoticeDisplays: [String: AppBotNoticeDisplay] = [:]

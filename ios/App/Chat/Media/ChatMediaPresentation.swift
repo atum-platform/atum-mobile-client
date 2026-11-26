@@ -93,6 +93,9 @@ actor ChatMediaMemoryCache {
 }
 
 extension EnvironmentValues {
+    // P4: a key a transcript row reads must also be listed in
+    // `TranscriptRowEnvironment.forwarded` (TranscriptView.swift); the hosted
+    // cells do not inherit it. tests/test_transcript_row_environment.py checks.
     @Entry var chatMediaAccess = ChatMediaAccess()
     /// Why files cannot be attached in this chat, or nil when they can. A company DM or
     /// group DM has no protected-file audience yet, so its `+` shows the reason and no

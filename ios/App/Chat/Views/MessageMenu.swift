@@ -162,6 +162,9 @@ struct DeleteRequest: Identifiable, Equatable {
 }
 
 extension EnvironmentValues {
+    // P4: a key a transcript row reads must also be listed in
+    // `TranscriptRowEnvironment.forwarded` (TranscriptView.swift); the hosted
+    // cells do not inherit it. tests/test_transcript_row_environment.py checks.
     /// The chat screen's presenter, for row views (the failed-send mark).
     @Entry var messageActions: MessageActionsPresenter?
 }
@@ -225,6 +228,9 @@ private struct MessageMenuModifier: ViewModifier {
     /// `testQuotesInBothBubblesMeetContrast`).
     @State private var pressing = false
     @Environment(\.chatReducesMotion) private var reduceMotion
+    /// P4: the transcript's pan. A press that the list has started to
+    /// scroll never opens the menu (`ChatRowInteractions.scroll`).
+    @Environment(\.chatRowInteractions) private var interactions
 
     /// How long a press takes to open the menu.
     static let pressDuration: Double = 0.35
@@ -270,7 +276,7 @@ private struct MessageMenuModifier: ViewModifier {
                 // Simultaneous, so the answer's own text views (links, the
                 // markdown renderer) never swallow the press.
                 .simultaneousGesture(pressGesture(items))
-                .gesture(MenuPressSink(delay: Self.pressDelay) { pressing = $0 })
+                .gesture(MenuPressSink(delay: Self.pressDelay, scroll: interactions.scroll) { pressing = $0 })
                 .gesture(followRecognizer(items))
                 // One medium tick when the menu opens, never when it closes.
                 .sensoryFeedback(.impact(weight: .medium), trigger: source) { _, opened in opened }
@@ -315,7 +321,7 @@ private struct MessageMenuModifier: ViewModifier {
     /// before the menu had laid its parts out still runs it (P3 run 5's
     /// probe: a quick flick arrives before the targets exist).
     private func followRecognizer(_ items: [MessageMenuItem]) -> MenuPressFollower {
-        MenuPressFollower(duration: Self.pressDuration,
+        MenuPressFollower(duration: Self.pressDuration, scroll: interactions.scroll,
                           began: { location in
                               open(items)
                               guard presenter.actionsOverlay?.id == row.id else { return }
@@ -336,7 +342,7 @@ private struct MessageMenuModifier: ViewModifier {
     }
 
     private func open(_ items: [MessageMenuItem]) {
-        guard presenter.actionsOverlay == nil else { return }
+        guard presenter.actionsOverlay == nil, !interactions.scroll.isScrolling() else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
@@ -354,6 +360,7 @@ private struct MessageMenuModifier: ViewModifier {
 /// cancelling one, like `MenuPressFollower`: it only observes.
 private struct MenuPressSink: UIGestureRecognizerRepresentable {
     let delay: Double
+    let scroll: ChatScrollSignal
     let changed: @MainActor (Bool) -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
@@ -365,17 +372,22 @@ private struct MenuPressSink: UIGestureRecognizerRepresentable {
         recognizer.delaysTouchesBegan = false
         recognizer.delaysTouchesEnded = false
         recognizer.delegate = context.coordinator
+        scroll.track(recognizer, onlyWaiting: false)
         return recognizer
     }
 
     func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
         recognizer.minimumPressDuration = delay
+        scroll.track(recognizer, onlyWaiting: false)
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
         let coordinator = context.coordinator
         switch recognizer.state {
         case .began:
+            // A finger resting on a row the list is already scrolling (a
+            // slow drag) is not a press.
+            guard !scroll.isScrolling() else { return }
             coordinator.start = recognizer.location(in: nil)
             coordinator.down = true
             changed(true)
@@ -383,7 +395,7 @@ private struct MenuPressSink: UIGestureRecognizerRepresentable {
             // Resting first and then dragging is a scroll: the row comes back up.
             guard coordinator.down, let start = coordinator.start else { return }
             let point = recognizer.location(in: nil)
-            if hypot(point.x - start.x, point.y - start.y) > recognizer.allowableMovement {
+            if hypot(point.x - start.x, point.y - start.y) > recognizer.allowableMovement || scroll.isScrolling() {
                 coordinator.down = false
                 changed(false)
             }
@@ -416,6 +428,7 @@ private struct MenuPressSink: UIGestureRecognizerRepresentable {
 /// press only reports `cancelled` (the highlight goes); the menu stays open.
 private struct MenuPressFollower: UIGestureRecognizerRepresentable {
     let duration: Double
+    let scroll: ChatScrollSignal
     let began: @MainActor (CGPoint) -> Void
     let moved: @MainActor (CGPoint) -> Void
     let ended: @MainActor (CGPoint) -> Void
@@ -430,11 +443,15 @@ private struct MenuPressFollower: UIGestureRecognizerRepresentable {
         recognizer.delaysTouchesBegan = false
         recognizer.delaysTouchesEnded = false
         recognizer.delegate = context.coordinator
+        // A press the pan takes before the threshold never opens the menu;
+        // one that already opened it keeps following the finger.
+        scroll.track(recognizer, onlyWaiting: true)
         return recognizer
     }
 
     func updateUIGestureRecognizer(_ recognizer: UILongPressGestureRecognizer, context: Context) {
         recognizer.minimumPressDuration = duration
+        scroll.track(recognizer, onlyWaiting: true)
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
