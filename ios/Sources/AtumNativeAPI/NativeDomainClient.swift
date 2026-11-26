@@ -1215,6 +1215,41 @@ public struct AgentsRead: Sendable {
         return try decode(AccountConnections.self, data: body)
     }
 
+    /// The assistant's Work choice and the revision that fences its next write.
+    /// Shell takes the owner from the bearer.
+    public func workSelection(
+        agentPrincipal: NativeID, isCurrent: NativeDispatchGate = { true }
+    ) async throws -> WorkModelSelectionSnapshot {
+        let request = try JSONEncoder().encode(WorkModelSelectionReadRequest(agentPrincipal: agentPrincipal))
+        let answer = try await phoneDeviceServices(request: request, isCurrent: isCurrent)
+        return try decode(WorkModelSelectionSnapshot.self, data: answer)
+    }
+
+    /// A single compare-and-swap. The picker owns the eligibility and retry
+    /// decision and can withdraw it even while authorization is pending.
+    public func setWorkSelection(
+        agentPrincipal: NativeID, selection: WorkModelSelection, expectedRevision: Int64,
+        isCurrent: NativeDispatchGate
+    ) async throws -> WorkModelSelectionWriteResult {
+        guard (0...NativeAPI.maximumInteger).contains(expectedRevision) else {
+            throw NativeDomainClientFailure.invalidRequest
+        }
+        let request = try JSONEncoder().encode(WorkModelSelectionWriteRequest(
+            agentPrincipal: agentPrincipal, expectedRevision: expectedRevision, selection: selection
+        ))
+        do {
+            let answer = try await phoneDeviceServices(request: request, isCurrent: isCurrent)
+            let reply = try decode(WorkModelSelectionWriteReply.self, data: answer)
+            // Writing the already-saved choice can return the same revision.
+            guard reply.snapshot.revision >= expectedRevision else {
+                throw NativeDomainClientFailure.invalidResponse
+            }
+            return .saved(reply.snapshot)
+        } catch let refusal as PhoneRegistryError where refusal.error == .conflict {
+            return .conflict
+        }
+    }
+
     // MARK: ChatGPT with Google data (Shell training-confirmation r3)
 
     /// The account's one-time training-off confirmation. Any answer other than
@@ -1561,11 +1596,13 @@ public struct AgentsRead: Sendable {
         return second
     }
 
-    func authorize(forceRefresh: Bool, reportsAuthenticationFailure: Bool = true) async throws -> String {
+    func authorize(forceRefresh: Bool, reportsAuthenticationFailure: Bool = true,
+                   isCurrent: NativeDispatchGate = { true }) async throws -> String {
+        guard isCurrent() else { throw NativeDomainClientFailure.cancelled }
         do {
             return try await authorization(forceRefresh)
         } catch {
-            if reportsAuthenticationFailure { authenticationFailureObserver(error) }
+            if reportsAuthenticationFailure, isCurrent() { authenticationFailureObserver(error) }
             throw error
         }
     }
@@ -1597,7 +1634,8 @@ public struct AgentsRead: Sendable {
     /// `controllerKeys` reads the public pinned controller keys.
     func phoneDeviceServices(request: Data? = nil, revoking id: UUID? = nil,
                              listVersion: String = PhoneRegistryContract.listVersion,
-                             controllerKeys: Bool = false, rotation: Bool = true) async throws -> Data {
+                             controllerKeys: Bool = false, rotation: Bool = true,
+                             isCurrent: NativeDispatchGate = { true }) async throws -> Data {
         let root = Self.baseURL.appendingPathComponent("device-services")
         let url = controllerKeys ? Self.baseURL.appendingPathComponent("cloud/controller-keys")
             : (id.map { root.appendingPathComponent($0.uuidString.lowercased()) } ?? root)
@@ -1605,7 +1643,7 @@ public struct AgentsRead: Sendable {
         let headers = method == "GET" && !controllerKeys ? [PhoneRegistryContract.versionHeader: listVersion] : [:]
         let token: String
         if rotation {
-            token = try await authorize(forceRefresh: false)
+            token = try await authorize(forceRefresh: false, isCurrent: isCurrent)
         } else {
             guard let stored = storedAuthorization() else { throw NativeDomainClientFailure.authenticationRefused }
             token = stored
@@ -1613,16 +1651,21 @@ public struct AgentsRead: Sendable {
         try requireActiveTask()
         var result = try await perform(url: url, token: token, method: method,
             body: method == "GET" ? nil : (request ?? Data()),
-            maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000, extraHeaders: headers)
+            maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000,
+            extraHeaders: headers, isCurrent: isCurrent)
         // Without rotation a 401 is final: no refresh, no replay, no report.
         if result.status == 401, !rotation { throw NativeDomainClientFailure.authenticationRefused }
         if result.status == 401 {
-            let refreshed = try await authorize(forceRefresh: true)
+            try requireActiveTask()
+            let refreshed = try await authorize(forceRefresh: true, isCurrent: isCurrent)
             try requireActiveTask()
             result = try await perform(url: url, token: refreshed, method: method,
                 body: method == "GET" ? nil : (request ?? Data()),
-                maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000, extraHeaders: headers)
-            if result.status == 401 { authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused) }
+                maximumRequestBodyBytes: 32_768, maximumResponseBodyBytes: 1_000_000,
+                extraHeaders: headers, isCurrent: isCurrent)
+            if result.status == 401, isCurrent() {
+                authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused)
+            }
         }
         try requireActiveTask()
         guard (method == "POST" ? [200, 201] : [200]).contains(result.status) else {

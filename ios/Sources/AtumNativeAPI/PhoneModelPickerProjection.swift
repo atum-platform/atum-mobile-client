@@ -10,6 +10,39 @@ public enum PhoneModelPickerProjection {
         public let models: [AccountConnectionModel]
         public var id: AccountPlan { plan }
         public var reason: Reason { .openOnMac }
+
+        public init(plan: AccountPlan, models: [AccountConnectionModel]) {
+            self.plan = plan
+            self.models = models
+        }
+    }
+
+    public struct WorkRow: Equatable, Sendable, Identifiable {
+        public let id: WorkModelSelection
+        public let displayName: String
+        public let selected: Bool
+        public let selectable: Bool
+    }
+
+    /// The Work identity includes the plan even when two catalogs report the
+    /// same model ID. A saved model stays visible if its catalog omits it.
+    public static func workRows(reported: [WorkPlanHandoff], state: PhoneModelPickerWorkSelectionState?) -> [WorkRow] {
+        let current = state?.readySnapshot?.selection
+        var seen = Set<WorkModelSelection>()
+        var rows: [WorkRow] = []
+        for handoff in reported {
+            for model in handoff.models {
+                guard let choice = WorkModelSelection(plan: handoff.plan, model: model.id),
+                      seen.insert(choice).inserted else { continue }
+                rows.append(.init(id: choice, displayName: model.displayName, selected: choice == current,
+                                  selectable: state?.eligibility.allows(choice) == true))
+            }
+        }
+        if let saved = state?.snapshot?.selection, seen.insert(saved).inserted {
+            rows.append(.init(id: saved, displayName: ModelDisplayName.destinationLabel(model: saved.model),
+                              selected: saved == current, selectable: state?.eligibility.allows(saved) == true))
+        }
+        return rows
     }
 
     public struct Row: Equatable, Sendable {

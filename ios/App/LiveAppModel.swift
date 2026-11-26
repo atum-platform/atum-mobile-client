@@ -2136,7 +2136,10 @@ final class LiveAppModel {
                     }
                 ),
                 makeConnectionsPoll: { [weak self] in self?.accountConnectionsPoller() ?? { nil } }
-            )
+            ),
+            makeWorkSelection: {
+                PhoneModelPickerWorkSelection(agentPrincipal: agent.principal, client: client, isCurrent: current)
+            }
         )
     }
 
