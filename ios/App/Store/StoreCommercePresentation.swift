@@ -159,6 +159,15 @@ enum StoreBetaGate {
                           betaFeatures: Bool, owned: Bool) -> StoreItemRow.Status {
         status == .price && comingSoon(kind, betaFeatures: betaFeatures, owned: owned) ? .comingSoon : status
     }
+
+    /// The assistants a per-assistant skill's sheet lists. With beta features,
+    /// every eligible one. Without, only those that already have the skill, so
+    /// each owner's chat stays one tap away and nothing new can be got (desktop
+    /// `store-detail.tsx`: "What is already owned stays usable").
+    static func recipients<Target>(all: [Target], eligible: [Target], betaFeatures: Bool,
+                                   owned: (Target) -> Bool) -> [Target] {
+        betaFeatures ? eligible : all.filter(owned)
+    }
 }
 
 /// A notice's meaning, kept apart from SwiftUI so each outcome's wording is

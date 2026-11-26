@@ -70,8 +70,10 @@ struct AssistantNewSheet: View {
     @FocusState private var nameFocused: Bool
     @Environment(\.colorScheme) private var scheme
     @Environment(\.atumBetaFeatures) private var betaFeatures
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
     private var handleCopy: AssistantHandleCopy { AssistantHandleCopy(design: design) }
 
     private var normalizedName: String { AssistantNameCheck.normalized(name) }
@@ -233,34 +235,22 @@ struct AssistantNewSheet: View {
         Section {
             ForEach(listings) { listing in
                 let title = listing.title(locale: design.locale)
-                let summary = listing.summary(locale: design.locale)
-                HStack(spacing: 12) {
-                    ListingFace(design: design, glyph: listing.glyph)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: title)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(atum.color(.ink, scheme: scheme))
-                            .lineLimit(1)
-                        if !summary.isEmpty {
-                            Text(verbatim: summary)
-                                .font(.footnote)
-                                .foregroundStyle(atum.color(.muted, scheme: scheme))
-                                .lineLimit(2)
+                // At accessibility sizes the action goes under the words, as in
+                // Settings and the model picker, so neither is squeezed.
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: kit.space(.s2)) {
+                            listingLabel(listing, title: title)
+                            listingAction(listing, title: title)
+                        }
+                    } else {
+                        HStack(spacing: kit.space(.s3)) {
+                            listingLabel(listing, title: title)
+                            listingAction(listing, title: title)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    // Without beta features: "Coming soon", disabled (desktop #132).
-                    let action = copy(betaFeatures ? ListingHireCopy.hire : StoreCopyKey.comingSoon)
-                    Button(action) { pick(listing) }
-                        .buttonStyle(.bordered)
-                        .buttonBorderShape(.capsule)
-                        .tint(atum.color(.ink, scheme: scheme))
-                        .disabled(shelfDisabled || !betaFeatures)
-                        .accessibilityLabel(Text(verbatim: action + " " + title))
-                        .accessibilityIdentifier(betaFeatures ? "home.newAssistant.listing.hire"
-                                                                      : "home.newAssistant.listing.soon")
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? kit.space(.s2) : 2)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home.newAssistant.listing")
             }
@@ -269,6 +259,55 @@ struct AssistantNewSheet: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("home.newAssistant.readyToHire")
         }
+    }
+
+    /// The face and the words. At accessibility sizes the face sits above
+    /// them so the title has the row's full width.
+    @ViewBuilder private func listingLabel(_ listing: OpenAgentListing, title: String) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: kit.space(.s2)) {
+                ListingFace(design: design, glyph: listing.glyph)
+                listingWords(listing, title: title)
+            }
+        } else {
+            HStack(spacing: kit.space(.s3)) {
+                ListingFace(design: design, glyph: listing.glyph)
+                listingWords(listing, title: title)
+            }
+        }
+    }
+
+    private func listingWords(_ listing: OpenAgentListing, title: String) -> some View {
+        let summary = listing.summary(locale: design.locale)
+        let accessible = dynamicTypeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: title)
+                .font(.body.weight(.medium))
+                .foregroundStyle(atum.color(.ink, scheme: scheme))
+                .lineLimit(accessible ? 2 : 1)
+                .minimumScaleFactor(accessible ? 0.8 : 1)
+            if !summary.isEmpty {
+                Text(verbatim: summary)
+                    .font(.footnote)
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                    .lineLimit(accessible ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: accessible)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func listingAction(_ listing: OpenAgentListing, title: String) -> some View {
+        // Without beta features: "Coming soon", disabled (desktop #132).
+        let action = copy(betaFeatures ? ListingHireCopy.hire : StoreCopyKey.comingSoon)
+        return Button(action) { pick(listing) }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .tint(atum.color(.ink, scheme: scheme))
+            .disabled(shelfDisabled || !betaFeatures)
+            .accessibilityLabel(Text(verbatim: action + " " + title))
+            .accessibilityIdentifier(betaFeatures ? "home.newAssistant.listing.hire"
+                                                          : "home.newAssistant.listing.soon")
     }
 
     private var shelfDisabled: Bool {

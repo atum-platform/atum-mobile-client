@@ -43,8 +43,13 @@ ownership when the projection is absent.
 
 **Store sheet** (`StoreItemSheet`). The sheet gets a new phase,
 `.comingSoon`. The sheet checks owned, pending and unresolved first. An
-assistant-scoped skill checks ownership for the chosen assistant. That is the
-first eligible assistant without the skill, because the picker is hidden. The
+assistant-scoped skill checks ownership for the chosen assistant. Without beta
+features the picker lists only the assistants that already own the skill
+(`StoreBetaGate.recipients`, round r3-ui). The chosen assistant defaults to the
+first owner, so an owned skill shows Owned and Open for that owner's chat, and
+each other owner can be picked to open theirs. No unowned assistant is listed,
+so nothing new can be got. When no assistant owns the skill the picker stays
+hidden and the sheet is Coming soon. The
 header, description, "What it uses" and the try line stay. A disabled primary
 button labelled "Coming soon" (`store.detail.soon`) replaces the action. No
 recipient picker, price rows, balance, notice, Get, top-up or Open shows. Hires
@@ -59,6 +64,11 @@ and has the identifier `home.newAssistant.listing.soon`. VoiceOver reads
 guard and `ListingHireFlow.press(…, betaFeatures:)` both refuse before a hire
 flow exists. Without beta features nothing changes phase, the name line does
 not show, and no request is sent. Make your own still works.
+At accessibility text sizes (round r3-ui) the shelf row stacks vertically:
+the face, then the title and summary at the row's full width, then the
+action. This follows the pattern of `AtumSettingsRow` and the model picker's
+Connect row, so "Researcher" no longer truncates and the button no longer
+breaks "Coming soon" across five lines. Default sizes keep the one-line row.
 
 An open skill review or Researcher confirmation updates when the flag changes.
 When access is revoked, Coming soon and Back replace Confirm, Retry and the
@@ -177,6 +187,23 @@ shelf already uses.
   captures are under `dd-w4-z2/r2/run-2` and `dd-w4-z2/r2/run-3`. Both
   batches used the same iPhone 16e simulator and shut it down at the end.
 
+### Round r3-ui (review r2 should-fixes)
+
+- `StoreCommercePresentationTests.testWithoutBetaTheRecipientsAreTheAssistantsThatOwnTheSkill`
+  covers the picker rows: without beta, every owner (including one that is
+  not paid-eligible) and no one else; with beta, every eligible assistant.
+- `StoreCommerceUITests.testWithoutBetaFeaturesOwnedItemsStayUsable` now
+  opens the owned skill at the default size and at AX5 light and dark. It
+  checks that Mai is listed, chosen and marked Owned, that Lan is not listed,
+  and that Open is shown and hittable with no Coming soon, Get or top-up.
+- `ListingHireUITests` at AX5 checks that Coming soon sits below the
+  listing title.
+- Captures live under `/Volumes/AtumTestFlight/dd-w4-z2/r3-ui/`. `before/`
+  holds the r2 AX5 shelf and Coming soon sheet captures, and the run folder
+  holds the after captures.
+
+RESULTS_PENDING
+
 ## Decisions
 
 - The sheet also hides the price rows while the item is Coming soon. Desktop
@@ -190,3 +217,10 @@ shelf already uses.
 - In the UI test, the scripted Lan assistant's ID constant is `lanAgent`. A
   constant named after Lan alone, after a dot, matches the public guard's
   private-host pattern for LAN hostnames.
+- Without beta features the skill picker lists only owners, a deliberate
+  refinement of desktop. Desktop (`store-detail.tsx`) leaves owned items
+  usable through `soon = done ? undefined : comingSoon` and opens on the first
+  assistant without the skill. Its picker then lists every assistant, and
+  choosing an unowned one hides the picker again. Listing only owners keeps
+  every owner's chat reachable and never offers an acquisition. The rows,
+  title and body reuse the existing pinned recipient keys.

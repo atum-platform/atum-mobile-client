@@ -92,6 +92,10 @@ final class ListingHireUITests: TranscriptUITestCase {
                     if size.hasSuffix("XXXL") {
                         for _ in 0..<6 where !sheetShows(soon, in: app) { dragSheetUp(app) }
                         XCTAssertTrue(sheetShows(soon, in: app), "Coming soon is clipped by the sheet")
+                        // The action sits under the listing's words, not squeezed beside them.
+                        let title = app.staticTexts[words.title].firstMatch
+                        XCTAssertGreaterThanOrEqual(soon.frame.minY, title.frame.maxY - 1,
+                                                    "Coming soon sits beside the title at AX5")
                     }
                     XCTAssertEqual(soon.label, "\(soonWords[language]!) \(words.title)")
                     XCTAssertFalse(soon.isEnabled, "Coming soon is pressable")

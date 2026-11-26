@@ -185,7 +185,7 @@ struct StoreItemSheet: View {
     private var perAssistant: Bool { item.kind == .skill && item.offer?.scope == .agent }
 
     private var showsRecipients: Bool {
-        betaFeatures && perAssistant && commerce?.readState == .ready && !eligible.isEmpty
+        perAssistant && commerce?.readState == .ready && !recipientTargets.isEmpty
     }
 
     private var eligible: [LiveStoreCommerce.Target] {
@@ -193,12 +193,21 @@ struct StoreItemSheet: View {
         return commerce.targets.filter { commerce.paidTargets.contains($0.id) }
     }
 
-    /// The chosen assistant, else the first eligible one without the skill.
-    /// Never silently swapped during a purchase: the review holds its own quote.
+    /// The picker's rows: every eligible assistant, or without beta features
+    /// only the assistants that already have the skill (`StoreBetaGate.recipients`).
+    private var recipientTargets: [LiveStoreCommerce.Target] {
+        StoreBetaGate.recipients(all: commerce?.targets ?? [], eligible: eligible,
+                                 betaFeatures: betaFeatures) { ownedFor($0.id) }
+    }
+
+    /// The chosen assistant, else the first listed one without the skill (an
+    /// owner when beta features are off). Never silently swapped during a
+    /// purchase: the review holds its own quote.
     private var assistant: NativeID? {
         guard perAssistant else { return nil }
-        if let chosenAssistant, eligible.contains(where: { $0.id == chosenAssistant }) { return chosenAssistant }
-        return (eligible.first { !ownedFor($0.id) } ?? eligible.first)?.id
+        let listed = recipientTargets
+        if let chosenAssistant, listed.contains(where: { $0.id == chosenAssistant }) { return chosenAssistant }
+        return (listed.first { !ownedFor($0.id) } ?? listed.first ?? eligible.first)?.id
     }
 
     private var recipients: some View {
@@ -212,7 +221,7 @@ struct StoreItemSheet: View {
                 .foregroundStyle(kit.color(.ink3, scheme: scheme))
                 .fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 0) {
-                ForEach(Array(eligible.enumerated()), id: \.element.id) { index, target in
+                ForEach(Array(recipientTargets.enumerated()), id: \.element.id) { index, target in
                     if index > 0 { Divider().overlay(kit.color(.line, scheme: scheme)).padding(.leading, kit.space(.s4) + 28 + kit.space(.s3)) }
                     recipientRow(target)
                 }

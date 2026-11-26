@@ -293,25 +293,49 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         }
     }
 
-    /// What is already owned is never Coming soon: the owned hire opens, and
-    /// the skill Mai owns keeps its row. Lan doesn't own it, so its sheet
-    /// (Lan is the assistant it would go to) is Coming soon.
+    /// What is already owned is never Coming soon: the owned hire keeps its
+    /// row, and the skill Mai owns keeps its row and its sheet. Without beta
+    /// features the sheet's picker lists only the assistants that own the
+    /// skill (Mai, not Lan), so each owner's chat stays reachable and nothing
+    /// new can be got. Default size, then AX5 light and dark.
     @MainActor
     func testWithoutBetaFeaturesOwnedItemsStayUsable() {
-        let app = launchStore("store.owned", extra: Self.withoutBeta)
-        XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
-        let skill = element(app, "store.item.skill/nova")
-        XCTAssertTrue(skill.waitForExistence(timeout: 5))
-        XCTAssertFalse(skill.label.contains(Self.comingSoon), "an owned skill's row: \(skill.label)")
-        let hire = element(app, "store.item.agent/scout")
-        XCTAssertTrue(hire.waitForExistence(timeout: 5))
-        XCTAssertFalse(hire.label.contains(Self.comingSoon), "an owned hire's row: \(hire.label)")
-        XCTAssertTrue(hire.label.contains(Self.owned), "an owned hire's row: \(hire.label)")
-        keepScreenshot("U-Store-Z2-owned-rows-light-default-vi", of: app)
-        openItem("skill/nova", in: app)
-        XCTAssertTrue(element(app, "store.detail.soon").waitForExistence(timeout: 8),
-                      "Lan doesn't own the skill, so its sheet is Coming soon")
-        XCTAssertFalse(element(app, "store.detail.acquire").exists)
+        for (size, dark) in [("UICTContentSizeCategoryL", false), (Self.ax5Size, false), (Self.ax5Size, true)] {
+            let suffix = "\(dark ? "dark" : "light")-\(size == Self.ax5Size ? "ax5" : "default")-vi"
+            let app = launchStore("store.owned", contentSize: size,
+                                  extra: Self.withoutBeta + ["-atum.appearance", dark ? "dark" : "light"])
+            XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 15))
+            if size == "UICTContentSizeCategoryL" {
+                let skill = element(app, "store.item.skill/nova")
+                XCTAssertTrue(skill.waitForExistence(timeout: 5))
+                XCTAssertFalse(skill.label.contains(Self.comingSoon), "an owned skill's row: \(skill.label)")
+                let hire = element(app, "store.item.agent/scout")
+                XCTAssertTrue(hire.waitForExistence(timeout: 5))
+                XCTAssertFalse(hire.label.contains(Self.comingSoon), "an owned hire's row: \(hire.label)")
+                XCTAssertTrue(hire.label.contains(Self.owned), "an owned hire's row: \(hire.label)")
+                keepScreenshot("U-Store-Z2-owned-rows-light-default-vi", of: app)
+            }
+            openItem("skill/nova", in: app)
+            let open = element(app, "store.detail.open")
+            XCTAssertTrue(open.waitForExistence(timeout: 8), "Mai owns the skill, so her chat opens from its sheet")
+            XCTAssertTrue(open.isHittable, "Open is clipped")
+            let mai = element(app, "store.recipient.\(ScriptedIDs.mai)")
+            XCTAssertTrue(mai.exists, "the owner is not listed")
+            XCTAssertTrue(mai.isSelected, "the owner is not chosen")
+            XCTAssertTrue(mai.label.contains(Self.owned), "the owner row: \(mai.label)")
+            XCTAssertFalse(element(app, "store.recipient.\(ScriptedIDs.lanAgent)").exists,
+                           "Lan doesn't own the skill and is offered it")
+            XCTAssertFalse(element(app, "store.detail.soon").exists)
+            XCTAssertFalse(element(app, "store.detail.acquire").exists)
+            XCTAssertFalse(element(app, "topup.entry").exists)
+            if size == Self.ax5Size {
+                let sheet = element(app, "store.sheet")
+                for _ in 0..<4 where !mai.isHittable { sheet.swipeUp() }
+                XCTAssertTrue(mai.isHittable, "the owner row is out of reach at AX5")
+            }
+            keepScreenshot("U-Store-Z2-owned-detail-\(suffix)", of: app)
+            app.terminate()
+        }
     }
 
     @MainActor

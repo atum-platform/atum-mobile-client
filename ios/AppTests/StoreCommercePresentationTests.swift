@@ -276,6 +276,20 @@ final class StoreCommercePresentationTests: XCTestCase {
         XCTAssertEqual(StoreBetaGate.rowStatus(.price, kind: .agent, betaFeatures: true, owned: false), .price)
     }
 
+    /// Without beta features a skill's picker keeps every owner and drops the
+    /// rest, so each owner's chat stays reachable; with beta it is every
+    /// eligible assistant, owned or not.
+    func testWithoutBetaTheRecipientsAreTheAssistantsThatOwnTheSkill() {
+        let all = ["mai", "lan", "minh", "an"]
+        let eligible = ["mai", "lan", "minh"]
+        let owners: Set<String> = ["mai", "minh", "an"]
+        XCTAssertEqual(StoreBetaGate.recipients(all: all, eligible: eligible, betaFeatures: false) { owners.contains($0) },
+                       ["mai", "minh", "an"])
+        XCTAssertEqual(StoreBetaGate.recipients(all: all, eligible: eligible, betaFeatures: true) { owners.contains($0) },
+                       eligible)
+        XCTAssertEqual(StoreBetaGate.recipients(all: all, eligible: eligible, betaFeatures: false) { _ in false }, [])
+    }
+
     #if DEBUG
     @MainActor func testRevokingBetaAfterReviewPreventsAnIntentAndDispatch() async throws {
         let journal = ScriptedStoreJournal()

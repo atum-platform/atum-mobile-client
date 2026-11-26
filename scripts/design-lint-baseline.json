@@ -65,8 +65,8 @@
       "spacing": 2
     },
     "ios/App/Chat/Views/AssistantNewSheet.swift": {
-      "padding": 3,
-      "spacing": 7
+      "padding": 2,
+      "spacing": 6
     },
     "ios/App/Chat/Views/AssistantRoutinesView.swift": {
       "padding": 1,
