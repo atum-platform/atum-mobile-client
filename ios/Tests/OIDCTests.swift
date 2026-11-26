@@ -368,6 +368,18 @@ final class OIDCTests: XCTestCase {
             try NativeAPI.decode(OIDCMe.self, from: JSONSerialization.data(withJSONObject: ["issuer": metadata.issuer, "subject": subject, "principal": "00000000-0000-4000-8000-038d3d87b15e"]))
         }
         let binding = try OIDCAccountBinding.bind(matrix: matrixID, domain: domainID, me: me("synthetic-subject"), clients: client)
+        // Platform #946: `/me` gains `betaFeatures`; older servers omit it. Other unknown fields stay rejected.
+        func meJSON(_ extra: [String: Any]) throws -> OIDCMe {
+            var body: [String: Any] = ["issuer": metadata.issuer, "subject": "synthetic-subject", "principal": "00000000-0000-4000-8000-038d3d87b15e"]
+            body.merge(extra) { $1 }
+            return try NativeAPI.decode(OIDCMe.self, from: JSONSerialization.data(withJSONObject: body))
+        }
+        XCTAssertFalse(try meJSON([:]).betaFeatures)
+        XCTAssertTrue(try meJSON(["betaFeatures": true]).betaFeatures)
+        XCTAssertFalse(try meJSON(["betaFeatures": false]).betaFeatures)
+        XCTAssertNoThrow(try OIDCAccountBinding.bind(matrix: matrixID, domain: domainID, me: meJSON(["betaFeatures": true]), clients: client))
+        XCTAssertThrowsError(try meJSON(["betaFeatures": "yes"]))
+        XCTAssertThrowsError(try meJSON(["somethingElse": 1]))
         XCTAssertThrowsError(try OIDCAccountBinding.bind(matrix: matrixID, domain: domainID, me: me("another-subject"), clients: client))
         XCTAssertThrowsError(try OIDCAccountBinding.bind(matrix: domainID, domain: matrixID, me: me("synthetic-subject"), clients: client))
         var lifecycle = OIDCDomainLifecycle()
