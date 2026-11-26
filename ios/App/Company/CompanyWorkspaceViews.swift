@@ -167,6 +167,8 @@ struct TeamSpaceScreen: View {
     @State private var savedPointers: [CompanySavedMessagePointer] = []
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
+    /// The channel row's "#" column grows with its text style.
+    @ScaledMetric(relativeTo: .title3) private var hashColumn: CGFloat = 28
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
     private var copy: CompanyCopy { CompanyCopy(design: design) }
@@ -632,8 +634,10 @@ struct TeamSpaceScreen: View {
     /// that creating companies is not open yet.
     private var emptyState: some View {
         VStack(spacing: 14) {
+            // A text style, so the empty state's glyph scales with its words.
             Image(atum.symbol(.briefcase))
-                .font(.system(size: 40, weight: .regular))
+                .font(.largeTitle)
+                .imageScale(.large)
                 .foregroundStyle(atum.color(.muted, scheme: scheme))
                 .accessibilityHidden(true)
             if presentation.canCreate {
@@ -970,9 +974,9 @@ struct TeamSpaceScreen: View {
                 // FlowPhone › Team: "#" in a 28 pt ink-3 column, the name in
                 // ink, semibold while unread.
                 Text(verbatim: "#")
-                    .font(.system(size: 20, weight: .regular))
+                    .font(.title3)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .frame(width: 28)
+                    .frame(width: hashColumn)
                     .accessibilityHidden(true)
                 Text(verbatim: channel.title)
                     .font(.body.weight(channel.isBold ? .semibold : .regular))

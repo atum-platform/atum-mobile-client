@@ -90,20 +90,34 @@ struct AgentDeskPage: View {
             return design.text(key, arguments: minutes.map { [.number(Int64($0))] } ?? [])
         }
         let sent = AgentDeskPolicy.sentFiles(rows: rows, agentUserID: actions.agentUserID)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                AgentDeskNow(design: design, now: now, steers: actions.steers)
-                if !sent.isEmpty || model.shownOwnView != nil {
-                    filesSection(sent)
+        // One system inset-grouped list (UX polish P2, audit issue 6): Now,
+        // then Files and Controls as the list's own sections, with the
+        // system's headers, footers and row highlights.
+        List {
+            if Self.isWorking(now) {
+                Section {
+                    AgentDeskNow(design: design, now: now, steers: actions.steers)
+                        .padding(.vertical, kit.space(.s1))
                 }
-                controlsSection
+                .listRowBackground(rowBackground)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 20)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(copy("desk", [.text(info.title)]))
-            .accessibilityIdentifier("desk.page")
+            if !sent.isEmpty {
+                sentSection(sent)
+            }
+            if let view = model.shownOwnView {
+                ownSection(view, sentIsEmpty: sent.isEmpty)
+            }
+            controlsSection
+            if moreOpen {
+                moreSections
+            }
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
+        .contentMargins(.horizontal, kit.space(.s4), for: .scrollContent)
+        .scrollContentBackground(.hidden)
+        .accessibilityLabel(copy("desk", [.text(info.title)]))
+        .accessibilityIdentifier("desk.page")
         .background(atum.color(.ground, scheme: scheme).opacity(0.001))
         .navigationTitle(info.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -125,36 +139,51 @@ struct AgentDeskPage: View {
         }
     }
 
+    private var kit: AtumKit { design.kit }
+    private var rowBackground: Color { atum.color(.cell, scheme: scheme) }
+
+    /// Now shows only while the agent works or waits.
+    static func isWorking(_ now: AgentDeskPolicy.Now) -> Bool {
+        if case .free = now { return false }
+        return true
+    }
+
     // MARK: Files
 
-    private func filesSection(_ sent: [ChatItem]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            heading(copy("files"))
-            if !sent.isEmpty {
-                AgentDeskGroup(design: design) {
-                    ForEach(Array(sent.enumerated()), id: \.element.id) { index, item in
-                        if index > 0 { AgentDeskDivider() }
-                        sentRow(item)
-                    }
-                }
-                .accessibilityElement(children: .contain)
+    /// What the agent sent in this chat, under "Files".
+    private func sentSection(_ sent: [ChatItem]) -> some View {
+        Section {
+            ForEach(sent, id: \.id) { item in
+                sentRow(item)
+            }
+        } header: {
+            Text(copy("files"))
                 .accessibilityHint(copy("sentHere"))
                 .accessibilityIdentifier("desk.files.sent")
-            }
-            if let view = model.shownOwnView {
+        }
+        .listRowBackground(rowBackground)
+    }
+
+    /// The agent's own files on its computer, when the host shares them. With
+    /// nothing sent here, this group heads the files as "Files" and says
+    /// where they are in its footer.
+    private func ownSection(_ view: HostAgentDesk.Files, sentIsEmpty: Bool) -> some View {
+        Section {
+            ownFiles(view)
+        } header: {
+            Text(copy(sentIsEmpty ? "files" : "onItsComputer"))
+                .accessibilityIdentifier("desk.files.own")
+        } footer: {
+            if sentIsEmpty {
                 Text(copy("onItsComputer"))
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .padding(.top, sent.isEmpty ? 0 : 8)
-                    .padding(.leading, 4)
-                ownFiles(view)
             }
         }
+        .listRowBackground(rowBackground)
     }
 
     private func sentRow(_ item: ChatItem) -> some View {
         let name = Self.fileName(item)
-        return HStack(spacing: 12) {
+        return HStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(.file))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .accessibilityHidden(true)
@@ -166,7 +195,7 @@ struct AgentDeskPage: View {
                     .font(.footnote)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: kit.space(.s2))
             Button(copy("saveShort")) { save(item) }
                 .buttonStyle(.atumSecondary)
                 .controlSize(.small)
@@ -174,119 +203,105 @@ struct AgentDeskPage: View {
                 .accessibilityLabel(copy("save", [.text(name)]))
                 .accessibilityIdentifier("desk.file.save." + item.id)
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 56)
+        .frame(minHeight: 44)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("desk.file." + item.id)
     }
 
-    private func ownFiles(_ view: HostAgentDesk.Files) -> some View {
-        AgentDeskGroup(design: design) {
-            if model.ownPath != nil {
-                Button { model.back() } label: {
-                    deskRow(glyph: .chevronLeft, title: copy("back"), chevron: false)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("desk.own.back")
-                if !view.rows.isEmpty { AgentDeskDivider() }
+    @ViewBuilder private func ownFiles(_ view: HostAgentDesk.Files) -> some View {
+        if model.ownPath != nil {
+            Button { model.back() } label: {
+                deskRow(glyph: .chevronLeft, title: copy("back"), chevron: false)
             }
-            ForEach(Array(view.rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 { AgentDeskDivider() }
-                if row.kind == .folder {
-                    Button { model.open(view.deskPath + "/" + row.name) } label: {
-                        deskRow(glyph: .folder, title: row.name, chevron: true)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text(verbatim: row.name))
-                    .accessibilityIdentifier("desk.own.folder." + row.name)
-                } else {
-                    deskRow(glyph: .file, title: row.name,
-                            meta: Self.size(row.size) + " · "
-                                + Self.when(Date(timeIntervalSince1970: Double(row.modifiedAt) / 1000),
-                                            locale: design.locale),
-                            chevron: false)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("desk.own.file." + row.name)
+            .accessibilityIdentifier("desk.own.back")
+        }
+        ForEach(view.rows, id: \.id) { row in
+            if row.kind == .folder {
+                Button { model.open(view.deskPath + "/" + row.name) } label: {
+                    deskRow(glyph: .folder, title: row.name, chevron: true)
                 }
+                .accessibilityLabel(Text(verbatim: row.name))
+                .accessibilityIdentifier("desk.own.folder." + row.name)
+            } else {
+                deskRow(glyph: .file, title: row.name,
+                        meta: Self.size(row.size) + " · "
+                            + Self.when(Date(timeIntervalSince1970: Double(row.modifiedAt) / 1000),
+                                        locale: design.locale),
+                        chevron: false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("desk.own.file." + row.name)
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("desk.files.own")
     }
 
     // MARK: Controls
 
+    /// Pause, this chat's notifications and More. A failed control and the
+    /// schedule's Refresh sit under the group, in its footer.
     private var controlsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            heading(copy("controls"))
-            AgentDeskGroup(design: design) {
-                if model.canControl {
-                    toggleRow(glyph: .clock, title: copy("pause"), id: "desk.pause",
-                              isOn: Binding(get: { HostAgentDesk.isPaused(model.jobs) },
-                                            set: { on in model.run(on ? .pause : .resume) }))
-                        .disabled(model.controlsDisabled)
-                        .accessibilityHint(AgentDeskCopy.text(design, "pauseHint"))
-                    AgentDeskDivider()
-                }
-                toggleRow(glyph: .bell, title: copy("notifications"), id: "desk.notifications",
-                          isOn: Binding(get: { !muted }, set: { on in
-                              muted = !on
-                              setMuted?(info.roomID, !on)
-                          }))
-                    .disabled(setMuted == nil)
-                AgentDeskDivider()
-                Button { withAnimation(.easeOut(duration: 0.2)) { moreOpen.toggle() } } label: {
-                    deskRow(glyph: .slidersHorizontal, title: copy("moreControls"),
-                            chevron: true, chevronOpen: moreOpen)
-                }
-                .buttonStyle(.plain)
-                .accessibilityValue(Text(verbatim: ""))
-                .accessibilityAddTraits(moreOpen ? .isSelected : [])
-                .accessibilityIdentifier("desk.more")
-                if moreOpen {
-                    moreBody
-                }
+        Section {
+            if model.canControl {
+                toggleRow(glyph: .clock, title: copy("pause"), id: "desk.pause",
+                          isOn: Binding(get: { HostAgentDesk.isPaused(model.jobs) },
+                                        set: { on in model.run(on ? .pause : .resume) }))
+                    .disabled(model.controlsDisabled)
+                    .accessibilityHint(AgentDeskCopy.text(design, "pauseHint"))
             }
-            if let problem = model.problem {
-                Text(copy(problem == .stopped ? "computerOff" : "controlFailed"))
-                    .font(.footnote)
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .padding(.leading, 4)
-                    .accessibilityIdentifier("desk.problem")
-                    .accessibilityAddTraits(.updatesFrequently)
+            toggleRow(glyph: .bell, title: copy("notifications"), id: "desk.notifications",
+                      isOn: Binding(get: { !muted }, set: { on in
+                          muted = !on
+                          setMuted?(info.roomID, !on)
+                      }))
+                .disabled(setMuted == nil)
+            Button { withMotion(.standard) { moreOpen.toggle() } } label: {
+                deskRow(glyph: .slidersHorizontal, title: copy("moreControls"),
+                        chevron: true, chevronOpen: moreOpen)
             }
-            if model.canRefreshSchedule {
-                Button(design.text(AgentDeskCopy.refresh)) { model.refreshSchedule() }
-                    .buttonStyle(.atumSecondary)
-                    .controlSize(.small)
-                    .accessibilityIdentifier("desk.schedule.refresh")
+            .accessibilityValue(Text(verbatim: ""))
+            .accessibilityAddTraits(moreOpen ? .isSelected : [])
+            .accessibilityIdentifier("desk.more")
+        } header: {
+            Text(copy("controls"))
+                .accessibilityIdentifier("desk.controls")
+        } footer: {
+            if model.problem != nil || model.canRefreshSchedule {
+                VStack(alignment: .leading, spacing: kit.space(.s2)) {
+                    if let problem = model.problem {
+                        Text(copy(problem == .stopped ? "computerOff" : "controlFailed"))
+                            .accessibilityIdentifier("desk.problem")
+                            .accessibilityAddTraits(.updatesFrequently)
+                    }
+                    if model.canRefreshSchedule {
+                        Button(design.text(AgentDeskCopy.refresh)) { model.refreshSchedule() }
+                            .buttonStyle(.atumSecondary)
+                            .controlSize(.small)
+                            .accessibilityIdentifier("desk.schedule.refresh")
+                    }
+                }
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("desk.controls")
+        .listRowBackground(rowBackground)
     }
 
-    @ViewBuilder private var moreBody: some View {
+    /// Behind More: its routines, then the card's settings.
+    @ViewBuilder private var moreSections: some View {
         if let jobs = model.jobs, !jobs.isEmpty {
-            AgentDeskDivider()
-            Text(copy("routines"))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(atum.color(.muted, scheme: scheme))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-                .accessibilityAddTraits(.isHeader)
-            ForEach(jobs) { job in
-                routineRow(job)
+            Section {
+                ForEach(jobs) { job in
+                    routineRow(job)
+                }
+            } header: {
+                Text(copy("routines"))
             }
+            .listRowBackground(rowBackground)
         }
-        AgentDeskDivider()
-        Button(action: allSettings) {
-            deskRow(glyph: .settings, title: copy("allSettings"), chevron: true)
+        Section {
+            Button(action: allSettings) {
+                deskRow(glyph: .settings, title: copy("allSettings"), chevron: true)
+            }
+            .accessibilityIdentifier("desk.allSettings")
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("desk.allSettings")
+        .listRowBackground(rowBackground)
     }
 
     private func routineRow(_ job: HostAgentDesk.Job) -> some View {
@@ -295,7 +310,7 @@ struct AgentDeskPage: View {
         case .paused: copy("paused")
         case let .next(date): copy("nextRun", [.text(Self.nextRun(date, locale: design.locale))])
         }
-        return HStack(spacing: 12) {
+        return HStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(.clock))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .accessibilityHidden(true)
@@ -305,73 +320,62 @@ struct AgentDeskPage: View {
                     Text(verbatim: meta).font(.footnote).foregroundStyle(atum.color(.muted, scheme: scheme))
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: kit.space(.s2))
             if actions.control != nil, HostAgentDesk.isSwitchable(job) {
                 Toggle(isOn: Binding(get: { job.state != .paused },
                                      set: { on in model.run(on ? .routineOn(job: job.id) : .routineOff(job: job.id)) })) {
                     Text(verbatim: job.name)
                 }
                 .labelsHidden()
+                .tint(atum.color(.actionStrong, scheme: scheme))
                 .disabled(model.controlsDisabled)
                 .accessibilityIdentifier("desk.routine." + job.id)
             }
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 52)
+        .frame(minHeight: 44)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("desk.routineRow." + job.id)
     }
 
     // MARK: Rows
 
-    private func heading(_ text: String) -> some View {
-        Text(text)
-            .font(.headline)
-            .foregroundStyle(atum.color(.ink, scheme: scheme))
-            .padding(.leading, 4)
-            .accessibilityAddTraits(.isHeader)
-    }
-
     private func deskRow(glyph: AtumGlyph, title: String, meta: String? = nil,
                          chevron: Bool, chevronOpen: Bool = false) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: kit.space(.s3)) {
             Image(atum.symbol(glyph))
                 .foregroundStyle(atum.color(.ink, scheme: scheme))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: title).font(.body).lineLimit(1)
+                    .foregroundStyle(atum.color(.ink, scheme: scheme))
                 if let meta {
                     Text(verbatim: meta).font(.footnote).foregroundStyle(atum.color(.muted, scheme: scheme))
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: kit.space(.s2))
             if chevron {
                 Image(atum.symbol(.chevronRight))
-                    .font(.footnote)
-                    .foregroundStyle(atum.color(.soft, scheme: scheme))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(atum.color(.muted, scheme: scheme))
                     .rotationEffect(.degrees(chevronOpen ? 90 : 0))
                     .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 48)
         .contentShape(Rectangle())
     }
 
     private func toggleRow(glyph: AtumGlyph, title: String, id: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
-            HStack(spacing: 12) {
+            HStack(spacing: kit.space(.s3)) {
                 Image(atum.symbol(glyph))
-                    .foregroundStyle(atum.color(.ink, scheme: scheme))
                     .accessibilityHidden(true)
                 Text(verbatim: title).font(.body)
             }
+            .foregroundStyle(atum.color(.ink, scheme: scheme))
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 48)
+        .tint(atum.color(.actionStrong, scheme: scheme))
         .accessibilityIdentifier(id)
     }
-
     // MARK: Reads and controls
 
     private func save(_ item: ChatItem) {
@@ -529,23 +533,6 @@ private struct AgentDeskClamped: View {
             }
         }
     }
-}
-
-/// One rounded group of rows on the panel's ground (the panel's other pages' cell).
-private struct AgentDeskGroup<Content: View>: View {
-    let design: LiveDesign
-    @ViewBuilder let content: Content
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        VStack(spacing: 0) { content }
-            .background(AtumVisualSystem(design: design).color(.cell, scheme: scheme),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-private struct AgentDeskDivider: View {
-    var body: some View { Divider().padding(.leading, 48) }
 }
 
 /// Save: the system's export sheet for a copy of the downloaded file (desktop's
