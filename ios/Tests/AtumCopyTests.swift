@@ -204,6 +204,32 @@ final class AtumCopyTests: XCTestCase {
         }
     }
 
+    func testBetaGateAndGoogleWriteCardsUseDesktopCopyInAllLocales() throws {
+        let copy = try AtumCopy()
+        let locales = ["en", "vi", "ja", "zh", "zh-Hant"]
+        let cases = [
+            ("desktop.surfaces.comingSoon",
+             ["Coming soon", "Sắp có", "近日公開", "即将推出", "即將推出"]),
+            ("desktop.surfaces.comingSoonHelp",
+             ["This place is not ready yet.", "Chỗ này chưa sẵn sàng.", "この場所はまだ利用できません。",
+              "此处尚未就绪。", "此處尚未就緒。"]),
+            ("src.matrix.google-write-card-copy.copies.approve",
+             ["Approve", "Duyệt", "Approve", "Approve", "Approve"]),
+            ("src.matrix.google-write-card-copy.copies.question.create_draft",
+             ["Save this draft in Gmail?", "Lưu thư nháp này trong Gmail?", "Save this draft in Gmail?",
+              "Save this draft in Gmail?", "Save this draft in Gmail?"]),
+            ("shared.matrix-google-write-copy.MATRIX_GOOGLE_WRITE_COPY.labels.subject",
+             ["Subject", "Tiêu đề", "件名", "主题", "主旨"]),
+        ]
+        XCTAssertEqual(copy.locales, Set(locales))
+        for (key, values) in cases {
+            XCTAssertEqual(copy.parameterKinds(key), [], key)
+            for (locale, value) in zip(locales, values) {
+                XCTAssertEqual(try copy.text(key, locale: locale), value, "\(locale): \(key)")
+            }
+        }
+    }
+
     func testTeamSpaceHeaderSearchInterpolatesTheQueryInAllLocales() throws {
         let copy = try AtumCopy()
         let prefix = "src.matrix.team-space.revamp-copy.copy."

@@ -19,14 +19,18 @@ VENDOR = ROOT / "ios/Vendor/AtumDesign"
 SOURCES = [ROOT / "ios/App", ROOT / "ios/Sources", ROOT / "ios/Notifications"]
 KEY = re.compile(r'"((?:desktop|src|shared)\.[A-Za-z0-9_.\-=]+)"')
 WORK_COPY = "src.matrix.mobile-copy.mobileScreensCopy.work."
+ATTENTION_COPY = "src.matrix.attention-copy.copies."
 RETIRED_KEYS = (
     WORK_COPY + "planRow",
     WORK_COPY + "consent",
     "shared.matrix-company-copy.copy.channelOpenFailed",
+    ATTENTION_COPY + "items.disk_critical",
+    ATTENTION_COPY + "items.disk_low",
+    ATTENTION_COPY + "snooze",
 )
-# Catch a channel suffix passed to a copy wrapper as well as full key literals.
+# Catch suffixes used by copy wrappers and the attention policy's raw values.
 RETIRED_REFERENCE = re.compile(
-    rf"\b(?:{re.escape(WORK_COPY)}(?:planRow|consent)|channelOpenFailed)\b"
+    rf"\b(?:{'|'.join(map(re.escape, RETIRED_KEYS))}|channelOpenFailed|disk_critical|disk_low)\b"
 )
 
 # Keys the pin does not carry yet. Each is read only after `design.copy.contains`
@@ -154,9 +158,9 @@ class CopyKeysInPinTests(unittest.TestCase):
     def test_catalog_matches_the_copy_pin(self):
         pin = json.loads((ROOT / "atum-design.lock").read_text())
         strings, _ = pin_key_sets()
-        self.assertEqual(pin["revision"], "a13e7275f88d12b9011b646303a05437a582d739")
-        self.assertEqual(pin["manifestSha256"], "2f1c4ea3c95f4b9612817198956306851e2951b123d3873cc851b8d59fa64dc1")
-        self.assertEqual(len(strings), 4138)
+        self.assertEqual(pin["revision"], "ec9e90041e4f5dbacfe4be72d00bd330ab508bbf")
+        self.assertEqual(pin["manifestSha256"], "e9136dc388da23f8c88fddfff22d9b63db60abd53023182d8ee6e450bc874c39")
+        self.assertEqual(len(strings), 4187)
 
     def test_every_copy_key_in_the_app_is_in_the_pinned_export(self):
         literals = list(key_literals())
