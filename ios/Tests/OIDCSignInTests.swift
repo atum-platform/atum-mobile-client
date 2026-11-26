@@ -80,6 +80,7 @@ final class OIDCSignInTests: XCTestCase {
         let transport = MASHTTP(protocols: [MASProtocol.self])
         var issued: [OIDCFlow] = []
         var domainSubject = "synthetic-subject", meSubject = "synthetic-subject"
+        var betaFeatures: Bool?
         var denyDomain = false, revokeStatus = 200
         var domainMeReply: MASProtocol.Reply?
         var onMe: (() -> Void)?
@@ -147,7 +148,9 @@ final class OIDCSignInTests: XCTestCase {
                 let keys = try JSONSerialization.data(withJSONObject: ["keys": [["kty": "EC", "kid": "p2-signin",
                     "crv": "P-256", "x": bytes.subdata(in: 1..<33).base64URL, "y": bytes.subdata(in: 33..<65).base64URL]]])
                 let whoami = try JSONSerialization.data(withJSONObject: ["user_id": "@p2-synthetic:atum.invalid", "device_id": "P2-DEVICE"])
-                let me = try JSONSerialization.data(withJSONObject: ["issuer": metadata.issuer, "subject": meSubject, "principal": principal])
+                var meFields: [String: Any] = ["issuer": metadata.issuer, "subject": meSubject, "principal": principal]
+                meFields["betaFeatures"] = betaFeatures
+                let me = try JSONSerialization.data(withJSONObject: meFields)
                 let tokenURL = metadata.tokenEndpoint, keysURL = metadata.jwksURI, revokeURL = metadata.revocationEndpoint
                 let status = revokeStatus, meReply = domainMeReply, observedMe = onMe
                 MASProtocol.state.handler = { request in
@@ -221,9 +224,11 @@ final class OIDCSignInTests: XCTestCase {
 
     @MainActor func testActualTransportTwoGrantsBindBeforeDomainReadinessAndPersistForRelaunch() async throws {
         let fixture = try Fixture(directory: directory()), signIn = fixture.coordinator(), store = fixture.store()
+        fixture.betaFeatures = true
         let matrix = try await signIn.matrix(deviceID: "P2-DEVICE", sessionReader: fixture.reader())
         let domain = try await signIn.domain(matrix: matrix, installation: fixture.installation, store: store)
         XCTAssertEqual(domain.binding.principal.rawValue, fixture.principal)
+        XCTAssertTrue(domain.betaFeatures)
         let restored = try store.resume(installation: fixture.marker)
         XCTAssertEqual(restored.account.subject, "synthetic-subject")
         XCTAssertNoThrow(try restored.account.reconcile(matrix: fixture.custodyTicket(phase: .ready)))
@@ -247,6 +252,64 @@ final class OIDCSignInTests: XCTestCase {
         XCTAssertEqual(fixture.operations.item?[kSecAttrAccessible as String] as? String, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
         XCTAssertEqual(fixture.operations.item?[kSecAttrAccessGroup as String] as? String, OIDCDomainKeychain.accessGroup)
         XCTAssertFalse(fixture.operations.item?[kSecAttrSynchronizable as String] as? Bool ?? true)
+    }
+
+    @MainActor func testRestoredDomainClientReadsMeAndRejectsAnotherPrincipal() async throws {
+        let fixture = try Fixture(directory: directory()), signIn = fixture.coordinator(), store = fixture.store()
+        _ = try await signIn.domain(matrix: fixture.custodyTicket(phase: .ready),
+                                    installation: fixture.installation, store: store)
+        let restored = try store.resume(installation: fixture.marker)
+        let client = NativeDomainClient(testAuthorization: { _ in "restored-domain" },
+                                        protocolClasses: [MASProtocol.self])
+        let body = try JSONSerialization.data(withJSONObject: ["issuer": fixture.metadata.issuer,
+            "subject": restored.account.subject, "principal": fixture.principal, "betaFeatures": true])
+        MASProtocol.state.handler = { request in
+            XCTAssertEqual(request.url, MASHTTP.domainMeURL)
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer restored-domain")
+            return .json(body)
+        }
+        let me = try await client.me(for: restored.account)
+        XCTAssertTrue(me.betaFeatures)
+
+        let foreign = try JSONSerialization.data(withJSONObject: ["issuer": fixture.metadata.issuer,
+            "subject": restored.account.subject, "principal": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "betaFeatures": true])
+        MASProtocol.state.handler = { _ in .json(foreign) }
+        do {
+            _ = try await client.me(for: restored.account)
+            XCTFail("A different principal cannot supply the restored account's beta answer")
+        } catch {
+            XCTAssertEqual(error as? OIDCFailure, .subjectMismatch)
+        }
+    }
+
+    /// W4-Z1 review r1: the optional /me beta read must never force a grant
+    /// rotation, so a retired client's 401 cannot race its replacement.
+    @MainActor func testRestoredMeReadNeverForcesRefreshOn401() async throws {
+        let fixture = try Fixture(directory: directory()), signIn = fixture.coordinator(), store = fixture.store()
+        _ = try await signIn.domain(matrix: fixture.custodyTicket(phase: .ready),
+                                    installation: fixture.installation, store: store)
+        let restored = try store.resume(installation: fixture.marker)
+        var forcedRefreshes = 0, authorizations = 0
+        let client = NativeDomainClient(testAuthorization: { force in
+            authorizations += 1
+            if force { forcedRefreshes += 1 }
+            return "restored-domain"
+        }, protocolClasses: [MASProtocol.self])
+        let unauthenticated = Data("{\"error\":\"matrix_401\"}".utf8)
+        MASProtocol.state.reset()
+        MASProtocol.state.handler = { _ in .init(status: 401, chunks: [unauthenticated]) }
+        do {
+            _ = try await client.me(for: restored.account)
+            XCTFail("A 401 /me read cannot succeed")
+        } catch let failure as NativeDomainClientFailure {
+            guard case let .http(http) = failure else { return XCTFail("Unexpected failure \(failure)") }
+            XCTAssertEqual(http.response.error, .unauthenticated)
+        }
+        XCTAssertEqual(authorizations, 1)
+        XCTAssertEqual(forcedRefreshes, 0)
+        XCTAssertEqual(MASProtocol.state.requests.filter { $0.url == MASHTTP.domainMeURL }.count, 1)
     }
 
     @MainActor func testSubjectMismatchRevokesOnlyDomainAndNeverLinks() async throws {

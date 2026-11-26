@@ -132,6 +132,21 @@ public struct AgentsRead: Sendable {
         "/api/matrix/v1/store/apple/" + $0
     }
 
+    /// Sign-in already reads /me to establish the binding. A restored grant
+    /// can read it again and reconcile the answer against that same binding.
+    public func me(for account: OIDCRestoredAccount) async throws -> OIDCMe {
+        let result = try await response(url: MASHTTP.domainMeURL, method: "GET", body: nil,
+                                        maximumRequestBodyBytes: 0, maximumResponseBodyBytes: 262_144,
+                                        reportsAuthenticationFailure: false,
+                                        // Optional presentation read: a 401 keeps the cached flag and
+                                        // never forces a grant rotation that a retired client could
+                                        // race against its replacement (W4-Z1 review r1).
+                                        retriesUnauthenticated: false)
+        let me = try decode(OIDCMe.self, data: result.body)
+        try account.reconcile(me)
+        return me
+    }
+
     public func appleProducts() async throws -> AppleProductsResponse {
         try await appleRequest(AppleProductsResponse.self, operation: "products", body: nil)
     }
@@ -1485,6 +1500,7 @@ public struct AgentsRead: Sendable {
                           extraHeaders: [String: String] = [:],
                           acceptedStatuses: Set<Int> = [200],
                           reportsAuthenticationFailure: Bool = true,
+                          retriesUnauthenticated: Bool = true,
                           dispatchGate: NativeDispatchGate? = nil,
                           isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         do { try Task.checkCancellation() }
@@ -1504,7 +1520,9 @@ public struct AgentsRead: Sendable {
             throw NativeDomainClientFailure.assistantName(try assistantNameRefusal(first.body))
         }
         let firstFailure = try httpFailure(first)
-        guard firstFailure.response.error == .unauthenticated else { throw NativeDomainClientFailure.http(firstFailure) }
+        guard firstFailure.response.error == .unauthenticated, retriesUnauthenticated else {
+            throw NativeDomainClientFailure.http(firstFailure)
+        }
 
         // A domain 401 is the only automatic retry. The coordinator enforces
         // single-flight rotation and persists the replacement before exposure.
@@ -1798,7 +1816,7 @@ public struct AgentsRead: Sendable {
         let phoneTail = String(url.path.dropFirst((phoneRoot + "/").count))
         if url.path == phoneRoot || (url.path.hasPrefix(phoneRoot + "/") && UUID(uuidString: phoneTail) != nil) { return url.query == nil }
         if url.path == Self.baseURL.path + "/cloud/controller-keys" { return url.query == nil }
-        let allowedPaths = [Self.agentsURL.path, Self.agentLifecycleURL.path,
+        let allowedPaths = [MASHTTP.domainMeURL.path, Self.agentsURL.path, Self.agentLifecycleURL.path,
                             Self.appsURL.path, Self.officialAccountsURL.path,
                             Self.storeCatalogURL.path,
                             Self.walletURL.path, Self.walletHistoryURL.path, Self.aliasLookupURL.path,
