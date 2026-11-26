@@ -29,12 +29,12 @@ The original audit used `simctl io recordVideo` with animations enabled and scri
 
 | Scenario | Baseline bursts | Baseline gaps over 34 ms | Baseline worst gap | P4 bursts | P4 gaps over 34 ms | P4 worst gap |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Long scroll | 9 | 39/720 (5.4%) | 233 ms | 9 | 35/1,053 (3.3%) | 225 ms |
-| Paging older history | 12 | 60/546 (11.0%) | 243 ms | 14 | 40/1,408 (2.8%) | 173 ms |
+| Long scroll | 9 | 39/720 (5.4%) | 233 ms | 10 | 42/703 (6.0%) | 233 ms |
+| Paging older history | 12 | 60/546 (11.0%) | 243 ms | 8 | 52/708 (7.3%) | 220 ms |
 
-The first collection replay at `eeb7457` measured 24 of 936 gaps (2.6%, worst 177 ms) on long scroll and 38 of 697 gaps (5.5%, worst 230 ms) on paging. Its screenshot comparison also identified clipping at the navigation glass, which prompted the viewport-inset change.
+The first collection replay at `eeb7457` measured 2.6% on long scroll and 5.5% on paging. Its screenshot comparison identified clipping at the navigation glass, which prompted the viewport-inset change. The viewport replay at `d98d492` measured 3.3% (worst 225 ms) on long scroll and 2.8% (worst 173 ms) on paging. Its screenshot shows content behind the navigation glass with a 116-point top inset. Its paging probe recorded 14 applied corrections with zero misses, all during user motion.
 
-The P4 column uses `d98d492` on the audit's iPhone 17 with iOS 27.0. It repeated the two scripted scenarios with animations enabled and the audit's five long-scroll flings and eight paging flings. The recording steps, clips and frame-gap counts are under `/Volumes/AtumTestFlight/dd-polish-p4`. The paging probe recorded 14 applied offset corrections and zero missed corrections. All 14 occurred during user motion. The initial long-scroll screenshot shows transcript content behind the navigation glass with a 116-point top inset.
+The P4 column uses the final app build at `2be1e05` on the audit's iPhone 17 with iOS 27.0. It repeated the two scripted scenarios with animations enabled and the audit's five long-scroll flings and eight paging flings. The final paging replay improved on the baseline. The final long-scroll replay had a slightly higher gap rate and the same worst gap. The recording steps, clips and frame-gap counts are under `/Volumes/AtumTestFlight/dd-polish-p4`.
 
 ## Local verification
 
@@ -46,6 +46,20 @@ The P4 column uses `d98d492` on the audit's iPhone 17 with iOS 27.0. It repeated
 - The initial full UI run at `d98d492` executed 72 cases, including the additional three-page search check. It passed 58 and reported 14 failures. The case log finished at 05:08. Xcode stalled during result finalization and was terminated four minutes after the completed suite totals were written. The full case log and the per-class summary are in the external logs directory.
 - The first focused rerun built at `d84609f` and passed eight of its 14 cases, including far-up send, the accessibility audit, both model-picker cases and static refolding. Six cases remained across both runs.
 - The six-case follow-up built at `09d18a2` and passed late-detail paging and the short keyboard pull. Late paging measured 0 pt drift in all 12 windows and 15 applied adjustments. The keyboard probe measured a 94 pt entry distance and 291 pt of travel against a 328 pt keyboard height. The latest row stayed visible after dismissal.
+- The final Debug build at `2be1e05` passed build-for-testing and the three remaining cases. Dynamic Type measured 0 pt of drift on both shrink and grow. The second G-scroll case measured 0 pt across 20 paging windows. The select-text probe recorded the queued action running after the cover disappeared, and the test passed both link routes.
+- The final animations-enabled capture passed both cases. It recorded the two scroll scenarios and a local echo while the composer keyboard remained open. The send clip shows the bubble enter below its final position, rise and become opaque. The existing SwiftUI send entrance runs inside the hosting cell.
+
+| Local UI suite | Passed across the full run and focused reruns |
+| --- | ---: |
+| `GScrollUITests` | 2/2 |
+| `GScrollDynamicTypeUITests` | 1/1 |
+| `TranscriptUITests` | 17/17 |
+| `TranscriptKeyboardAndFoldUITests` | 3/3 |
+| `ComposerAndMenuUITests.swift` | 34/34 (12 composer, 14 menu, 6 turn-stop, 2 model-picker) |
+| `ChatInfoUITests` | 14/14 |
+| Additional three-page search case | 1/1 |
+
+The optional G-scroll memory diagnostic reached the start in 41 flings in the first case. In the second case a synthetic fling opened a message menu, and the diagnostic reported the 120-fling cap with that menu still open. Both cases passed their anchor and in-motion offset assertions.
 - Two attempts to start a dedicated simulator on the external volume stalled in LaunchServices migration. The existing audit iPhone 17 booted successfully. Derived data, test scratch, result bundles and recordings use `/Volumes/AtumTestFlight/dd-polish-p4`, and the build, test and capture scripts take the shared heavy-build lock.
 
 ## Session log
@@ -67,3 +81,5 @@ The P4 column uses `d98d492` on the audit's iPhone 17 with iOS 27.0. It repeated
 - 2026-11-26. The viewport keyboard fix and stable late-detail measurements passed their focused cases, bringing the cumulative result to 68 of 72. Added a debug probe for the select-text action and the menu's dismissal callback after the scoped tap still failed to show the sheet. The two G-scroll cases, Dynamic Type and select-text remained queued.
 - 2026-11-26. Starting the drags in the side margin reached G-scroll's detach deadline. Dynamic Type reached the shrink assertion and measured 35.3 pt of movement. The near-bottom sample appeared during the size change, so the adapter retains the detached reading anchor across those provisional layouts. The test now starts farther from the bottom to leave a feasible scroll offset after shrinking from AX XXL.
 - 2026-11-26. The first G-scroll case passed all 20 paging windows at 0 pt maximum drift, reached the timeline start, and applied all 57 corrections, 54 while moving. The other case missed the timed detach window after two XCTest idle waits. The select-text probe verified that the tap queued its action but SwiftUI dropped the cover's dismissal callback. Added a cover-disappearance fallback that consumes the pending action once on the next main-actor turn.
+- 2026-11-26. The final focused run passed the three remaining cases, bringing the cumulative result to 72 of 72. Started the final frame-gap and send-motion replay on the same build.
+- 2026-11-26. The final replay passed both cases at `2be1e05`. Recorded the latest frame-gap comparison and verified the existing send entrance in `capture-final-05-own-row-send.mp4`.
