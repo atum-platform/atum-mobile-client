@@ -8,7 +8,7 @@ import Foundation
     func storePurchases() async throws -> StorePurchasesResponse
     func wallet() async throws -> WalletResponse
     func managedModelDestinations(agentPrincipal: NativeID) async throws -> ManagedModelDestinationSnapshot
-    func acquireStoreItem(_ attempt: StorePurchaseAttempt) async throws -> StorePurchaseResult
+    func acquireStoreItem(_ attempt: StorePurchaseAttempt, dispatchGate: NativeDispatchGate?) async throws -> StorePurchaseResult
     func cancelStoreSubscription(_ id: NativeID) async throws -> StoreEntitlement
 }
 

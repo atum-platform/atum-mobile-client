@@ -3349,6 +3349,32 @@ extension NativeDomainClientTests {
         }
     }
 
+    func testStoreDispatchGateCanBlockTheFirstSendAndThe401Replay() async throws {
+        let item = try StoreWire.decode(StoreCatalogResponse.self, from: storePack("catalog-pet")).items[0]
+        let attempt = try StorePurchaseAttempt(item: item, assistantID: nil,
+            idempotencyKey: NativeID("10000000-0000-4000-8000-000000000004"))
+        NativeDomainProtocol.state.handler = { _ in
+            .init(status: 401, chunks: [Data("{\"error\":\"matrix_401\"}".utf8)])
+        }
+        let api = client(TestAuthorization(first: "first", refreshed: "second"))
+        do {
+            _ = try await api.acquireStoreItem(attempt, dispatchGate: { false })
+            XCTFail("revocation should block the first send")
+        } catch is NativeDispatchBlocked {}
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
+
+        var checks = 0
+        do {
+            _ = try await api.acquireStoreItem(attempt, dispatchGate: {
+                checks += 1
+                return checks == 1
+            })
+            XCTFail("revocation should block the replay")
+        } catch is NativeDispatchBlocked {}
+        XCTAssertEqual(checks, 2)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1)
+    }
+
     func testStoreMismatchAndProtectedMetadataFailClosed() async throws {
         let item = try StoreWire.decode(StoreCatalogResponse.self, from: storePack("catalog-pet")).items[0]
         let attempt = try StorePurchaseAttempt(item: item, assistantID: nil,

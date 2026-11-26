@@ -276,6 +276,81 @@ final class StoreCommercePresentationTests: XCTestCase {
         XCTAssertEqual(StoreBetaGate.rowStatus(.price, kind: .agent, betaFeatures: true, owned: false), .price)
     }
 
+    #if DEBUG
+    @MainActor func testRevokingBetaAfterReviewPreventsAnIntentAndDispatch() async throws {
+        let journal = ScriptedStoreJournal()
+        let api = ScriptedStoreAPI(mode: .acquire)
+        let commerce = LiveStoreCommerce(journal: journal)
+        var beta = true
+        commerce.configure(account: ScriptedStoreAPI.account, client: api, targets: api.targets) { beta }
+        await commerce.refresh()
+        let quote = try commerce.review(itemID: "skill/nova", assistant: ScriptedStoreAPI.mai)
+
+        beta = false
+        await commerce.confirm(quote)
+        XCTAssertEqual(commerce.state, .idle)
+        XCTAssertTrue(try journal.attempts(account: ScriptedStoreAPI.account).isEmpty)
+        XCTAssertEqual(api.acquireCalls, 0)
+    }
+
+    @MainActor func testRevokingBetaAfterDispatchKeepsThePurchaseOutcome() async throws {
+        let api = ScriptedStoreAPI(mode: .acquire)
+        let commerce = LiveStoreCommerce(journal: ScriptedStoreJournal())
+        var beta = true
+        commerce.configure(account: ScriptedStoreAPI.account, client: api, targets: api.targets) { beta }
+        await commerce.refresh()
+        let quote = try commerce.review(itemID: "skill/nova", assistant: ScriptedStoreAPI.mai)
+
+        let purchase = Task { await commerce.confirm(quote) }
+        for _ in 0..<50 where api.acquireCalls == 0 { await Task.yield() }
+        XCTAssertEqual(api.acquireCalls, 1)
+        XCTAssertEqual(commerce.state, .working)
+        beta = false
+        await purchase.value
+
+        XCTAssertTrue(StoreOutcomePresentation.completedPurchase(for: commerce.state))
+        XCTAssertEqual(commerce.purchases.count, 1)
+        XCTAssertTrue(commerce.unresolvedAttempts.isEmpty)
+    }
+
+    @MainActor func testNonBetaSkillStatusKeepsAnIntentTheServerNeverReceived() async throws {
+        let journal = ScriptedStoreJournal()
+        let api = ScriptedStoreAPI(mode: .acquire)
+        let item = try await api.storeCatalog().items.first { $0.itemID == "skill/nova" }
+        let attempt = try StorePurchaseAttempt(item: XCTUnwrap(item), assistantID: ScriptedStoreAPI.mai,
+            idempotencyKey: NativeID("10000000-0000-4000-8000-000000000004"))
+        try journal.save(attempt, account: ScriptedStoreAPI.account)
+        let commerce = LiveStoreCommerce(journal: journal)
+        commerce.configure(account: ScriptedStoreAPI.account, client: api, targets: api.targets) { false }
+
+        await commerce.retry(attempt)
+        XCTAssertEqual(api.acquireCalls, 0)
+        XCTAssertTrue(commerce.purchases.isEmpty)
+        XCTAssertEqual(commerce.state, .uncertain)
+        XCTAssertEqual(commerce.unresolvedAttempts, [attempt])
+        XCTAssertEqual(try journal.attempts(account: ScriptedStoreAPI.account), [attempt])
+
+        api.seedPendingSkillDelivery(for: ScriptedStoreAPI.lanAgent)
+        await commerce.retry(attempt)
+        XCTAssertEqual(commerce.purchases.first?.state, .deliveryPending, "status should read purchase history")
+        XCTAssertEqual(commerce.unresolvedAttempts, [attempt], "another recipient cannot resolve this key")
+        XCTAssertEqual(api.acquireCalls, 0)
+    }
+
+    @MainActor func testStoreRowOwnershipUsesEntitlementsOnlyWhenCatalogProjectionIsAbsent() async throws {
+        let api = ScriptedStoreAPI(mode: .owned)
+        let commerce = LiveStoreCommerce(journal: ScriptedStoreJournal())
+        commerce.configure(account: ScriptedStoreAPI.account, client: api, targets: api.targets) { false }
+        await commerce.refresh()
+        let available = try StoreWire.decode(StoreOwnership.self, from: Data(
+            #"{"state":"available","source":null,"assistantIds":[],"until":null}"#.utf8))
+
+        XCTAssertTrue(commerce.ownedAnywhere(itemID: "skill/nova"), "legacy active entitlement")
+        XCTAssertFalse(commerce.ownedAnywhere(itemID: "skill/nova", projection: available),
+                       "explicit available projection wins over the active entitlement")
+    }
+    #endif
+
     /// The gate's only words are the pinned desktop "Coming soon", in every locale.
     func testComingSoonIsThePinnedDiscoverKeyInEveryLocale() throws {
         XCTAssertEqual(StoreCopyKey.comingSoon, "desktop.atum.discover.comingSoon")

@@ -20,7 +20,7 @@ struct StoreItemSheet: View {
     let item: LiveProductStoreItem
     let commerce: LiveStoreCommerce?
     let openRoom: (String) -> Void
-    var betaFeatures = false
+    let openPurchased: () -> Void
 
     @State private var chosenAssistant: NativeID?
     @State private var quote: StoreAcquireQuote?
@@ -36,6 +36,7 @@ struct StoreItemSheet: View {
     @State private var checkout: StorePurchaseGate.Checkout = .settling
     private var purchasesOpen: Bool { checkout == .open }
     @Environment(\.protonTopUp) private var topUp
+    @Environment(\.atumBetaFeatures) private var betaFeatures
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
 
@@ -60,6 +61,9 @@ struct StoreItemSheet: View {
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(commerce?.busy == true)
         .onReceive(StorePurchaseGate.checkoutUpdates(topUp)) { checkout = $0 }
+        .onChange(of: betaFeatures) { _, enabled in
+            if !enabled && item.kind == .skill { showsTopUp = false }
+        }
         .task {
             // A quote needs this moment's catalog, inventory and wallet.
             guard let commerce, !commerce.busy else { return }
@@ -101,6 +105,10 @@ struct StoreItemSheet: View {
                 if let notice = phaseNotice {
                     noticeView(notice).padding(.top, kit.space(.s5))
                         .accessibilityIdentifier("store.detail.status")
+                }
+                if let otherRecipientNotice {
+                    noticeView(otherRecipientNotice).padding(.top, kit.space(.s5))
+                        .accessibilityIdentifier("store.detail.recipientStatus")
                 }
             }
             .padding(.horizontal, kit.space(.s5))
@@ -177,9 +185,7 @@ struct StoreItemSheet: View {
     private var perAssistant: Bool { item.kind == .skill && item.offer?.scope == .agent }
 
     private var showsRecipients: Bool {
-        guard perAssistant, let commerce, commerce.readState == .ready else { return false }
-        if case .comingSoon = phase { return false }
-        return !eligible.isEmpty
+        betaFeatures && perAssistant && commerce?.readState == .ready && !eligible.isEmpty
     }
 
     private var eligible: [LiveStoreCommerce.Target] {
@@ -292,6 +298,7 @@ struct StoreItemSheet: View {
         case owned
         case pending
         case unresolved(StorePurchaseAttempt)
+        case recipientRecovery(StoreNotice)
         case notForSale
         case blocked(LiveStoreCommerce.ReviewFailure)
         case ready(StoreAcquireQuote)
@@ -302,7 +309,7 @@ struct StoreItemSheet: View {
 
         var showsPrice: Bool {
             switch self {
-            case .owned, .pending, .comingSoon: false
+            case .owned, .pending, .recipientRecovery, .comingSoon: false
             default: true
             }
         }
@@ -331,18 +338,41 @@ struct StoreItemSheet: View {
             .contains { commerce.owned($0, assistant: assistant) }
     }
 
+    private var itemIDs: Set<String> { StoreShelfPlan.itemIDs(for: item.id) }
+
+    private var pendingPurchases: [StorePurchase] {
+        commerce?.purchases.filter { itemIDs.contains($0.itemID) && $0.state == .deliveryPending } ?? []
+    }
+
+    private var unresolvedAttempts: [StorePurchaseAttempt] {
+        commerce?.unresolvedAttempts.filter { itemIDs.contains($0.itemID) } ?? []
+    }
+
+    private var recipientRecoveryNotice: StoreNotice? {
+        if !pendingPurchases.isEmpty { return .init(key: StoreCopyKey.detailPending, tone: .neutral) }
+        if !unresolvedAttempts.isEmpty { return .init(key: StoreCopyKey.deliveryUncertain, tone: .warning) }
+        return nil
+    }
+
+    private var otherRecipientNotice: StoreNotice? {
+        switch phase {
+        case .pending, .unresolved, .recipientRecovery: nil
+        default: recipientRecoveryNotice
+        }
+    }
+
     private var phase: Phase {
         // Past the ownership checks, so "owned" is false for the chosen assistant.
         let comingSoon = StoreBetaGate.comingSoon(item.kind, betaFeatures: betaFeatures, owned: false)
         guard let commerce else { return ownedFor(nil) ? .owned : comingSoon ? .comingSoon : .info }
         if ownedFor(assistant) && (!perAssistant || assistant != nil) { return .owned }
-        if commerce.purchases.contains(where: {
-            $0.itemID == item.id && $0.assistantID == assistant && $0.state == .deliveryPending
-        }) { return .pending }
-        if let attempt = commerce.unresolvedAttempts.first(where: {
-            $0.itemID == item.id && $0.assistantID == assistant
-        }) { return .unresolved(attempt) }
-        if comingSoon { return .comingSoon }
+        if pendingPurchases.contains(where: { $0.assistantID == assistant }) { return .pending }
+        if let attempt = unresolvedAttempts.first(where: { $0.assistantID == assistant }) {
+            return .unresolved(attempt)
+        }
+        if comingSoon {
+            return recipientRecoveryNotice.map(Phase.recipientRecovery) ?? .comingSoon
+        }
         guard let offer = item.offer, item.kind != .agent, item.install == nil,
               offer.billingInterval == .oneTime else { return .info }
         if item.deliverable == false { return .notForSale }
@@ -399,6 +429,7 @@ struct StoreItemSheet: View {
             return .init(key: perAssistant ? StoreCopyKey.recipientOwned : StoreCopyKey.owned, tone: .done)
         case .pending: return .init(key: StoreCopyKey.detailPending, tone: .neutral)
         case .unresolved: return .init(key: StoreCopyKey.deliveryUncertain, tone: .warning)
+        case .recipientRecovery(let notice): return notice
         case .notForSale: return .init(key: StoreCopyKey.notForSale, tone: .neutral)
         case .blocked(let failure):
             return StoreOutcomePresentation.notice(for: failure, kind: item.kind,
@@ -410,8 +441,20 @@ struct StoreItemSheet: View {
 
     @ViewBuilder private var actionBar: some View {
         let content = actionContent
-        if let content {
-            VStack(spacing: kit.space(.s2)) { content }
+        let hasRecovery = recipientRecoveryNotice != nil
+        if content != nil || hasRecovery {
+            VStack(spacing: kit.space(.s2)) {
+                content
+                if hasRecovery {
+                    Button(copy(StoreCopyKey.purchasedTitle)) {
+                        openPurchased()
+                        dismiss()
+                    }
+                    .buttonStyle(.atumSecondary)
+                    .disabled(commerce?.busy == true)
+                    .accessibilityIdentifier("store.detail.purchased")
+                }
+            }
                 .padding(.horizontal, kit.space(.s5))
                 .padding(.top, kit.space(.s3))
                 .padding(.bottom, kit.space(.s2))
@@ -488,7 +531,7 @@ struct StoreItemSheet: View {
                     .accessibilityLabel(copy(StoreCopyKey.loading))
                     .accessibilityIdentifier("store.detail.loading")
             )
-        case .info, .pending, .notForSale, .blocked:
+        case .info, .pending, .recipientRecovery, .notForSale, .blocked:
             return nil
         }
     }
@@ -561,6 +604,7 @@ private struct StoreReviewView: View {
     /// more than the balance): say why and offer only Close.
     @State private var requoteFailure: LiveStoreCommerce.ReviewFailure?
     @Environment(\.protonTopUp) private var topUp
+    @Environment(\.atumBetaFeatures) private var betaFeatures
     @Environment(\.dismiss) private var pop
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -575,6 +619,9 @@ private struct StoreReviewView: View {
     }
 
     private var working: Bool { commerce.busy || state == .working }
+    private var betaRevoked: Bool {
+        StoreBetaGate.comingSoon(item.kind, betaFeatures: betaFeatures, owned: false)
+    }
 
     /// The write was refused for want of Protons (locally or by the server).
     private var short: Bool {
@@ -623,8 +670,8 @@ private struct StoreReviewView: View {
         .navigationTitle(design.text(StoreCopyKey.reviewTitle))
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(working || outcome != nil && outcome != .requote)
-        .onChange(of: outcome) { _, value in
-            guard value == .requote else { return }
+        .onChange(of: !betaRevoked && outcome == .requote) { _, needsQuote in
+            guard needsQuote else { return }
             // The server's new offer is shown and must be confirmed again.
             do {
                 quote = try commerce.review(itemID: item.id, assistant: quote.assistantID)
@@ -694,6 +741,22 @@ private struct StoreReviewView: View {
     private var actions: some View {
         VStack(spacing: kit.space(.s2)) {
             switch requoteFailure == nil ? outcome : .stopped {
+            case nil where betaRevoked && working:
+                AtomWait()
+                    .frame(width: 20, height: 20)
+                    .frame(minHeight: kit.phoneControlHeight(.primary))
+                    .accessibilityElement()
+                    .accessibilityLabel(design.text(StoreCopyKey.busy))
+            case nil where betaRevoked, .requote? where betaRevoked, .stopped? where betaRevoked && short:
+                Button {} label: {
+                    Text(design.text(StoreCopyKey.comingSoon)).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.atumPrimary)
+                .disabled(true)
+                .accessibilityIdentifier("store.detail.soon")
+                Button(design.text(StoreCopyKey.back)) { pop() }
+                    .buttonStyle(.atumPlain)
+                    .accessibilityIdentifier("store.review.back")
             case nil, .requote?:
                 confirmButton
                 Button(design.text(StoreCopyKey.cancel)) { pop() }
@@ -748,7 +811,7 @@ private struct StoreReviewView: View {
         Button {
             // Single flight: the engine refuses a second write while busy, and
             // the page shows the first one's outcome.
-            guard !commerce.busy, !submitted || outcome == .requote else { return }
+            guard !betaRevoked, !commerce.busy, !submitted || outcome == .requote else { return }
             // The App Store gate, again at the moment Protons would move.
             guard StorePurchaseGate.allowsSpend(priceMicroProtons: quote.price,
                                                 checkoutOpen: topUp?.purchases.checkoutOpen == true) else { return }

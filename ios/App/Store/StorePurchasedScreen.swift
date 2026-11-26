@@ -3,10 +3,10 @@ import AtumDesign
 import AtumNativeAPI
 import SwiftUI
 
-/// Purchased: unfinished writes first (each checked with its original key,
-/// never a new purchase), then what the account owns, then the purchase
-/// record. A failed inventory read is said plainly; it is never shown as an
-/// empty list. Renewal cancellation stops renewal only: no uninstall, no refund.
+/// Purchased: unfinished writes first, then what the account owns and the
+/// purchase record. Check status uses the original key for eligible replays
+/// and reads history and inventory for skills while beta is off.
+/// Renewal cancellation stops renewal only: no uninstall, no refund.
 struct StorePurchasedScreen: View {
     let design: LiveDesign
     let commerce: LiveStoreCommerce

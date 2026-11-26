@@ -75,6 +75,47 @@ final class StoreCommerceUITests: TranscriptUITestCase {
     }
 
     @MainActor
+    func testRevokingBetaWhileSkillReviewIsOpenRemovesConfirm() throws {
+        try FileManager.default.createDirectory(at: probeFolder, withIntermediateDirectories: true)
+        let revoke = probeFolder.appendingPathComponent("revoke-beta")
+        let app = launchStore("store.acquire",
+                              extra: ["-AtumUITestBetaRevocationFile", revoke.path] + probeArguments)
+        openItem("skill/nova", in: app)
+        let acquire = element(app, "store.detail.acquire")
+        XCTAssertTrue(acquire.waitForExistence(timeout: 10))
+        acquire.tap()
+        let confirm = element(app, "store.review.confirm")
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirm.isEnabled)
+
+        try Data().write(to: revoke, options: .atomic)
+        let soon = element(app, "store.detail.soon")
+        XCTAssertTrue(soon.waitForExistence(timeout: 10))
+        XCTAssertEqual(soon.label, Self.comingSoon)
+        XCTAssertFalse(soon.isEnabled)
+        XCTAssertFalse(confirm.exists)
+        XCTAssertFalse(element(app, "topup.entry").exists)
+        element(app, "store.review.back").tap()
+        XCTAssertTrue(element(app, "store.sheet").waitForExistence(timeout: 5))
+        XCTAssertTrue(soon.exists)
+        XCTAssertFalse(acquire.exists)
+        XCTAssertTrue(probeLines("store-actions.txt").isEmpty)
+    }
+
+    @MainActor
+    func testWithoutBetaPendingSkillForAnotherRecipientOpensPurchased() {
+        let app = launchStore("store.acquire", extra: Self.withoutBeta + ["-AtumScriptedOtherRecipientPending"])
+        openItem("skill/nova", in: app)
+        XCTAssertTrue(element(app, "store.detail.status").waitForExistence(timeout: 10))
+        XCTAssertFalse(element(app, "store.detail.soon").exists)
+        let purchased = element(app, "store.detail.purchased")
+        XCTAssertTrue(purchased.waitForExistence(timeout: 5))
+        purchased.tap()
+        XCTAssertTrue(element(app, "store.purchased").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "store.purchased.purchase.50000000-0000-4000-8000-000000000003").exists)
+    }
+
+    @MainActor
     /// Short of Protons (lane 4 D14): the item offers the in-app top-up; a
     /// credited pack returns with Continue to the item, which can now be got.
     func testInsufficientBalanceTopsUpThenContinuesToTheItem() {

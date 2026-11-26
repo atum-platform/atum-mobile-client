@@ -124,13 +124,13 @@ struct ListingHireState: Equatable, Sendable {
     /// Hire at the shown price. A price that isn't positive (a quote that
     /// couldn't be read) can't be confirmed; the model also refuses a
     /// confirmed hire while Apple checkout is closed.
-    func confirm() {
-        guard case let .confirm(price)? = hire?.phase, price > 0 else { return }
+    func confirm(betaFeatures: Bool) {
+        guard betaFeatures, case let .confirm(price)? = hire?.phase, price > 0 else { return }
         start(confirmed: true)
     }
 
-    func retry() {
-        guard let hire, hire.phase == .failed(nil) else { return }
+    func retry(betaFeatures: Bool) {
+        guard betaFeatures, let hire, hire.phase == .failed(nil) else { return }
         start(confirmed: hire.hireConfirmed)
     }
 

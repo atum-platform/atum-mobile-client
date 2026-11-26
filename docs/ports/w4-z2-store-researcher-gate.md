@@ -2,8 +2,8 @@
 
 Stacked on W4-Z1 (`docs/ports/w4-z1-beta-features.md`), which publishes
 `LiveAppModel.betaFeatures`. That value is false when unknown. This lane gates
-two surfaces on it, as desktop #132 does. Team Space is a later lane and is
-unchanged here.
+the Store and the Researcher shelf as desktop #132 does. Round r2 also applies
+the flag to open confirmations and purchase or hire dispatch.
 
 ## Desktop references
 
@@ -37,8 +37,9 @@ A row stays as it is today in these cases:
 - a delivery for it is pending;
 - a skill is owned by any assistant (desktop `storeOwnership`).
 
-`LiveStoreCommerce.ownedAnywhere` checks ownership. It reads active
-entitlements and the catalog's `ownership`, and covers both Hatch IDs.
+`LiveStoreCommerce.ownedAnywhere` checks ownership per item, including both
+Hatch IDs. The explicit catalog projection wins. Active entitlements supply
+ownership when the projection is absent.
 
 **Store sheet** (`StoreItemSheet`). The sheet gets a new phase,
 `.comingSoon`. The sheet checks owned, pending and unresolved first. An
@@ -48,7 +49,8 @@ header, description, "What it uses" and the try line stay. A disabled primary
 button labelled "Coming soon" (`store.detail.soon`) replaces the action. No
 recipient picker, price rows, balance, notice, Get, top-up or Open shows. Hires
 already had no native acquisition on the phone, so they only gain the disabled
-action.
+action. A pending delivery or unresolved attempt for another assistant is
+visible from the same detail sheet, with a link to Purchased.
 
 **Researcher** (`AssistantNewSheet`). Ready to hire still lists the Researcher
 with its face, title and summary. Its button reads "Coming soon", is disabled,
@@ -58,20 +60,32 @@ guard and `ListingHireFlow.press(…, betaFeatures:)` both refuse before a hire
 flow exists. Without beta features nothing changes phase, the name line does
 not show, and no request is sent. Make your own still works.
 
-With `betaFeatures` true, all three surfaces behave as before. The flag only
-changes what the phone shows. The platform authorizes each acquisition and hire.
+An open skill review or Researcher confirmation updates when the flag changes.
+When access is revoked, Coming soon and Back replace Confirm, Retry and the
+item-specific top-up where applicable. An in-flight request, a purchase outcome,
+or a hire setting up its chat still shows its current status.
+
+Store Check status from Detail, Review and Purchased shares one recovery path.
+For a skill while beta is off it reads purchase history and entitlements. A
+journal entry may have been written before any request reached the server. A
+missing server purchase keeps its original key available for recovery when
+beta access returns.
 
 ## Wiring
 
-- The Store reads the SwiftUI environment value `\.atumBetaFeatures`. It
-  defaults to false, so a Store with no account shows hires and skills as
-  "Coming soon". `AppRoot` sets it from `model.betaFeatures`, which covers the
-  Store tab and Settings › Store. `StoreScreen` passes it to the sheet.
-- The hire shelf reads `HomeAssistantActions.betaFeatures`, which also defaults
-  to false. `AppRoot` sets it from `model.betaFeatures`.
+- The Store, its sheet and review, and the hire shelf and confirmation read
+  the SwiftUI environment value `\.atumBetaFeatures`. `AppRoot` sets it from
+  `model.betaFeatures` for the Store tab, Settings › Store and Home. It
+  defaults to false.
+- `LiveStoreCommerce` checks the signed-in account's flag before confirming a
+  skill and at transport dispatch. `LiveAppModel.hireListing` checks it before
+  saving a hire intent and in its existing account and checkout dispatch gate.
+  The transport evaluates both gates just before the first send and any
+  replay after a 401.
 - The scripted Debug hosts use `AtumDebugLaunch.scriptedBetaFeatures`. It is on
   by default, so existing walks are unchanged. `-AtumScriptedBetaFeatures NO`
-  turns it off.
+  turns it off. The revocation walks signal the running host after an enabled
+  confirmation is visible.
 
 ## Copy
 
@@ -128,12 +142,27 @@ shelf already uses.
     size and at AX5.
   - The default-size Researcher captures (`hire-soon-*-default`) show
     "Coming soon" on the shelf.
-  - The AX5 Researcher captures only show the medium sheet. The disabled
-    button sat under the bottom bar but still counted as hittable, so the test
-    took no drag before the capture. The AX5 shelf assertions still passed:
-    the button exists, is disabled, has the right label and sends nothing.
-    A follow-up should scroll by frame before that capture.
+  - The r1 AX5 Researcher captures show the medium sheet with the disabled
+    button clipped by the bottom bar. Round r2 scrolls by frame and asserts
+    that the whole button is visible before capturing.
 - The public guard and design lint each exit 0.
+
+### Round r2 verification
+
+- AppTests cover revocation between quote and Confirm, preservation of a
+  purchase already dispatched, read-only recovery when the server has no
+  matching purchase, catalog ownership precedence over active entitlements,
+  and Researcher Confirm and Retry after revocation.
+- The native transport test covers revocation before the first Store POST
+  and before a replay after 401.
+- The two new UI revocation walks start at an enabled confirmation. They
+  verify Coming soon and Back after the flag changes, with no Store or hire
+  dispatch. The pending-skill walk opens Purchased from the detail of a
+  skill whose pending delivery is for a different assistant.
+- `swift test` passed all 821 tests. Design lint, its unit tests, copy-pin
+  checks, the public purchase contract check, and Xcode project lint passed.
+- The first Debug build caught four existing test calls missing the explicit
+  beta argument. The callers now provide it and the locked batch was rerun.
 
 ## Decisions
 
@@ -142,11 +171,9 @@ shelf already uses.
   the price becomes Coming soon.
 - A delivery in progress keeps its pending clock on the row and its pending
   notice in the sheet. Something already bought is not dimmed.
-- The Store gets the flag through the environment because the Store is
-  embedded twice: in the tab, and in Settings via `AccountScreen`. The hire
-  shelf gets it through its existing capability bundle.
-- No guard was added to the model's `hireListing`. The UI refuses before the
-  flow starts, and the platform authorizes the hire.
+- The Store is embedded in the tab and in Settings via `AccountScreen`.
+  Both presentations and the hire flow use the same environment flag so
+  open screens follow the signed-in account's latest answer.
 - In the UI test, the scripted Lan assistant's ID constant is `lanAgent`. A
   constant named after Lan alone, after a dot, matches the public guard's
   private-host pattern for LAN hostnames.

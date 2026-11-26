@@ -89,7 +89,10 @@ final class ListingHireUITests: TranscriptUITestCase {
                     let soon = app.buttons.matching(identifier: "home.newAssistant.listing.soon").firstMatch
                     XCTAssertTrue(soon.waitForExistence(timeout: 20), "no Coming soon on the shelf")
                     // At AX5 the sheet opens at its medium height with the shelf below the fold.
-                    for _ in 0..<6 where !soon.isHittable { dragSheetUp(app) }
+                    if size.hasSuffix("XXXL") {
+                        for _ in 0..<6 where !sheetShows(soon, in: app) { dragSheetUp(app) }
+                        XCTAssertTrue(sheetShows(soon, in: app), "Coming soon is clipped by the sheet")
+                    }
                     XCTAssertEqual(soon.label, "\(soonWords[language]!) \(words.title)")
                     XCTAssertFalse(soon.isEnabled, "Coming soon is pressable")
                     XCTAssertTrue(element(app, "home.newAssistant.readyToHire").exists)
@@ -113,6 +116,44 @@ final class ListingHireUITests: TranscriptUITestCase {
                 }
             }
         }
+    }
+
+    @MainActor
+    func testRevokingBetaWhileResearcherConfirmationIsOpenRemovesHire() throws {
+        try FileManager.default.createDirectory(at: probeFolder, withIntermediateDirectories: true)
+        let revoke = probeFolder.appendingPathComponent("revoke-beta")
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+            + ["-AtumScriptedHire", "paid", "-AtumUITestBetaRevocationFile", revoke.path,
+               "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"] + probeArguments
+        app.launch()
+        openNewAssistant(app).tap()
+        let confirm = element(app, "home.newAssistant.hire.confirm")
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        XCTAssertTrue(confirm.isEnabled)
+
+        try Data().write(to: revoke, options: .atomic)
+        let soon = app.buttons.matching(identifier: "home.newAssistant.listing.soon").firstMatch
+        XCTAssertTrue(soon.waitForExistence(timeout: 10))
+        XCTAssertEqual(soon.label, "Coming soon")
+        XCTAssertFalse(soon.isEnabled)
+        XCTAssertFalse(confirm.exists)
+        XCTAssertFalse(element(app, "home.newAssistant.hire.retry").exists)
+        XCTAssertFalse(element(app, "topup.entry").exists)
+        element(app, "home.newAssistant.hire.back").tap()
+        XCTAssertTrue(element(app, "home.newAssistant.readyToHire").waitForExistence(timeout: 5))
+        XCTAssertFalse(probeLines("home-actions.txt").contains { $0.text.hasPrefix("hire ") })
+    }
+
+    @MainActor
+    private func sheetShows(_ button: XCUIElement, in app: XCUIApplication) -> Bool {
+        let form = app.collectionViews.containing(.button, identifier: button.identifier).firstMatch
+        let bar = element(app, "home.newAssistant.create")
+        guard form.exists, bar.exists else { return false }
+        let frame = button.frame
+        return !frame.isEmpty && form.frame.intersection(app.frame).contains(frame)
+            && frame.maxY <= bar.frame.minY
     }
 
     /// Drags the sheet's content up from its lower half (the Home list behind

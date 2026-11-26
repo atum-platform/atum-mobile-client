@@ -1187,9 +1187,9 @@ final class LiveAppModel {
     ///
     /// `account` is the account the hire was picked under: anything else
     /// signed in now is refused before any request is read or sent. A
-    /// confirmed request (confirmed now or stored with it) can spend, so it
-    /// goes out only while Apple checkout is open (REL-15), checked here and
-    /// again inside the transport right before each send.
+    /// hire requires beta access. A confirmed request (confirmed now or
+    /// stored with it) can spend, so it also requires open Apple checkout
+    /// (REL-15). The transport checks both right before each send.
     ///
     /// The request ledger follows the Store journal (`StoreFileJournal`): an
     /// unreadable ledger mints nothing and sends nothing, the request is
@@ -1221,6 +1221,7 @@ final class LiveAppModel {
             }
             earlier = nil
         }
+        guard betaFeatures else { return .refused(.retry) }
         let plan = ListingHireRequestPlan.make(
             earlier: earlier, name: name, hireConfirmed: hireConfirmed,
             checkoutOpen: applePurchases.checkoutOpen,
@@ -1254,14 +1255,14 @@ final class LiveAppModel {
             return .refused(.retry)
         }
         // Asked right before each send (the first and the resend after a 401
-        // refresh): the same client and account, and open checkout for a
-        // request that can spend. When it says no, nothing goes out and the
-        // request stays as stored.
+        // refresh): the same client and account with beta access, and open
+        // checkout for a request that can spend. A blocked request stays stored.
         let confirmed = pending.hireConfirmed
         let gate: NativeDispatchGate = { [weak self] in
             guard let self else { return false }
             return self.domainClient === client
                 && self.context?.runtime.ticket.session.userID == account
+                && self.betaFeatures
                 && ListingHireGate.allowsRequest(confirmed: confirmed,
                                                  checkoutOpen: self.applePurchases.checkoutOpen)
         }
@@ -1271,6 +1272,7 @@ final class LiveAppModel {
             created = try await client.createAgentPlaced(request, dispatchGate: gate)
         } catch is NativeDispatchBlocked {
             let sameAccount = domainClient === client && context?.runtime.ticket.session.userID == account
+            if sameAccount && !betaFeatures { return .refused(.retry) }
             LiveFlowLog.creation(.assistant, outcome: "hire_refused",
                                  code: sameAccount ? "checkout_closed" : "account_changed")
             return sameAccount ? .checkoutClosed : .refused(.retry)
@@ -6949,7 +6951,10 @@ final class LiveAppModel {
                 LiveStoreCommerce.Target(id: agent.id, principal: agent.principal, name: agent.displayName,
                     roomID: liveMatrix?.rooms.first(where: { agentForRoom($0.roomID)?.id == agent.id })?.roomID)
             }
-            storeCommerce.configure(account: accountID, client: domainClient, targets: targets)
+            storeCommerce.configure(account: accountID, client: domainClient, targets: targets) { [weak self] in
+                guard let self, self.context?.runtime.ticket.session.userID == accountID else { return false }
+                return self.betaFeatures
+            }
         }
 
         if self.domainClient === domainClient,

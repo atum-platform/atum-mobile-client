@@ -45,6 +45,7 @@ struct StoreScreen: View {
     @State private var showsDelayedLoadingMark = false
     @State private var selectedItem: LiveProductStoreItem?
     @State private var showsPurchased = false
+    @State private var opensPurchasedAfterDetail = false
     @State private var query = ""
     @Environment(\.colorScheme) private var scheme
 
@@ -77,9 +78,13 @@ struct StoreScreen: View {
             }
         }
         .onReceive(StorePurchaseGate.checkoutUpdates(topUp)) { checkout = $0 }
-        .sheet(item: $selectedItem) { item in
+        .sheet(item: $selectedItem, onDismiss: {
+            guard opensPurchasedAfterDetail else { return }
+            opensPurchasedAfterDetail = false
+            openPurchased()
+        }) { item in
             StoreItemSheet(design: design, item: item, commerce: commerce,
-                           openRoom: onOpenRoom, betaFeatures: betaFeatures)
+                           openRoom: onOpenRoom, openPurchased: { opensPurchasedAfterDetail = true })
         }
         .navigationDestination(isPresented: $showsPurchased) { purchasedDestination }
         .navigationDestination(for: Router.StoreDestination.self) { destination in
@@ -211,9 +216,7 @@ struct StoreScreen: View {
 
     private var purchasedSection: some View {
         Section {
-            Button {
-                if let onOpenPurchased { onOpenPurchased() } else { showsPurchased = true }
-            } label: {
+            Button(action: openPurchased) {
                 StorePurchasedEntry(design: design,
                                     checking: !(commerce?.unresolvedAttempts.isEmpty ?? true))
             }
@@ -222,6 +225,10 @@ struct StoreScreen: View {
             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
             .accessibilityIdentifier("store.purchased.entry")
         }
+    }
+
+    private func openPurchased() {
+        if let onOpenPurchased { onOpenPurchased() } else { showsPurchased = true }
     }
 
     private func itemTitle(_ itemID: String) -> String {
@@ -380,26 +387,18 @@ struct StoreScreen: View {
     /// price, and "Coming soon" for a hire or skill nobody here owns yet
     /// (`StoreBetaGate`). The row still opens its sheet.
     private func status(for item: LiveProductStoreItem) -> StoreItemRow.Status {
-        let owned = item.ownership?.state == .owned
-            || commerce?.ownedAnywhere(StoreShelfPlan.itemIDs(for: item.id)) == true
-        return StoreBetaGate.rowStatus(ownershipStatus(for: item), kind: item.kind,
-                                       betaFeatures: betaFeatures, owned: owned)
-    }
-
-    private func ownershipStatus(for item: LiveProductStoreItem) -> StoreItemRow.Status {
-        guard let commerce else {
-            return item.kind != .skill && item.ownership?.state == .owned ? .owned : .price
-        }
         let ids = StoreShelfPlan.itemIDs(for: item.id)
-        if commerce.purchases.contains(where: { ids.contains($0.itemID) && $0.state == .deliveryPending }) {
+        if commerce?.purchases.contains(where: { ids.contains($0.itemID) && $0.state == .deliveryPending }) == true {
             return .pending
         }
-        // A skill is owned per assistant: its row keeps the price.
-        guard item.kind != .skill else { return .price }
-        // The folded Hatch card carries the regular card's ownership.
-        if item.ownership?.state == .owned { return .owned }
-        let catalogItems = commerce.catalog.filter { ids.contains($0.itemID) }
-        return catalogItems.contains { commerce.owned($0, assistant: nil) } ? .owned : .price
+        let owned = ids.contains { id in
+            let projection = id == item.id ? item.ownership : nil
+            return commerce?.ownedAnywhere(itemID: id, projection: projection)
+                ?? (projection?.state == .owned)
+        }
+        // A skill is owned per assistant: its row keeps the price when owned.
+        let status: StoreItemRow.Status = owned && item.kind != .skill ? .owned : .price
+        return StoreBetaGate.rowStatus(status, kind: item.kind, betaFeatures: betaFeatures, owned: owned)
     }
 
     private func sectionKey(_ kind: StoreSectionKind) -> String {

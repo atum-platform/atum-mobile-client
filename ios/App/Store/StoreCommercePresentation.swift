@@ -141,8 +141,8 @@ enum StorePurchaseGate {
 /// skill it doesn't own reads "Coming soon": the row dims its art and shows
 /// the words in place of the price, and the sheet keeps what the item is with
 /// a disabled Coming soon in place of any way to get it. Pets and apps are
-/// unchanged, and anything already owned stays usable. Presentation only: the
-/// platform authorizes every acquisition.
+/// unchanged, and anything already owned stays usable. LiveStoreCommerce
+/// also checks the flag before dispatching skill purchases.
 enum StoreBetaGate {
     /// Desktop `.atum-store-card--soon`: the art and the price button at 55%.
     static let dimmedOpacity = 0.55

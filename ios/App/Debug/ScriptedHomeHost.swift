@@ -42,6 +42,8 @@ struct ScriptedHomeHost: View {
     /// listing on the New assistant sheet (desktop D9). Without it the sheet
     /// has no shelf, as for an account the platform offers none.
     @State private var listingHire = ListingHireFlow()
+    @State private var betaFeatures = AtumDebugLaunch.scriptedBetaFeatures
+    @State private var topUp: ProtonTopUpContext?
     @MainActor private static var scriptedHireAttempts = 0
     @Environment(\.colorScheme) private var scheme
     private let design: LiveDesign
@@ -195,7 +197,6 @@ struct ScriptedHomeHost: View {
                             hire: Self.hireMode == nil ? nil : Self.scriptedHire,
                             hireFlow: Self.hireMode == nil ? nil : listingHire,
                             hireAccount: Self.hireMode == nil ? nil : "@scripted:atum.test",
-                            betaFeatures: AtumDebugLaunch.scriptedBetaFeatures,
                             // `capacity`: the hired assistant's chat never opens here.
                             chatReady: { _ in Self.hireMode != "capacity" }
                         ),
@@ -319,7 +320,18 @@ struct ScriptedHomeHost: View {
         .foregroundStyle(design.color("ink", scheme: scheme))
         .tint(design.color("ink", scheme: scheme))
         .focusEffectDisabled()
+        .environment(\.atumBetaFeatures, betaFeatures)
+        .environment(\.protonTopUp, topUp)
         .task { applyDebugSurface() }
+        .task {
+            guard AtumDebugLaunch.betaRevocationFile != nil else { return }
+            let purchases = ApplePurchaseCoordinator(
+                store: ScriptedApplePurchaseStore(), environment: .production, refreshWallet: {})
+            let store = ScriptedStoreAPI(mode: .acquire)
+            purchases.bind(accountID: ScriptedStoreAPI.account, api: ScriptedApplePurchasesAPI(store: store))
+            topUp = ProtonTopUpContext(purchases: purchases, balance: { nil })
+            if await AtumDebugLaunch.waitForBetaRevocation() { betaFeatures = false }
+        }
         // F2: the live shell's pop hooks (`AppRoot`), so a Back or swipe-back
         // here clears Router's typed room mirror exactly as the app does and
         // a second tap on the same row pushes again.

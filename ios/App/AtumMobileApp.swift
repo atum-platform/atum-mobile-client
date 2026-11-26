@@ -60,7 +60,6 @@ struct AtumMobileApp: App {
             ScriptedChatHost(script: script)
         } else if let roster = AtumScriptedLaunch.selection?.roster {
             ScriptedHomeHost(roster: roster)
-                .environment(\.atumBetaFeatures, AtumDebugLaunch.scriptedBetaFeatures)
         } else {
             AppRoot()
         }

@@ -500,12 +500,13 @@ public struct AgentsRead: Sendable {
         try await storeRead(StorePurchasesResponse.self, path: "purchases")
     }
 
-    public func acquireStoreItem(_ attempt: StorePurchaseAttempt) async throws -> StorePurchaseResult {
+    public func acquireStoreItem(_ attempt: StorePurchaseAttempt,
+                                 dispatchGate: NativeDispatchGate? = nil) async throws -> StorePurchaseResult {
         let data = try await storeData(url: Self.baseURL.appendingPathComponent("store/purchases"),
             method: "POST", body: attempt.body, extraHeaders: [
                 StoreWire.capabilitiesHeader: StoreWire.capabilities,
                 "Idempotency-Key": attempt.idempotencyKey.rawValue
-            ])
+            ], dispatchGate: dispatchGate)
         let result = try StoreWire.decode(StorePurchaseResult.self, from: data)
         try attempt.validate(result)
         return result
@@ -525,10 +526,11 @@ public struct AgentsRead: Sendable {
         return try StoreWire.decode(type, from: data)
     }
 
-    private func storeData(url: URL, method: String, body: Data?, extraHeaders: [String: String]) async throws -> Data {
+    private func storeData(url: URL, method: String, body: Data?, extraHeaders: [String: String],
+                           dispatchGate: NativeDispatchGate? = nil) async throws -> Data {
         try await response(url: url, method: method, body: body,
             maximumRequestBodyBytes: 4096, maximumResponseBodyBytes: 1_048_576,
-            extraHeaders: extraHeaders).body
+            extraHeaders: extraHeaders, dispatchGate: dispatchGate).body
     }
 
     public func storeCatalog() async throws -> StoreCatalogResponse {
@@ -1508,12 +1510,11 @@ public struct AgentsRead: Sendable {
         let firstToken = try await authorize(forceRefresh: false,
                                              reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
-        if let dispatchGate, !dispatchGate() { throw NativeDispatchBlocked() }
         let first = try await perform(url: url, token: firstToken, method: method, body: body,
                                       companyWire: companyWire,
                                       maximumRequestBodyBytes: maximumRequestBodyBytes,
                                       maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                      extraHeaders: extraHeaders, isCurrent: isCurrent)
+                                      extraHeaders: extraHeaders, dispatchGate: dispatchGate, isCurrent: isCurrent)
         try requireActiveTask()
         if acceptedStatuses.contains(first.status) { return first }
         if first.status == 422, acceptsAssistantNameRefusal {
@@ -1530,12 +1531,11 @@ public struct AgentsRead: Sendable {
         let refreshedToken = try await authorize(forceRefresh: true,
                                                  reportsAuthenticationFailure: reportsAuthenticationFailure)
         try requireActiveTask()
-        if let dispatchGate, !dispatchGate() { throw NativeDispatchBlocked() }
         let second = try await perform(url: url, token: refreshedToken, method: method, body: body,
                                        companyWire: companyWire,
                                        maximumRequestBodyBytes: maximumRequestBodyBytes,
                                        maximumResponseBodyBytes: maximumResponseBodyBytes,
-                                       extraHeaders: extraHeaders, isCurrent: isCurrent)
+                                       extraHeaders: extraHeaders, dispatchGate: dispatchGate, isCurrent: isCurrent)
         try requireActiveTask()
         if acceptedStatuses.contains(second.status) { return second }
         if second.status == 422, acceptsAssistantNameRefusal {
@@ -1660,6 +1660,7 @@ public struct AgentsRead: Sendable {
                          maximumResponseBodyBytes: Int,
                          extraHeaders: [String: String] = [:],
                          canSend: DeskSendCheck? = nil,
+                         dispatchGate: NativeDispatchGate? = nil,
                          isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
         guard isApprovedURL(url), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
               !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
@@ -1728,6 +1729,10 @@ public struct AgentsRead: Sendable {
                 // Authorization may have suspended, so check on every dispatch, including a 401 replay.
                 guard canSend?() != false, isCurrent() else {
                     continuation.resume(throwing: NativeDomainClientFailure.cancelled)
+                    return
+                }
+                if let dispatchGate, !dispatchGate() {
+                    continuation.resume(throwing: NativeDispatchBlocked())
                     return
                 }
                 operation.start(continuation)

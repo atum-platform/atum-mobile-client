@@ -69,6 +69,7 @@ struct AssistantNewSheet: View {
     @State private var listings: [OpenAgentListing] = []
     @FocusState private var nameFocused: Bool
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.atumBetaFeatures) private var betaFeatures
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
     private var handleCopy: AssistantHandleCopy { AssistantHandleCopy(design: design) }
@@ -249,14 +250,14 @@ struct AssistantNewSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     // Without beta features: "Coming soon", disabled (desktop #132).
-                    let action = copy(actions.betaFeatures ? ListingHireCopy.hire : StoreCopyKey.comingSoon)
+                    let action = copy(betaFeatures ? ListingHireCopy.hire : StoreCopyKey.comingSoon)
                     Button(action) { pick(listing) }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
                         .tint(atum.color(.ink, scheme: scheme))
-                        .disabled(shelfDisabled || !actions.betaFeatures)
+                        .disabled(shelfDisabled || !betaFeatures)
                         .accessibilityLabel(Text(verbatim: action + " " + title))
-                        .accessibilityIdentifier(actions.betaFeatures ? "home.newAssistant.listing.hire"
+                        .accessibilityIdentifier(betaFeatures ? "home.newAssistant.listing.hire"
                                                                       : "home.newAssistant.listing.soon")
                 }
                 .padding(.vertical, 2)
@@ -276,7 +277,7 @@ struct AssistantNewSheet: View {
     }
 
     private func pick(_ listing: OpenAgentListing) {
-        guard !shelfDisabled, actions.betaFeatures, let flow = actions.hireFlow, let run = actions.hire,
+        guard !shelfDisabled, betaFeatures, let flow = actions.hireFlow, let run = actions.hire,
               let account = actions.hireAccount else { return }
         nameFocused = false
         // A nil name: every name this listing could take is refused here, so
@@ -285,7 +286,7 @@ struct AssistantNewSheet: View {
                    name: ListingAssistantName.name(for: listing, locale: design.locale,
                                                    others: actions.names, apps: actions.appNames),
                    shownAs: listing.title(locale: design.locale), account: account,
-                   betaFeatures: actions.betaFeatures, run: run)
+                   betaFeatures: betaFeatures, run: run)
     }
 
     private var handleSection: some View {

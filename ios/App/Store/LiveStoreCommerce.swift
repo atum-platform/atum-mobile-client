@@ -37,6 +37,7 @@ import Observation
     @ObservationIgnored private var acquisition: StoreAcquisition?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var account: String?
+    @ObservationIgnored private var betaFeatures: NativeDispatchGate = { false }
     @ObservationIgnored private let journal: any StoreAttemptJournal
 
     init(journal: (any StoreAttemptJournal)? = nil) {
@@ -44,14 +45,20 @@ import Observation
         self.journal = journal ?? StoreFileJournal(directory: base.appendingPathComponent("StoreAttempts", isDirectory: true))
     }
 
-    func configure(account: String, client: any StoreCommerceAPI, targets: [Target]) {
+    func configure(account: String, client: any StoreCommerceAPI, targets: [Target],
+                   betaFeatures: @escaping NativeDispatchGate) {
         if self.account != account || self.client !== client {
             reset()
             self.account = account; self.client = client
-            acquisition = StoreAcquisition(account: account, journal: journal) { attempt in
-                try await client.acquireStoreItem(attempt)
+            let token = generation
+            acquisition = StoreAcquisition(account: account, journal: journal) { [weak self] attempt in
+                try await client.acquireStoreItem(attempt, dispatchGate: { [weak self] in
+                    guard let self, self.generation == token else { return false }
+                    return !attempt.itemID.hasPrefix("skill/") || self.betaFeatures()
+                })
             }
         }
+        self.betaFeatures = betaFeatures
         self.targets = targets
         loadSavedAttempts(account: account)
     }
@@ -62,6 +69,7 @@ import Observation
         readState = .unavailable; cancellationState = .idle
         paidTargets = []; ready = false; busy = false; refreshing = false; state = .idle
         journalReady = false
+        betaFeatures = { false }
         operationAssistantID = nil; operationItemID = nil; cancelled = []; cancelFailed = false
     }
 
@@ -140,11 +148,13 @@ import Observation
         return item.kind != .skill || assistant.map(ownership.assistantIDs.contains) == true
     }
 
-    /// Owned at all: on the account or, for a skill, on any assistant
-    /// (desktop `storeOwnership`). The Store's "Coming soon" never covers it.
-    func ownedAnywhere(_ itemIDs: Set<String>) -> Bool {
-        entitlements.contains { itemIDs.contains($0.itemID) && $0.isOwned }
-            || catalog.contains { itemIDs.contains($0.itemID) && $0.ownership?.state == .owned }
+    /// Per-item row ownership (desktop `storeOwnership`). An explicit
+    /// projection takes precedence over the separately refreshed grants.
+    func ownedAnywhere(itemID: String, projection: StoreOwnership? = nil) -> Bool {
+        if let ownership = catalog.first(where: { $0.itemID == itemID })?.ownership ?? projection {
+            return ownership.state == .owned
+        }
+        return entitlements.contains { $0.itemID == itemID && $0.isOwned }
     }
 
     func attempt(itemID: String, assistant: NativeID?) -> StorePurchaseAttempt? {
@@ -173,6 +183,7 @@ import Observation
 
     func confirm(_ quote: StoreAcquireQuote) async {
         guard !busy, !refreshing, let acquisition else { return }
+        guard quote.item.kind != .skill || betaFeatures() else { return }
         guard ready, journalReady, catalog.contains(where: { $0.itemID == quote.item.itemID && $0.offer == quote.item.offer }) else {
             state = .unavailable; operationItemID = quote.item.itemID; return
         }
@@ -186,13 +197,47 @@ import Observation
     }
 
     func retry(_ attempt: StorePurchaseAttempt) async {
-        guard !busy, !refreshing, let acquisition else { return }
+        guard !busy, !refreshing, let acquisition, let client else { return }
         let token = generation
         busy = true; state = .working; operationItemID = attempt.itemID; operationAssistantID = attempt.assistantID
-        let result = await acquisition.retry(attempt, online: client != nil)
+        if attempt.itemID.hasPrefix("skill/"), !betaFeatures() {
+            await readPurchaseStatus(attempt, client: client, token: token)
+            return
+        }
+        let result = await acquisition.retry(attempt, online: true)
         guard generation == token else { return }
         state = result
         await reconcile(result, token: token)
+    }
+
+    /// The journal can contain an intent that never reached the server.
+    /// Without beta access, refresh the records without replaying that intent.
+    private func readPurchaseStatus(_ attempt: StorePurchaseAttempt, client: any StoreCommerceAPI,
+                                    token: UUID) async {
+        defer { if generation == token { busy = false } }
+        do {
+            let history = try await client.storePurchases()
+            let inventory = try await client.storeEntitlements()
+            guard generation == token else { return }
+            purchases = history.purchases
+            entitlements = inventory.entitlements
+            let entitlement = entitlements.first {
+                $0.itemID == attempt.itemID && $0.assistantID == attempt.assistantID && $0.isOwned
+            }
+            if let purchase = purchases.first(where: { attempt.matches($0) }) {
+                switch purchase.state {
+                case .completed where entitlement == nil, .granted where entitlement == nil: state = .uncertain
+                default: state = .result(.purchased(purchase, entitlement))
+                }
+            } else if let entitlement {
+                state = .result(.alreadyOwned(entitlement))
+            } else {
+                state = .uncertain
+            }
+        } catch {
+            guard generation == token else { return }
+            state = .uncertain
+        }
     }
 
     private func reconcile(_ result: StoreAcquireState, token: UUID) async {

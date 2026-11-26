@@ -57,6 +57,23 @@ enum AtumDebugLaunch {
         return arguments[flag + 1] != "NO"
     }()
     static let scriptedBetaFeaturesFlag = "-AtumScriptedBetaFeatures"
+
+    static let betaRevocationFile: String? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-AtumUITestBetaRevocationFile"),
+              arguments.indices.contains(index + 1) else { return nil }
+        return arguments[index + 1]
+    }()
+
+    /// Wait for the UI test to revoke access after it sees the open confirmation.
+    static func waitForBetaRevocation() async -> Bool {
+        guard let betaRevocationFile else { return false }
+        while !FileManager.default.fileExists(atPath: betaRevocationFile) {
+            do { try await Task.sleep(for: .milliseconds(100)) }
+            catch { return false }
+        }
+        return !Task.isCancelled
+    }
 }
 
 enum S6ScriptedScenario: String, CaseIterable {

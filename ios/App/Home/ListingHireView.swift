@@ -68,6 +68,7 @@ struct ListingHireView: View {
     let done: () -> Void
 
     @Environment(\.protonTopUp) private var topUp
+    @Environment(\.atumBetaFeatures) private var betaFeatures
     @Environment(\.colorScheme) private var scheme
     @State private var checkout: StorePurchaseGate.Checkout = .closed
 
@@ -91,6 +92,14 @@ struct ListingHireView: View {
     /// spend on the phone. The confirm step only ever shows a priced seat.
     private var hireAllowed: Bool {
         ListingHireGate.allowsPaidHire(priceProtons: price ?? 0, checkoutOpen: checkout == .open)
+    }
+
+    private var comingSoon: Bool {
+        guard !betaFeatures else { return false }
+        switch hire.phase {
+        case .confirm, .short, .failed(nil): return true
+        default: return false
+        }
     }
 
     /// The setting-up phase's assistant, while its chat isn't open yet.
@@ -123,7 +132,7 @@ struct ListingHireView: View {
                 }
                 .padding(.vertical, kit.space(.s1))
             }
-            Section { line }
+            if !comingSoon { Section { line } }
         }
         .scrollContentBackground(.hidden)
         .background(atum.color(.ground, scheme: scheme))
@@ -132,6 +141,7 @@ struct ListingHireView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { actionBar }
         .onReceive(StorePurchaseGate.checkoutUpdates(topUp)) { checkout = $0 }
         .onChange(of: hire.phase) { _, phase in
+            guard !comingSoon else { return }
             if let spoken = announcement(phase) { AccessibilityNotification.Announcement(spoken).post() }
         }
         .onChange(of: waitedChatReady, initial: true) { _, ready in
@@ -214,6 +224,8 @@ struct ListingHireView: View {
     private var actionBar: some View {
         VStack(spacing: kit.space(.s2)) {
             switch hire.phase {
+            case .confirm where comingSoon, .short where comingSoon, .failed(nil) where comingSoon:
+                revokedActions
             case .done, .settingUp:
                 Button(action: done) { primaryLabel(copy(ListingHireCopy.done)) }
                     .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
@@ -225,15 +237,15 @@ struct ListingHireView: View {
                 }
                 backButton
             case .failed(nil):
-                Button { flow.retry() } label: { primaryLabel(copy(ListingHireCopy.retry)) }
+                Button { flow.retry(betaFeatures: betaFeatures) } label: { primaryLabel(copy(ListingHireCopy.retry)) }
                     .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
                     .accessibilityIdentifier("home.newAssistant.hire.retry")
                 backButton
             case .failed:
                 backButton
             case .confirm, .hiring:
-                if hireAllowed || hire.phase == .hiring {
-                    Button { flow.confirm() } label: {
+                if betaFeatures && (hireAllowed || hire.phase == .hiring) {
+                    Button { flow.confirm(betaFeatures: betaFeatures) } label: {
                         HStack(spacing: kit.space(.s2)) {
                             if hire.phase == .hiring {
                                 ProgressView().tint(atum.color(.onInk, scheme: scheme))
@@ -262,6 +274,16 @@ struct ListingHireView: View {
         }
         .overlay(alignment: .top) {
             Rectangle().fill(atum.color(.frame, scheme: scheme)).frame(height: 0.5)
+        }
+    }
+
+    private var revokedActions: some View {
+        Group {
+            Button {} label: { primaryLabel(copy(StoreCopyKey.comingSoon)) }
+                .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
+                .disabled(true)
+                .accessibilityIdentifier("home.newAssistant.listing.soon")
+            backButton
         }
     }
 

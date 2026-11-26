@@ -40,6 +40,7 @@ import SwiftUI
     private var available: Int64
     private var entitlements = [[String: Any]]()
     private var purchases = [[String: Any]]()
+    private(set) var acquireCalls = 0
     /// Uncertain: the first write commits but its reply is lost.
     private var loseNextReply: Bool
 
@@ -111,7 +112,11 @@ import SwiftUI
         ])
     }
 
-    func acquireStoreItem(_ attempt: StorePurchaseAttempt) async throws -> StorePurchaseResult {
+    func acquireStoreItem(_ attempt: StorePurchaseAttempt,
+                          dispatchGate: NativeDispatchGate?) async throws -> StorePurchaseResult {
+        if let dispatchGate, !dispatchGate() { throw NativeDispatchBlocked() }
+        acquireCalls += 1
+        UITestProbe.append("acquire \(attempt.itemID)", to: "store-actions.txt")
         try await Task.sleep(for: .milliseconds(400))
         let key = attempt.idempotencyKey.rawValue
         // Exact replay: the same key returns the original purchase, never a second charge.
@@ -136,6 +141,12 @@ import SwiftUI
             throw URLError(.timedOut)
         }
         return try result(purchase, attempt: attempt)
+    }
+
+    func seedPendingSkillDelivery(for assistant: NativeID) {
+        purchases.append(Self.purchase(id: "50000000-0000-4000-8000-000000000003", item: "skill/nova",
+                                       offer: Self.skillOffer, key: "60000000-0000-4000-8000-000000000003",
+                                       assistant: assistant.rawValue, amount: 24_000_000, state: "delivery_pending"))
     }
 
     func cancelStoreSubscription(_ id: NativeID) async throws -> StoreEntitlement {
@@ -322,6 +333,7 @@ struct StoreCommerceScriptedHost: View {
     @State private var commerce = LiveStoreCommerce(journal: ScriptedStoreJournal())
     @State private var api: ScriptedStoreAPI?
     @State private var topUp: ProtonTopUpContext?
+    @State private var betaFeatures = AtumDebugLaunch.scriptedBetaFeatures
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -333,11 +345,17 @@ struct StoreCommerceScriptedHost: View {
                 }
         }
         .environment(\.protonTopUp, topUp)
+        .environment(\.atumBetaFeatures, betaFeatures)
         .task {
             guard api == nil else { return }
             let value = ScriptedStoreAPI(mode: mode)
+            if ProcessInfo.processInfo.arguments.contains("-AtumScriptedOtherRecipientPending") {
+                value.seedPendingSkillDelivery(for: ScriptedStoreAPI.lanAgent)
+            }
             api = value
-            commerce.configure(account: ScriptedStoreAPI.account, client: value, targets: value.targets)
+            commerce.configure(account: ScriptedStoreAPI.account, client: value, targets: value.targets) { [flag = $betaFeatures] in
+                flag.wrappedValue
+            }
             let commerce = commerce
             let purchases = ApplePurchaseCoordinator(
                 store: ScriptedApplePurchaseStore(), environment: .production,
@@ -345,6 +363,9 @@ struct StoreCommerceScriptedHost: View {
             purchases.bind(accountID: ScriptedStoreAPI.account, api: ScriptedApplePurchasesAPI(store: value))
             topUp = ProtonTopUpContext(purchases: purchases,
                                        balance: { commerce.wallet?.balances.available })
+        }
+        .task {
+            if await AtumDebugLaunch.waitForBetaRevocation() { betaFeatures = false }
         }
     }
 

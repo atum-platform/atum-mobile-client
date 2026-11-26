@@ -1056,7 +1056,6 @@ struct AppRoot: View {
                 hire: { await model.hireListing($0, name: $1, hireConfirmed: $2, account: $3) },
                 hireFlow: listingHire,
                 hireAccount: model.listingHireAccount,
-                betaFeatures: model.betaFeatures,
                 appNames: model.appCatalogNames,
                 chatReady: { model.hiredAssistantChatReady($0) }
             ) : nil,

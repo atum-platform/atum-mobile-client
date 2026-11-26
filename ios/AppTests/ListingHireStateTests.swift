@@ -50,13 +50,31 @@ import XCTest
         XCTAssertNil(flow.hire)
     }
 
+    func testBetaRevocationStopsAnOpenConfirmationAndRetry() async throws {
+        let flow = ListingHireFlow()
+        let runs = Runs([.refused(.retry)])
+        flow.press(try listing(paid: true), name: "Researcher", shownAs: "Researcher",
+                   account: Self.owner, betaFeatures: true, run: runs.run)
+
+        flow.confirm(betaFeatures: false)
+        XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 60_000))
+        XCTAssertTrue(runs.calls.isEmpty)
+
+        flow.confirm(betaFeatures: true)
+        await settle(flow)
+        XCTAssertEqual(flow.hire?.phase, .failed(nil))
+        flow.retry(betaFeatures: false)
+        XCTAssertEqual(flow.hire?.phase, .failed(nil))
+        XCTAssertEqual(runs.calls.count, 1)
+    }
+
     func testAThirdAssistantShowsThePriceOnceThenHiresConfirmed() async throws {
         let flow = ListingHireFlow()
         let runs = Runs([.hired])
         flow.pick(try listing(paid: true), name: "Researcher", account: Self.owner, run: runs.run)
         XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 60_000))
         XCTAssertTrue(runs.calls.isEmpty, "nothing is hired before the price is confirmed")
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         await settle(flow)
         XCTAssertEqual(flow.hire?.phase, .done)
         XCTAssertEqual(runs.calls.map(\.confirmed), [true])
@@ -68,7 +86,7 @@ import XCTest
         flow.pick(try listing(), name: "Researcher", account: Self.owner, run: runs.run)
         await settle(flow)
         XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 61_000))
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         await settle(flow)
         XCTAssertEqual(runs.calls.map(\.confirmed), [false, true])
         XCTAssertEqual(flow.hire?.phase, .done)
@@ -78,10 +96,10 @@ import XCTest
         let flow = ListingHireFlow()
         let runs = Runs([.refused(.retry), .hired])
         flow.pick(try listing(paid: true), name: "Researcher", account: Self.owner, run: runs.run)
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         await settle(flow)
         XCTAssertEqual(flow.hire?.phase, .failed(nil))
-        flow.retry()
+        flow.retry(betaFeatures: true)
         await settle(flow)
         XCTAssertEqual(runs.calls.map(\.confirmed), [true, true])
         XCTAssertEqual(flow.hire?.phase, .done)
@@ -93,7 +111,7 @@ import XCTest
             other.pick(try listing(), name: "Researcher", account: Self.owner, run: refused.run)
             await settle(other)
             XCTAssertEqual(other.hire?.phase, phase)
-            other.retry()
+            other.retry(betaFeatures: true)
             XCTAssertEqual(refused.calls.count, 1, "a final refusal is never retried")
         }
     }
@@ -102,7 +120,7 @@ import XCTest
         let flow = ListingHireFlow()
         let runs = Runs([.refused(.short)])
         flow.pick(try listing(paid: true), name: "Researcher", account: Self.owner, run: runs.run)
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         await settle(flow)
         XCTAssertEqual(flow.hire?.phase, .short(priceProtons: 60_000))
         flow.toppedUp()
@@ -187,7 +205,7 @@ import XCTest
         let runs = Runs([])
         flow.pick(try listing(paid: true, price: 0), name: "Researcher", account: Self.owner, run: runs.run)
         XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 0))
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 0))
         XCTAssertTrue(runs.calls.isEmpty, "a zero quote was confirmed")
     }
@@ -198,7 +216,7 @@ import XCTest
         let flow = ListingHireFlow()
         let runs = Runs([.refused(.retry)])
         flow.pick(try listing(paid: true), name: "Researcher", account: Self.owner, run: runs.run)
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         await settle(flow)
         flow.sheetClosed()
         XCTAssertNil(flow.hire)
@@ -206,7 +224,7 @@ import XCTest
         let held = Runs([.hired])
         held.held = true
         flow.pick(try listing(paid: true), name: "Researcher", account: Self.owner, run: held.run)
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         XCTAssertTrue(flow.isHiring)
         for _ in 0..<10 { await Task.yield() }
         flow.accountChanged(to: "@other:atum.test")
@@ -214,8 +232,8 @@ import XCTest
         held.release()
         for _ in 0..<10 { await Task.yield() }
         XCTAssertNil(flow.hire)
-        flow.retry()
-        flow.confirm()
+        flow.retry(betaFeatures: true)
+        flow.confirm(betaFeatures: true)
         XCTAssertEqual(runs.calls.map(\.account), [Self.owner])
         XCTAssertEqual(held.calls.map(\.account), [Self.owner])
         // The same account signing in again keeps a hire that is its own.
@@ -247,7 +265,7 @@ import XCTest
         flow.pick(try listing(), name: "Researcher", account: Self.owner, run: runs.run)
         await settle(flow)
         XCTAssertEqual(flow.hire?.phase, .settingUp(assistantID: id))
-        flow.retry()
+        flow.retry(betaFeatures: true)
         XCTAssertEqual(runs.calls.count, 1, "a hire that is made is never sent again")
         flow.chatAvailable()
         XCTAssertEqual(flow.hire?.phase, .done)
@@ -362,7 +380,7 @@ import XCTest
         flow.pick(try listing(), name: "Researcher", account: Self.owner, run: runs.run)
         await settle(flow)
         XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 61_000))
-        flow.confirm()
+        flow.confirm(betaFeatures: true)
         await settle(flow)
         XCTAssertEqual(flow.hire?.phase, .confirm(priceProtons: 61_000), "the catalog's 60,000 replaced the quote")
 
@@ -370,11 +388,11 @@ import XCTest
         unquoted.pick(try listing(), name: "Researcher", account: Self.owner, run: runs.run)
         await settle(unquoted)
         XCTAssertEqual(unquoted.hire?.phase, .failed(nil))
-        unquoted.confirm()
-        unquoted.retry()
+        unquoted.confirm(betaFeatures: true)
+        unquoted.retry(betaFeatures: true)
         await settle(unquoted)
         XCTAssertEqual(unquoted.hire?.phase, .failed(nil), "a zero quote is not a price")
-        unquoted.retry()
+        unquoted.retry(betaFeatures: true)
         await settle(unquoted)
         XCTAssertEqual(unquoted.hire?.phase, .confirm(priceProtons: 62_000))
         XCTAssertEqual(runs.calls.map(\.confirmed), [false, true, false, false, false],
@@ -393,8 +411,8 @@ import XCTest
         flow.refuseName(researcher, shownAs: researcher.title(locale: "en"), account: Self.owner)
         XCTAssertEqual(flow.hire?.phase, .failed(.name))
         XCTAssertEqual(flow.hire?.name, "Researcher")
-        flow.retry()
-        flow.confirm()
+        flow.retry(betaFeatures: true)
+        flow.confirm(betaFeatures: true)
         XCTAssertEqual(flow.hire?.phase, .failed(.name))
         flow.reset()
         XCTAssertNil(flow.hire)
@@ -411,8 +429,8 @@ import XCTest
                    betaFeatures: false, run: runs.run)
         flow.press(researcher, name: nil, shownAs: "Researcher", account: Self.owner,
                    betaFeatures: false, run: runs.run)
-        flow.confirm()
-        flow.retry()
+        flow.confirm(betaFeatures: true)
+        flow.retry(betaFeatures: true)
         for _ in 0..<10 { await Task.yield() }
         XCTAssertNil(flow.hire)
         XCTAssertTrue(runs.calls.isEmpty, "a hire request went out without beta features")
