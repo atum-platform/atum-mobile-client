@@ -13,15 +13,20 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
     let design: LiveDesign
     let availability: PhoneTabAvailability
     let badges: PhoneTabBadges
+    /// Desktop #132: without the account's beta features the Team Space tab
+    /// is drawn subdued, named "Team space · Coming soon" and carries no mark.
+    let teamSpaceGate: TeamSpaceBetaGate
     private let home: () -> HomeContent
     private let drive: () -> DriveContent
     private let store: () -> StoreContent
     private let teamSpace: () -> TeamSpaceContent
     private let account: () -> AccountContent
+    @Environment(\.colorScheme) private var scheme
 
     init(router: Router, design: LiveDesign,
          availability: PhoneTabAvailability = .none,
          badges: PhoneTabBadges = .none,
+         teamSpaceGate: TeamSpaceBetaGate = .open,
          @ViewBuilder home: @escaping () -> HomeContent,
          @ViewBuilder drive: @escaping () -> DriveContent,
          @ViewBuilder store: @escaping () -> StoreContent,
@@ -31,6 +36,7 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
         self.design = design
         self.availability = availability
         self.badges = badges
+        self.teamSpaceGate = teamSpaceGate
         self.home = home
         self.drive = drive
         self.store = store
@@ -98,12 +104,16 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
     /// Liquid Glass. Only a mention earns a mark (gap spec §2), drawn by the
     /// system badge with the same "99+" cap as a Home row. An unavailable tab
     /// is never dimmed (STYLE: no silent gates); it opens its coming-soon
-    /// destination and says so in its value.
+    /// destination and says so in its value. The one exception is desktop
+    /// #132's beta gate: a gated Team Space tab is drawn in the ghost ink the
+    /// desktop rail uses (`--atum-ink-ghost`, the Kit's `ink-4`), says "Team
+    /// space · Coming soon" in its label, and opens the Coming soon page.
     private func tab<Content: View>(_ kind: Router.Tab,
                                     @ViewBuilder content: () -> Content) -> some TabContent<Router.Tab> {
         let title = PhoneTabCopy.title(for: kind, design: design)
         let atum = AtumVisualSystem(design: design)
         let selected = router.selectedTab == kind
+        let gated = kind == .teamSpace && teamSpaceGate.isComingSoon
         let destination = content()
             // The bar's bottom scroll edge is the system hard edge, not the
             // default soft one. iOS 26's soft edge fades and dims list rows
@@ -122,13 +132,16 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
             // No title text in the bar: FlowPhone2's phone shell is four icon
             // tabs. A `.fill` custom symbol must not be picked up by the bar's
             // automatic fill variant, so variants are pinned off.
-            tabIcon(atum.symbol(glyph(for: kind, selected: selected)))
+            tabIcon(atum.symbol(glyph(for: kind, selected: selected)),
+                    subdued: gated ? UIColor(atum.kitColor(.ink4, scheme: scheme)) : nil)
                 .environment(\.symbolVariants, .none)
         }
         .badge(badgeText(for: kind))
-        .accessibilityLabel(Text(verbatim: title))
-        .accessibilityValue(Text(verbatim: isAvailable(kind) ? badgeDescription(for: kind)
-                                                 : design.text("desktop.atum.discover.comingSoon")))
+        .accessibilityLabel(Text(verbatim: gated
+            ? teamSpaceGate.tabLabel(title: title, comingSoon: design.text("desktop.surfaces.comingSoon"))
+            : title))
+        .accessibilityValue(Text(verbatim: gated ? ""
+            : isAvailable(kind) ? badgeDescription(for: kind) : design.text("desktop.atum.discover.comingSoon")))
         .accessibilityIdentifier("phone.tab." + kind.identifier)
     }
 
@@ -141,13 +154,16 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
     /// (docs/ports/tabbar-icon-size.md).
     /// The Phosphor symbols are Regular-M only, so `.light` matches the old
     /// bar's font without changing the stroke.
-    private func tabIcon(_ name: String) -> Image {
+    /// A `subdued` tab keeps that colour in both states: the bar's template
+    /// tint (ink when selected) would otherwise draw it like any other tab.
+    private func tabIcon(_ name: String, subdued: UIColor? = nil) -> Image {
         let size = CGFloat(design.kit.tokens.icon["xl"] ?? 24)
         guard let image = UIImage(named: name)?
             .applyingSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: size, weight: .light)) else {
             return Image(name)
         }
-        return Image(uiImage: image)
+        guard let subdued else { return Image(uiImage: image) }
+        return Image(uiImage: image.withTintColor(subdued, renderingMode: .alwaysOriginal))
     }
 
     private func badgeText(for tab: Router.Tab) -> Text? {
@@ -156,7 +172,7 @@ struct RootTabs<HomeContent: View, DriveContent: View, StoreContent: View, TeamS
     }
 
     private func badge(for tab: Router.Tab) -> Badge {
-        tab == .teamSpace ? badges.teamSpace : .none
+        tab == .teamSpace ? teamSpaceGate.tabBadge(badges.teamSpace) : .none
     }
 
     /// The mark in words, with its numbers, from the exported copy
@@ -215,6 +231,34 @@ struct PhoneComingSoonView: View {
         .navigationTitle(Text(verbatim: PhoneTabCopy.title(for: tab, design: design)))
         .navigationBarTitleDisplayMode(.large)
         .accessibilityIdentifier("phone.comingSoon." + tab.rawValue)
+    }
+}
+
+/// Desktop #132's Team Space page for an account without beta features
+/// (`data-team-space-coming-soon`: an empty state titled "Coming soon" over
+/// "This place is not ready yet."). It replaces the whole workspace, and
+/// every route into a company room lands here, so it never shows a
+/// transcript or a composer.
+struct TeamSpaceComingSoonView: View {
+    let design: LiveDesign
+
+    @Environment(\.colorScheme) private var scheme
+
+    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(design.text("desktop.surfaces.comingSoon"), image: atum.symbol(.briefcase))
+        } description: {
+            Text(verbatim: design.text("desktop.surfaces.comingSoonHelp"))
+        }
+        .foregroundStyle(atum.color(.soft, scheme: scheme))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+        .navigationTitle(Text(verbatim: PhoneTabCopy.title(for: Router.Tab.teamSpace, design: design)))
+        .navigationBarTitleDisplayMode(.large)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("teamSpace.comingSoon")
     }
 }
 
@@ -300,6 +344,20 @@ private extension Router.Tab {
         case .drive: PhoneTab.drive.rawValue
         case .store: "store"
         case .teamSpace: PhoneTab.teamSpace.rawValue
+        }
+    }
+}
+
+extension View {
+    /// Desktop #132: a gated Team Space tab shows only its Coming soon page.
+    /// The workspace (and its room destinations) is not in the hierarchy, so
+    /// nothing behind the page can open a transcript or a composer.
+    @ViewBuilder
+    func teamSpaceComingSoon(_ gate: TeamSpaceBetaGate, design: LiveDesign) -> some View {
+        if gate.isComingSoon {
+            TeamSpaceComingSoonView(design: design)
+        } else {
+            self
         }
     }
 }

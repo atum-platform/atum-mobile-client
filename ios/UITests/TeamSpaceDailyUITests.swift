@@ -29,6 +29,36 @@ final class TeamSpaceDailyUITests: TranscriptUITestCase {
         return target.exists && target.isHittable
     }
 
+    /// W4-Z3, desktop #132: an account without beta features keeps the tab,
+    /// subdued and named "Team space · Coming soon" with no mark, and its page
+    /// is Coming soon with "This place is not ready yet.", never the workspace.
+    @MainActor
+    func testWithoutBetaFeaturesTeamSpaceIsComingSoon() {
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+            + ["-AtumDebugTeamSpace", "-AtumScriptedBetaFeatures", "NO"] + probeArguments + Self.vietnamese
+        app.launch()
+        XCTAssertTrue(element(app, "teamSpace.comingSoon").waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertTrue(app.staticTexts["Sắp có"].exists, boundedHierarchy(app))
+        XCTAssertTrue(app.staticTexts["Chỗ này chưa sẵn sàng."].exists, boundedHierarchy(app))
+        XCTAssertFalse(element(app, "teamSpace.screen").exists)
+        XCTAssertFalse(element(app, "company.channels").exists)
+
+        let tab = app.buttons.matching(identifier: "phone.tab.team_space").firstMatch
+        XCTAssertTrue(tab.exists)
+        XCTAssertEqual(tab.label, "Không gian nhóm · Sắp có")
+        XCTAssertFalse((tab.value as? String ?? "").contains("Nhắc đến bạn"), "a gated tab has no mark")
+
+        // Chats and back: the tab still opens only the Coming soon page.
+        let chats = app.buttons.matching(identifier: "phone.tab.chats").firstMatch
+        chats.tap()
+        XCTAssertTrue(waitFor(5) { chats.isSelected })
+        tab.tap()
+        XCTAssertTrue(waitFor(5) { tab.isSelected })
+        XCTAssertTrue(element(app, "teamSpace.comingSoon").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "teamSpace.screen").exists)
+    }
+
     @MainActor
     func testWorkplaceRootIsTheChannelListAndAChannelPushesAndPopsBack() {
         let app = launchWorkplace()

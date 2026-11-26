@@ -371,6 +371,7 @@ struct AppRoot: View {
         )
         let coversChatsTap = router.chatRestoreIntent?.entry == .chatsTap
             && router.coversChatsRootForRestore
+        let teamSpaceGate = self.teamSpaceGate
         return RootTabs(
             router: router,
             design: design,
@@ -379,7 +380,8 @@ struct AppRoot: View {
                 teamSpace: model.companyWorkspace.isVisible
             ),
             badges: PhoneTabBadges(
-                teamSpace: model.companyWorkspace.tabBadge(signals: companySignals))
+                teamSpace: model.companyWorkspace.tabBadge(signals: companySignals)),
+            teamSpaceGate: teamSpaceGate
         ) {
             HomeScreen(design: design, router: router,
                        accountName: accountPresentation.name(unnamed: PeopleNameWords.unnamed),
@@ -527,6 +529,9 @@ struct AppRoot: View {
                 chatHost(account, roomID: roomID)
                     .toolbarVisibility(.hidden, for: .tabBar)
             }
+            // Desktop #132: without beta features the tab's whole page is
+            // Coming soon; routes into company rooms land there (`routeRoom`).
+            .teamSpaceComingSoon(teamSpaceGate, design: design)
         } account: {
             AccountScreen(design: design,
                           presentation: accountPresentation,
@@ -648,6 +653,17 @@ struct AppRoot: View {
             if roomID == nil, router.selectedTab == .teamSpace {
                 if companyThreads.pending?.focusEventID != nil { companyThreads.pending = nil }
                 model.closeConversation()
+            }
+        }
+        // Desktop #132: beta features turned off (another account, a /me
+        // answer) take an open company room off the screen; turned on, the
+        // workspace returns on the next render.
+        .onChange(of: model.betaFeatures) { _, _ in
+            if teamSpaceGate.closesOpenRoom(teamSpaceRoomID: router.teamSpaceRoomID) {
+                if let roomID = router.teamSpaceRoomID, model.conversation?.roomID == roomID {
+                    model.closeConversation()
+                }
+                router.popTeamSpaceToRoot()
             }
         }
         .onChange(of: model.companyLeftToken) { _, _ in
@@ -938,7 +954,13 @@ struct AppRoot: View {
                 // A first-party board link stays in Atum (desktop `openMatrixMarkdownLink`):
                 // Team space → that company → Board, and the card.
                 onOpenCompanyBoard: { target in
-                    if model.companyWorkspace.requestBoardLink(target) { router.showTeamSpaceRoot() }
+                    // Desktop #132: a gated account's board link lands on Coming soon,
+                    // and no board request waits for a later account.
+                    if teamSpaceGate.isComingSoon {
+                        router.showTeamSpaceRoot()
+                    } else if model.companyWorkspace.requestBoardLink(target) {
+                        router.showTeamSpaceRoot()
+                    }
                 },
                 onBeginAppBotSetup: model.beginAppOnboarding,
                 onOpenAppBotRoute: model.openAppRoute,
@@ -1240,6 +1262,9 @@ struct AppRoot: View {
         }
         guard !Task.isCancelled, fenceHolds() else { return .superseded }
         guard let requestedDestination = roomDestination(for: roomID) else { return .failed }
+        if teamSpaceGate.landing(routesToTeamSpace: requestedDestination == .teamSpace) == .comingSoon {
+            return landOnTeamSpaceComingSoon()
+        }
         if companyThreads.pending?.focusEventID != nil { companyThreads.pending = nil }
         if requestedDestination == .teamSpace { model.companyWorkspace.activateCompany(owning: roomID) }
         prepareRoot(requestedDestination, roomID: roomID, stagedCold: stagedCold)
@@ -1271,6 +1296,12 @@ struct AppRoot: View {
             popRoot(requestedDestination)
             return .failed
         }
+        // The gate may have closed during the open (another account's scope, a /me answer).
+        if teamSpaceGate.landing(routesToTeamSpace: authoritativeDestination == .teamSpace) == .comingSoon {
+            if model.conversation?.roomID == openedRoomID { model.closeConversation() }
+            if stagedCold, requestedDestination != .teamSpace { popRoot(requestedDestination) }
+            return landOnTeamSpaceComingSoon()
+        }
         if router.selectedTab != authoritativeDestination.tab {
             prepareRoot(authoritativeDestination, roomID: openedRoomID, stagedCold: false)
         }
@@ -1288,6 +1319,22 @@ struct AppRoot: View {
         if !alreadyStaged {
             await LivePushRouting.removeDeliveredNotifications(for: openedRoomID)
         }
+        return .opened
+    }
+
+    /// Desktop #132's gate for the signed-in account.
+    private var teamSpaceGate: TeamSpaceBetaGate {
+        TeamSpaceBetaGate(betaFeatures: model.betaFeatures)
+    }
+
+    /// A route into a company room without beta features (desktop #132): a
+    /// notification, a room link or a selected company room lands on Team
+    /// Space's Coming soon page; no room opens, so no transcript or composer.
+    /// The route has landed where desktop lands, so callers report no error.
+    private func landOnTeamSpaceComingSoon() -> RoomOpenResult {
+        openRequestGeneration &+= 1
+        if companyThreads.pending != nil { companyThreads.pending = nil }
+        router.showTeamSpaceRoot()
         return .opened
     }
 

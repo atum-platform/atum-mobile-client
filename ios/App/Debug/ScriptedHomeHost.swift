@@ -103,6 +103,16 @@ struct ScriptedHomeHost: View {
         }
     }
 
+    /// `-AtumScriptedBetaFeatures NO` (the flag W4-Z2's Store gate reads):
+    /// an account without beta features sees desktop #132's Team Space gate.
+    /// Every other scripted walk keeps today's Team Space.
+    static var teamSpaceGate: TeamSpaceBetaGate {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-AtumScriptedBetaFeatures"), flag + 1 < arguments.count
+        else { return .open }
+        return TeamSpaceBetaGate(betaFeatures: arguments[flag + 1] != "NO")
+    }
+
     /// `-AtumScriptedSignInAgain`: the native domain sign-in has ended (W4-E3 bell).
     static var signInAgain: Bool { ProcessInfo.processInfo.arguments.contains("-AtumScriptedSignInAgain") }
 
@@ -111,7 +121,8 @@ struct ScriptedHomeHost: View {
             design.color("ground", scheme: scheme).ignoresSafeArea()
             RootTabs(router: router, design: design,
                      availability: PhoneTabAvailability(drive: ScriptedDrive.enabled, teamSpace: true),
-                     badges: PhoneTabBadges(teamSpace: scriptedTabBadge)) {
+                     badges: PhoneTabBadges(teamSpace: scriptedTabBadge),
+                     teamSpaceGate: Self.teamSpaceGate) {
                 HomeScreen(
                     design: design,
                     router: router,
@@ -283,6 +294,7 @@ struct ScriptedHomeHost: View {
                     .accessibilityIdentifier("teamSpace.scripted.destination")
                     .toolbarVisibility(.hidden, for: .tabBar)
                 }
+                .teamSpaceComingSoon(Self.teamSpaceGate, design: design)
             } account: {
                 AccountScreen(
                     design: design,
