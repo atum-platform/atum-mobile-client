@@ -202,7 +202,30 @@ shelf already uses.
   holds the r2 AX5 shelf and Coming soon sheet captures, and the run folder
   holds the after captures.
 
-RESULTS_PENDING
+Results (26 Nov 2026, head `537ab56`, one locked batch on the iPhone 16e
+simulator, iOS 27, `r3-ui/verify.sh`, log `r3-ui/verify-run-1.log`):
+
+- `swift test` passed: 821 tests, 0 failures.
+- Debug build-for-testing exited 0.
+- AppTests passed: 48 tests in `ListingHireStateTests` and
+  `StoreCommercePresentationTests`, 0 failures.
+- UI tests passed: 9 of 9. That is all three `ListingHireUITests`, plus
+  the six Store beta, owned, review, revocation and pending walks.
+- Design lint and its unit tests pass. The `AssistantNewSheet` baseline
+  dropped by one padding and one spacing, now Kit tokens. Copy-pin, design
+  import verification and the project plist lint pass.
+- `python3 scripts/public_guard.py --base origin/main --head HEAD` exits 0.
+- The after captures in `r3-ui/after/` show:
+  - On the AX5 shelf, the face, then "Researcher" on one line, the summary,
+    and "Coming soon" on two lines below.
+  - The owned Nova sheet at the default size, with Mai, Owned, the check and
+    Open.
+- Known follow-up, which predates this round and also affects the beta-on
+  picker: at AX5 the recipient row keeps the name, "Owned" and the check on
+  one line. "Owned" wraps, and the AX5 capture shows the row partly under
+  the action bar after scrolling. The row is still reachable, and the walk
+  asserts that it is hittable. Stacking "Owned" under the name at
+  accessibility sizes, as in `AtumSettingsRow`, is the next fix.
 
 ## Decisions
 
