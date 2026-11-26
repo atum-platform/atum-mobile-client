@@ -158,8 +158,10 @@ the card ID captured from the projection the owner tapped.
   default-size Home capture had no Work card, because Home read the store
   inside its List closure and missed a list that arrived after the first
   frame. Home now reads the store in its own body.
-- Locked run 3 (package unchanged, so `SKIP_SWIFT=1`): rebuild and the full
-  screenshot matrix, with longer waits and retakes of blank frames. Shots are
+- Locked run 3 (package unchanged, so `SKIP_SWIFT=1`), at `ac6c226`:
+  `build-for-testing` exited 0, producing an arm64 simulator app. All 48
+  screenshots drew content, with longer waits and retakes of blank frames. Home
+  now shows Work's card at the default size in both schemes. Shots are
   in `/Volumes/AtumTestFlight/w4-aa2-shots/`: `gallery-{open,busy,settled,work}`,
   `chat` and `home`, in `{en,vi}` × `{light,dark}`, plus `ax5-` variants.
   No UI test was added. The scripted hosts and the gallery serve the
