@@ -111,3 +111,26 @@ Results are recorded in the session-log section below.
   against a running desktop.
 - The notification service extension still renders company notifications
   with their Team Space names and logos. Only the tap is gated.
+
+## Session log (2026-11-26)
+
+- Locked run (`/Volumes/AtumTestFlight/dd-w4-z3/run.sh`, iPhone 17 simulator
+  939B69F8): `swift test --filter` ran 8 tests (5 `TeamSpaceBetaGateTests` and
+  3 `PhoneTabAvailabilityTests`) with 0 failures. Debug `build-for-testing`
+  for `AtumMobile`, including the UI test target, ended with
+  `** TEST BUILD SUCCEEDED **`.
+- Captures: on the first pass, 8 of 10 frames caught the launch screen
+  because the 8 s wait was too short. No crash report was written. A second
+  locked pass, captures only (`captures.sh`: one warm-up launch, then 25 s
+  waits), rendered all 10.
+  - Non-beta: the tab shows a grey briefcase with no badge. The page has the
+    large `Team space` title over "Coming soon" and "This place is not ready
+    yet." The layout holds in light, dark and AX5.
+  - Beta: the workspace, the channel list and the 7 badge are unchanged.
+- Unlocked checks: design lint OK (baseline unchanged), `git diff --check`
+  clean, and `public_guard.py --base origin/main --head HEAD` exit 0.
+- The UI test was not run locally. Per the lane rules, the hosted UI shards
+  run it.
+- Deferred: the gate is not enforced in the notification service extension's
+  presentation, so a company notification still renders. Only opening it is
+  gated.
