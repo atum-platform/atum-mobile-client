@@ -4113,3 +4113,100 @@ extension NativeDomainClientTests {
         }
     }
 }
+
+extension NativeDomainClientTests {
+    func testGoogleProposalAllowlistOnlyAdmitsExactListAndDecisionRoutes() {
+        let client = client(TestAuthorization(first: "proposal-spec"))
+        let root = "https://api.atumplatform.com/api/connections/google/proposals"
+        let id = GoogleProposalFixtures.id(1)
+        let accepted = [(root, "GET"), ("\(root)/\(id)/approve", "POST"), ("\(root)/\(id)/decline", "POST")]
+        for (url, method) in accepted {
+            XCTAssertTrue(client.isApprovedURL(URL(string: url)!, method: method), url)
+        }
+        let refused = [(root, "POST"), ("\(root)/", "GET"), ("\(root)?", "GET"), ("\(root)?owner=other", "GET"),
+                       ("\(root)#fragment", "GET"), ("\(root)/\(id)/approve", "GET"),
+                       ("\(root)/\(id)/approve?digest=other", "POST"), ("\(root)/\(id)/delivered", "POST"),
+                       ("\(root)/not-a-uuid/approve", "POST"), ("\(root)/\(id)/%61pprove", "POST"),
+                       ("\(root)/\(id)/approve/extra", "POST"),
+                       (root.replacingOccurrences(of: "https:", with: "http:"), "GET"),
+                       (root.replacingOccurrences(of: "api.atumplatform.com", with: "foreign.invalid"), "GET")]
+        for (url, method) in refused {
+            XCTAssertFalse(client.isApprovedURL(URL(string: url)!, method: method), url)
+        }
+    }
+
+    func testGoogleProposalTransportUsesOwnerBearerAndEchoesDisplayedDigest() async throws {
+        let authorization = TestAuthorization(first: "proposal-owner", refreshed: "proposal-refresh")
+        let client = client(authorization)
+        let id = GoogleProposalFixtures.id(1)
+        let digest = GoogleProposalFixtures.eventDigest
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Atum-Host-Bridge-Contract"), "atum.s2.host-bridge/1.0.0")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            let bearer = request.value(forHTTPHeaderField: "Authorization")
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.path, "/api/connections/google/proposals")
+                XCTAssertNil(self.body(of: request))
+                if bearer == "Bearer proposal-owner" { return .init(status: 401) }
+                XCTAssertEqual(bearer, "Bearer proposal-refresh")
+                return .json(GoogleProposalFixtures.data([GoogleProposalFixtures.row(1)]))
+            }
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(bearer, "Bearer proposal-owner")
+            XCTAssertEqual(request.url?.path, "/api/connections/google/proposals/\(id)/approve")
+            XCTAssertEqual(self.body(of: request), Data(#"{"digest":"\#(digest)"}"#.utf8))
+            return .json(Data(#"{"status":"confirmed","proposalId":"\#(id)","digest":"\#(digest)"}"#.utf8))
+        }
+        let proposals = try await client.googleWriteProposals(isCurrent: { true })
+        let proposal = try XCTUnwrap(proposals.first)
+        let result = await client.decideGoogleWriteProposal(.approve, proposal: proposal, isCurrent: { true })
+        XCTAssertEqual(result, .accepted)
+        XCTAssertEqual(authorization.refreshCalls, 1)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 3)
+    }
+
+    func testGoogleProposalTransportRefusalsAndMismatchedReceiptsNeverConfirm() async throws {
+        let client = client(TestAuthorization(first: "proposal-owner"))
+        let id = GoogleProposalFixtures.id(1)
+        let otherID = GoogleProposalFixtures.id(2)
+        let digest = GoogleProposalFixtures.eventDigest
+        let otherDigest = String(repeating: "e", count: 64)
+        let proposal = try GoogleProposalFixtures.proposal(1)
+        let unverifiable = try GoogleProposalFixtures.proposal(1, digest: otherDigest)
+        let localMismatch = await client.decideGoogleWriteProposal(.approve, proposal: unverifiable, isCurrent: { true })
+        XCTAssertEqual(localMismatch, .changed)
+        XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
+
+        let cases: [(Int, String, GoogleWriteDecisionResult)] = [
+            (409, #"{"state":"refused"}"#, .refused), // same status for a stale digest and a foreign proposal
+            (403, #"{"state":"refused"}"#, .refused),
+            (200, #"{"status":"confirmed","proposalId":"\#(id)","digest":"\#(otherDigest)"}"#, .changed),
+            (200, #"{"status":"confirmed","proposalId":"\#(otherID)","digest":"\#(digest)"}"#, .unavailable),
+            (200, #"{"status":"declined","proposalId":"\#(id)","digest":"\#(digest)"}"#, .unavailable),
+            (503, #"{"state":"unavailable"}"#, .unavailable)
+        ]
+        for (status, json, expected) in cases {
+            NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(json.utf8)]) }
+            let result = await client.decideGoogleWriteProposal(.approve, proposal: proposal, isCurrent: { true })
+            XCTAssertEqual(result, expected, "HTTP \(status)")
+        }
+    }
+
+    func testGoogleProposalDecisionChecksSessionAgainBefore401Replay() async throws {
+        let proposal = try GoogleProposalFixtures.proposal(1)
+        var current = true
+        NativeDomainProtocol.state.handler = { _ in .init(status: 401) }
+        let client = NativeDomainClient(testAuthorization: { forceRefresh in
+            if forceRefresh {
+                current = false
+                return "proposal-refresh"
+            }
+            return "proposal-first"
+        }, protocolClasses: [NativeDomainProtocol.self])
+        let result = await client.decideGoogleWriteProposal(.decline, proposal: proposal, isCurrent: { current })
+        XCTAssertEqual(result, .unavailable)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.map { $0.value(forHTTPHeaderField: "Authorization") },
+                       ["Bearer proposal-first"])
+        XCTAssertEqual(NativeDomainProtocol.state.requests.first?.url?.lastPathComponent, "decline")
+    }
+}

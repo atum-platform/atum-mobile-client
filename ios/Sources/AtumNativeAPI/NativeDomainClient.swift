@@ -47,7 +47,7 @@ public struct AgentsRead: Sendable {
 /// Main-process-only client for explicit operations on the fixed native domain API. The
 /// refresh coordinator remains the only authority that can expose a bearer;
 /// SwiftUI receives typed domain values and safe failures only.
-@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, CompanyInvitesAPI, ApplePurchasesAPI {
+@MainActor public final class NativeDomainClient: CompanyWorkspaceAPI, CompanyConversationsAPI, CompanyPrivateCosAPI, CompanyInvitesAPI, ApplePurchasesAPI, GoogleWriteProposalAPI {
     private static let baseURL = URL(string: "https://api.atumplatform.com/api/matrix/v1")!
     private static let scheduleStopOrigin = "https://api.atumplatform.com"
     private static let agentsURL = URL(string: "https://api.atumplatform.com/api/matrix/v1/agents")!
@@ -1215,6 +1215,54 @@ public struct AgentsRead: Sendable {
         return try decode(AccountConnections.self, data: body)
     }
 
+    // MARK: Google owner write proposals
+
+    public func googleWriteProposals(isCurrent: @escaping NativeDispatchGate) async throws -> [GoogleWriteProposal] {
+        let response = try await googleProposalCall(url: GoogleProposalRoute.url, body: nil, isCurrent: isCurrent)
+        guard response.status == 200 else {
+            throw response.status == 401 || response.status == 403
+                ? NativeDomainClientFailure.authenticationRefused : NativeDomainClientFailure.transportUnavailable
+        }
+        return try decode(GoogleWriteProposalList.self, data: response.body).proposals
+    }
+
+    public func decideGoogleWriteProposal(_ decision: GoogleWriteDecision, proposal: GoogleWriteProposal,
+                                         isCurrent: @escaping NativeDispatchGate) async -> GoogleWriteDecisionResult {
+        guard proposal.digestMatchesPreview else { return .changed }
+        let url = GoogleProposalRoute.url.appendingPathComponent(proposal.id.rawValue)
+            .appendingPathComponent(decision.rawValue)
+        guard let body = try? JSONEncoder().encode(GoogleProposalRoute.Request(digest: proposal.digest)),
+              let response = try? await googleProposalCall(url: url, body: body, isCurrent: isCurrent) else {
+            return .unavailable
+        }
+        if [400, 401, 403, 409].contains(response.status) { return .refused }
+        guard response.status == 200,
+              let receipt = try? decode(GoogleProposalRoute.Receipt.self, data: response.body),
+              receipt.proposalId == proposal.id,
+              receipt.status == (decision == .approve ? "confirmed" : "declined") else { return .unavailable }
+        return receipt.digest == proposal.digest ? .accepted : .changed
+    }
+
+    private func googleProposalCall(url: URL, body: Data?, isCurrent: NativeDispatchGate) async throws
+        -> NativeDomainHTTPResponse {
+        for forceRefresh in [false, true] {
+            try requireActiveTask()
+            guard isCurrent() else { throw NativeDomainClientFailure.cancelled }
+            // A feature-specific refusal must not end the wider phone session.
+            let token = try await authorize(forceRefresh: forceRefresh, reportsAuthenticationFailure: false)
+            try requireActiveTask()
+            let response = try await perform(url: url, token: token, method: body == nil ? "GET" : "POST",
+                                             body: body, maximumRequestBodyBytes: 128,
+                                             maximumResponseBodyBytes: body == nil ? 4_194_304 : 4_096,
+                                             extraHeaders: [GoogleProposalRoute.header: GoogleProposalRoute.version],
+                                             isCurrent: isCurrent)
+            try requireActiveTask()
+            guard isCurrent() else { throw NativeDomainClientFailure.cancelled }
+            if response.status != 401 || forceRefresh { return response }
+        }
+        throw NativeDomainClientFailure.authenticationRefused
+    }
+
     // MARK: ChatGPT with Google data (Shell training-confirmation r3)
 
     /// The account's one-time training-off confirmation. Any answer other than
@@ -1643,12 +1691,17 @@ public struct AgentsRead: Sendable {
                          extraHeaders: [String: String] = [:],
                          canSend: DeskSendCheck? = nil,
                          isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
-        guard isApprovedURL(url), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
+        guard isApprovedURL(url, method: method), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
               !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
               maximumRequestBodyBytes >= 0, (body?.count ?? 0) <= maximumRequestBodyBytes,
               (0...4_500_000).contains(maximumResponseBodyBytes),
               (method == "GET") == (body == nil),
+              !GoogleProposalRoute.matches(url.path)
+                || extraHeaders == [GoogleProposalRoute.header: GoogleProposalRoute.version],
               extraHeaders.allSatisfy({ name, value in
+                  if GoogleProposalRoute.matches(url.path) {
+                      return name == GoogleProposalRoute.header && value == GoogleProposalRoute.version
+                  }
                   if url.path == CloudScheduleStop.path, method == "POST" {
                       return (name == "Origin" && value == Self.scheduleStopOrigin)
                           || (name == CloudScheduleStop.bridgeHeader && value == CloudScheduleStop.bridgeVersion)
@@ -1786,10 +1839,15 @@ public struct AgentsRead: Sendable {
         return url
     }
 
-    private func isApprovedURL(_ url: URL) -> Bool {
+    func isApprovedURL(_ url: URL, method: String) -> Bool {
         guard url.scheme == "https", url.host == "api.atumplatform.com", url.port == nil,
               url.user == nil, url.password == nil, url.fragment == nil else { return false }
         // The Shell routes outside the domain prefix, each by its exact path.
+        if GoogleProposalRoute.matches(url.path) {
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            return components?.percentEncodedQuery == nil && components?.percentEncodedPath == url.path
+                && GoogleProposalRoute.allows(path: url.path, method: method)
+        }
         if url.path == Self.hostDeskURL.path || url.path == Self.hostControlURL.path { return url.query == nil }
         if url.path == CloudScheduleStop.path { return url.query == nil }
         if url.path == ChatGPTTraining.url.path { return url.query == nil }

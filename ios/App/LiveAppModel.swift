@@ -129,7 +129,9 @@ final class LiveAppModel {
     @ObservationIgnored private var firstRunMarkerCoordinator: FirstRunMarkerCoordinator?
     private(set) var holdsRecoveryKey = false
     private(set) var recoveryKeySavedOnThisPhone = false
-    private(set) var signOutInProgress = false
+    private(set) var signOutInProgress = false {
+        didSet { bindGoogleWriteProposals() }
+    }
     private(set) var signOutFailureToken: UInt64 = 0
     /// The owner's activity switch (`io.atum.desktop.share_activity`): public
     /// receipts and typing by default. Loaded from Matrix account data on
@@ -275,8 +277,12 @@ final class LiveAppModel {
     private var metadata: MASMetadata?
     private var context: Context? {
         didSet {
-            if oldValue?.runtime.ticket.session.userID != context?.runtime.ticket.session.userID {
+            let ownerChanged = oldValue?.runtime.ticket.session.userID != context?.runtime.ticket.session.userID
+            if ownerChanged {
                 applePurchases.bind(accountID: nil, api: nil)
+            }
+            if ownerChanged || oldValue?.installation.id != context?.installation.id {
+                googleWriteProposals.bind(accountID: nil, api: nil)
             }
         }
     }
@@ -376,6 +382,7 @@ final class LiveAppModel {
             configureHandleDirectory()
             rebindPhoneApprovals()
             applePurchases.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
+            bindGoogleWriteProposals()
             assistantTurnStopUnavailable.removeAll()
             modelOffers.removeAll()
             modelDestinations.removeAll()
@@ -388,6 +395,15 @@ final class LiveAppModel {
                 ))
             }
         }
+    }
+    let googleWriteProposals = GoogleWriteProposalStore()
+
+    private func bindGoogleWriteProposals() {
+        guard !signOutInProgress, case .signedIn = stage else {
+            googleWriteProposals.bind(accountID: nil, api: nil)
+            return
+        }
+        googleWriteProposals.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
     }
     @ObservationIgnored private var modelOffers = [NativeID: ManagedModelPickerState<ManagedModelSnapshot>]()
     @ObservationIgnored private var modelDestinations = [NativeID: ManagedModelPickerState<ManagedModelDestinationSnapshot>]()
@@ -4178,7 +4194,8 @@ final class LiveAppModel {
             switch phase {
             case .active: self?.sceneBecameActive()
             case .background: self?.sceneEnteredBackground()
-            default: break
+            case .inactive: self?.googleWriteProposals.setForeground(false)
+            @unknown default: break
             }
         }
         observeTimeZoneChanges()
@@ -4207,6 +4224,7 @@ final class LiveAppModel {
     func sceneBecameActive() {
         Task { [weak self] in await self?.applePurchases.replayUnfinished() }
         isSceneActive = true
+        googleWriteProposals.setForeground(true)
         startSessionKeepAlive()
         if returningFromBackground {
             returningFromBackground = false
@@ -4223,6 +4241,7 @@ final class LiveAppModel {
     /// suspension would strand custody. The next activation renews instead.
     func sceneEnteredBackground() {
         isSceneActive = false
+        googleWriteProposals.setForeground(false)
         returningFromBackground = true
         // B13: nothing is marked read in the background.
         conversation?.bottomVisible = false
@@ -5484,6 +5503,7 @@ final class LiveAppModel {
 
     private func invalidateAppAccount(nextInstallationID: UUID? = nil) {
         handleStore.bind(owner: nil)
+        googleWriteProposals.bind(accountID: nil, api: nil)
         roomTurnStops.removeAll()
         cancelAppOnboarding()
         appContentPage = nil
