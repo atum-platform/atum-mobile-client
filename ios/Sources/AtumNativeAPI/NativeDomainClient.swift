@@ -1231,19 +1231,23 @@ public struct AgentsRead: Sendable {
         guard proposal.digestMatchesPreview else { return .changed }
         let url = GoogleProposalRoute.url.appendingPathComponent(proposal.id.rawValue)
             .appendingPathComponent(decision.rawValue)
-        guard let body = try? JSONEncoder().encode(GoogleProposalRoute.Request(digest: proposal.digest)),
-              let response = try? await googleProposalCall(url: url, body: body, isCurrent: isCurrent) else {
-            return .unavailable
+        guard let body = try? JSONEncoder().encode(GoogleProposalRoute.Request(digest: proposal.digest))
+        else { return .unavailable }
+        var dispatched = false
+        let response = try? await googleProposalCall(url: url, body: body, isCurrent: isCurrent) { pending in
+            dispatched = pending
         }
+        guard let response else { return dispatched ? .ambiguous : .unavailable }
         if [400, 401, 403, 409].contains(response.status) { return .refused }
         guard response.status == 200,
               let receipt = try? decode(GoogleProposalRoute.Receipt.self, data: response.body),
               receipt.proposalId == proposal.id,
-              receipt.status == (decision == .approve ? "confirmed" : "declined") else { return .unavailable }
+              receipt.status == (decision == .approve ? "confirmed" : "declined") else { return .ambiguous }
         return receipt.digest == proposal.digest ? .accepted : .changed
     }
 
-    private func googleProposalCall(url: URL, body: Data?, isCurrent: NativeDispatchGate) async throws
+    private func googleProposalCall(url: URL, body: Data?, isCurrent: NativeDispatchGate,
+                                    awaitingDecision: (Bool) -> Void = { _ in }) async throws
         -> NativeDomainHTTPResponse {
         for forceRefresh in [false, true] {
             try requireActiveTask()
@@ -1255,7 +1259,11 @@ public struct AgentsRead: Sendable {
                                              body: body, maximumRequestBodyBytes: 128,
                                              maximumResponseBodyBytes: body == nil ? 4_194_304 : 4_096,
                                              extraHeaders: [GoogleProposalRoute.header: GoogleProposalRoute.version],
-                                             isCurrent: isCurrent)
+                                             isCurrent: isCurrent, onDispatch: {
+                if body != nil { awaitingDecision(true) }
+            })
+            // A complete 401 settles this attempt before any authorization replay.
+            if response.status == 401 { awaitingDecision(false) }
             try requireActiveTask()
             guard isCurrent() else { throw NativeDomainClientFailure.cancelled }
             if response.status != 401 || forceRefresh { return response }
@@ -1690,7 +1698,8 @@ public struct AgentsRead: Sendable {
                          maximumResponseBodyBytes: Int,
                          extraHeaders: [String: String] = [:],
                          canSend: DeskSendCheck? = nil,
-                         isCurrent: @MainActor () -> Bool = { true }) async throws -> NativeDomainHTTPResponse {
+                         isCurrent: @MainActor () -> Bool = { true },
+                         onDispatch: () -> Void = {}) async throws -> NativeDomainHTTPResponse {
         guard isApprovedURL(url, method: method), isBearerToken(token), ["DELETE", "GET", "POST", "PUT"].contains(method),
               !isBareAgentPath(url.path) || (method == "DELETE" && body?.isEmpty == true),
               maximumRequestBodyBytes >= 0, (body?.count ?? 0) <= maximumRequestBodyBytes,
@@ -1754,8 +1763,13 @@ public struct AgentsRead: Sendable {
         if let companyWire { request.setValue(companyWire.rawValue, forHTTPHeaderField: CompanyWire.headerName) }
         request.httpShouldHandleCookies = false
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        var timeout: TimeInterval = url.path == CloudScheduleStop.path ? 40 : 15
+        if method == "POST", GoogleProposalRoute.matches(url.path) {
+            timeout = GoogleProposalRoute.decisionTimeout
+            request.timeoutInterval = timeout
+        }
         let operation = NativeDomainJSONOperation(request: request, protocolClasses: protocolClasses,
-                                                  timeout: url.path == CloudScheduleStop.path ? 40 : 15,
+                                                  timeout: timeout,
                                                   maximumBodyBytes: maximumResponseBodyBytes)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -1765,6 +1779,7 @@ public struct AgentsRead: Sendable {
                     continuation.resume(throwing: NativeDomainClientFailure.cancelled)
                     return
                 }
+                onDispatch()
                 operation.start(continuation)
             }
         } onCancel: {

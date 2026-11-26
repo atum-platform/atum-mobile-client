@@ -7,7 +7,7 @@ public enum GoogleWriteProposalSurface: Hashable, Sendable {
 }
 
 public enum GoogleWriteProposalState: Equatable, Sendable {
-    case pending, deciding(GoogleWriteDecision), failedRetryable
+    case pending, deciding(GoogleWriteDecision), reconciling, failedRetryable
     case approved, declined, superseded, expired, changed, closed, unsupported
 
     fileprivate var canDecide: Bool { self == .pending || self == .failedRetryable }
@@ -16,8 +16,6 @@ public enum GoogleWriteProposalState: Equatable, Sendable {
         if case .deciding = self { return true }
         return false
     }
-
-    fileprivate var isOpen: Bool { canDecide || isDeciding }
 }
 
 public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
@@ -57,20 +55,23 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
     @ObservationIgnored private var api: (any GoogleWriteProposalAPI)?
     @ObservationIgnored private var entries: [Entry] = []
     @ObservationIgnored private var retired = Set<NativeID>()
-    @ObservationIgnored private var inFlight = Set<DecisionKey>()
+    @ObservationIgnored private var inFlight = [DecisionKey: Task<Void, Never>]()
+    @ObservationIgnored private var reconciling = [DecisionKey: ContinuousClock.Instant]()
     @ObservationIgnored private var visible = Set<GoogleWriteProposalSurface>()
     @ObservationIgnored private var foreground = false
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var queuedRefresh: RefreshTrigger?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private let sleep: @Sendable () async throws -> Void
+    @ObservationIgnored private let now: () -> ContinuousClock.Instant
 
     public convenience init() {
         self.init(sleep: { try await Task.sleep(for: .seconds(5)) })
     }
 
-    init(sleep: @escaping @Sendable () async throws -> Void) {
+    init(sleep: @escaping @Sendable () async throws -> Void, now: @escaping () -> ContinuousClock.Instant = { .now }) {
         self.sleep = sleep
+        self.now = now
     }
 
     /// Bind to the live owner and its domain client together. A new client,
@@ -136,37 +137,56 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
     }
 
     public func decide(_ decision: GoogleWriteDecision, cardID: GoogleWriteProposalCard.ID) async {
-        guard cardID.session == session, let api, let accountID,
+        guard !Task.isCancelled, cardID.session == session, let api, let accountID,
               let index = entries.firstIndex(where: { $0.proposal.id == cardID.proposalID }),
               entries[index].state.canDecide else { return }
         let proposal = entries[index].proposal
         let key = DecisionKey(accountID: accountID, proposalID: proposal.id)
-        guard inFlight.insert(key).inserted else { return }
+        guard inFlight[key] == nil, reconciling[key] == nil else { return }
         entries[index].state = .deciding(decision)
+        let task = Task<Void, Never> { [weak self] in
+            let result = await api.decideGoogleWriteProposal(decision, proposal: proposal, isCurrent: {
+                self?.session == cardID.session
+            })
+            await self?.finishDecision(decision, result: result, key: key, session: cardID.session)
+        }
+        inFlight[key] = task
         publish()
+        await task.value
+    }
 
-        let result = await api.decideGoogleWriteProposal(decision, proposal: proposal, isCurrent: { [weak self] in
-            self?.session == cardID.session
-        })
-        inFlight.remove(key)
-        if cardID.session != session {
+    private func finishDecision(_ decision: GoogleWriteDecision, result: GoogleWriteDecisionResult,
+                                key: DecisionKey, session: UUID) async {
+        inFlight[key] = nil
+        if result == .ambiguous {
+            // The server may have started just before the client lost the response.
+            reconciling[key] = now() + .seconds(GoogleProposalRoute.approvalLimit)
+        }
+        if self.session != session {
             // The same owner can return while a previous dispatch is still
             // finishing. Use a fresh list for the new session's state.
-            if self.accountID == accountID {
+            if accountID == key.accountID {
                 publish()
                 requestRefresh(.visible)
             }
             return
         }
-        guard let current = entries.firstIndex(where: { $0.proposal.id == cardID.proposalID }) else { return }
+        guard let index = entries.firstIndex(where: { $0.proposal.id == key.proposalID }) else { return }
 
+        let entry = entries[index]
+        let state: GoogleWriteProposalState
         switch result {
-        case .accepted: entries[current].state = decision == .approve ? .approved : .declined
-        case .refused: entries[current].state = proposal.source == .work ? .expired : .closed
-        case .changed: entries[current].state = .changed
-        case .unavailable: entries[current].state = .failedRetryable
+        case .accepted: state = decision == .approve ? .approved : .declined
+        case .refused: state = entry.proposal.source == .work ? .expired : .closed
+        case .changed: state = .changed
+        case .unavailable, .ambiguous: state = entry.listResolution ?? .failedRetryable
         }
-        if result != .unavailable { retired.insert(proposal.id) }
+        entries[index].state = state
+        entries[index].listResolution = nil
+        if !state.canDecide {
+            retired.insert(key.proposalID)
+            reconciling[key] = nil
+        }
         publish()
         await refresh()
     }
@@ -191,11 +211,12 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
             while self?.session == session, let trigger = self?.queuedRefresh, !Task.isCancelled {
                 self?.queuedRefresh = nil
                 guard self?.canRefresh(trigger, session: session) == true else { break }
+                let startedAt = self?.now()
                 let proposals = try? await api.googleWriteProposals(isCurrent: { [weak self] in
                     self?.canRefresh(trigger, session: session) == true
                 })
                 guard let self, self.session == session, !Task.isCancelled else { return }
-                if let proposals { self.apply(proposals) }
+                if let proposals, let startedAt { self.apply(proposals, startedAt: startedAt) }
             }
             if self?.session == session { self?.refreshTask = nil }
         }
@@ -224,6 +245,7 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
     private struct Entry {
         let proposal: GoogleWriteProposal
         var state: GoogleWriteProposalState
+        var listResolution: GoogleWriteProposalState?
         var surface: GoogleWriteProposalSurface? {
             switch proposal.source {
             case let .assistant(_, room): .assistant(roomID: room)
@@ -233,21 +255,32 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
         }
     }
 
-    private func apply(_ proposals: [GoogleWriteProposal]) {
+    private func apply(_ proposals: [GoogleWriteProposal], startedAt: ContinuousClock.Instant) {
+        guard let accountID else { return }
         let byID = Dictionary(proposals.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for index in entries.indices {
             let entry = entries[index]
-            // An authenticated answer wins over a list refreshed during the POST.
-            guard !entry.state.isDeciding, !retired.contains(entry.proposal.id) else { continue }
+            guard !retired.contains(entry.proposal.id) else { continue }
+            let resolution: GoogleWriteProposalState?
             if let latest = byID[entry.proposal.id] {
-                if !entry.proposal.sameApproval(as: latest) {
-                    entries[index].state = .changed
-                    retired.insert(entry.proposal.id)
-                }
-            } else if entry.state.isOpen || entry.state == .unsupported || entry.state == .changed {
+                resolution = entry.proposal.sameApproval(as: latest) ? nil : .changed
+            } else {
                 let replaced = proposals.contains { $0.source == entry.proposal.source }
-                entries[index].state = replaced ? .superseded : (entry.proposal.source == .work ? .expired : .closed)
+                resolution = replaced ? .superseded : (entry.proposal.source == .work ? .expired : .closed)
+            }
+            // Keep the newest successful list evidence while a matching receipt can still arrive.
+            if entry.state.isDeciding {
+                entries[index].listResolution = resolution
+            } else if let resolution {
+                entries[index].state = resolution
                 retired.insert(entry.proposal.id)
+            }
+        }
+
+        for (key, retryAfter) in reconciling where key.accountID == accountID {
+            if byID[key.proposalID] == nil { retired.insert(key.proposalID) }
+            if retired.contains(key.proposalID) || startedAt >= retryAfter {
+                reconciling[key] = nil
             }
         }
 
@@ -275,8 +308,9 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
         guard let accountID else { return }
         let next = entries.map { entry in
             let key = DecisionKey(accountID: accountID, proposalID: entry.proposal.id)
-            return GoogleWriteProposalCard(session: session, proposal: entry.proposal, state: entry.state,
-                                           canDecide: entry.state.canDecide && !inFlight.contains(key))
+            let state = entry.state.canDecide && reconciling[key] != nil ? .reconciling : entry.state
+            return GoogleWriteProposalCard(session: session, proposal: entry.proposal, state: state,
+                                           canDecide: state.canDecide && inFlight[key] == nil)
         }
         if cards != next { cards = next }
     }

@@ -69,10 +69,10 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
             .to(["person@example.test"]), .cc(["copy@example.test"]), .bcc(["blind@example.test"]),
             .subject("Cafe\u{301} / ☕"), .forwarded(from: "canary@example.test", subject: "Prior"),
             .attachments([.init(filename: "notes.txt", mimeType: "text/plain", size: 42, sha256: nil)]),
-            .reply, .body("line 1\nline 2\t\"test\"\\\u{1f}"), .quote("original"), .quoteTruncated
+            .reply, .threadID("thread"), .body("line 1\nline 2\t\"test\"\\\u{1f}"), .quote("original"), .quoteTruncated
         ])
         XCTAssertEqual(decoded[1].previewLines, [
-            .title("Review"), .start("2026-11-26T08:00:00+07:00"), .end("2026-11-26T09:00:00+07:00"),
+            .sourceID("calendar"), .title("Review"), .start("2026-11-26T08:00:00+07:00"), .end("2026-11-26T09:00:00+07:00"),
             .location("Room"), .description("Discuss")
         ])
     }
@@ -94,8 +94,58 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
         XCTAssertEqual(decoded.map(\.kind), [.updateEvent, .createDraft, .updateDraft, .mailbox, .createLabel])
         XCTAssertTrue(decoded.allSatisfy(\.digestMatchesPreview))
         XCTAssertEqual(decoded[3].mailboxOperation, .addLabels)
-        XCTAssertEqual(decoded[3].previewLines, [.mailboxTarget(conversation: false), .labels(["Important"])])
-        XCTAssertEqual(decoded[4].previewLines, [.name("Notes")])
+        XCTAssertTrue(decoded[1].previewLines.contains(.sourceID("gmail")))
+        XCTAssertTrue(decoded[2].previewLines.contains(.draftID("saved")))
+        XCTAssertEqual(decoded[3].previewLines, [
+            .sourceID("gmail"), .mailboxTarget(conversation: false), .messageID("target"), .labels(["Important"])
+        ])
+        XCTAssertEqual(decoded[4].previewLines, [.sourceID("gmail"), .name("Notes")])
+    }
+
+    func testCalendarPreviewDistinguishesOmittedFieldsClearsAndDestinations() throws {
+        let calendarA = "google:calendar:Q2FsZW5kYXIgQQ"
+        let calendarB = "google:calendar:Q2FsZW5kYXIgQg"
+        let omitted = """
+            {"action":"update_event","sourceId":"\(calendarA)","eventId":"target","title":"Review",
+             "start":"2026-11-26T08:00:00+07:00","end":"2026-11-26T09:00:00+07:00"}
+            """
+        let clears = Fixture.extend(omitted, with: #""location":"","description":"""#)
+        let differentDestination = omitted.replacingOccurrences(of: calendarA, with: calendarB)
+        let decoded = try Fixture.decode([
+            Fixture.row(1, work: true, draft: omitted, digest: "ba746fad886111fb41f2676eb935188ace5af200c452ea7fd20147bbe9527c15"),
+            Fixture.row(2, work: true, draft: clears, digest: "7bd4894a7eb645759eefdd2c0bccccfe87804c31028e80c70b8ad2807d18c109"),
+            Fixture.row(3, work: true, draft: differentDestination, digest: "33dbcf4e25a6657d324d79547edf49fd9dd2f54d25cdf308229ae2f25ac9b17b")
+        ])
+        XCTAssertEqual(decoded.count, 3)
+        XCTAssertTrue(decoded.allSatisfy(\.digestMatchesPreview))
+        let eventLines: [GoogleWritePreviewLine] = [
+            .eventID("target"), .title("Review"), .start("2026-11-26T08:00:00+07:00"), .end("2026-11-26T09:00:00+07:00")
+        ]
+        XCTAssertEqual(decoded.map(\.previewLines), [
+            [.sourceID(calendarA)] + eventLines,
+            [.sourceID(calendarA)] + eventLines + [.cleared(.location), .cleared(.description)],
+            [.sourceID(calendarB)] + eventLines
+        ])
+    }
+
+    func testDraftPreviewPreservesEmptyComposeValuesAndOptionalRecipientLists() throws {
+        let omitted = """
+            {"action":"update_draft","sourceId":"google:gmail","draftId":"saved","to":[],
+             "subject":"","body":"","quote":"","references":[],"attachments":[]}
+            """
+        let emptyRecipients = Fixture.extend(omitted, with: #""cc":[],"bcc":[]"#)
+        let decoded = try Fixture.decode([
+            Fixture.row(1, work: true, draft: omitted, digest: "620687ac11276d180d1c9c8706d7f4ae7d24bbfd4b8670e153f73f0ae2888e26"),
+            Fixture.row(2, work: true, draft: emptyRecipients, digest: "4450717ae6ade64f8872ef340c1eb4844dbd78c60fb8dc819b02f5d95fcfef4b")
+        ])
+        XCTAssertEqual(decoded.count, 2)
+        XCTAssertTrue(decoded.allSatisfy(\.digestMatchesPreview))
+        let target: [GoogleWritePreviewLine] = [.sourceID("google:gmail"), .draftID("saved"), .to([])]
+        let content: [GoogleWritePreviewLine] = [.subject(""), .attachments([]), .body(""), .quote("")]
+        XCTAssertEqual(decoded.map(\.previewLines), [
+            target + content,
+            target + [.cc([]), .bcc([])] + content
+        ])
     }
 
     func testUnknownKindAndDraftFieldsKeepListButDoNotAuthorize() throws {
@@ -220,6 +270,120 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
         XCTAssertEqual(api.decisions.count, 1)
     }
 
+    func testCallerCancellationLeavesStoreOwnedDecisionRunning() async throws {
+        let store = GoogleWriteProposalStore()
+        let api = ProposalAPI()
+        api.proposals = [try Fixture.proposal(1)]
+        api.holdDecision = true
+        store.bind(accountID: "owner-a", api: api)
+        await store.refresh()
+        let cardID = try XCTUnwrap(store.cards.first?.id)
+        let caller = Task { await store.decide(.approve, cardID: cardID) }
+        await until { api.decisionContinuation != nil }
+        caller.cancel()
+        await store.decide(.decline, cardID: cardID)
+        XCTAssertEqual(store.cards.first?.state, .deciding(.approve))
+        XCTAssertEqual(api.decisions.map(\.0), [.approve])
+
+        api.finishDecision(.accepted)
+        await caller.value
+        XCTAssertFalse(api.decisionWasCancelled)
+        XCTAssertEqual(store.cards.first?.state, .approved)
+    }
+
+    func testForegroundReadKeepsInFlightDecisionDisabled() async throws {
+        let store = GoogleWriteProposalStore()
+        let api = ProposalAPI()
+        api.proposals = [try Fixture.proposal(1, work: true)]
+        api.holdDecision = true
+        store.bind(accountID: "owner-a", api: api)
+        store.setVisible(true, for: .work, session: store.session)
+        store.setForeground(true)
+        await until { !store.cards.isEmpty }
+        let cardID = try XCTUnwrap(store.cards.first?.id)
+        let caller = Task { await store.decide(.approve, cardID: cardID) }
+        await until { api.decisionContinuation != nil }
+
+        store.setForeground(false)
+        store.setForeground(true)
+        await until { api.reads == 2 }
+        XCTAssertEqual(store.cards.first?.state, .deciding(.approve))
+        XCTAssertFalse(store.cards.first?.canDecide ?? true)
+        await store.decide(.decline, cardID: cardID)
+        XCTAssertEqual(api.decisions.map(\.0), [.approve])
+
+        api.finishDecision(.accepted)
+        await caller.value
+        XCTAssertEqual(store.cards.first?.state, .approved)
+        store.setForeground(false)
+    }
+
+    func testAmbiguousDecisionNeedsSuccessfulListEvidenceToReopen() async throws {
+        var now = ContinuousClock.now
+        let retryAfter = now + .seconds(GoogleProposalRoute.approvalLimit)
+        let store = GoogleWriteProposalStore(sleep: { try await Task.sleep(for: .seconds(5)) }, now: { now })
+        let api = ProposalAPI()
+        api.proposals = [try Fixture.proposal(1, work: true)]
+        api.holdDecision = true
+        store.bind(accountID: "owner-a", api: api)
+        await store.refresh()
+        let cardID = try XCTUnwrap(store.cards.first?.id)
+        let caller = Task { await store.decide(.approve, cardID: cardID) }
+        await until { api.decisionContinuation != nil }
+
+        api.finishDecision(.ambiguous)
+        await caller.value
+        // An early read still showing the same proposal cannot rule out a late claim.
+        XCTAssertEqual(store.cards.first?.state, .reconciling)
+        await store.decide(.decline, cardID: cardID)
+        XCTAssertEqual(api.decisions.map(\.0), [.approve])
+
+        api.holdRead = true
+        let earlyRead = Task { await store.refresh() }
+        await until { api.readContinuation != nil }
+        now = retryAfter
+        api.finishRead()
+        await earlyRead.value
+        api.holdRead = false
+        XCTAssertEqual(store.cards.first?.state, .reconciling)
+
+        api.failRead = true
+        await store.refresh()
+        XCTAssertFalse(store.cards.first?.canDecide ?? true)
+        api.failRead = false
+        await store.refresh()
+        XCTAssertEqual(store.cards.first?.state, .failedRetryable)
+        XCTAssertTrue(store.cards.first?.canDecide ?? false)
+    }
+
+    func testReplacementReadSurvivesFailedPostDecisionReadAndMatchingReceiptWins() async throws {
+        for (result, expected) in [(GoogleWriteDecisionResult.unavailable, GoogleWriteProposalState.superseded),
+                                   (.accepted, .approved),
+                                   (.ambiguous, .superseded)] {
+            let store = GoogleWriteProposalStore()
+            let api = ProposalAPI()
+            api.proposals = [try Fixture.proposal(1)]
+            api.holdDecision = true
+            store.bind(accountID: "owner-a", api: api)
+            await store.refresh()
+            let cardID = try XCTUnwrap(store.cards.first?.id)
+            let caller = Task { await store.decide(.approve, cardID: cardID) }
+            await until { api.decisionContinuation != nil }
+            api.proposals = [try Fixture.proposal(2)]
+            await store.refresh()
+            XCTAssertEqual(store.cards.map(\.state), [.deciding(.approve), .pending])
+
+            api.failRead = true
+            api.finishDecision(result)
+            await caller.value
+            XCTAssertEqual(api.reads, 3)
+            XCTAssertEqual(store.cards.map(\.state), [expected, .pending])
+            XCTAssertFalse(store.cards.first?.canDecide ?? true)
+            await store.decide(.decline, cardID: cardID)
+            XCTAssertEqual(api.decisions.map(\.0), [.approve])
+        }
+    }
+
     func testDecisionAnswerAfterSignOutIsIgnoredEvenAfterSameOwnerReturns() async throws {
         let store = GoogleWriteProposalStore()
         let api = ProposalAPI()
@@ -244,6 +408,35 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
         XCTAssertNotEqual(newID, cardID)
         XCTAssertTrue(store.cards.first?.canDecide ?? false)
         XCTAssertEqual(api.reads, 2)
+    }
+
+    func testAmbiguousDecisionGuardSurvivesSameOwnerRebinding() async throws {
+        let store = GoogleWriteProposalStore()
+        let first = ProposalAPI()
+        let next = ProposalAPI()
+        first.proposals = [try Fixture.proposal(1, work: true)]
+        next.proposals = first.proposals
+        first.holdDecision = true
+        store.bind(accountID: "owner-a", api: first)
+        await store.refresh()
+        let cardID = try XCTUnwrap(store.cards.first?.id)
+        let caller = Task { await store.decide(.approve, cardID: cardID) }
+        await until { first.decisionContinuation != nil }
+
+        store.bind(accountID: "owner-a", api: next)
+        await store.refresh()
+        XCTAssertFalse(store.cards.first?.canDecide ?? true)
+        first.finishDecision(.ambiguous)
+        await caller.value
+        await store.refresh()
+        let newCard = try XCTUnwrap(store.cards.first)
+        XCTAssertEqual(newCard.state, .reconciling)
+        await store.decide(.decline, cardID: newCard.id)
+        XCTAssertTrue(next.decisions.isEmpty)
+
+        next.proposals = []
+        await store.refresh()
+        XCTAssertEqual(store.cards.first?.state, .expired)
     }
 
     func testOutcomeMappingAndRetry() async throws {
@@ -319,6 +512,7 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
     var decisions: [(GoogleWriteDecision, String)] = []
     var result = GoogleWriteDecisionResult.accepted
     var decisionContinuation: CheckedContinuation<GoogleWriteDecisionResult, Never>?
+    var decisionWasCancelled = false
 
     func googleWriteProposals(isCurrent: @escaping NativeDispatchGate) async throws -> [GoogleWriteProposal] {
         reads += 1
@@ -333,7 +527,9 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
         lastDecisionGate = isCurrent
         decisions.append((decision, proposal.digest))
         if holdDecision && decisions.count == 1 {
-            return await withCheckedContinuation { decisionContinuation = $0 }
+            let result = await withCheckedContinuation { decisionContinuation = $0 }
+            decisionWasCancelled = Task.isCancelled
+            return result
         }
         return result
     }

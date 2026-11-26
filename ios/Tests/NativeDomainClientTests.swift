@@ -4177,19 +4177,38 @@ extension NativeDomainClientTests {
         XCTAssertEqual(localMismatch, .changed)
         XCTAssertTrue(NativeDomainProtocol.state.requests.isEmpty)
 
-        let cases: [(Int, String, GoogleWriteDecisionResult)] = [
+        let cases: [(Int, String, GoogleWriteDecisionResult?)] = [
             (409, #"{"state":"refused"}"#, .refused), // same status for a stale digest and a foreign proposal
             (403, #"{"state":"refused"}"#, .refused),
             (200, #"{"status":"confirmed","proposalId":"\#(id)","digest":"\#(otherDigest)"}"#, .changed),
-            (200, #"{"status":"confirmed","proposalId":"\#(otherID)","digest":"\#(digest)"}"#, .unavailable),
-            (200, #"{"status":"declined","proposalId":"\#(id)","digest":"\#(digest)"}"#, .unavailable),
-            (503, #"{"state":"unavailable"}"#, .unavailable)
+            (200, #"{"status":"confirmed","proposalId":"\#(otherID)","digest":"\#(digest)"}"#, nil),
+            (200, #"{"status":"declined","proposalId":"\#(id)","digest":"\#(digest)"}"#, nil),
+            (503, #"{"state":"unavailable"}"#, nil)
         ]
         for (status, json, expected) in cases {
             NativeDomainProtocol.state.handler = { _ in .init(status: status, chunks: [Data(json.utf8)]) }
             let result = await client.decideGoogleWriteProposal(.approve, proposal: proposal, isCurrent: { true })
-            XCTAssertEqual(result, expected, "HTTP \(status)")
+            if let expected {
+                XCTAssertEqual(result, expected, "HTTP \(status)")
+            } else if case .ambiguous = result {
+                continue
+            } else {
+                XCTFail("HTTP \(status) must leave the decision unresolved")
+            }
         }
+    }
+
+    func testGoogleProposalTimeoutAfterDispatchIsAmbiguous() async throws {
+        let proposal = try GoogleProposalFixtures.proposal(1, work: true)
+        let client = client(TestAuthorization(first: "proposal-owner"))
+        NativeDomainProtocol.state.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertGreaterThanOrEqual(request.timeoutInterval, 120)
+            return .init(error: URLError(.timedOut))
+        }
+        let result = await client.decideGoogleWriteProposal(.approve, proposal: proposal, isCurrent: { true })
+        XCTAssertEqual(result, .ambiguous)
+        XCTAssertEqual(NativeDomainProtocol.state.requests.count, 1)
     }
 
     func testGoogleProposalDecisionChecksSessionAgainBefore401Replay() async throws {

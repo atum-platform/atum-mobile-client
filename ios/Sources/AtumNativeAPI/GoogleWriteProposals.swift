@@ -26,12 +26,20 @@ public struct GoogleWriteAttachment: Codable, Equatable, Sendable {
     public let sha256: String?
 }
 
+public enum GoogleWriteClearedField: Equatable, Sendable {
+    case location, description
+}
+
 /// Plain text and typed values for the UI to label, format and localize.
+/// An omitted line represents an absent field. Present empty strings and arrays are retained.
 public enum GoogleWritePreviewLine: Equatable, Sendable {
+    case sourceID(String), eventID(String), draftID(String)
     case to([String]), cc([String]), bcc([String]), subject(String)
     case forwarded(from: String, subject: String), attachments([GoogleWriteAttachment])
     case reply, body(String), quote(String), quoteTruncated
+    case threadID(String), inReplyTo(String), messageID(String)
     case title(String), start(String), end(String), location(String), description(String)
+    case cleared(GoogleWriteClearedField)
     case mailboxTarget(conversation: Bool), labels([String]), name(String)
 }
 
@@ -148,7 +156,7 @@ public struct GoogleWriteProposal: Decodable, Equatable, Sendable {
         case "create_label":
             guard source == .work else { return Preview(kind: .unsupported("create_label")) }
             let draft = try GoogleLabelDraft(from: decoder)
-            return Preview(kind: .createLabel, lines: [.name(draft.name)], draft: draft)
+            return Preview(kind: .createLabel, lines: [.sourceID(draft.sourceId), .name(draft.name)], draft: draft)
         case let action?:
             return Preview(kind: .unsupported(action))
         }
@@ -183,18 +191,20 @@ private struct GoogleEmailDraft: Codable {
 
     var lines: [GoogleWritePreviewLine] {
         var lines = [GoogleWritePreviewLine]()
-        if !to.isEmpty { lines.append(.to(to)) }
-        if let cc, !cc.isEmpty { lines.append(.cc(cc)) }
-        if let bcc, !bcc.isEmpty { lines.append(.bcc(bcc)) }
+        if let sourceId { lines.append(.sourceID(sourceId)) }
+        if let draftId { lines.append(.draftID(draftId)) }
+        lines.append(.to(to))
+        if let cc { lines.append(.cc(cc)) }
+        if let bcc { lines.append(.bcc(bcc)) }
         lines.append(.subject(subject))
         if let forwarded { lines.append(.forwarded(from: forwarded.from, subject: forwarded.subject)) }
-        if !attachments.isEmpty { lines.append(.attachments(attachments)) }
+        lines.append(.attachments(attachments))
         if threadId != nil || inReplyTo != nil { lines.append(.reply) }
+        if let threadId { lines.append(.threadID(threadId)) }
+        if let inReplyTo { lines.append(.inReplyTo(inReplyTo)) }
         lines.append(.body(body))
-        if !quote.isEmpty {
-            lines.append(.quote(quote))
-            if forwarded?.truncated == true { lines.append(.quoteTruncated) }
-        }
+        lines.append(.quote(quote))
+        if forwarded?.truncated == true { lines.append(.quoteTruncated) }
         return lines
     }
 }
@@ -210,9 +220,11 @@ private struct GoogleEventDraft: Codable {
     let description: String?
 
     var lines: [GoogleWritePreviewLine] {
-        var lines: [GoogleWritePreviewLine] = [.title(title), .start(start), .end(end)]
-        if let location, !location.isEmpty { lines.append(.location(location)) }
-        if let description, !description.isEmpty { lines.append(.description(description)) }
+        var lines: [GoogleWritePreviewLine] = [.sourceID(sourceId)]
+        if let eventId { lines.append(.eventID(eventId)) }
+        lines += [.title(title), .start(start), .end(end)]
+        if let location { lines.append(location.isEmpty ? .cleared(.location) : .location(location)) }
+        if let description { lines.append(description.isEmpty ? .cleared(.description) : .description(description)) }
         return lines
     }
 }
@@ -226,7 +238,9 @@ private struct GoogleMailboxDraft: Codable {
     let labels: [String]?
 
     var lines: [GoogleWritePreviewLine] {
-        var lines: [GoogleWritePreviewLine] = [.mailboxTarget(conversation: threadId != nil)]
+        var lines: [GoogleWritePreviewLine] = [.sourceID(sourceId), .mailboxTarget(conversation: threadId != nil)]
+        if let threadId { lines.append(.threadID(threadId)) }
+        if let messageId { lines.append(.messageID(messageId)) }
         if let labels { lines.append(.labels(labels)) }
         return lines
     }
@@ -293,7 +307,7 @@ enum GoogleDraftDigest {
 public enum GoogleWriteDecision: String, Sendable { case approve, decline }
 
 public enum GoogleWriteDecisionResult: Equatable, Sendable {
-    case accepted, refused, changed, unavailable
+    case accepted, refused, changed, unavailable, ambiguous
 }
 
 @MainActor public protocol GoogleWriteProposalAPI: AnyObject {
@@ -306,6 +320,9 @@ enum GoogleProposalRoute {
     static let url = URL(string: "https://api.atumplatform.com/api/connections/google/proposals")!
     static let header = HostAgentDesk.bridgeHeader
     static let version = HostAgentDesk.bridgeVersion
+    static let approvalLimit: TimeInterval = 120
+    // Leave time for the request and receipt to travel.
+    static let decisionTimeout = approvalLimit + 15
 
     static func isDigest(_ value: String) -> Bool {
         value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
