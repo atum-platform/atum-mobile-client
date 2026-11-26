@@ -99,6 +99,7 @@ final class MessageActionsPresenter {
 
     /// The cover has gone: forget the overlay's parts and run what waited for it.
     func overlayDismissed() {
+        guard actionsOverlay == nil else { return }
         pressStart = nil
         // The row stayed sunk under its copy until now (`MessageMenuModifier`
         // counts `liftedRowID` as pressed); it springs back here, animated.
@@ -1015,6 +1016,12 @@ private struct MessageActionSheets: ViewModifier {
             .fullScreenCover(item: $presenter.actionsOverlay, onDismiss: { presenter.overlayDismissed() }) { request in
                 MessageActionsOverlay(request: request, design: design, actions: actions, presenter: presenter)
                     .presentationBackground(.clear)
+                    .onDisappear {
+                        // Some cover dismissals remove the content without
+                        // running onDismiss. Let that removal finish before
+                        // asking the presenter to open a sheet or dialog.
+                        Task { @MainActor in presenter.overlayDismissed() }
+                    }
             }
             .sheet(item: $presenter.selectText, onDismiss: {
                 guard let link = presenter.linkAfterSelectText else { return }
