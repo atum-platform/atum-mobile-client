@@ -163,6 +163,19 @@ shelf already uses.
   checks, the public purchase contract check, and Xcode project lint passed.
 - The first Debug build caught four existing test calls missing the explicit
   beta argument. The callers now provide it and the locked batch was rerun.
+- The corrected Debug build-for-testing passed in `dd-w4-z2`. On iPhone 16e
+  (iOS 27), `ListingHireStateTests` passed 23 tests and
+  `StoreCommercePresentationTests` passed 24 tests.
+- The Researcher AX5 light and dark captures include the full button. The
+  existing horizontal shelf wraps the text tightly at AX5.
+- Seven of eight UI tests passed in the full run. The dark Store catalog
+  variant timed out waiting for a skill detail sheet after tapping its
+  visible row. The UI test helper now allows more time for the sheet and
+  retries the tap once if the row is still hittable.
+- The locked rerun passed that Store test in all four variants. Across the
+  full run and the focused rerun, all eight UI tests passed. Results and
+  captures are under `dd-w4-z2/r2/run-2` and `dd-w4-z2/r2/run-3`. Both
+  batches used the same iPhone 16e simulator and shut it down at the end.
 
 ## Decisions
 

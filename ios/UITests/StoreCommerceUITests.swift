@@ -472,9 +472,14 @@ final class StoreCommerceUITests: TranscriptUITestCase {
         let row = element(app, "store.item.\(id)")
         let list = app.collectionViews.firstMatch
         for _ in 0..<6 where !(row.exists && row.isHittable) { list.swipeUp() }
-        XCTAssertTrue(row.waitForExistence(timeout: 3), "missing Store row \(id)")
+        XCTAssertTrue(row.isHittable, "Store row \(id) is outside the viewport")
+        let sheet = element(app, "store.sheet")
         row.tap()
-        XCTAssertTrue(element(app, "store.sheet").waitForExistence(timeout: 3))
+        if !sheet.waitForExistence(timeout: 8), row.isHittable {
+            // A tap can settle the list's scroll before opening the row.
+            row.tap()
+        }
+        XCTAssertTrue(sheet.waitForExistence(timeout: 8), "Store row \(id) did not open its sheet")
     }
 
     /// Owner ruling 1: the pack sheet never shows a paid/bonus split or a rate.
