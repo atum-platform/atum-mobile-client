@@ -1,5 +1,6 @@
 import Accessibility
 import AtumChat
+import AtumNativeAPI
 import QuickLook
 import SwiftUI
 import UIKit
@@ -76,6 +77,8 @@ struct ChatScreen: View {
     var openThreads: ((String?) -> Void)? = nil
     /// The thread panel covers this chat, so nothing here is read meanwhile (B13).
     var threadPanelPresented = false
+    /// W4-AA2: the owner's Google write proposals for this chat's Matrix room.
+    var googleWrite: GoogleWriteChatBinding? = nil
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
@@ -98,6 +101,8 @@ struct ChatScreen: View {
     /// Today, for the day dividers (B14): updated at midnight and when the
     /// app comes back, so a chat left open overnight relabels its days.
     @State private var today = Calendar.current.startOfDay(for: Date())
+    /// The chat's height, so the Google write cards above the composer never take more than half of it.
+    @State private var chatHeight: CGFloat = 0
 
     var body: some View {
         let theme = ChatTheme(design: design)
@@ -182,6 +187,12 @@ struct ChatScreen: View {
                             // The notice shares the composer's stack (spacing 0) so its
                             // empty host, kept for the sheet, adds no gap above the composer.
                             VStack(spacing: 0) {
+                                if let googleWrite, store.kind == .assistant, conversationChat?.banner == nil {
+                                    GoogleWriteChatCards(store: googleWrite.store, roomID: googleWrite.roomID,
+                                                         design: design,
+                                                         activity: store.snapshot.rows.last.map { "\($0.id)" },
+                                                         maxHeight: chatHeight * 0.45)
+                                }
                                 // ST-5 (lane 4 W7): out of Protons, the same top-up as the Store.
                                 if store.kind == .assistant, conversationChat?.banner == nil {
                                     ProtonTopUpChatNotice(design: design)
@@ -198,6 +209,7 @@ struct ChatScreen: View {
                 }
             }
             .background(design.color("ground", scheme: scheme).ignoresSafeArea())
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chatHeight = $0 }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {

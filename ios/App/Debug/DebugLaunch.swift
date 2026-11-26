@@ -114,6 +114,9 @@ enum S6ScriptedScenario: String, CaseIterable {
     case connectionsFailed = "connections.failed"
     /// Antigravity lands on a Mac while its connect sheet is open.
     case connectionsLands = "connections.lands"
+    /// W4-AA2: every Google write card state, assistant and Work, drawn from
+    /// synthetic store projections (desktop's `work-google-write-gallery`).
+    case googleWriteGallery = "google-write.gallery"
 
     var isPhoneApprovals: Bool { rawValue.hasPrefix("approvals.") }
     var isConnections: Bool { rawValue.hasPrefix("connections.") }

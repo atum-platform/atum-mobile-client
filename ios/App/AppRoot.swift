@@ -391,7 +391,8 @@ struct AppRoot: View {
                            if router.selectedTab == .home, router.homeRoomID == nil {
                                router.presentationChanged(active)
                            }
-                       })
+                       },
+                       googleWork: model.googleWriteProposals)
                 // A Chats tap whose restore is still deciding shows the
                 // ground, not a roster the chat would replace a moment later.
                 .accessibilityHidden(coversChatsTap)
@@ -976,7 +977,8 @@ struct AppRoot: View {
                 },
                 openThreads: model.offersCompanyThreads(roomID: roomID)
                     ? { rootID in companyThreads.open(roomID: roomID, rootID: rootID) } : nil,
-                threadPanelPresented: companyThreads.panel?.roomID == roomID
+                threadPanelPresented: companyThreads.panel?.roomID == roomID,
+                googleWrite: GoogleWriteChatBinding(store: model.googleWriteProposals, roomID: roomID)
             )
             .modifier(CompanyThreadPanelHost(model: model, design: design, coordinator: companyThreads,
                                              roomID: roomID))

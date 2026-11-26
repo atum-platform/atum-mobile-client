@@ -471,6 +471,9 @@ struct HomeScreen: View {
     let actions: HomeActions
     var dismissPresentationRequest: UInt64 = 0
     var onPresentationChanged: (Bool) -> Void = { _ in }
+    /// W4-AA2: Work's Google write proposals. The phone has no Work page, so
+    /// they wait at the top of Home, the screen the owner returns to.
+    var googleWork: GoogleWriteProposalStore? = nil
 
     @State private var query = ""
     /// While the top search field has focus (or a query), the face and the
@@ -539,6 +542,7 @@ struct HomeScreen: View {
             }
         }
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+        .googleWriteSurface(googleWork, .work)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $startChatPresented) {
             HomeStartChatSheet(design: design,
@@ -855,6 +859,12 @@ struct HomeScreen: View {
 
     private var appIconBadge: Int { presentation.appIconCount }
 
+    /// Work's Google write cards, above the roster; they step aside while a search shows results.
+    private var workCards: [GoogleWriteCards.Shown] {
+        guard let googleWork, query.isEmpty, !showsGlobalResults else { return [] }
+        return GoogleWriteCards.shown(googleWork, surface: .work, design: design)
+    }
+
     private var roster: some View {
         ScrollViewReader { proxy in
             TimelineView(.periodic(from: .now, by: 60)) { clock in
@@ -871,15 +881,26 @@ struct HomeScreen: View {
                     // Desktop draws the search's People, Channels, Messages
                     // and Files above the roster's own matches
                     // (`data-matrix-global-search-results`).
+                    let work = workCards
+                    ForEach(Array(work.enumerated()), id: \.element.id) { index, shown in
+                        if let googleWork {
+                            GoogleWriteCards.card(shown, store: googleWork, design: design)
+                                .listRowInsets(EdgeInsets(top: design.kit.space(.s2), leading: design.kit.space(.s4),
+                                                          bottom: design.kit.space(.s2), trailing: design.kit.space(.s4)))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .id(index == 0 && !presentation.showsNotificationPrompt ? topID : "home.google-work.\(index)")
+                        }
+                    }
                     globalResults(isTop: !presentation.showsNotificationPrompt)
                     section(copy(.assistants), id: "assistants", rows: assistantRows, now: clock.date,
-                            isTop: !presentation.showsNotificationPrompt && !showsGlobalResults)
+                            isTop: !presentation.showsNotificationPrompt && !showsGlobalResults && work.isEmpty)
                     // Desktop parity: the roster labels its second block
                     // "Chats" too. Without it apps and people read as more
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
                     section(copy(.chats), id: "chats", rows: chatRows, now: clock.date,
                             isTop: !presentation.showsNotificationPrompt && !showsGlobalResults
-                                && assistantRows.isEmpty)
+                                && assistantRows.isEmpty && work.isEmpty)
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)

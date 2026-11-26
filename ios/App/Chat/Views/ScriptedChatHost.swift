@@ -378,7 +378,10 @@ struct ScriptedChatHost: View {
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,
                             mediaAccess: ScriptedMediaAccess.access,
-                            loadMatrixThumbnail: Self.photoLoader
+                            loadMatrixThumbnail: Self.photoLoader,
+                            googleWrite: script.context.kind == .assistant && ScriptedGoogleWrite.enabled
+                                ? GoogleWriteChatBinding(store: ScriptedGoogleWrite.store,
+                                                         roomID: ScriptedGoogleWrite.roomID) : nil
                         )
                     }
                 }

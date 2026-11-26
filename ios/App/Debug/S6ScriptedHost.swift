@@ -27,6 +27,7 @@ struct S6ScriptedHost: View {
         Group {
             switch scenario {
             case .systemGallery: S6SystemGallery(design: design)
+            case .googleWriteGallery: ScriptedGoogleWriteGallery(design: design)
             case .welcome: welcome(.idle)
             case .welcomeCancelled: welcome(.cancelled)
             case .welcomeExpired: welcome(.expired)

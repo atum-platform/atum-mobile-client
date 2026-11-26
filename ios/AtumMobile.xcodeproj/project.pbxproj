@@ -37,6 +37,7 @@
 		1FE1ED15632DFF480B9E4E80 /* MathFonts-MIT-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 000C5802F5DA2B1CD68F6163 /* MathFonts-MIT-LICENSE.txt */; };
 		1FED11C16F6AAF0A823FA3D5 /* GScrollDynamicTypeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E14C8E07A5220CD1744589 /* GScrollDynamicTypeUITests.swift */; };
 		209F6023083F9EF7BCC9BB9A /* S6SystemGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C05250266D07008E89E4A6B /* S6SystemGallery.swift */; };
+		A4A2C0DE0000000000000A03 /* ScriptedGoogleWriteGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A2C0DE0000000000000A04 /* ScriptedGoogleWriteGallery.swift */; };
 		21EF3F77E989BD727A6D49BE /* LiveReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B4490D35CF0E8E7F7F1696 /* LiveReporting.swift */; };
 		22B6D11E40D6CC1F3CE999E0 /* ProtonTopUp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17CA4634D4BB32072A0A9001 /* ProtonTopUp.swift */; };
 		25E48EEEFA8F85D1D89E44DA /* AtumMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C847BF5BA076FDE92399ED /* AtumMobileApp.swift */; };
@@ -46,6 +47,7 @@
 		289D64EBC63A86A62671DB68 /* MathFonts-GUST-FONT-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F21F9F26B7AE3ADF4F7C1F85 /* MathFonts-GUST-FONT-LICENSE.txt */; };
 		29DA3E212073130210A58D9D /* AppOnboardingCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5773C98F5EB80B08BB493152 /* AppOnboardingCopyTests.swift */; };
 		2B892CD831237CDD5BEE7ED6 /* AtomMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F90A897EA9F722D94BEB953 /* AtomMark.swift */; };
+		A4A2C0DE0000000000000A01 /* GoogleWriteCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A2C0DE0000000000000A02 /* GoogleWriteCard.swift */; };
 		2EA8CF5CF7C6C781F05BFD33 /* Hermes-Agent-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6118FC17F0E26712603AC6DF /* Hermes-Agent-MIT.txt */; };
 		2F08C2E9AB8ED449C146B953 /* AtumVisualSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E574CAA6873D7ED17908C6A /* AtumVisualSystem.swift */; };
 		2FDD125FC2AA57A582073044 /* AtumNativeAPI in Frameworks */ = {isa = PBXBuildFile; productRef = D8C6BF6671CF0D572F7C02E5 /* AtumNativeAPI */; };
@@ -437,6 +439,7 @@
 		3CDA670495E738C2EA73023F /* AtumAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumAvatar.swift; sourceTree = "<group>"; };
 		3E574CAA6873D7ED17908C6A /* AtumVisualSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumVisualSystem.swift; sourceTree = "<group>"; };
 		3F90A897EA9F722D94BEB953 /* AtomMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtomMark.swift; sourceTree = "<group>"; };
+		A4A2C0DE0000000000000A02 /* GoogleWriteCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleWriteCard.swift; sourceTree = "<group>"; };
 		40C847BF5BA076FDE92399ED /* AtumMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtumMobileApp.swift; sourceTree = "<group>"; };
 		41709887A661B2844962F90D /* MatrixAvatarThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixAvatarThumbnailCache.swift; sourceTree = "<group>"; };
 		434D4AEA1F0B23ECF0B0C391 /* SwiftUIMath-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftUIMath-LICENSE.txt"; sourceTree = "<group>"; };
@@ -528,6 +531,7 @@
 		DAFCBEC9B0954FCA25EF4A54 /* ChatRenameAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRenameAlert.swift; sourceTree = "<group>"; };
 		207C3C4A1EC650C92DE749C6 /* ChatSearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSearchBar.swift; sourceTree = "<group>"; };
 		8C05250266D07008E89E4A6B /* S6SystemGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S6SystemGallery.swift; sourceTree = "<group>"; };
+		A4A2C0DE0000000000000A04 /* ScriptedGoogleWriteGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptedGoogleWriteGallery.swift; sourceTree = "<group>"; };
 		8C7861959DAC2456AC4C87C6 /* LaunchUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchUITests.swift; sourceTree = "<group>"; };
 		9029419E7D96871E7953588E /* RootTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabs.swift; sourceTree = "<group>"; };
 		921B6D886A7C47341BA06EA0 /* KitGlyphTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KitGlyphTests.swift; sourceTree = "<group>"; };
@@ -1114,6 +1118,7 @@
 				2EE2D07D34EDD53B2BC9B079 /* ProbeLog.swift */,
 				DAB2C7BB62CE7DE3694EE525 /* S6ScriptedHost.swift */,
 				8C05250266D07008E89E4A6B /* S6SystemGallery.swift */,
+				A4A2C0DE0000000000000A04 /* ScriptedGoogleWriteGallery.swift */,
 				878AB17BC9B607538F2836E1 /* ScriptedHomeHost.swift */,
 				D7A1E0C2F4B6A8D0C2E4F6A6 /* ScriptedDriveHost.swift */,
 				B2A7F0C1D3E4051627384A06 /* ScriptedPhoneApprovals.swift */,
@@ -1247,6 +1252,7 @@
 				875F5458032FE479BC384970 /* AssistantNewSheet.swift */,
 				B04ADFE2DD7D8C4A57DD93EC /* AssistantHandleEditor.swift */,
 				3F90A897EA9F722D94BEB953 /* AtomMark.swift */,
+				A4A2C0DE0000000000000A02 /* GoogleWriteCard.swift */,
 				C7F63C1B58186F8A073F792B /* ChatEnvironment.swift */,
 				75D6ED1A84266C6C7E977FF1 /* ChatFaces.swift */,
 				4D90FAB83643A6D6FE0FB40C /* ChatInfoSheet.swift */,
@@ -1674,6 +1680,7 @@
 				85D823E80D743CCD68224B7E /* AssistantNewSheet.swift in Sources */,
 				AB0FED87F238AF93CE3B3244 /* AssistantHandleEditor.swift in Sources */,
 				2B892CD831237CDD5BEE7ED6 /* AtomMark.swift in Sources */,
+				A4A2C0DE0000000000000A01 /* GoogleWriteCard.swift in Sources */,
 				9CE5EC213498C0B2ED79040F /* AttachSheet.swift in Sources */,
 				0DB02DBDBB94CA899ED4006F /* AttachmentPreparer.swift in Sources */,
 				3E61CE0DF718650931A7CB11 /* AttachmentTray.swift in Sources */,
@@ -1794,6 +1801,7 @@
 				C9BACD4F0326BE550F6E2F2B /* S6AuthViews.swift in Sources */,
 				445A157653B8FF38DFAE3CC6 /* S6ScriptedHost.swift in Sources */,
 				209F6023083F9EF7BCC9BB9A /* S6SystemGallery.swift in Sources */,
+				A4A2C0DE0000000000000A03 /* ScriptedGoogleWriteGallery.swift in Sources */,
 				687C54AD09A246F9A915D372 /* SDKSharedCollectionsSource.swift in Sources */,
 				1AD41E78A49825E6CBA2DD01 /* SDKTimelineSource.swift in Sources */,
 				B7A3C1B1F746DAB67FA4B3C6 /* SDKValueMapping.swift in Sources */,

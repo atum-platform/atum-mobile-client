@@ -102,6 +102,11 @@ enum AtumGlyph: String, Sendable, CaseIterable {
     case starFilled = "StarFilled"
     case thumbsUp = "ThumbsUp"
     case user = "User"
+    // The Google write card's kinds (desktop `Calendar`, `Inbox`, `Tag`),
+    // through the phone's existing Phosphor aliases for the same marks.
+    case calendar = "StoreCalendarBlank"
+    case inbox = "StoreTrayArrowDown"
+    case tag = "StoreTag"
 }
 
 /// Copy identifiers required by shared decorative controls. They are resolved

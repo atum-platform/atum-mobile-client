@@ -217,7 +217,8 @@ struct ScriptedHomeHost: View {
                                                        avatarSHA256: row.avatarSHA256,
                                                        avatarCandidates: row.avatarCandidates)
                         }
-                    ))
+                    )),
+                    googleWork: ScriptedGoogleWrite.enabled ? ScriptedGoogleWrite.store : nil
                 )
                 .navigationDestination(for: String.self) { roomID in
                     ZStack {
