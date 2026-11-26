@@ -866,7 +866,11 @@ struct HomeScreen: View {
     }
 
     private var roster: some View {
-        ScrollViewReader { proxy in
+        // Read here, in Home's own body, so a Work list that lands after the
+        // first frame redraws Home (the List and TimelineView closures below
+        // are evaluated later, outside this view's observation).
+        let work = workCards
+        return ScrollViewReader { proxy in
             TimelineView(.periodic(from: .now, by: 60)) { clock in
                 List {
                     if presentation.showsNotificationPrompt {
@@ -881,7 +885,6 @@ struct HomeScreen: View {
                     // Desktop draws the search's People, Channels, Messages
                     // and Files above the roster's own matches
                     // (`data-matrix-global-search-results`).
-                    let work = workCards
                     ForEach(Array(work.enumerated()), id: \.element.id) { index, shown in
                         if let googleWork {
                             GoogleWriteCards.card(shown, store: googleWork, design: design)

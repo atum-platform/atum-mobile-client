@@ -43,9 +43,12 @@ struct ScriptedGoogleWriteGallery: View {
             GoogleWriteCardPresentation(source: source, kind: kind, lines: lines, operation: operation,
                                         state: state, canDecide: canDecide, resolve: { design.text($0) })
         }
+        // Attachments are wire data (no public memberwise init): decode one as Shell sends it.
+        let agenda = (try? JSONDecoder().decode([GoogleWriteAttachment].self, from: Data(
+            #"[{"filename":"agenda.pdf","mimeType":"application/pdf","size":184320}]"#.utf8))) ?? []
         let email: [GoogleWritePreviewLine] = [
             .to(["lan@example.com"]), .cc(["minh@example.com"]), .subject("Thursday review"),
-            .attachments([.init(filename: "agenda.pdf", mimeType: "application/pdf", size: 184_320, sha256: nil)]),
+            .attachments(agenda),
             .reply, .threadID("thread"),
             .body("Hi Lan,\n\nThe review moves to Thursday at 10:00. The agenda is attached.\n\nThanks"),
             .quote("> Can we move the review?"),

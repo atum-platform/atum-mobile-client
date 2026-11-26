@@ -135,4 +135,32 @@ the card ID captured from the projection the owner tapped.
 
 ## Verification
 
-See the session status at the end of this file.
+- Focused package tests: `GoogleWriteCardPresentationTests` (8 cases) cover
+  the email and event blocks, busy, reconciling and retry phases, the settled
+  lines for each source, summaries, unsupported proposals, all 49 card keys in
+  en and vi with zero arguments, and time and size formatting.
+- Light checks, unlocked: `tests.test_copy_keys_in_pin` and
+  `tests.test_ios_project_sources` (13 tests) pass. The design lint reports no
+  new findings (601 baseline findings in 46 files). `git diff --check` is
+  clean. `python3 scripts/public_guard.py --base origin/main --head HEAD`
+  exits 0.
+- Locked run 1 (`lockf -k /Volumes/AtumTestFlight/.heavy-build.lock
+  /Volumes/AtumTestFlight/w4-aa2-locked.sh`, scratch and DerivedData under
+  `/Volumes/AtumTestFlight/dd-w4-aa2`, packages under
+  `/Volumes/AtumTestFlight/spm`): `swift test` exited 0, with 1,979 XCTest
+  cases passed and 0 failed. The Debug `build-for-testing` failed in the
+  gallery: it called `GoogleWriteAttachment`'s memberwise init, which is not
+  public. The gallery now decodes the attachment from wire JSON.
+- Locked run 2: `build-for-testing` exited 0, producing an arm64 simulator
+  app. The 48 screenshots showed the cards correct in place. In the assistant
+  chat the card sits above the composer and scrolls within its bound. On Home
+  the Work card renders at AX5. Some captures were launch frames. The
+  default-size Home capture had no Work card, because Home read the store
+  inside its List closure and missed a list that arrived after the first
+  frame. Home now reads the store in its own body.
+- Locked run 3 (package unchanged, so `SKIP_SWIFT=1`): rebuild and the full
+  screenshot matrix, with longer waits and retakes of blank frames. Shots are
+  in `/Volumes/AtumTestFlight/w4-aa2-shots/`: `gallery-{open,busy,settled,work}`,
+  `chat` and `home`, in `{en,vi}` × `{light,dark}`, plus `ax5-` variants.
+  No UI test was added. The scripted hosts and the gallery serve the
+  screenshots, and the hosted shards stay the UI evidence.
