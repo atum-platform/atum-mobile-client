@@ -88,6 +88,8 @@ final class ListingHireUITests: TranscriptUITestCase {
                     newAssistant.tap()
                     let soon = app.buttons.matching(identifier: "home.newAssistant.listing.soon").firstMatch
                     XCTAssertTrue(soon.waitForExistence(timeout: 20), "no Coming soon on the shelf")
+                    // At AX5 the sheet opens at its medium height with the shelf below the fold.
+                    for _ in 0..<6 where !soon.isHittable { dragSheetUp(app) }
                     XCTAssertEqual(soon.label, "\(soonWords[language]!) \(words.title)")
                     XCTAssertFalse(soon.isEnabled, "Coming soon is pressable")
                     XCTAssertTrue(element(app, "home.newAssistant.readyToHire").exists)
@@ -101,8 +103,9 @@ final class ListingHireUITests: TranscriptUITestCase {
                                    "a hire started without beta features")
                     XCTAssertFalse(probeLines("home-actions.txt").contains { $0.text.hasPrefix("hire ") },
                                    "a hire request went out without beta features")
-                    // Make your own never waits for beta.
+                    // Make your own never waits for beta. At AX5 it sits below the shelf.
                     let name = element(app, "home.newAssistant.name")
+                    for _ in 0..<8 where !name.exists { dragSheetUp(app) }
                     XCTAssertTrue(name.exists, "the make-your-own form is gone")
                     XCTAssertTrue(name.isEnabled, "Make your own is disabled")
                     XCTAssertTrue(element(app, "home.newAssistant.own").exists)
@@ -110,6 +113,14 @@ final class ListingHireUITests: TranscriptUITestCase {
                 }
             }
         }
+    }
+
+    /// Drags the sheet's content up from its lower half (the Home list behind
+    /// it is a list too, so no element query picks the sheet's own).
+    @MainActor
+    private func dragSheetUp(_ app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
     }
 
     @MainActor

@@ -109,6 +109,32 @@ shelf already uses.
   folder is `/Volumes/AtumTestFlight/dd-w4-z2/`. The public guard and design
   lint run separately.
 
+### Results (26 Nov 2026, iPhone 16e simulator, iOS 27)
+
+- Run 1 (`run-1.log`, head `15fd08c`):
+  - `swift test` passed: 821 tests, 0 failures.
+  - Debug build-for-testing exited 0.
+  - AppTests passed: 42 tests in `ListingHireStateTests` and
+    `StoreCommercePresentationTests`, 0 failures (`app-tests.xcresult`).
+  - All four Store UI tests passed (`ui-tests.xcresult`).
+  - The Researcher walk failed at en light AX5. At AX5 the sheet opens at its
+    medium height, and the lazy form had not loaded the name field. The test
+    now drags the sheet up before checking Make your own.
+- Run 2 (`run-2.log`): build-for-testing exited 0, and the Researcher walk
+  passed in all six variants (`ui-tests-2.xcresult`).
+- Captures:
+  - Store rows and the Nova sheet (`U-Store-Z2-*`) show the dimmed
+    "Sắp có" pill and the disabled action in light and dark, at the default
+    size and at AX5.
+  - The default-size Researcher captures (`hire-soon-*-default`) show
+    "Coming soon" on the shelf.
+  - The AX5 Researcher captures only show the medium sheet. The disabled
+    button sat under the bottom bar but still counted as hittable, so the test
+    took no drag before the capture. The AX5 shelf assertions still passed:
+    the button exists, is disabled, has the right label and sends nothing.
+    A follow-up should scroll by frame before that capture.
+- The public guard and design lint each exit 0.
+
 ## Decisions
 
 - The sheet also hides the price rows while the item is Coming soon. Desktop
