@@ -72,6 +72,59 @@ The P4 column uses the final app build at `2be1e05` on the audit's iPhone 17 wit
 The optional G-scroll memory diagnostic reached the start in 41 flings in the first case. In the second case a synthetic fling opened a message menu, and the diagnostic reported the 120-fling cap with that menu still open. Both cases passed their anchor and in-motion offset assertions.
 - Two attempts to start a dedicated simulator on the external volume stalled in LaunchServices migration. The existing audit iPhone 17 booted successfully. Derived data, test scratch, result bundles and recordings use `/Volumes/AtumTestFlight/dd-polish-p4`, and the build, test and capture scripts take the shared heavy-build lock.
 
+## Fix round r2 (review r1: HOLD)
+
+| Finding | Change | Where |
+| --- | --- | --- |
+| B1 send rise/fade did not animate | The entrance plays on the new row's cell as explicit additive layer animations (`Motion.send` spring, 0.15 s fade under Reduce Motion), committed with the cell's first frame. The engine queues fresh local echoes when they first appear in a diff and plays on `willDisplay`; a reused cell drops them. | `TranscriptView.swift` (`pendingEntrances`, `collectionView(_:willDisplay:)`), `MessageBubbleRow.swift` (`SendEntrance`), `Motion.swift` (`layerAnimation`) |
+| B2 long-press menus opened during drags | `ChatScrollSignal` in `ChatRowInteractions`: `isScrolling` reads the list's dragging or decelerating state; `panBegan()` from `scrollViewWillBeginDragging` cancels the press sink and any menu follower that has not recognized yet. `MessageMenuModifier.open` and `MenuPressSink` check it. | `ChatEnvironment.swift`, `MessageMenu.swift`, `TranscriptView.swift` |
+| B2 test drags | The shared drag starts mid-width again (inside the unobscured viewport); `testSlowDragFromABubbleScrollsWithoutOpeningTheMenu` drags slowly from a bubble's centre and requires no menu, scrolling and detach. | `TranscriptUITestSupport.swift`, `TranscriptUITests.swift` |
+| 1 Jump to latest from far up | More than two screens up: move without animation to one screen above the end, `layoutIfNeeded`, then animate the last screen. | `TranscriptView.swift` `scrollToBottom` |
+| 2 Search release | Releasing a placement sends `.searchPlacementReleased` on the next report and records the geometry, instead of forcing a full geometry report. Applies to routed and in-chat placements. | `TranscriptView.swift` `stopPlacement`, `reportViewport` |
+| 3 Re-rendering visible rows | Interactions are built once; the forwarded environment is reassigned only when a compared value changes. | `TranscriptView.swift` `update` |
+| 4 Photo zoom across cell hosts | No code change needed. The animations-on capture shows the viewer growing from the photo's bubble and closing back onto it, also after the bubble's cell scrolled away and was reused. | `capture-r2-06-photo-zoom.mp4`, `shots/zoom-open1.png`, `zoom-close1.png`, `zoomx-b.png` |
+| 5 Environment forwarding list | One table, `TranscriptRowEnvironment.forwarded`; `tests/test_transcript_row_environment.py` (in CI's lint step) fails when an app `@Entry` is neither forwarded nor exempted; comments at the key definitions point to it. | `TranscriptView.swift`, `tests/`, `.github/workflows/public-client.yml` |
+| 6 Duplicate row IDs | First occurrence kept, Debug `assertionFailure`, before the dictionary and the snapshot. | `TranscriptView.swift` `applySnapshot` |
+| 7 Out-of-scope test edits | Quote-contrast audit fallback reverted (the assistant-chat audit passed without it). The model-picker identifiers no longer differ: main moved them to `claude-plan` itself. | `TranscriptUITestSupport.swift` |
+
+### Send entrance measurement
+
+Band brightness of the bubble area (crop 720x450 at 450,900 of the 1206x2622 recording), per recorded frame, with `ffmpeg signalstats`. Frames counted when the band changes by more than 0.15.
+
+| Clip | Frames changing | Span | Largest single step |
+| --- | ---: | ---: | ---: |
+| main P3 `02-send.mp4` | 13 | 243 ms | 33% of the change |
+| r1 `capture-final-05-own-row-send.mp4` | 1 (bubble pops in) | — | 100% |
+| r2 `capture-r2-05-own-row-send.mp4` | 13 | 278 ms | 13% |
+
+The per-frame values are in `logs/r2/b1-send-*.csv` and the r2 frames in `shots/r2-entrance.png`. About 1.1 s after the send (118 ms in r1), the chat's working row is inserted while following and the content moves up by its height in one frame (`shots/r2-strip.png`). The P3 reference clip has no working row to compare against; animating follow-mode inserts is a follow-up because an animated scroll currently reads as user motion to the follow policy.
+
+### r2 verification
+
+All locked runs used the audit's iPhone 17 (iOS 27.0), derived data in `/Volumes/AtumTestFlight/dd-polish-p4`, logs in `logs/r2/`, and shut the simulator down afterwards.
+
+- Swift package tests: AtumChat 821, AtumDesign 1,063, AtumDrive 48, AtumTelemetry 16 (1,948, no failures). Design lint and `tests.test_transcript_row_environment` passed.
+- Debug build-for-testing passed at `c0bc079` and again at `6c85742`.
+- Focused UI suites at `c0bc079`: 52 of 54.
+
+| Suite | Result |
+| --- | ---: |
+| `TranscriptUITests` (with the drag-from-a-bubble case and the accessibility audit) | 18/18 |
+| `GScrollUITests` | 1/2, then mechanism B passed on rerun (20 windows, 0 pt) |
+| `ComposerUITests` | 12/12 |
+| `MessageMenuUITests` | 13/14, and 13/14 on a suite rerun at `6c85742` |
+| `TurnStopUITests` | 6/6 |
+| `PhoneModelPickerVisualsUITests` | 2/2 |
+
+- The drag-from-a-bubble case started on `message.body.chat.paginate.0137`, dragged 252 pt slowly, opened no menu and moved the bubble 235 pt.
+- P3 press-and-slide passed in the full run, failed once in a three-case rerun (the stationary 1.2 s press showed no menu), then passed in the suite rerun and in three consecutive iterations: 5 of 6.
+- G-scroll mechanism B measured 83.3 pt in one of 20 windows in the full run (the reading row was sampled immediately after the drag); the rerun measured 0 pt in all 20. Its first rerun attempt failed to launch the app.
+- `testLinksInTheSelectTextSheetGoThroughLinkPolicy` failed in all three r2 runs. The probe shows the menu, the select-text sheet and the link hand-off all run (`select text link routed via=onDismiss`), but the held-link alert never presents afterwards. This flow is outside the transcript cells; r1 passed it once in five runs. Open: the chat screen's alert after the sheet that follows the menu cover.
+- The animations-on captures passed both cases: `capture-r2-05-own-row-send.mp4` and `capture-r2-06-photo-zoom.mp4`.
+- `scripts/public_guard.py --base origin/main --head HEAD` exited 0.
+
+Device checks still useful: the send entrance and the drag-from-a-bubble behaviour on hardware with a real finger (XCUITest synthesises touches), and the photo zoom with Reduce Motion on.
+
 ## Follow-up: scaling measurement plan
 
 Recorded from review r1; not done in this change.
@@ -105,3 +158,4 @@ Recorded from review r1; not done in this change.
 - 2026-11-26. Fix round r2 after review r1 (HOLD). Branch `feat/polish-p4-transcript-engine-r2` from `a9c9f25` with `origin/main` merged. Moved the send entrance onto the cell's layer, added the transcript scroll signal for message presses, the environment forwarding table and its repository test, the far-up jump, search-placement release, duplicate-ID guard, restored mid-width test drags with a dedicated drag-from-a-bubble case, and reverted the quote-contrast audit fallback. The model-picker identifier edit no longer differs from main: main itself moved those tests to `claude-plan`. Verification results follow in the r2 section.
 - 2026-11-26. r2 locked run 1: package tests passed (AtumChat 821, AtumDesign 1,063, AtumDrive 48, AtumTelemetry 16; 1,948 total). The Debug build stopped on Swift 6 isolation errors: a main-actor default for the scroll signal inside the `@Entry` default and non-Sendable key paths in the forwarding table. The signal is now optional in `ChatRowInteractions` and the table is main-actor isolated, applied inside SwiftUI's main-thread environment transform.
 - 2026-11-26. r2 locked run 2 at `c0bc079`: Debug build passed; focused UI suites 52 of 54. The two failures were G-scroll mechanism B check 4 (one of 20 windows at 83.3 pt, the rest 0 pt) and the select-text sheet link, whose sheet closed without routing the queued link. The rerun of both: G-scroll B could not launch the app (no process ID) and the link case failed the same way. The sheet's queued link now routes from either its dismissal callback or its content's disappearance, with a probe line naming which, matching r1's cover fallback.
+- 2026-11-26. r2 reruns at `6c85742`: G-scroll mechanism B 0 pt in 20 windows; message-menu suite 13 of 14; press-and-slide three iterations passed; the select-text link case still fails after the link is routed (recorded as open). Recorded the r2 verification above.
