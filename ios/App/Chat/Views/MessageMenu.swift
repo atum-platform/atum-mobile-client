@@ -131,6 +131,19 @@ final class MessageActionsPresenter {
         selectText = nil
     }
 
+    /// The select-text sheet has gone: route the link it queued, once. Called
+    /// from the sheet's `onDismiss` and, because SwiftUI can drop that
+    /// callback after the menu cover's own dismissal (as with
+    /// `overlayDismissed`), from its content's disappearance.
+    func selectTextDismissed(_ open: @MainActor (String) -> Void, via source: String) {
+        guard selectText == nil, let link = linkAfterSelectText else { return }
+        linkAfterSelectText = nil
+        #if DEBUG
+        UITestProbe.append("select text link routed via=\(source)", to: "menu-press.txt")
+        #endif
+        open(link)
+    }
+
     /// A system menu, sheet or delete confirmation covers the chat: its bottom does
     /// not count as visible, so no receipt goes out meanwhile (B13).
     var covers: Bool {
@@ -1042,12 +1055,14 @@ private struct MessageActionSheets: ViewModifier {
                     }
             }
             .sheet(item: $presenter.selectText, onDismiss: {
-                guard let link = presenter.linkAfterSelectText else { return }
-                presenter.linkAfterSelectText = nil
-                actions.openLink(link)
+                presenter.selectTextDismissed(actions.openLink, via: "onDismiss")
             }) { request in
                 SelectTextSheet(request: request, design: design) { url in
                     presenter.openLinkFromSelectText(url)
+                }
+                .onDisappear {
+                    // Let the removal finish before presenting from the chat.
+                    Task { @MainActor in presenter.selectTextDismissed(actions.openLink, via: "disappear") }
                 }
             }
             .sheet(item: $presenter.failedSend) { request in
