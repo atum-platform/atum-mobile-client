@@ -58,3 +58,7 @@ UI pass (2026-11-27, Opus): every touched Swift file passed `swiftc -parse` (Scr
 Engine pass:
 
 Swift 6 type checking passed for the domain policy and the six new XCTest cases compiled together with it. The app adapter and notification extension sources passed Swift parsing. The Xcode project passed `plutil -lint`, repository design lint passed and the diff had no whitespace errors. Xcode package resolution stalled in Sentry's Git pack indexing on the build volume. The Debug retry hit the shared build-lock timeout and the SwiftPM test command remained queued behind volume I/O. SwiftPM test execution, Debug linking and a runtime exercise of the selected iOS binary are still pending.
+
+## Coordinator integration
+
+The notification sheet now scopes its asynchronous observation, legacy reads, write completions and timeout callbacks to a presentation generation. Replacing the room or account invalidates the old generation so delayed work cannot change the new sheet state. Notification UI package tests and assembled Debug compilation are recorded in the assembly log; live push and cross-client acceptance remain open.

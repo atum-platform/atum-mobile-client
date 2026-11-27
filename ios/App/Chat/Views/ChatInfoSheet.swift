@@ -385,6 +385,7 @@ struct ChatInfoHome: View {
     @State private var renameRequest: ChatRenameRequest?
     /// S3: the room's notification mode as the SDK last reported it.
     @State private var notificationState = ChatNotificationMenuState()
+    @State private var notificationGeneration = UUID()
 
     private enum SheetConfirmation: Equatable {
         case deleteApp
@@ -830,6 +831,8 @@ struct ChatInfoHome: View {
     /// Follows the room's mode until the sheet closes or the session changes.
     /// A sync from another client (desktop, Element X) updates the row in place.
     private func observeNotifications() async {
+        notificationGeneration = UUID()
+        let generation = notificationGeneration
         guard notificationObservation.isOffered, let session = actions.notifications?.session else {
             notificationState = ChatNotificationMenuState()
             return
@@ -838,21 +841,24 @@ struct ChatInfoHome: View {
         let roomID = info.roomID
         do {
             try await session.observe(roomID) { snapshot in
+                guard notificationGeneration == generation, !Task.isCancelled else { return }
                 notificationState.receive(snapshot)
                 readLegacyLevel(session, roomID: roomID)
             }
         } catch {
             // The room or session is unavailable: the row stays, disabled.
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, notificationGeneration == generation else { return }
         notificationState.becomeUnavailable()
     }
 
     /// An inherited Team Space room can still be narrowed by a pre-parity channel level.
     private func readLegacyLevel(_ session: ChatNotificationActions.Session, roomID: String) {
         guard let snapshot = notificationState.settings, snapshot.isInherited else { return }
+        let generation = notificationGeneration
         Task {
             let level = await session.legacyLevel(roomID)
+            guard notificationGeneration == generation else { return }
             notificationState.receiveLegacyChannel(level, for: snapshot)
         }
     }
@@ -863,19 +869,23 @@ struct ChatInfoHome: View {
         guard let session = actions.notifications?.session,
               let attempt = notificationState.begin(option) else { return }
         let roomID = info.roomID
+        let generation = notificationGeneration
         Task {
             do {
                 try await session.set(roomID, option.choice)
             } catch {
+                guard notificationGeneration == generation else { return }
                 notificationState.finish(attempt, succeeded: false)
                 AccessibilityNotification.Announcement(notificationText(.failed)).post()
                 return
             }
+            guard notificationGeneration == generation else { return }
             notificationState.finish(attempt, succeeded: true)
             // Retiring a legacy level alone leaves the push rules as they were,
             // so no new snapshot arrives: read the level again.
             readLegacyLevel(session, roomID: roomID)
             try? await Task.sleep(for: .seconds(10))
+            guard notificationGeneration == generation else { return }
             notificationState.stopWaiting(attempt)
         }
     }
