@@ -24,6 +24,8 @@ struct ScriptedChatHost: View {
     @State private var path: [String]
     @State private var infoPinned = false
     @State private var infoMuted = false
+    /// S3: the scripted room's notification mode (inherited All at first).
+    @State private var scriptedNotifications = ScriptedRoomNotifications()
     @State private var infoLowPriority = false
     /// HC-7: the name Rename gave the scripted chat.
     @State private var scriptedTitle: String?
@@ -373,7 +375,8 @@ struct ScriptedChatHost: View {
                                             UITestProbe.append("rename \(request.shared) \(title)", to: "panel.txt")
                                             return true
                                         }) : nil,
-                                handles: ScriptedHandles.lookup
+                                handles: ScriptedHandles.lookup,
+                                notifications: scriptedNotifications.actions
                             ),
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,
@@ -914,6 +917,45 @@ private struct EncodableRoutine: Encodable {
         try c.encodeNil(forKey: .lastRun)
     }
     enum Keys: String, CodingKey { case id, title, instruction, schedule, timezone, enabled, notifications, revision, nextRunAt, lastRun }
+}
+
+/// S3: one scripted room's Matrix notification mode. A choice lands after a
+/// short write and reaches every observer, as a synced change does.
+@MainActor
+final class ScriptedRoomNotifications {
+    private var snapshot = ChatNotificationSettings(effectiveMode: .all, isInherited: true,
+                                                    hasEncryptedMentionCaveat: false)
+    private var observers: [UUID: AsyncStream<ChatNotificationSettings>.Continuation] = [:]
+
+    var actions: ChatNotificationActions {
+        ChatNotificationActions(session: .init(
+            id: ObjectIdentifier(self),
+            observe: { [weak self] _, onChange in
+                guard let self else { return }
+                let (changes, continuation) = AsyncStream.makeStream(
+                    of: ChatNotificationSettings.self, bufferingPolicy: .bufferingNewest(1))
+                let id = UUID()
+                observers[id] = continuation
+                continuation.yield(snapshot)
+                defer { observers[id] = nil }
+                // The stream ends when the sheet's task is cancelled.
+                for await change in changes { onChange(change) }
+            },
+            set: { [weak self] _, choice in
+                try await Task.sleep(for: .milliseconds(300))
+                guard let self else { return }
+                snapshot = switch choice {
+                case .restoreDefault:
+                    ChatNotificationSettings(effectiveMode: .all, isInherited: true, hasEncryptedMentionCaveat: false)
+                case let .set(mode):
+                    ChatNotificationSettings(effectiveMode: mode, isInherited: false, hasEncryptedMentionCaveat: false)
+                }
+                UITestProbe.append("notifications \(ChatNotificationMenuOption(choice).rawValue)", to: "panel.txt")
+                for observer in observers.values { observer.yield(snapshot) }
+            },
+            legacyLevel: { _ in nil }
+        ))
+    }
 }
 
 /// Debug only: what the app did that the screen cannot show, for the UI

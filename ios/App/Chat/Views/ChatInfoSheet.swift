@@ -223,9 +223,29 @@ struct ChatInfoActions {
     var agentDesk: AgentDeskActions?
     /// HC-7: Rename a person or group chat (desktop conversation menu).
     var rename: ChatRenameActions?
+    /// S3: the room's Matrix notification mode. When set, the four-choice
+    /// Notifications menu replaces the binary mute switch and tile.
+    var notifications: ChatNotificationActions?
     /// Members' verified @handles, on the line under each name (desktop
     /// `MatrixMembers`). Nil shows none.
     var handles: PersonHandleLookup?
+}
+
+/// S3 notification modes (`docs/ports/chat-parity-notifications.md`, UI contract).
+/// `session` is nil until the Matrix session is ready and has synced once; the
+/// row then shows disabled.
+struct ChatNotificationActions {
+    struct Session {
+        /// The session's identity: the sheet's observation restarts when it changes.
+        let id: ObjectIdentifier
+        /// Delivers every changed snapshot on the main actor until cancelled.
+        let observe: @MainActor (String, @MainActor (ChatNotificationSettings) -> Void) async throws -> Void
+        let set: @MainActor (String, ChatNotificationChoice) async throws -> Void
+        /// A quieter legacy Team Space channel level for an inherited room.
+        let legacyLevel: @MainActor (String) async -> ChatNotificationMode?
+    }
+
+    var session: Session?
 }
 
 /// What the panel reads when it opens. Every field may be unknown; an unknown
@@ -363,6 +383,8 @@ struct ChatInfoHome: View {
     @State private var confirmation: SheetConfirmation?
     @State private var reporting: ReportPersonRequest?
     @State private var renameRequest: ChatRenameRequest?
+    /// S3: the room's notification mode as the SDK last reported it.
+    @State private var notificationState = ChatNotificationMenuState()
 
     private enum SheetConfirmation: Equatable {
         case deleteApp
@@ -502,6 +524,8 @@ struct ChatInfoHome: View {
             }
         }
 
+        .task(id: notificationObservation) { await observeNotifications() }
+        .sensoryFeedback(.error, trigger: notificationState.failedChoice) { _, new in new != nil }
         .sensoryFeedback(.error, trigger: info.actionFailureToken)
         .onChange(of: info.actionFailureToken) { old, new in
             guard old != new else { return }
@@ -626,9 +650,13 @@ struct ChatInfoHome: View {
             switchRow(glyph: info.isPinned ? .pinFilled : .pin, title: copy(.pin),
                       isOn: info.isPinned, isEnabled: info.isPinned || !info.pinLimitReached,
                       id: "info.pin") { actions.setPinned?(info.roomID, $0) }
-            switchRow(glyph: info.isMuted ? .bellOff : .bell, title: design.text(PersonInfoKey.muteNotifications),
-                      isOn: info.isMuted, isEnabled: actions.setMuted != nil,
-                      id: "info.mute") { actions.setMuted?(info.roomID, $0) }
+            if actions.notifications != nil {
+                notificationRow
+            } else {
+                switchRow(glyph: info.isMuted ? .bellOff : .bell, title: design.text(PersonInfoKey.muteNotifications),
+                          isOn: info.isMuted, isEnabled: actions.setMuted != nil,
+                          id: "info.mute") { actions.setMuted?(info.roomID, $0) }
+            }
             if info.offersLowPriority, actions.setLowPriority != nil {
                 switchRow(glyph: .chevronDown, title: design.text(PersonInfoKey.lowPriority),
                           isOn: info.isLowPriority, isEnabled: true,
@@ -754,11 +782,15 @@ struct ChatInfoHome: View {
                        id: "info.pin") {
                 actions.setPinned?(info.roomID, !info.isPinned)
             }
-            infoAction(isEnabled: true,
-                       glyph: info.isMuted ? .bell : .bellOff,
-                       label: info.isMuted ? .unmute : .mute,
-                       id: "info.mute") {
-                actions.setMuted?(info.roomID, !info.isMuted)
+            if actions.notifications != nil {
+                notificationTile
+            } else {
+                infoAction(isEnabled: true,
+                           glyph: info.isMuted ? .bell : .bellOff,
+                           label: info.isMuted ? .unmute : .mute,
+                           id: "info.mute") {
+                    actions.setMuted?(info.roomID, !info.isMuted)
+                }
             }
         }
         VStack(spacing: kit.space(.s2)) {
@@ -773,8 +805,176 @@ struct ChatInfoHome: View {
                     .foregroundStyle(atum.color(.soft, scheme: scheme))
                     .multilineTextAlignment(.center)
             }
+            if actions.notifications != nil, let line = notificationState.quietLine {
+                notificationQuietLine(line)
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding(.horizontal, kit.space(.s4))
+    }
+
+    // MARK: Notifications (S3)
+
+    /// The observation restarts for a new session or room (UI contract).
+    private struct NotificationObservation: Equatable {
+        let session: ObjectIdentifier?
+        let roomID: String
+        let isOffered: Bool
+    }
+
+    private var notificationObservation: NotificationObservation {
+        NotificationObservation(session: actions.notifications?.session?.id, roomID: info.roomID,
+                                isOffered: actions.notifications != nil && !isAssistantInfo)
+    }
+
+    /// Follows the room's mode until the sheet closes or the session changes.
+    /// A sync from another client (desktop, Element X) updates the row in place.
+    private func observeNotifications() async {
+        guard notificationObservation.isOffered, let session = actions.notifications?.session else {
+            notificationState = ChatNotificationMenuState()
+            return
+        }
+        notificationState = ChatNotificationMenuState(isAvailable: true)
+        let roomID = info.roomID
+        do {
+            try await session.observe(roomID) { snapshot in
+                notificationState.receive(snapshot)
+                readLegacyLevel(session, roomID: roomID)
+            }
+        } catch {
+            // The room or session is unavailable: the row stays, disabled.
+        }
+        guard !Task.isCancelled else { return }
+        notificationState.becomeUnavailable()
+    }
+
+    /// An inherited Team Space room can still be narrowed by a pre-parity channel level.
+    private func readLegacyLevel(_ session: ChatNotificationActions.Session, roomID: String) {
+        guard let snapshot = notificationState.settings, snapshot.isInherited else { return }
+        Task {
+            let level = await session.legacyLevel(roomID)
+            notificationState.receiveLegacyChannel(level, for: snapshot)
+        }
+    }
+
+    /// Writes one choice. The confirmed snapshot stays on screen until sync
+    /// reports the change; a failure leaves the same choice open to retry.
+    private func chooseNotification(_ option: ChatNotificationMenuOption) {
+        guard let session = actions.notifications?.session,
+              let attempt = notificationState.begin(option) else { return }
+        let roomID = info.roomID
+        Task {
+            do {
+                try await session.set(roomID, option.choice)
+            } catch {
+                notificationState.finish(attempt, succeeded: false)
+                AccessibilityNotification.Announcement(notificationText(.failed)).post()
+                return
+            }
+            notificationState.finish(attempt, succeeded: true)
+            // Retiring a legacy level alone leaves the push rules as they were,
+            // so no new snapshot arrives: read the level again.
+            readLegacyLevel(session, roomID: roomID)
+            try? await Task.sleep(for: .seconds(10))
+            notificationState.stopWaiting(attempt)
+        }
+    }
+
+    /// The export's value once pinned, else desktop #155's (PENDING-COPY).
+    private func notificationText(_ key: ChatNotificationCopyKey) -> String {
+        if design.copy.contains(key.rawValue) { return design.text(key.rawValue) }
+        return ChatNotificationPendingCopy.text(key, locale: design.locale)
+    }
+
+    /// The desktop menu's four choices, each with its one-line hint; the
+    /// current one is checked. Picking the checked one again retries a failure.
+    @ViewBuilder private var notificationOptions: some View {
+        ForEach(ChatNotificationMenuOption.allCases) { option in
+            Toggle(isOn: Binding(get: { notificationState.selected == option },
+                                 set: { _ in chooseNotification(option) })) {
+                Text(verbatim: notificationText(option.title))
+                if let hint = notificationState.hint(for: option) {
+                    Text(verbatim: notificationText(hint))
+                }
+            }
+            .accessibilityIdentifier("info.notifications." + option.rawValue)
+        }
+    }
+
+    private var notificationGlyph: AtumGlyph {
+        notificationState.displayedMode == .off ? .bellOff : .bell
+    }
+
+    private var notificationValue: String? {
+        notificationState.value.map(notificationText)
+    }
+
+    /// Person and group chats: one row in the conversation group, with its
+    /// value at the trailing edge and one quiet line under the title.
+    private var notificationRow: some View {
+        Menu { notificationOptions } label: {
+            HStack(spacing: kit.space(.s3)) {
+                Image(atum.symbol(notificationGlyph))
+                VStack(alignment: .leading, spacing: kit.space(.s1)) {
+                    Text(verbatim: notificationText(.notifications))
+                    if let line = notificationState.quietLine {
+                        notificationQuietLine(line)
+                    }
+                }
+                Spacer(minLength: kit.space(.s2))
+                if notificationState.isWorking || notificationState.isLoading {
+                    ProgressView()
+                } else if let value = notificationValue {
+                    Text(verbatim: value)
+                        .foregroundStyle(atum.color(.soft, scheme: scheme))
+                }
+            }
+            .foregroundStyle(ink)
+            .contentShape(Rectangle())
+        }
+        .disabled(!notificationState.isEnabled)
+        .accessibilityLabel(notificationText(.notifications))
+        .accessibilityValue(notificationValue ?? "")
+        .accessibilityHint(notificationState.quietLine.map(notificationText) ?? "")
+        .accessibilityIdentifier("info.notifications")
+    }
+
+    /// App and Team Space chats: the second tile names the current mode and
+    /// opens the same choices. Its quiet line sits under the tiles.
+    private var notificationTile: some View {
+        Menu { notificationOptions } label: {
+            VStack(spacing: kit.space(.s2)) {
+                Group {
+                    if notificationState.isWorking || notificationState.isLoading {
+                        ProgressView()
+                    } else {
+                        Image(atum.symbol(notificationGlyph))
+                    }
+                }
+                .font(.title3)
+                Text(verbatim: notificationValue ?? notificationText(.notifications))
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+            }
+            .foregroundStyle(ink)
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(rowBackground,
+                        in: RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous))
+        }
+        .disabled(!notificationState.isEnabled)
+        .opacity(notificationState.isEnabled || notificationState.isWorking ? 1 : 0.4)
+        .accessibilityLabel(notificationText(.notifications))
+        .accessibilityValue(notificationValue ?? "")
+        .accessibilityHint(notificationState.quietLine.map(notificationText) ?? "")
+        .accessibilityIdentifier("info.notifications")
+    }
+
+    private func notificationQuietLine(_ key: ChatNotificationCopyKey) -> some View {
+        Text(verbatim: notificationText(key))
+            .font(.footnote)
+            .foregroundStyle(atum.color(key == .failed ? .danger : .soft, scheme: scheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("info.notifications.line")
     }
 
     private func infoAction(isEnabled: Bool, glyph: AtumGlyph, label: ChatCopyKey,

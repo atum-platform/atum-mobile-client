@@ -930,7 +930,9 @@ struct AppRoot: View {
                     rename: model.offersPersonalExits(roomID: roomID)
                         ? ChatRenameActions(request: { await model.renameRequest(roomID: $0) },
                                             save: { await model.rename($0, to: $1) }) : nil,
-                    handles: personHandles
+                    handles: personHandles,
+                    // S3: the four-choice room notification menu.
+                    notifications: model.chatNotificationActions
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),

@@ -1,6 +1,6 @@
 # Phone room notifications
 
-ML2 S3 engine. The existing mute action sets Off, and unmute restores the room's Matrix default. The four-choice settings UI and the live delivery and cross-client checks are pending.
+ML2 S3 engine and chat info UI. Partly built: the four-choice menu is wired but not yet compiled, run on a device or checked against another client. The Home and Team Space roster mute actions still set Off and restore the room's Matrix default.
 
 ## Matrix and Atum policy
 
@@ -21,6 +21,21 @@ Source baselines are mobile `f9231683f80bc378b79299a43ea14af713be548b` (`LiveMat
 - Use `selection` to mark the current choice and `effectiveMode` to show what an inherited default actually does. `isInherited` distinguishes explicit All from inherited All. Use `hasEncryptedMentionCaveat` with the Mentions & keywords option when the encrypted-event push rule is unavailable or disabled.
 - Await `session.setRoomNotificationChoice(roomID:choice:)` with `.set(.all)`, `.set(.mentionsAndKeywords)`, `.set(.off)` or `.restoreDefault`. Keep the confirmed snapshot visible while writing and until the synced snapshot arrives. Track the in-flight action in the presentation. The engine rejects overlapping changes to the same room with `changeInProgress` and protects separate Matrix filters with `customPushRules`. A thrown `legacyPreferenceNotRetired` means the native write returned successfully but the Atum cleanup needs a retry. Let the same action be retried even when it is now selected.
 
+## Chat info menu
+
+`ChatInfoHome` shows Notifications where the Mute switch was in person and group chats, and in place of the Mute tile for app and Team Space chats. The assistant card has no notification control, as before. It opens the desktop #155 menu (`MatrixRoomNotificationMenu`, `notification-level-menu.tsx` at `c2099ee6`): Restore default, All, Mentions & keywords and Off. Each option has its own hint. The current choice is checked. Restore default is checked for an inherited room, and its hint names the inherited mode. The row shows the effective mode as its value, plus one quiet line that explains that mode. With the encrypted caveat, the line and the Mentions hint read "Mentions may be missed in encrypted chats".
+
+The sheet keys one observation task by session identity and room ID, using `LiveAppModel.chatNotificationActions` over `notificationSettingsSession`. The row is disabled until the session is ready, shows a spinner until the first read, and follows synced changes in place. A choice disables the menu and shows a spinner. The confirmed snapshot stays on screen until a new one arrives, and waiting stops after 10 s when sync brings nothing. A failure re-enables the menu and turns the quiet line into "Could not save notification settings. Try again." It also posts an announcement and a haptic. The same choice can be picked again even when it already reads as selected. That covers `legacyPreferenceNotRetired`. Choosing the current Matrix choice is a no-op unless a legacy level still narrows the room.
+
+To preserve quieter Atum preferences, an inherited Team Space room with a pre-parity channel level of Mentions or Off shows that level as its choice, as the desktop does. Choosing again writes the native mode, and the engine retires that level. The read is `LiveMatrixSession.legacyRoomNotificationLevel(roomID:)`. It is a small, read-only addition to the lane's engine file. It reads synced account data as the notification extension does, and it runs again after each snapshot and after a successful write. Thread levels and quiet hours are not shown or changed here.
+
+The presentation rules live in `ChatNotificationMenuState` (`Sources/AtumChat/ChatNotificationMenu.swift`) and are covered by `ChatNotificationMenuTests`. The words are desktop #155's `matrix-notification-copy.ts`, as generated PENDING-COPY (`ChatNotificationPendingCopy`). The keys are `shared.matrix-notification-copy.copy.*`. The app reads the design export first, so the next repin takes over with no wording change. `ChatCopyContractTests` checks that every key resolves from one source or the other in all five locales. The scripted host gives UI tests an in-memory mode. `testGroupInfoShowsMembersRowAndOptimisticSwitches` now chooses Mentions & keywords from the menu instead of toggling Mute.
+
+Known differences from desktop:
+- When a room has an explicit mode, the Restore default option has no hint. The engine reports only the effective mode, while the desktop also computes the inherited default.
+- A `customPushRules` refusal shows the generic save failure. The desktop has no equivalent state because its writer leaves compound rules alone, and the export has no dedicated wording.
+- A legacy level changed on another device appears on the phone on the next snapshot or reopen. It does not have a live subscription of its own.
+
 ## Behaviour comparison
 
 | Audited Element X revision and path | Audited behaviour | Phone evidence | Pending interop or difference |
@@ -32,8 +47,14 @@ Source baselines are mobile `f9231683f80bc378b79299a43ea14af713be548b` (`LiveMat
 
 [Element X iOS reference](https://github.com/element-hq/element-x-ios/blob/183bbc7f0419bf76ae46d52f448c44eb14fe1069/ElementX/Sources/Screens/RoomNotificationSettingsScreen/RoomNotificationSettingsScreenViewModel.swift) · [Element X Android reference](https://github.com/element-hq/element-x-android/blob/20ad9664790111e5558d4610f9fb05d6cc1efcc2/features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/notificationsettings/RoomNotificationSettingsPresenter.kt)
 
+| Desktop #155 `c2099ee6`, `notification-level-menu.tsx` `MatrixRoomNotificationMenu` | Four choices in the order inherit, All, Mentions & keywords, Off. Each has a hint. Inherit names the default. The encrypted Mentions caveat is shown. The menu is disabled while saving. A legacy channel level shows as selected while the room is inherited. Re-choosing writes only when a legacy level is present. | `ChatNotificationMenuTests` cover order, explicit and inherited checks, hints, the caveat, in-flight and sync waiting, retry after failure, stale attempts and legacy display. The UI test covers inherited All → Mentions & keywords in the scripted host. | The Restore default hint is missing for explicit modes. Compiled rendering of menu subtitles and live sync from desktop and Element X are still unverified. |
+
 Acceptance items 1 and 2 require synced clients and a push gateway. Items 3 and 4 have automated policy fixtures. Real thread delivery and the account-data round trip remain device acceptance checks.
 
 ## Local verification
+
+UI pass (2026-11-27, Opus): every touched Swift file passed `swiftc -parse` (ScriptedChatHost with `-D DEBUG`). `ChatNotificationSettings.swift`, `ChatNotificationMenu.swift` and `TeamNotificationPolicy.swift` passed `swiftc -typecheck -swift-version 6`. Repository design lint passed with no new findings, and `git diff --check` was clean. No SwiftPM test, Xcode build, simulator or device run was done in this pass. The coordinator owns those under the build lock.
+
+Engine pass:
 
 Swift 6 type checking passed for the domain policy and the six new XCTest cases compiled together with it. The app adapter and notification extension sources passed Swift parsing. The Xcode project passed `plutil -lint`, repository design lint passed and the diff had no whitespace errors. Xcode package resolution stalled in Sentry's Git pack indexing on the build volume. The Debug retry hit the shared build-lock timeout and the SwiftPM test command remained queued behind volume I/O. SwiftPM test execution, Debug linking and a runtime exercise of the selected iOS binary are still pending.

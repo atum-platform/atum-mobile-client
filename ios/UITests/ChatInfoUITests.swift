@@ -369,8 +369,8 @@ final class ChatInfoUITests: TranscriptUITestCase {
     }
 
     /// A personal group's panel (M2): name, topic and "N members"
-    /// (Members is its own page), the assistant-access line, and Pin and Mute
-    /// as switches that answer at once.
+    /// (Members is its own page), the assistant-access line, Pin as a switch
+    /// that answers at once, and Notifications as the four-choice menu (S3).
     @MainActor
     func testGroupInfoShowsMembersRowAndOptimisticSwitches() {
         let app = XCUIApplication()
@@ -404,7 +404,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(assistantAccess.label.contains("ngừng đọc tin nhắn mới"))
         XCTAssertTrue(assistantAccess.label.contains("không hoàn tác"))
 
-        for id in ["info.pin", "info.mute"] {
+        for id in ["info.pin"] {
             let toggle = scroll.switches.matching(identifier: id).firstMatch
             XCTAssertTrue(toggle.waitForExistence(timeout: 10), "missing \(id)")
             let knob = toggle.switches.firstMatch
@@ -424,6 +424,24 @@ final class ChatInfoUITests: TranscriptUITestCase {
             XCTAssertTrue(waitFor(15) { toggle.exists && toggle.value as? String == "1" },
                           "\(id) did not turn on: \(boundedHierarchy(app))")
         }
+
+        // S3: the scripted room inherits All. Choosing Mentions & keywords
+        // keeps the confirmed value until the scripted sync lands.
+        let notifications = scroll.descendants(matching: .any)
+            .matching(identifier: "info.notifications").firstMatch
+        XCTAssertTrue(revealByScrolling(notifications, in: scroll, up: nil, verticalInset: 44),
+                      boundedHierarchy(app))
+        XCTAssertTrue(waitFor(10) { notifications.isEnabled && notifications.value as? String == "Tất cả" },
+                      "notifications did not read inherited All: \(boundedHierarchy(app))")
+        notifications.tap()
+        let mentions = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Nhắc đến và từ khóa"))
+            .firstMatch
+        XCTAssertTrue(mentions.waitForExistence(timeout: 5), boundedHierarchy(app))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Khôi phục mặc định"))
+            .firstMatch.exists, "Restore default is missing from the menu")
+        mentions.tap()
+        XCTAssertTrue(waitFor(15) { notifications.value as? String == "Nhắc đến và từ khóa" },
+                      "notifications did not change: \(boundedHierarchy(app))")
 
         keepScreenshot("s2-chat-info-group-light-vi", of: app)
     }

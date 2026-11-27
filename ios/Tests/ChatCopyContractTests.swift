@@ -43,6 +43,22 @@ final class ChatCopyContractTests: XCTestCase {
         }
     }
 
+    /// S3: the room notification menu's words resolve from the export once it is
+    /// pinned, and until then from desktop #155's generated table.
+    func testEveryNotificationMenuKeyResolvesOrIsPendingInEveryLocale() throws {
+        let copy = try AtumCopy()
+        for locale in ["en", "vi", "ja", "zh", "zh-Hant"] {
+            for key in ChatNotificationCopyKey.allCases {
+                if copy.contains(key.rawValue) {
+                    XCTAssertNoThrow(try copy.text(key.rawValue, locale: locale), "\(locale) \(key.rawValue)")
+                } else {
+                    XCTAssertNotEqual(ChatNotificationPendingCopy.text(key, locale: locale), key.rawValue,
+                                      "\(locale) \(key.rawValue)")
+                }
+            }
+        }
+    }
+
     /// HC-3/HC-5: Home's working words and Start chat's find, no-match and
     /// member-count words resolve in every pinned locale.
     func testHomeWave2KeysResolveInEveryPinnedLocale() throws {

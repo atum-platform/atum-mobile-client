@@ -17,6 +17,20 @@ extension LiveAppModel {
               (try? liveMatrix.runtime.requireCurrent()) != nil else { return nil }
         return liveMatrix
     }
+
+    /// The chat info sheet's notification menu. Reading it in a view body
+    /// observes session readiness, so the sheet re-keys its observation.
+    var chatNotificationActions: ChatNotificationActions {
+        guard let session = notificationSettingsSession else { return ChatNotificationActions() }
+        return ChatNotificationActions(session: .init(
+            id: ObjectIdentifier(session),
+            observe: { roomID, onChange in
+                try await session.observeRoomNotificationSettings(roomID: roomID, onChange: onChange)
+            },
+            set: { try await session.setRoomNotificationChoice(roomID: $0, choice: $1) },
+            legacyLevel: { await session.legacyRoomNotificationLevel(roomID: $0) }
+        ))
+    }
 }
 
 extension LiveMatrixSession {
@@ -84,6 +98,29 @@ extension LiveMatrixSession {
             try await retireLegacyRoomNotificationPreference(room: room, roomID: roomID)
         } catch {
             throw RoomNotificationFailure.legacyPreferenceNotRetired
+        }
+    }
+
+    /// ML2 UI integration (read only): a quieter pre-parity channel level that still
+    /// narrows an inherited Team Space room, so the menu can show it as the desktop
+    /// menu does. Reads the synced store, as the notification extension does; nil
+    /// for other rooms, unreadable data or a level that does not narrow.
+    func legacyRoomNotificationLevel(roomID: String) async -> ChatNotificationMode? {
+        guard let room = try? notificationRoom(roomID),
+              let creates = try? await room.stateEvents(eventType: .roomCreate),
+              TeamNotificationPolicy.applies(toRoomType: MobileRoomTypePolicy.roomType(
+                  createContentJSON: creates.first { $0.stateKey.isEmpty }?.contentJson))
+        else { return nil }
+        let target = TeamNotificationPolicy.Target.channel(roomID)
+        let channel = (try? await runtime.client.accountData(eventType: target.eventType))
+            .flatMap { TeamNotificationPolicy.Record.parse($0, for: target) }
+        let legacy = (try? await runtime.client.accountData(eventType: TeamNotificationPolicy.legacyType))
+            .flatMap(TeamNotificationPolicy.Legacy.parse)
+        guard (try? requireNotificationRoom(room)) != nil else { return nil }
+        switch TeamNotificationPolicy(roomID: roomID, legacy: legacy, channel: channel).legacyChannel {
+        case .mentions: return .mentionsAndKeywords
+        case .nothing: return .off
+        case .all, nil: return nil
         }
     }
 
