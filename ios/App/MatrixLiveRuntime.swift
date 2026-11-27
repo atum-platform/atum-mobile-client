@@ -49,6 +49,9 @@ final class MatrixLiveRuntime {
     private let sessionStore: MatrixSessionKeychain
     private let marker: OIDCInstallationMarker
     private let recoveryStore: MatrixRecoveryKeychain
+    private var securityPaused = false
+    private var recoveryOperationInFlight = false
+    private var verificationController: MatrixSASVerification?
     private var recoveryObserver: MatrixLiveRecoveryObserver?
     private var recoveryStateStream: TaskHandle?
     private var recoverySink: (@MainActor @Sendable (MatrixLiveRecoverySnapshot) -> Void)?
@@ -531,12 +534,226 @@ final class MatrixLiveRuntime {
     /// Import only a key the owner explicitly supplied. The SDK validates it
     /// and downloads the account backup; no device comparison UI is involved.
     func recover(using recoveryKey: String) async throws -> MatrixLiveRecoverySnapshot {
-        try await recoverAndPersist(recoveryKey: recoveryKey)
+        try beginRecoveryOperation()
+        defer { recoveryOperationInFlight = false }
+        let keyID = try? await currentRecoveryStorageKeyID()
+        try requireSecurityCurrent()
+        let snapshot = try await recoverAndPersist(recoveryKey: recoveryKey)
+        try requireSecurityCurrent()
+        if let keyID, (try? await currentRecoveryStorageKeyID()) == keyID,
+           client.encryption().backupState() == .enabled {
+            try requireSecurityCurrent()
+            // Existing restoration must still succeed if local receipt storage
+            // is unavailable. Private creation remains unavailable in that case.
+            try? MatrixRecoverySaveStore(ticket: ticket).write(
+                id: UUID(), storageKeyID: keyID, pendingKey: nil
+            )
+        }
+        return snapshot
     }
 
     func pause() async {
+        securityPaused = true
+        verificationController?.invalidate()
         stopObservingRecovery()
         try? await client.pause()
+    }
+
+    var deviceVerification: MatrixSASVerification {
+        if let verificationController { return verificationController }
+        let controller = MatrixSASVerification(
+            userID: ticket.session.userID, deviceID: ticket.session.deviceID,
+            requireCurrent: { [weak self] in
+                guard let self else { throw MatrixSecurityFailure.sessionUnavailable }
+                try self.requireSecurityCurrent()
+            },
+            load: { [weak self] in
+                guard let self else { throw MatrixSecurityFailure.sessionUnavailable }
+                try self.requireSecurityCurrent()
+                return try await self.client.getSessionVerificationController()
+            }
+        )
+        verificationController = controller
+        return controller
+    }
+
+    func securitySnapshot() async throws -> MatrixSecuritySnapshot {
+        try requireSecurityCurrent()
+        let keyID = try await currentRecoveryStorageKeyID()
+        let receipt = try? MatrixRecoverySaveStore(ticket: ticket).read()
+        let encryption = client.encryption()
+        return MatrixSecuritySnapshot(
+            sessionVerified: encryption.verificationState() == .verified,
+            recoveryEnabled: encryption.recoveryState() == .enabled,
+            backupEnabled: encryption.backupState() == .enabled,
+            recoveryKeyConfirmed: keyID != nil && receipt?.storageKeyID == keyID && receipt?.pendingKey == nil,
+            pendingSaveID: receipt?.pendingKey != nil ? receipt?.id : nil
+        )
+    }
+
+    /// Explicit Security setup for an already cross-signed phone. The pinned
+    /// FFI has no non-destructive cross-signing bootstrap on a live client.
+    /// Its resetIdentity first deletes recovery, before any authentication.
+    func setupRecovery() async throws -> UUID {
+        try beginRecoveryOperation()
+        defer { recoveryOperationInFlight = false }
+        let store = MatrixRecoverySaveStore(ticket: ticket)
+        if let pending = try store.read(), pending.pendingKey != nil { return pending.id }
+        let encryption = client.encryption()
+        await encryption.waitForE2eeInitializationTasks()
+        try requireSecurityCurrent()
+        if encryption.verificationState() != .verified {
+            do {
+                let existing = try await encryption.userIdentity(
+                    userId: ticket.session.userID, fallbackToServer: true
+                )
+                try requireSecurityCurrent()
+                throw existing == nil
+                    ? MatrixSecurityFailure.crossSigningBootstrapUnavailable
+                    : MatrixSecurityFailure.verificationRequired
+            } catch let error as MatrixSecurityFailure {
+                throw error
+            } catch {
+                throw MatrixSecurityFailure.recoveryNotReady
+            }
+        }
+        guard encryption.recoveryState() == .disabled else {
+            throw encryption.recoveryState() == .unknown
+                ? MatrixSecurityFailure.recoveryNotReady : MatrixSecurityFailure.existingRecovery
+        }
+        do {
+            guard try await !encryption.backupExistsOnServer() else {
+                throw MatrixSecurityFailure.existingRecovery
+            }
+            try requireSecurityCurrent()
+            guard encryption.recoveryState() == .disabled,
+                  encryption.verificationState() == .verified else {
+                throw MatrixSecurityFailure.recoveryNotReady
+            }
+            let progress = MatrixRecoverySetupProgress()
+            let key: String
+            do {
+                key = try await encryption.enableRecovery(
+                    waitForBackupsToUpload: false, passphrase: nil, progressListener: progress
+                )
+            } catch {
+                // Rust can emit the key before its final readiness refresh
+                // fails. Preserve the key if the callback already arrived.
+                guard let generated = progress.keyAfterPartialSetup() else { throw error }
+                key = generated
+            }
+            try requireSecurityCurrent()
+            let id = UUID()
+            try store.write(id: id, storageKeyID: nil, pendingKey: key)
+            return id
+        } catch let error as MatrixSecurityFailure {
+            throw error
+        } catch {
+            throw MatrixSecurityFailure.recoveryNotReady
+        }
+    }
+
+    /// The caller uses the secret only for this explicit presentation or
+    /// local-only Copy action. It does not belong in observable model state.
+    func withRecoveryKey<T>(_ id: UUID, use: (String) throws -> T) throws -> T {
+        try requireSecurityCurrent()
+        return try use(pendingRecoveryKey(id))
+    }
+
+    /// A platform save completion or the user's explicit fallback confirmation
+    /// permits the key custody receipt. A Copy tap alone does not.
+    func saveRecoveryKey(
+        _ id: UUID, using save: @MainActor (String) async throws -> Void
+    ) async throws {
+        try beginRecoveryOperation()
+        defer { recoveryOperationInFlight = false }
+        let key = try pendingRecoveryKey(id)
+        let keyID = try await validatePendingRecoveryKey(key)
+        try requireSecurityCurrent()
+        do { try await save(key) }
+        catch is CancellationError { throw MatrixSecurityFailure.saveCancelled }
+        catch { throw MatrixSecurityFailure.platformSaveUnavailable }
+        try await recordRecoveryKeyConfirmation(id: id, keyID: keyID)
+    }
+
+    func confirmRecoveryKeySaved(_ id: UUID) async throws {
+        try await saveRecoveryKey(id) { _ in }
+    }
+
+    /// UI projections are advisory. The actual private create path rechecks
+    /// the SDK state and exact key custody receipt at the mutation boundary.
+    func requirePrivateChatReadiness() async throws {
+        let state = try await securitySnapshot()
+        guard state.canCreatePrivateChat, !recoveryOperationInFlight else {
+            throw MatrixSecurityFailure.recoveryNotReady
+        }
+    }
+
+    private func beginRecoveryOperation() throws {
+        try requireSecurityCurrent()
+        guard !recoveryOperationInFlight else { throw MatrixSecurityFailure.busy }
+        recoveryOperationInFlight = true
+    }
+
+    private func requireSecurityCurrent() throws {
+        guard !securityPaused, !oldHistoryUnavailable, !Task.isCancelled else {
+            throw MatrixSecurityFailure.sessionUnavailable
+        }
+        do { try requireCurrent() }
+        catch { throw MatrixSecurityFailure.sessionUnavailable }
+    }
+
+    private func currentRecoveryStorageKeyID() async throws -> String? {
+        try requireSecurityCurrent()
+        let data: String?
+        do { data = try await client.accountData(eventType: "m.secret_storage.default_key") }
+        catch { throw MatrixSecurityFailure.recoveryNotReady }
+        try requireSecurityCurrent()
+        return MatrixRecoverySaveStore.defaultKeyID(in: data)
+    }
+
+    private func pendingRecoveryKey(_ id: UUID) throws -> String {
+        let record = try MatrixRecoverySaveStore(ticket: ticket).read()
+        guard record?.id == id, let key = record?.pendingKey else {
+            throw MatrixSecurityFailure.recoveryKeyUnavailable
+        }
+        return key
+    }
+
+    private func validatePendingRecoveryKey(_ key: String) async throws -> String {
+        let encryption = client.encryption()
+        do {
+            guard let keyID = try await currentRecoveryStorageKeyID() else {
+                throw MatrixSecurityFailure.recoveryNotReady
+            }
+            // The awaited native setup return and sync echo can race with a
+            // desktop key change. Let the SDK check the exact key before use.
+            try await encryption.recover(recoveryKey: key)
+            try requireSecurityCurrent()
+            try await encryption.waitForBackupUploadSteadyState(progressListener: nil)
+            try requireSecurityCurrent()
+            guard encryption.recoveryState() == .enabled,
+                  encryption.backupState() == .enabled else {
+                throw MatrixSecurityFailure.recoveryNotReady
+            }
+            return keyID
+        } catch let error as MatrixSecurityFailure {
+            throw error
+        } catch {
+            throw MatrixSecurityFailure.recoveryNotReady
+        }
+    }
+
+    private func recordRecoveryKeyConfirmation(id: UUID, keyID: String) async throws {
+        guard try await currentRecoveryStorageKeyID() == keyID,
+              client.encryption().recoveryState() == .enabled,
+              client.encryption().backupState() == .enabled else {
+            throw MatrixSecurityFailure.recoveryNotReady
+        }
+        let store = MatrixRecoverySaveStore(ticket: ticket)
+        guard try store.read()?.id == id else { throw MatrixSecurityFailure.recoveryKeyUnavailable }
+        try requireSecurityCurrent()
+        try store.write(id: id, storageKeyID: keyID, pendingKey: nil)
     }
 
     private func recoverAndPersist(
@@ -555,12 +772,12 @@ final class MatrixLiveRuntime {
         // Stock SDK: the SDK validates the key, keeps the backup key in its own
         // store and reports readiness. The phone-only key journal is a
         // candidate-lane feature and is not written here.
-        try requireCurrent()
+        try requireSecurityCurrent()
         try await client.encryption().recover(recoveryKey: value)
-        try requireCurrent()
+        try requireSecurityCurrent()
         var lastStockSnapshot: MatrixLiveRecoverySnapshot?
         for _ in 0..<MobileOwnerRecoveryTiming.readinessPollCount {
-            try Task.checkCancellation()
+            try requireSecurityCurrent()
             let snapshot = try await recoverySnapshot()
             lastStockSnapshot = snapshot
             if snapshot.recovery == .ready {
@@ -574,12 +791,12 @@ final class MatrixLiveRuntime {
         LiveFlowLog.recovery(.readiness, outcome: "timeout", code: lastStockSnapshot?.logCode)
         throw MatrixLiveRuntimeFailure.recoveryNotReady
         #else
-        try requireCurrent()
+        try requireSecurityCurrent()
         let recovered = try await client.encryption().recoverWithDetails(
             recoveryKey: value,
             expectedKeyId: nil
         )
-        try requireCurrent()
+        try requireSecurityCurrent()
         let input = try MatrixRecoveryInput(recoveryKey: recovered.recoveryKey,
                                             keyID: recovered.keyId,
                                             metadataJSON: recovered.metadataJson)
@@ -598,7 +815,7 @@ final class MatrixLiveRuntime {
         }
         var lastSnapshot: MatrixLiveRecoverySnapshot?
         for _ in 0..<MobileOwnerRecoveryTiming.readinessPollCount {
-            try Task.checkCancellation()
+            try requireSecurityCurrent()
             let snapshot = try await recoverySnapshot()
             lastSnapshot = snapshot
             if snapshot.recovery == .ready {

@@ -221,6 +221,8 @@ final class LiveMatrixSession {
     private var latestRoomPublication: UInt64 = 0
     private var requestedRoomPages = 1
     private var directCreations: [String: Task<String?, Never>] = [:]
+    private var privateDirectCreations: [NativeMatrixUser: Task<String, Error>] = [:]
+    private var privateGroupCreations: [UUID: PrivateGroupCreation] = [:]
     private var maximumMediaUploadSizeTask: Task<UInt64?, Never>?
     @ObservationIgnored private var personalChatClaimChecks = PersonalChatClaimChecks()
     private(set) var personalChatClaimRevision: UInt64 = 0
@@ -285,69 +287,90 @@ final class LiveMatrixSession {
     /// effort after creation and never used as membership authority.
     func createDirectRoom(inviting target: NativeMatrixUser) async -> String? {
         if let pending = directCreations[target.rawValue] { return await pending.value }
-        let task = Task { await self.reuseOrCreateDirectRoom(inviting: target) }
+        let task = Task { try? await self.reuseOrCreateDirectRoom(inviting: target) }
         directCreations[target.rawValue] = task
         // Retain the outcome for this session: an ambiguous create failure must
         // never become a second create when a picker is tapped again.
         return await task.value
     }
 
-    private func reuseOrCreateDirectRoom(inviting target: NativeMatrixUser) async -> String? {
-        do {
-            try runtime.requireCurrent()
-            // Read m.direct through the SDK before creating, including rooms not
-            // yet published by the paged room-list adapter. Only joined ordinary
-            // one-to-one rooms qualify; account data is never membership authority.
-            let raw: String?
-            if let anchor = rooms.first {
-                // The pinned SDK's authenticated global-account-data bridge is
-                // a one-shot read, so another device's classification need not
-                // wait for our next sync before a create decision.
-                raw = try await room(id: anchor.roomID).fetchGlobalAccountDataRaw(eventType: "m.direct")
-            } else {
-                guard hasCompletedInitialSync else { throw LiveMatrixAdapterFailure.unavailable }
-                raw = try await runtime.client.accountData(eventType: "m.direct")
-            }
-            try runtime.requireCurrent()
-            for roomID in try MobileDirectRoomPolicy.roomIDs(accountData: raw, userID: target.rawValue) {
-                guard let room = try runtime.client.getRoom(roomId: roomID) else {
-                    // Another device's DM can precede our local room sync.
-                    // Wait for it rather than create a duplicate.
-                    throw LiveMatrixAdapterFailure.unavailable
-                }
-                let info = try await room.roomInfo()
-                guard info.membership == .joined, !info.isSpace,
-                      info.activeMembersCount <= 2 else { continue }
-                // Unknown member state cannot justify a new DM.
-                let members = try await Self.cachedMembers(from: room, synchronize: true, includeInvited: true)
-                let create = try await room.stateEvents(eventType: .roomCreate)
-                guard MobileDirectRoomPolicy.canReuse(
-                    isJoined: info.membership == .joined, isSpace: info.isSpace,
-                    activeMemberCount: info.activeMembersCount, activeMemberIDs: members.map(\.userID),
-                    target: target.rawValue,
-                    hasCustomRoomType: create.contains { MobileRoomTypePolicy.roomType(createContentJSON: $0.contentJson) != nil }
-                ) else { continue }
-                try runtime.requireCurrent()
-                return roomID
-            }
-            if let existing = HomeAddFriendPolicy.existingRoomID(in: rooms, matrixUserID: target.rawValue) {
-                return existing
-            }
-            let roomID = try await runtime.client.createRoom(request: CreateRoomParameters(
-                name: nil,
-                isEncrypted: false,
-                isDirect: true,
-                visibility: .private,
-                preset: .privateChat,
-                invite: [target.rawValue],
-                historyVisibilityOverride: .shared
-            ))
-            try runtime.requireCurrent()
-            try? await rememberDirectRoom(roomID, for: target.rawValue)
-            return roomID
-        } catch {
-            return nil
+    /// An explicit Private selection can reuse a private DM with this person.
+    /// An existing plain DM remains a separate conversation.
+    func createPrivateDirectRoom(inviting lookup: AliasLookupResponse) async throws -> String {
+        let targets = try PrivatePeopleChat.people([lookup], ownUserID: runtime.ticket.session.userID)
+        guard let target = targets.first else { throw MatrixSecurityFailure.notHuman }
+        try await requirePrivateCreation()
+        let task: Task<String, Error>
+        let ownsAttempt = privateDirectCreations[target] == nil
+        if let existing = privateDirectCreations[target] {
+            task = existing
+        } else {
+            task = Task { try await self.reuseOrCreateDirectRoom(inviting: target, encrypted: true) }
+            privateDirectCreations[target] = task
         }
+        let roomID: String
+        do {
+            roomID = try await task.value
+        } catch let error as MatrixSecurityFailure {
+            // A guard refusal happened before dispatch. Only an ambiguous SDK
+            // result retains the task to prevent a duplicate create.
+            if ownsAttempt { privateDirectCreations[target] = nil }
+            throw error
+        } catch {
+            throw MatrixSecurityFailure.roomUnavailable
+        }
+        try await requirePrivateCreation()
+        return roomID
+    }
+
+    private func reuseOrCreateDirectRoom(inviting target: NativeMatrixUser,
+                                         encrypted: Bool = false) async throws -> String {
+        try runtime.requireCurrent()
+        // m.direct is a candidate index, never membership authority.
+        let raw: String?
+        if let anchor = rooms.first {
+            raw = try await room(id: anchor.roomID).fetchGlobalAccountDataRaw(eventType: "m.direct")
+        } else {
+            guard hasCompletedInitialSync else { throw LiveMatrixAdapterFailure.unavailable }
+            raw = try await runtime.client.accountData(eventType: "m.direct")
+        }
+        try runtime.requireCurrent()
+        for roomID in try MobileDirectRoomPolicy.roomIDs(accountData: raw, userID: target.rawValue) {
+            guard let room = try runtime.client.getRoom(roomId: roomID) else {
+                // A newly created DM can precede the local room sync.
+                throw LiveMatrixAdapterFailure.unavailable
+            }
+            let info = try await room.roomInfo()
+            guard info.membership == .joined, !info.isSpace,
+                  info.activeMembersCount <= 2 else { continue }
+            if encrypted {
+                // Unknown can't authorize reuse or a duplicate creation.
+                guard let isEncrypted = info.isEncrypted else { throw LiveMatrixAdapterFailure.unavailable }
+                guard isEncrypted else { continue }
+            }
+            let members = try await Self.cachedMembers(from: room, synchronize: true, includeInvited: true)
+            let create = try await room.stateEvents(eventType: .roomCreate)
+            guard MobileDirectRoomPolicy.canReuse(
+                isJoined: info.membership == .joined, isSpace: info.isSpace,
+                activeMemberCount: info.activeMembersCount, activeMemberIDs: members.map(\.userID),
+                target: target.rawValue,
+                hasCustomRoomType: create.contains { MobileRoomTypePolicy.roomType(createContentJSON: $0.contentJson) != nil }
+            ) else { continue }
+            try runtime.requireCurrent()
+            if encrypted { try await requirePrivateCreation() }
+            return roomID
+        }
+        if !encrypted, let existing = HomeAddFriendPolicy.existingRoomID(in: rooms, matrixUserID: target.rawValue) {
+            return existing
+        }
+        if encrypted { try await requirePrivateCreation() }
+        let roomID = try await runtime.client.createRoom(request: PrivatePeopleChat.parameters(
+            name: nil, isDirect: true, targets: [target], encrypted: encrypted
+        ))
+        try runtime.requireCurrent()
+        try? await rememberDirectRoom(roomID, for: target.rawValue)
+        if encrypted { try runtime.requireCurrent() }
+        return roomID
     }
 
     /// A chat with a catalog app bot in the desktop's recipe (`openAppBotDm`): an
@@ -514,19 +537,68 @@ final class LiveMatrixSession {
               Set(targets.map(\.rawValue)).count == targets.count else { return nil }
         do {
             try runtime.requireCurrent()
-            let roomID = try await runtime.client.createRoom(request: CreateRoomParameters(
-                name: name,
-                isEncrypted: false,
-                isDirect: false,
-                visibility: .private,
-                preset: .privateChat,
-                invite: targets.map(\.rawValue),
-                historyVisibilityOverride: .shared
+            let roomID = try await runtime.client.createRoom(request: PrivatePeopleChat.parameters(
+                name: name, isDirect: false, targets: targets
             ))
             try runtime.requireCurrent()
             return roomID
         } catch {
             return nil
+        }
+    }
+
+    private struct PrivateGroupCreation {
+        let name: String
+        let targets: Set<NativeMatrixUser>
+        let task: Task<String, Error>
+    }
+
+    /// Keep the same request ID when retrying a particular creation. Each
+    /// lookup must correspond to the selected participant's exact MXID.
+    /// A roster label or an unclassified invitee carries no creation authority.
+    func createPrivateGroup(name: String, inviting lookups: [AliasLookupResponse],
+                            requestID: UUID) async throws -> String {
+        guard !name.isEmpty, name.unicodeScalars.count <= 200,
+              lookups.count <= HomeGroupPolicy.maximumInvites else {
+            throw MatrixSecurityFailure.invalidParticipants
+        }
+        let targets = try PrivatePeopleChat.people(lookups, ownUserID: runtime.ticket.session.userID)
+        try await requirePrivateCreation()
+        let task: Task<String, Error>
+        let ownsAttempt = privateGroupCreations[requestID] == nil
+        if let existing = privateGroupCreations[requestID] {
+            guard existing.name == name, existing.targets == Set(targets) else {
+                throw MatrixSecurityFailure.invalidParticipants
+            }
+            task = existing.task
+        } else {
+            task = Task { [runtime] in
+                try await self.requirePrivateCreation()
+                return try await runtime.client.createRoom(request: PrivatePeopleChat.parameters(
+                    name: name, isDirect: false, targets: targets, encrypted: true
+                ))
+            }
+            privateGroupCreations[requestID] = PrivateGroupCreation(name: name, targets: Set(targets), task: task)
+        }
+        let roomID: String
+        do {
+            roomID = try await task.value
+        } catch let error as MatrixSecurityFailure {
+            if ownsAttempt { privateGroupCreations[requestID] = nil }
+            throw error
+        } catch {
+            throw MatrixSecurityFailure.roomUnavailable
+        }
+        try await requirePrivateCreation()
+        return roomID
+    }
+
+    private func requirePrivateCreation() async throws {
+        let epoch = sessionEpoch
+        guard isReady, hasCompletedInitialSync else { throw MatrixSecurityFailure.sessionUnavailable }
+        try await runtime.requirePrivateChatReadiness()
+        guard sessionEpoch == epoch, isReady, hasCompletedInitialSync, !Task.isCancelled else {
+            throw MatrixSecurityFailure.sessionUnavailable
         }
     }
 
@@ -540,6 +612,7 @@ final class LiveMatrixSession {
         let encoded = try JSONEncoder().encode(direct)
         guard encoded.count <= 262_144, let content = String(data: encoded, encoding: .utf8)
         else { throw LiveMatrixAdapterFailure.unavailable }
+        try runtime.requireCurrent()
         try await runtime.client.setAccountData(eventType: "m.direct", content: content)
         try runtime.requireCurrent()
     }
