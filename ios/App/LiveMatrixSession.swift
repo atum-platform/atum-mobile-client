@@ -345,8 +345,11 @@ final class LiveMatrixSession {
                   info.activeMembersCount <= 2 else { continue }
             if encrypted {
                 // Unknown can't authorize reuse or a duplicate creation.
-                guard let isEncrypted = Self.encrypted(info.encryptionState) else { throw LiveMatrixAdapterFailure.unavailable }
-                guard isEncrypted else { continue }
+                switch info.encryptionState {
+                case .encrypted: break
+                case .notEncrypted: continue
+                case .unknown: throw LiveMatrixAdapterFailure.unavailable
+                }
             }
             let members = try await Self.cachedMembers(from: room, synchronize: true, includeInvited: true)
             let create = try await room.stateEvents(eventType: .roomCreate)

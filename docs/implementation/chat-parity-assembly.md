@@ -17,3 +17,5 @@ Notification UI integration: 23 focused tests passed (12 menu state, 6 settings 
 Debug integration correction: the generic simulator build requested unsupported x86_64; the selected artifact contains arm64 device and simulator slices. The arm64 build then reached app compilation and found a private-DM reuse read using nonexistent RoomInfo.isEncrypted. It now uses the existing adapter for RoomInfo.encryptionState, retaining unknown-state refusal. SDK pin unchanged; arm64 Debug verification rerun required.
 
 The next Debug pass exposed notification/handles initializer argument order in live and scripted chat hosts; both call sites now match ChatInfoActions declaration order.
+
+The encryption-state conversion helper was nested in the roster reader, not LiveMatrixSession. The private-DM path now switches directly over encrypted/notEncrypted/unknown, preserving refusal on unknown. This corrects the preceding coordinator fix.
