@@ -375,8 +375,8 @@ struct ScriptedChatHost: View {
                                             UITestProbe.append("rename \(request.shared) \(title)", to: "panel.txt")
                                             return true
                                         }) : nil,
-                                handles: ScriptedHandles.lookup,
-                                notifications: scriptedNotifications.actions
+                                notifications: scriptedNotifications.actions,
+                                handles: ScriptedHandles.lookup
                             ),
                             appBot: scriptedAppBot,
                             appBotCatalog: scriptedAppBotCatalog,
