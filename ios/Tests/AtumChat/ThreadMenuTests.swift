@@ -20,6 +20,43 @@ final class ThreadMenuTests: XCTestCase {
             .contains(.replyInThread))
     }
 
+    func testPersonalRoomThreadAndPinScope() {
+        typealias Scope = MessageMenuRules.SharedChatActions
+        let group = Scope(kind: .group, isDirect: false, activeMemberCount: 3, isOrdinaryRoom: true)
+        XCTAssertTrue(group.offersThreads)
+        XCTAssertTrue(group.offersPins)
+        let invitedAssistant = F.text("answer", from: F.agent, "Reply here")
+        XCTAssertTrue(MessageMenuRules.items(for: invitedAssistant, in: .group, threads: group.offersThreads)
+            .contains(.replyInThread))
+
+        // Use the roster's direct distinction even for a two-person group
+        // or a former direct room that now has a third (invited) member.
+        XCTAssertEqual(Scope(kind: .person, isDirect: false, activeMemberCount: 2, isOrdinaryRoom: true), .peopleGroup)
+        XCTAssertEqual(Scope(kind: .group, isDirect: true, activeMemberCount: 3, isOrdinaryRoom: true), .peopleGroup)
+        let person = Scope(kind: .person, isDirect: true, activeMemberCount: 2, isOrdinaryRoom: true)
+        XCTAssertFalse(person.offersThreads)
+        XCTAssertTrue(person.offersPins)
+        for kind in [RoomKind.assistant, .appBot] {
+            XCTAssertEqual(Scope(kind: kind, isDirect: true, activeMemberCount: 2, isOrdinaryRoom: true), .unavailable)
+        }
+        XCTAssertEqual(Scope(kind: .person, isDirect: false, activeMemberCount: 1, isOrdinaryRoom: false), .unavailable)
+        XCTAssertEqual(Scope(kind: .person, isDirect: true, activeMemberCount: 2,
+                             isOrdinaryRoom: false, isTeamSpace: true), .teamSpace)
+    }
+
+    func testSharedPinsRequireEligibleRoomPowerAndSettledMessage() {
+        let reply = F.text("reply", from: F.agent, "Reply", threadRoot: "$root")
+        XCTAssertEqual(MessageMenuRules.pinEventID(for: reply, in: .peopleGroup, canChange: true), "$reply")
+        XCTAssertEqual(MessageMenuRules.pinEventID(for: F.mine("own", "Decision"), in: .peopleDM, canChange: true), "$own")
+        XCTAssertNil(MessageMenuRules.pinEventID(for: reply, in: .peopleGroup, canChange: false))
+        XCTAssertNil(MessageMenuRules.pinEventID(for: reply, in: .unavailable, canChange: true))
+        XCTAssertNil(MessageMenuRules.pinEventID(for: F.echo("local"), in: .peopleGroup, canChange: true))
+        XCTAssertTrue(MessageMenuRules.isPinEventID("$history:example.test"))
+        for invalid in ["$", "$contains a space", "$contains\na newline", "local"] {
+            XCTAssertFalse(MessageMenuRules.isPinEventID(invalid))
+        }
+    }
+
     func testReportOfAThreadReplyTargetsTheReplyEvent() {
         for sender in [F.friend, F.agent, F.bot] {
             let reply = F.text("reply", from: sender, "Trong chuỗi", replyTo: "$quoted", threadRoot: "$root")

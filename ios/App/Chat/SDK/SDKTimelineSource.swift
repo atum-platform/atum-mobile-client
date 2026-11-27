@@ -37,7 +37,7 @@ actor SDKTimelineSource: ChatTimelineSource {
         reportUtds: false
     )
 
-    /// TS-6b: one thread of a Team Space room, root first, then its replies.
+    /// One Matrix thread, root first, then its replies.
     /// The SDK sends from it in the thread (`m.thread` with the reply
     /// fallback) and reads it with a threaded receipt.
     static func threadConfiguration(rootEventID: String) -> TimelineConfiguration {
@@ -85,11 +85,25 @@ actor SDKTimelineSource: ChatTimelineSource {
     /// timeline's `echoAliases`.
     static func make(room: Room, mapperRoom: ItemMapperRoom, aliases: [String: String],
                      calendar: Calendar = .current, threadRootID: String? = nil) async throws -> SDKTimelineSource {
+        if let threadRootID {
+            return try await makeThread(room: room, mapperRoom: mapperRoom, aliases: aliases,
+                                        calendar: calendar, rootEventID: threadRootID)
+        }
+        let timeline = try await room.timelineWithConfiguration(configuration: configuration)
+        return SDKTimelineSource(roomID: mapperRoom.roomID, room: room, timeline: timeline,
+                                 mapper: ItemMapper(room: mapperRoom, aliases: aliases, calendar: calendar))
+    }
+
+    static func makeThread(room: Room, mapperRoom: ItemMapperRoom, aliases: [String: String],
+                           calendar: Calendar, rootEventID: String) async throws -> SDKTimelineSource {
+        guard CompanyThreadAttention.isRootID(rootEventID), room.membership() == .joined else {
+            throw RoomThreadsFailure.unavailable
+        }
         let timeline = try await room.timelineWithConfiguration(
-            configuration: threadRootID.map { threadConfiguration(rootEventID: $0) } ?? configuration)
+            configuration: threadConfiguration(rootEventID: rootEventID))
         return SDKTimelineSource(roomID: mapperRoom.roomID, room: room, timeline: timeline,
                                  mapper: ItemMapper(room: mapperRoom, aliases: aliases, calendar: calendar),
-                                 threadRootID: threadRootID)
+                                 threadRootID: rootEventID)
     }
 
     /// The room's encryption state for the mapper (rule 10).

@@ -5,8 +5,7 @@ import MatrixRustSDK
 
 // The Matrix reads behind wave 2's Team Space structure: the homeserver's
 // notification list (Activity), the account's Saved list, a channel's pinned
-// events and its create date, and one event's display summary. Each is a read;
-// nothing here writes Matrix state.
+// events and its create date, and one event's display summary.
 
 /// One message, as a Saved, Pinned or Activity row shows it.
 struct CompanyEventSummary: Equatable, Sendable {
@@ -19,6 +18,237 @@ struct CompanyEventSummary: Equatable, Sendable {
 }
 
 enum CompanySpaceMatrixFailure: Error { case invalid, refused }
+
+enum RoomPinFailure: Error, Equatable {
+    case unavailable, forbidden, invalidTarget, invalidState, limit, awaitingSync, failed
+}
+
+struct RoomPinSnapshot: Equatable, Sendable {
+    let eventIDs: [String]
+    let canChange: Bool
+    let awaitingSync: Bool
+}
+
+/// A room's shared pins. Each mutation applies a single intent to SDK state;
+/// it never submits the list rendered by the caller.
+@MainActor
+final class RoomPins {
+    static let maximum = 100
+
+    private enum WritePhase {
+        case sending
+        case awaitingSync(previousEventID: String?)
+    }
+
+    private struct Write {
+        weak var session: LiveMatrixSession?
+        let phase: WritePhase
+    }
+
+    private struct WriteKey: Hashable {
+        let session: ObjectIdentifier
+        let roomID: String
+    }
+
+    private static var writes = [WriteKey: Write]()
+    private let roomID: String
+    private let session: LiveMatrixSession
+    private let room: Room
+    private let isEligible: @MainActor () -> Bool
+
+    init(roomID: String, session: LiveMatrixSession, room: Room, isEligible: @escaping @MainActor () -> Bool) {
+        self.roomID = roomID
+        self.session = session
+        self.room = room
+        self.isEligible = isEligible
+    }
+
+    /// Re-read `snapshot()` after a signal. A power-level change, pin sync
+    /// or membership change can change what the current account may do.
+    func updates() -> AsyncStream<Void> {
+        let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        guard isCurrent else {
+            continuation.finish()
+            return stream
+        }
+        let handle = room.subscribeToRoomInfoUpdates(listener: RoomPinUpdateListener(continuation))
+        continuation.onTermination = { _ in handle.cancel() }
+        return stream
+    }
+
+    func snapshot() async throws -> RoomPinSnapshot {
+        guard isCurrent else { throw RoomPinFailure.unavailable }
+        let canChange = await mayChange()
+        let state = try await pinnedState()
+        guard isCurrent else { throw RoomPinFailure.unavailable }
+        return RoomPinSnapshot(eventIDs: state.ids, canChange: canChange,
+                               awaitingSync: writeIsPending(syncedEventID: state.eventID))
+    }
+
+    /// Use pinned-events focus to hydrate the current IDs. Keep the state
+    /// order and unavailable entries, while omitting SDK-known redactions.
+    func entries(for snapshot: RoomPinSnapshot) async throws -> [CompanyPinnedRow] {
+        guard isCurrent else { throw RoomPinFailure.unavailable }
+        guard !snapshot.eventIDs.isEmpty else { return [] }
+        let configuration = TimelineConfiguration(focus: .pinnedEvents, filter: .all, internalIdPrefix: nil,
+                                                  dateDividerMode: .daily, trackReadReceipts: .disabled,
+                                                  reportUtds: false)
+        let timeline = try await room.timelineWithConfiguration(configuration: configuration)
+        let (updates, continuation) = AsyncStream<[TimelineItem]>.makeStream()
+        let handle = await timeline.addListener(listener: RoomPinnedTimelineSnapshot(continuation))
+        defer { handle.cancel() }
+        let encryption = await SDKTimelineSource.encryption(of: room)
+        guard let items = await updates.first(where: { _ in true }), isCurrent else {
+            throw RoomPinFailure.unavailable
+        }
+        var shown = [String: CompanyPinnedRow]()
+        var redacted = Set<String>()
+        for item in items {
+            guard let event = item.asEvent(), case let .eventId(eventID) = event.eventOrTransactionId,
+                  case let .msgLike(content) = event.content else { continue }
+            if case .redacted = content.kind { redacted.insert(eventID) }
+            guard case let .message(message) = content.kind else { continue }
+            // Respect the app's existing plaintext-in-encrypted-room rule.
+            let clear: Bool
+            if encryption != false, case .red(code: .sentInClear) = event.lazyProvider.getShields(strict: false) {
+                clear = true
+            } else {
+                clear = false
+            }
+            guard MobilePlaintextEventPolicy.shows(roomEncrypted: encryption, sentInClear: clear) else { continue }
+            let name = MatrixPersonName.name(ChatItem.senderName(event.senderProfile), userID: event.sender)
+            let summary = CompanyEventSummary(senderID: event.sender, senderName: name, body: message.body,
+                                              sentAt: Int64(clamping: event.timestamp), threadRootID: content.threadRoot)
+            shown[eventID] = CompanyPinnedRow(eventID: eventID, summary: summary, isOwn: event.isOwn)
+        }
+        return snapshot.eventIDs.filter { !redacted.contains($0) }.map {
+            shown[$0] ?? CompanyPinnedRow(eventID: $0, summary: nil, isOwn: false)
+        }
+    }
+
+    /// An authorized no-op succeeds. A second tap before the first edit
+    /// reaches sync is recoverable, so it cannot write a stale whole list.
+    func setPinned(_ pinned: Bool, eventID: String) async throws {
+        guard isCurrent else { throw RoomPinFailure.unavailable }
+        guard MessageMenuRules.isPinEventID(eventID) else { throw RoomPinFailure.invalidTarget }
+        guard await mayChange() else { throw RoomPinFailure.forbidden }
+        let event: TimelineEvent
+        do {
+            event = try await room.loadOrFetchEvent(eventId: eventID)
+        } catch ClientError.MatrixApi(kind: .notFound, code: _, msg: _, details: _) {
+            throw RoomPinFailure.invalidTarget
+        } catch {
+            throw isCurrent ? RoomPinFailure.failed : .unavailable
+        }
+        guard event.eventId() == eventID, case .messageLike(.roomMessage)? = try? event.content() else {
+            throw RoomPinFailure.invalidTarget
+        }
+        guard let timeline = try? await room.timeline() else {
+            throw isCurrent ? RoomPinFailure.failed : .unavailable
+        }
+        let canChange = await mayChange()
+        let state = try await pinnedState()
+        guard let info = try? await room.roomInfo(), isCurrent else { throw RoomPinFailure.unavailable }
+        guard canChange else { throw RoomPinFailure.forbidden }
+        // Native mutation reads RoomInfo. A sync can publish cached state
+        // and room info across our awaits, so retry once they agree.
+        guard info.pinnedEventIds == state.ids else { throw RoomPinFailure.awaitingSync }
+        guard !writeIsPending(syncedEventID: state.eventID) else { throw RoomPinFailure.awaitingSync }
+        guard state.ids.contains(eventID) != pinned else { return }
+        guard !pinned || state.ids.count < Self.maximum else { throw RoomPinFailure.limit }
+
+        Self.writes = Self.writes.filter { $0.value.session != nil }
+        Self.writes[writeKey] = Write(session: session, phase: .sending)
+        var sent = false
+        defer {
+            Self.writes[writeKey] = sent
+                ? Write(session: session, phase: .awaitingSync(previousEventID: state.eventID))
+                : nil
+        }
+        do {
+            sent = if pinned {
+                try await timeline.pinEvent(eventId: eventID)
+            } else {
+                try await timeline.unpinEvent(eventId: eventID)
+            }
+        } catch ClientError.MatrixApi(kind: .forbidden, code: _, msg: _, details: _) {
+            throw RoomPinFailure.forbidden
+        } catch {
+            guard isCurrent else { throw RoomPinFailure.unavailable }
+            throw RoomPinFailure.failed
+        }
+        guard isCurrent else { throw RoomPinFailure.unavailable }
+    }
+
+    private var writeKey: WriteKey { WriteKey(session: ObjectIdentifier(session), roomID: roomID) }
+
+    private var isCurrent: Bool {
+        !Task.isCancelled && isEligible() && room.membership() == .joined
+            && (try? session.runtime.requireCurrent()) != nil
+    }
+
+    private func mayChange() async -> Bool {
+        guard isCurrent, let levels = try? await room.getPowerLevels() else { return false }
+        return isCurrent && (try? levels.canUserSendState(userId: room.ownUserId(), stateEvent: .roomPinnedEvents)) == true
+    }
+
+    private func pinnedState() async throws -> (ids: [String], eventID: String?) {
+        guard let events = try? await room.stateEvents(eventType: .roomPinnedEvents) else {
+            throw RoomPinFailure.unavailable
+        }
+        guard let event = events.first(where: { $0.stateKey.isEmpty }) else { return ([], nil) }
+        guard let content = (try? JSONSerialization.jsonObject(with: Data(event.contentJson.utf8))) as? [String: Any]
+        else { throw RoomPinFailure.invalidState }
+        guard let value = content["pinned"] else { return ([], event.eventId) }
+        guard let ids = value as? [String], ids.count <= Self.maximum,
+              Set(ids).count == ids.count, ids.allSatisfy(MessageMenuRules.isPinEventID) else {
+            throw RoomPinFailure.invalidState
+        }
+        return (ids, event.eventId)
+    }
+
+    private func writeIsPending(syncedEventID: String?) -> Bool {
+        guard let entry = Self.writes[writeKey], entry.session === session else { return false }
+        switch entry.phase {
+        case .sending: return true
+        case let .awaitingSync(previousEventID):
+            guard syncedEventID != previousEventID else { return true }
+            Self.writes[writeKey] = nil
+            return false
+        }
+    }
+}
+
+private final class RoomPinUpdateListener: RoomInfoListener {
+    private let continuation: AsyncStream<Void>.Continuation
+
+    init(_ continuation: AsyncStream<Void>.Continuation) { self.continuation = continuation }
+
+    func call(roomInfo: RoomInfo) { continuation.yield(()) }
+}
+
+private final class RoomPinnedTimelineSnapshot: TimelineListener {
+    private let continuation: AsyncStream<[TimelineItem]>.Continuation
+
+    init(_ continuation: AsyncStream<[TimelineItem]>.Continuation) { self.continuation = continuation }
+
+    func onUpdate(diff: [TimelineDiff]) {
+        guard case let .reset(items)? = diff.first else { return }
+        continuation.yield(items)
+        continuation.finish()
+    }
+}
+
+extension LiveAppModel {
+    func openRoomPins(roomID: String) -> RoomPins? {
+        guard sharedChatActions(roomID: roomID).offersPins, let session = liveMatrix,
+              let room = try? session.room(id: roomID), room.membership() == .joined else { return nil }
+        return RoomPins(roomID: roomID, session: session, room: room) { [weak self, weak session] in
+            guard let self, let session else { return false }
+            return self.liveMatrix === session && self.sharedChatActions(roomID: roomID).offersPins
+        }
+    }
+}
 
 extension LiveMatrixSession {
     /// `GET /_matrix/client/v3/notifications`: the homeserver's own list of what

@@ -8,9 +8,7 @@ public enum MessageMenuItem: Equatable, Hashable, Sendable {
     case react
     /// "Trả lời" (B21).
     case reply
-    /// "Reply in thread": Team Space channels and conversations only, on a
-    /// message that is not itself in a thread (desktop `onThread`; nested
-    /// threads are never made).
+    /// "Reply in thread" on a root in a thread-enabled room.
     case replyInThread
     /// "Sao chép": the raw text, as sent.
     case copy
@@ -38,6 +36,26 @@ public struct ReactionChoice: Equatable, Hashable, Sendable {
 }
 
 public enum MessageMenuRules {
+    /// Availability for already-classified chats. The caller supplies the
+    /// roster's direct-chat distinction for ordinary personal rooms.
+    public enum SharedChatActions: Equatable, Sendable {
+        case unavailable, peopleDM, peopleGroup, teamSpace
+
+        public init(kind: RoomKind, isDirect: Bool, activeMemberCount: UInt64,
+                    isOrdinaryRoom: Bool, isTeamSpace: Bool = false) {
+            if isTeamSpace {
+                self = .teamSpace
+            } else if !isOrdinaryRoom || kind == .assistant || kind == .appBot || activeMemberCount == 0 {
+                self = .unavailable
+            } else {
+                self = isDirect && activeMemberCount <= 2 ? .peopleDM : .peopleGroup
+            }
+        }
+
+        public var offersThreads: Bool { self == .peopleGroup || self == .teamSpace }
+        public var offersPins: Bool { self != .unavailable }
+    }
+
     /// Desktop's `MATRIX_QUICK_REACTIONS` (atum-app
     /// `apps/desktop/src/matrix/message-actions.tsx`), in its order. Data,
     /// not copy.
@@ -91,6 +109,23 @@ public enum MessageMenuRules {
         guard item.threadRoot == nil, ChatItemRules.canReply(item),
               let eventID = item.eventID, eventID.hasPrefix("$") else { return nil }
         return eventID
+    }
+
+    /// A pin acts on a settled message event, including a thread reply.
+    /// A state snapshot and the current room powers determine the action.
+    public static func pinEventID(for item: ChatItem, in scope: SharedChatActions,
+                                  canChange: Bool) -> String? {
+        guard scope.offersPins, canChange, ChatItemRules.canReply(item),
+              let eventID = item.eventID, isPinEventID(eventID) else { return nil }
+        switch item.kind {
+        case .message, .notice, .image, .file: return eventID
+        default: return nil
+        }
+    }
+
+    public static func isPinEventID(_ value: String) -> Bool {
+        value.first == "$" && (2...512).contains(value.utf8.count)
+            && value.utf8.allSatisfy { (33...126).contains($0) }
     }
 
     /// A send tapped while no timeline was attached (a session renewal): it

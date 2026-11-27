@@ -3,10 +3,9 @@ import AtumNativeAPI
 import Foundation
 import MatrixRustSDK
 
-// TS-6b: the Matrix calls behind Team Space threads. The thread list is the
-// SDK's `ThreadListService` (the homeserver's `/threads`, one page per room),
-// the follow preference is the desktop's own room account data, and reading a
-// thread is a private threaded receipt, as `threads.ts` does on the desktop.
+// Matrix thread operations shared with Team Space. Atum follow preferences
+// are the desktop's room account data; server-side MSC4306 subscriptions
+// are a separate SDK capability.
 
 /// One server thread of a room, before the policy projects it.
 struct CompanyThreadRoot: Sendable {
@@ -16,6 +15,89 @@ struct CompanyThreadRoot: Sendable {
 }
 
 enum CompanyThreadsMatrixFailure: Error { case invalid, refused, limit }
+enum RoomThreadsFailure: Error { case unavailable, invalidTarget }
+
+/// A room-scoped native list. Keep one service for all pages of an open list.
+@MainActor
+final class RoomThreadList {
+    private let service: ThreadListService
+    private let session: LiveMatrixSession
+    private let room: Room
+    private let roomID: String
+    private let isEligible: @MainActor () -> Bool
+
+    init(room: Room, roomID: String, session: LiveMatrixSession, isEligible: @escaping @MainActor () -> Bool) {
+        self.room = room
+        self.roomID = roomID
+        self.session = session
+        self.isEligible = isEligible
+        service = room.threadListService()
+    }
+
+    var canPaginate: Bool {
+        guard isCurrent, service.items().count < CompanyThreads.roomMaximum else { return false }
+        guard case .idle(endReached: false) = service.paginationState() else { return false }
+        return true
+    }
+
+    func paginate() async throws {
+        guard isCurrent else { throw RoomThreadsFailure.unavailable }
+        guard canPaginate else { return }
+        try await service.paginate()
+        guard isCurrent else { throw RoomThreadsFailure.unavailable }
+    }
+
+    /// Signals when the SDK's root/reply summaries change. Cancelling the
+    /// consumer also drops its Rust listener.
+    func updates() -> AsyncStream<Void> {
+        let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        guard isCurrent else {
+            continuation.finish()
+            return stream
+        }
+        let handle = service.subscribeToItemsUpdates(listener: RoomThreadListListener(continuation))
+        continuation.onTermination = { _ in handle.cancel() }
+        return stream
+    }
+
+    /// Native root/count/latest data, without a second homeserver request.
+    func roots() -> [CompanyThreadRoot]? {
+        guard isCurrent else { return nil }
+        return Array(service.items().prefix(CompanyThreads.roomMaximum)).map {
+            LiveMatrixSession.threadRoot($0, ownUserID: room.ownUserId())
+        }
+    }
+
+    /// Atum list rows with attention and unread highlights. Use on list open
+    /// and refresh. Summary consumers can use `roots()` on each SDK update.
+    func threads() async -> [CompanyThread]? {
+        guard isCurrent else { return nil }
+        let own = room.ownUserId()
+        let activity: [CompanyActivityItem]
+        if let data = try? await session.companyNotificationsJSON() {
+            activity = CompanyActivityFeed.parse(notificationsJSON: data, ownUserID: own, roomIDs: [roomID]) ?? []
+        } else {
+            activity = []
+        }
+        let attention = await session.companyThreadAttention(roomID: roomID)
+        guard let roots = roots() else { return nil }
+        return CompanyThreads.project(roomID: roomID, roots: roots.map { ($0.root, $0.latest, $0.replyCount) },
+                                      attention: attention, activity: activity)
+    }
+
+    private var isCurrent: Bool {
+        !Task.isCancelled && isEligible() && room.membership() == .joined
+            && (try? session.runtime.requireCurrent()) != nil
+    }
+}
+
+private final class RoomThreadListListener: ThreadListEntriesListener {
+    private let continuation: AsyncStream<Void>.Continuation
+
+    init(_ continuation: AsyncStream<Void>.Continuation) { self.continuation = continuation }
+
+    func onUpdate(diff: [ThreadListUpdate]) { continuation.yield(()) }
+}
 
 extension LiveMatrixSession {
     /// The room's threads, newest first, from one page of the server's thread
@@ -29,11 +111,7 @@ extension LiveMatrixSession {
             return nil
         }
         guard (try? runtime.requireCurrent()) != nil else { return nil }
-        return service.items().map { item in
-            CompanyThreadRoot(root: Self.threadMessage(item.rootEvent, ownUserID: ownUserID),
-                              latest: item.latestEvent.map { Self.threadMessage($0, ownUserID: ownUserID) },
-                              replyCount: Int(item.numReplies))
-        }
+        return service.items().map { Self.threadRoot($0, ownUserID: ownUserID) }
     }
 
     /// The person's follow choices in a room (`io.atum.thread_attention.v1`):
@@ -66,11 +144,13 @@ extension LiveMatrixSession {
     /// Writes to one room run one at a time, each built on the record the
     /// previous one wrote (kept until sync says the same), so two quick taps
     /// on different threads can't overwrite each other.
-    func companySetThreadFollow(roomID: String, rootID: String, followed: Bool) async throws {
+    func companySetThreadFollow(roomID: String, rootID: String, followed: Bool,
+                                isEligible: @escaping @MainActor @Sendable () -> Bool = { true }) async throws {
         try runtime.requireCurrent()
         guard let key = companyThreadAttentionKey(roomID: roomID) else { throw CompanyThreadsMatrixFailure.invalid }
         try await CompanyThreadAttentionWrites.shared.serialized(key) { @MainActor in
             let current = await self.companyThreadAttention(roomID: roomID)
+            guard isEligible() else { throw RoomThreadsFailure.unavailable }
             guard let next = current.setting(rootID, followed: followed) else {
                 throw CompanyThreadsMatrixFailure.limit
             }
@@ -117,6 +197,12 @@ extension LiveMatrixSession {
         let room = try room(id: roomID)
         try await room.sendSingleReceipt(receiptType: .readPrivate, thread: .thread(threadRootEventId: rootID),
                                          eventId: latestEventID)
+    }
+
+    static func threadRoot(_ item: ThreadListItem, ownUserID: String) -> CompanyThreadRoot {
+        CompanyThreadRoot(root: threadMessage(item.rootEvent, ownUserID: ownUserID),
+                          latest: item.latestEvent.map { threadMessage($0, ownUserID: ownUserID) },
+                          replyCount: Int(item.numReplies))
     }
 
     private static func threadMessage(_ event: ThreadListItemEvent, ownUserID: String) -> CompanyThreadMessage {

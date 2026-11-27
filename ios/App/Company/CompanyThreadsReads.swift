@@ -159,29 +159,6 @@ extension LiveAppModel {
         return await liveMatrix.companyEventSummary(roomID: roomID, eventID: rootID) != nil
     }
 
-    /// A chat store on the thread's own timeline (root, then replies), whose
-    /// composer replies in the thread. The caller attaches and closes it.
-    func companyThreadStore(roomID: String, rootID: String, draft: String) -> LiveConversationStore? {
-        guard offersCompanyThreads(roomID: roomID), let liveMatrix,
-              let own = try? liveMatrix.companyOwnUserID(),
-              var info = conversationInfo(roomID: roomID, title: companyThreadPlace(roomID: roomID) ?? "",
-                                          ownUserID: own) else { return nil }
-        info.threadRootID = rootID
-        if case .channel = info.context.companyTurnScope {
-            info.context.companyTurnScope = .channel(threadRoot: rootID, binding: nil)
-        }
-        let store = LiveConversationStore(info: info, draft: draft, history: .onScroll)
-        store.onMessageSent = { LiveReporting.shared.messageSent() }
-        let roster = companyWorkspace.mentionRoster(roomID: roomID)
-        Task { @MainActor [weak store, weak liveMatrix] in
-            guard let liveMatrix, let members = await liveMatrix.members(roomID: roomID), let store else { return }
-            store.setMentionCandidates(MentionRules.candidates(
-                members: members.map { (userID: $0.userID, displayName: $0.displayName) },
-                roster: roster, ownUserID: own))
-        }
-        return store
-    }
-
     private static let concurrentRoomReads = 4
 
     private func threads(in roomIDs: Set<String>) async -> [CompanyThread]? {
