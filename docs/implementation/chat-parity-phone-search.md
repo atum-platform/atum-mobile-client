@@ -38,6 +38,16 @@ The index receives native cache updates and the Rust index applies redaction rem
 | S2 [iOS SearchServiceProxy.swift](https://github.com/element-hq/element-x-ios/blob/183bbc7f0419bf76ae46d52f448c44eb14fe1069/ElementX/Sources/Services/Search/SearchServiceProxy.swift), [iOS SearchScreenHistoryLimitSheet.swift](https://github.com/element-hq/element-x-ios/blob/183bbc7f0419bf76ae46d52f448c44eb14fe1069/ElementX/Sources/Screens/SearchScreen/View/SearchScreenHistoryLimitSheet.swift), [Android RustSearchBackfillService.kt](https://github.com/element-hq/element-x-android/blob/20ad9664790111e5558d4610f9fb05d6cc1efcc2/libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/search/RustSearchBackfillService.kt) | Search decrypted history this device can read and surface history limits. | Atum exposes a separate device scope and a bounded SDK backfill. The engine fixture holds an in-flight plain request, switches scope, then checks that the private canary reaches only the local closure. Local result tests cover filtering by room, redaction and ignore. Signed privacy and lifecycle capture remain pending. |
 | S16 iOS `RoomListFilterModels` at `183bbc7f0419bf76ae46d52f448c44eb14fe1069`, `RoomListFiltersPresenter.kt` in the [pinned Android Home feature](https://github.com/element-hq/element-x-android/tree/20ad9664790111e5558d4610f9fb05d6cc1efcc2/features/home) | Toggle a reversible unread or favourites filter. | Pure policy checks unread activity, mentions, manual unread, favourites, real rooms, availability and All fallback. Home retains existing assistant and people sections and owns scroll restoration. |
 
+## Local verification
+
+| Check | Result |
+| --- | --- |
+| `git diff --check` and the public outbound guard | Passed. |
+| `xcodegen generate` in a lane-local source copy | Passed. Both app sources and the SDK test were included in their target source lists. The coordinator will regenerate the tracked project after assembly. |
+| Locked `xcodebuild -resolvePackageDependencies` | Started with lane-local derived data and package paths, checked out the exact SDK revision, then stalled during the Textual checkout and was terminated. |
+| Locked `swift test --package-path ios -j 2 --filter 'GlobalChatSearchTests\|ChatSearchTests\|ChatRoomListFilterTests\|PersonalMessageSearchTests\|CompanyMessageSearchTests\|CompanySearchServiceTests'` | Queued with a lane-local scratch path. Cancelled with the shared build lock still busy and 124 MiB free on the internal volume. |
+| Locked Debug `xcodebuild test` for `AtumMobileTests/LocalSearchSDKTests` | Queued with lane-local derived data and package paths, then cancelled with 139 MiB free on the internal volume. App compilation, SDK linkage and execution, and the synthetic SDK projection tests remain pending. |
+
 ## Coordinator acceptance
 
 - S1. Search the same assistant DM, people group and company-channel corpus from both clients. Verify actual Synapse filter support, equal result IDs, the company label, group leave, and focused placement on a deep duplicate-body event. Test a thread reply after assembly.
