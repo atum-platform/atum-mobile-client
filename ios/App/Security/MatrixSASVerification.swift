@@ -156,6 +156,9 @@ final class MatrixSASVerification {
         timer = Task { [weak self] in
             do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
             guard let self, self.attempt == id else { return }
+            // This task owns the expiry. Clearing its handle prevents finish
+            // from cancelling the task that must send the native cancellation.
+            self.timer = nil
             await self.abort(.timedOut)
         }
         return id

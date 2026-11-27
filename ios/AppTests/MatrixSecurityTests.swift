@@ -42,6 +42,18 @@ final class MatrixSecurityTests: XCTestCase {
         controller.invalidate()
     }
 
+    func testCancelClearsDisplayedSASAndBlocksLateTap() async throws {
+        let native = NativeSAS()
+        let controller = makeController(native)
+        let id = await beginComparison(controller, native: native)
+        await controller.cancel(id)
+        await controller.compare(id, matches: true)
+        native.emit { $0.didFinish() }
+        XCTAssertEqual(controller.state, .finished(.cancelled))
+        XCTAssertEqual(native.actions, [.request, .start, .cancel])
+        controller.invalidate()
+    }
+
     func testIncomingOnlyAcceptsSameAccountAndWaitsForRequesterToStart() async throws {
         let native = NativeSAS()
         let controller = makeController(native)
@@ -73,7 +85,7 @@ final class MatrixSecurityTests: XCTestCase {
 
     func testSASDeadlineAndSessionChangeCannotApprove() async throws {
         let native = NativeSAS()
-        let timed = makeController(native, timeout: .milliseconds(70))
+        let timed = makeController(native, timeout: .milliseconds(300))
         await timed.request()
         guard case .requested(let id) = timed.state else { return XCTFail() }
         await waitFor { timed.state == .finished(.timedOut) && native.actions.contains(.cancel) }
@@ -210,7 +222,7 @@ final class MatrixSecurityTests: XCTestCase {
 
     private func makeController(_ native: NativeSAS, timeout: Duration = .seconds(30)) -> MatrixSASVerification {
         MatrixSASVerification(userID: "@me:example.org", deviceID: "PHONE", timeout: timeout,
-                              requireCurrent: {}, load: { native })
+                              requireCurrent: { try Task.checkCancellation() }, load: { native })
     }
 
     private func beginComparison(_ controller: MatrixSASVerification, native: NativeSAS) async -> UUID {
@@ -376,7 +388,9 @@ private final class SecurityFixtureHomeserver: @unchecked Sendable {
 
     private func reply(method: String, path: String, payload: [String: Any]) -> (String, [String: Any]) {
         let ok = "200 OK"
-        let notFound: (String, [String: Any]) = ("404 Not Found", ["errcode": "M_NOT_FOUND"])
+        let notFound: (String, [String: Any]) = ("404 Not Found", [
+            "errcode": "M_NOT_FOUND", "error": "Fixture resource does not exist"
+        ])
         if path.hasSuffix("/versions") {
             return (ok, ["versions": ["v1.17"], "unstable_features": [:]])
         }
