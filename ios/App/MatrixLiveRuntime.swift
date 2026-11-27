@@ -649,7 +649,8 @@ final class MatrixLiveRuntime {
         let sqlite = SqliteStoreBuilder(dataPath: paths.data.path,
                                         cachePath: paths.cache.path)
             .passphrase(passphrase: ticket.passphrase)
-        return try await ClientBuilder()
+        return try await MatrixLocalSearchStore.configure(ClientBuilder(), cacheDirectory: paths.cache,
+                                                          sessionSecret: ticket.passphrase)
             .homeserverUrl(url: ticket.session.homeserver)
             .disableWellKnownLookup(disableWellKnownLookup: true)
             .sqliteStore(config: sqlite)

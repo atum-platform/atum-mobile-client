@@ -1,5 +1,140 @@
 import Foundation
 
+public enum GlobalChatSearchScope: Equatable, Sendable {
+    case plain, deviceOnly
+}
+
+/// Search selection survives duplicate message bodies and unloaded history.
+/// A threaded hit opens the thread and focuses the reply ID, never the root ID.
+public struct ChatSearchEventTarget: Hashable, Sendable {
+    public let roomID: String
+    public let eventID: String
+    public let threadRootID: String?
+
+    public init(roomID: String, eventID: String, threadRootID: String? = nil) {
+        self.roomID = roomID
+        self.eventID = eventID
+        self.threadRootID = threadRootID
+    }
+}
+
+public struct GlobalChatSearchHit: Identifiable, Equatable, Sendable {
+    public let id: ChatSearchEventTarget
+    public let roomName: String?
+    public let senderID: String
+    public let senderName: String?
+    public let snippet: String
+    /// Milliseconds since 1970.
+    public let timestamp: Int64
+
+    public init(target: ChatSearchEventTarget, roomName: String?, senderID: String,
+                senderName: String? = nil, snippet: String, timestamp: Int64) {
+        id = target
+        self.roomName = roomName
+        self.senderID = senderID
+        self.senderName = senderName
+        self.snippet = snippet
+        self.timestamp = timestamp
+    }
+}
+
+/// One Home search per signed-in session. Submit keystrokes with the input
+/// token bound to the field. Selecting a scope invalidates the old binding,
+/// clears the field and results, and cancels debounce and all source work.
+@MainActor
+public final class GlobalChatSearch<Plain, Device> {
+    public struct Input: Equatable, Sendable {
+        public let scope: GlobalChatSearchScope
+        fileprivate let id: UUID
+    }
+
+    public enum Result {
+        case idle, pending
+        case plain(Plain)
+        case device(Device)
+    }
+
+    public typealias IsCurrent = @MainActor () -> Bool
+    public typealias Search<Value> = @MainActor (String, IsCurrent) async -> Value
+
+    public private(set) var input = Input(scope: .plain, id: UUID())
+    public private(set) var query = ""
+    public private(set) var result: Result = .idle
+    /// Capture for selection, then recheck after any async validation.
+    public private(set) var generation = UUID()
+    public var onChange: (@MainActor () -> Void)?
+
+    private let debounce: Duration
+    private let plain: Search<Plain>
+    private let device: Search<Device>
+    private var searchTask: Task<Void, Never>?
+
+    /// Run all remote sources inside `plain` as structured children. The
+    /// device closure must only have access to the SDK's local search source.
+    public init(debounce: Duration = ChatHistorySearch.debounce,
+                plain: @escaping Search<Plain>, device: @escaping Search<Device>) {
+        self.debounce = debounce
+        self.plain = plain
+        self.device = device
+    }
+
+    deinit { searchTask?.cancel() }
+
+    /// Also reset on dismiss, account replacement or deletion of local data,
+    /// even when the chosen scope was already plain.
+    public func reset(to scope: GlobalChatSearchScope = .plain) {
+        cancel()
+        input = Input(scope: scope, id: UUID())
+        query = ""
+        result = .idle
+        onChange?()
+    }
+
+    public func submit(_ text: String, for input: Input) {
+        guard input == self.input, text != query else { return }
+        query = text
+        refresh()
+    }
+
+    /// Revalidate and rerun the active query when the roster or history
+    /// changes. The same query must never start in another scope.
+    public func refresh() {
+        cancel()
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (2...200).contains(term.unicodeScalars.count) else {
+            result = .idle
+            onChange?()
+            return
+        }
+        let generation = generation
+        let scope = input.scope
+        result = .pending
+        searchTask = Task { [weak self, debounce, plain, device] in
+            do { try await Task.sleep(for: debounce) } catch { return }
+            let isCurrent: IsCurrent = { [weak self] in
+                !Task.isCancelled && self?.generation == generation
+            }
+            guard isCurrent() else { return }
+            let next: Result
+            switch scope {
+            case .plain: next = .plain(await plain(term, isCurrent))
+            case .deviceOnly: next = .device(await device(term, isCurrent))
+            }
+            guard isCurrent(), let self else { return }
+            self.result = next
+            self.searchTask = nil
+            self.onChange?()
+        }
+        onChange?()
+    }
+
+    private func cancel() {
+        generation = UUID()
+        searchTask?.cancel()
+        searchTask = nil
+    }
+}
+
 // HC-6 (parity plan v2, lane 1 S6): search in the open chat, ported from
 // desktop `m/chat-search-matches.ts`, `m/history-search.ts` and
 // `m/history-message-text.ts`. Pure values only: the chat screen owns the
