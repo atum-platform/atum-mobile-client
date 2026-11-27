@@ -50,4 +50,10 @@ Two clients can start with the same pin state and write simultaneously. Matrix h
 
 ## Local verification
 
-`git diff --check`, Xcode project property-list validation and the design baseline check passed. The focused Swift test build, Debug simulator link and selected-binary loopback probe are using the shared build lock and separate lane-owned paths. The wire probe uses synthetic rooms and a local fixture with no external service calls.
+| Check | Result |
+| --- | --- |
+| `git diff --check`, `plutil -lint ios/AtumMobile.xcodeproj/project.pbxproj`, `python3 scripts/design_lint.py` | Passed |
+| `python3 scripts/public_guard.py --base f9231683f80bc378b79299a43ea14af713be548b --head HEAD` | Passed on the engine checkpoint |
+| `swift test --package-path ios --scratch-path <lane>/scratch-noindex -j 2 --disable-index-store --filter 'ThreadMenuTests\|CompanyThreadsPolicyTests'` | Tests did not execute. A compiler sample identified index-store file closure in the first build. The no-index run reached 265 of 408 build steps before it was stopped to clear the shared lock for assembly after sustained volume delays. |
+| Debug `xcodebuild`, generic iOS Simulator, `-jobs 2`, lane-owned derived and package paths | The build was withdrawn from the shared lock queue. App compilation and link are pending on the assembled source. |
+| Selected SDK binary loopback | The cached simulator framework's static Rust input matched the selected package artifact byte for byte. The probe compiled the SDK calls, linked the framework and launched in the simulator. The fixture logged `GET /_matrix/client/versions` before the runner exited 1. The runner's original error log printed a literal instead of the error. The retained probe source fixes that logging, and the thread and pin operations still need to run. No missing SDK capability was established. |
