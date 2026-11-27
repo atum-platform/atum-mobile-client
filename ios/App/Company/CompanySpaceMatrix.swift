@@ -98,7 +98,8 @@ final class RoomPins {
         let handle = await timeline.addListener(listener: RoomPinnedTimelineSnapshot(continuation))
         defer { handle.cancel() }
         let encryption = await SDKTimelineSource.encryption(of: room)
-        guard let items = await updates.first(where: { _ in true }), isCurrent else {
+        var iterator = updates.makeAsyncIterator()
+        guard let items = await iterator.next(), isCurrent else {
             throw RoomPinFailure.unavailable
         }
         var shown = [String: CompanyPinnedRow]()

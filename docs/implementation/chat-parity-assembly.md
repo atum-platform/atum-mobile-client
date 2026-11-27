@@ -19,3 +19,5 @@ Debug integration correction: the generic simulator build requested unsupported 
 The next Debug pass exposed notification/handles initializer argument order in live and scripted chat hosts; both call sites now match ChatInfoActions declaration order.
 
 The encryption-state conversion helper was nested in the roster reader, not LiveMatrixSession. The private-DM path now switches directly over encrypted/notEncrypted/unknown, preserving refusal on unknown. This corrects the preceding coordinator fix.
+
+Debug integration: the main-actor pin reader now receives the first SDK timeline update directly through its AsyncStream iterator. This avoids passing a main-actor predicate to the concurrent first(where:) API under Swift 6, without weakening isolation or changing snapshot semantics.
