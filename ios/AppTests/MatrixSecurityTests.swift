@@ -260,7 +260,7 @@ final class MatrixSecurityTests: XCTestCase {
     }
 
     private static func lookup(kind: String, user: String) throws -> AliasLookupResponse {
-        try JSONDecoder().decode(AliasLookupResponse.self, from: JSONSerialization.data(withJSONObject: [
+        try NativeAPI.decode(AliasLookupResponse.self, from: JSONSerialization.data(withJSONObject: [
             "state": "assigned", "handle": "person", "principal": "00000000-0000-4000-8000-175097128f22",
             "kind": kind, "generation": 1, "matrixUser": user
         ]))
