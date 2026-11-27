@@ -23,3 +23,5 @@ The encryption-state conversion helper was nested in the roster reader, not Live
 Debug integration: the main-actor pin reader now receives the first SDK timeline update directly through its AsyncStream iterator. This avoids passing a main-actor predicate to the concurrent first(where:) API under Swift 6, without weakening isolation or changing snapshot semantics.
 
 The complete arm64 iOS Simulator Debug build succeeded at f90e4ed with the selected Rust artifact unchanged. This verifies compiled app adapters and notification UI linking. It does not establish runtime SDK behavior or installed acceptance. Focused LocalSearchSDKTests and MatrixSecurityTests are now queued on one existing simulator under the same lock, with automatic shutdown on exit.
+
+Focused app SDK tests compiled but failed linking because AtumMobileTests imported MatrixRustSDK without declaring a direct package dependency. Added that dependency in project.yml and regenerated the project. No runtime test executed in the first attempt; rerun uses a fresh result bundle.

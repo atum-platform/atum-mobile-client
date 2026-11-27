@@ -249,6 +249,7 @@
 		C475E35DE3168E0E18519B28 /* LiveStoreCommerce.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAD038C5408C865A1BFF776 /* LiveStoreCommerce.swift */; };
 		C59B2B077ECF4F2716150E91 /* ProviderMarks-NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 07EC06E748A415CB40DBEF79 /* ProviderMarks-NOTICE.txt */; };
 		C624A555C15919EC6D743448 /* TeamSpaceRevampUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2EB46030896B302B6EA7076 /* TeamSpaceRevampUITests.swift */; };
+		C8198B5B91ADB3927BF67238 /* MatrixRustSDK in Frameworks */ = {isa = PBXBuildFile; productRef = E3B0EAAA9BA9934FF20CFDA9 /* MatrixRustSDK */; };
 		C847245926D94DEA1A6AD528 /* MatrixRustSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 6609D85B0A2DBD948F46EBE5 /* MatrixRustSDK */; };
 		C8D3197CAA8F1DBADEB85732 /* ComposerAndMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40C0D2BB2D7B3A0383AB5D8 /* ComposerAndMenuUITests.swift */; };
 		C9488A36C07EAEE3289AECD8 /* ChatGPTTrainingGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947C5973B20CB4DD59F6C2FF /* ChatGPTTrainingGateTests.swift */; };
@@ -716,6 +717,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E8768073B70AADA21D4543F7 /* AtumChat in Frameworks */,
+				C8198B5B91ADB3927BF67238 /* MatrixRustSDK in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1383,6 +1385,7 @@
 			name = AtumMobileTests;
 			packageProductDependencies = (
 				0CFF1FDDA5302B1B9089C38D /* AtumChat */,
+				E3B0EAAA9BA9934FF20CFDA9 /* MatrixRustSDK */,
 			);
 			productName = AtumMobileTests;
 			productReference = B0C5457A5495F8263F9B4B28 /* AtumMobileTests.xctest */;
@@ -2395,6 +2398,11 @@
 		E3A146A2089669930C6F69E1 /* AtumNativeAPI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AtumNativeAPI;
+		};
+		E3B0EAAA9BA9934FF20CFDA9 /* MatrixRustSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 97704AB3428F663611A759AD /* XCRemoteSwiftPackageReference "atum-matrix-rust-components-swift" */;
+			productName = MatrixRustSDK;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

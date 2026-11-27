@@ -208,6 +208,7 @@ targets:
       - target: AtumMobile
       - package: AtumDesign
         product: AtumChat
+      - package: MatrixRustSDK
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.atum.mobile.tests
