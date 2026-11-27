@@ -21,3 +21,5 @@ The next Debug pass exposed notification/handles initializer argument order in l
 The encryption-state conversion helper was nested in the roster reader, not LiveMatrixSession. The private-DM path now switches directly over encrypted/notEncrypted/unknown, preserving refusal on unknown. This corrects the preceding coordinator fix.
 
 Debug integration: the main-actor pin reader now receives the first SDK timeline update directly through its AsyncStream iterator. This avoids passing a main-actor predicate to the concurrent first(where:) API under Swift 6, without weakening isolation or changing snapshot semantics.
+
+The complete arm64 iOS Simulator Debug build succeeded at f90e4ed with the selected Rust artifact unchanged. This verifies compiled app adapters and notification UI linking. It does not establish runtime SDK behavior or installed acceptance. Focused LocalSearchSDKTests and MatrixSecurityTests are now queued on one existing simulator under the same lock, with automatic shutdown on exit.
