@@ -68,7 +68,15 @@ actor MatrixNotificationFetcher {
                     decryptionDeadline: 5, encryptionSyncPollTimeout: 1, encryptionSyncNetworkTimeout: 3))
             let status = try await notifications.getNotification(roomId: roomID, eventId: eventID)
             try Task.checkCancellation()
-            let result = try Self.presentation(status, eventID: eventID, ownUserID: session.userId, copy: copy)
+            let result: RichPushPresentation.Result
+            if await Self.suppressesTeamNotification(
+                status, client: client, notifications: notifications,
+                roomID: roomID, eventID: eventID, ownUserID: session.userId
+            ) {
+                result = .suppress
+            } else {
+                result = try Self.presentation(status, eventID: eventID, ownUserID: session.userId, copy: copy)
+            }
             // The big image is best effort: any failure here keeps the rich text.
             let face = await Self.face(status, result: result, roomID: roomID, ownUserID: session.userId,
                                        store: try? NotificationSharedStore()) { uri, side in
@@ -83,6 +91,67 @@ actor MatrixNotificationFetcher {
             try? await client.pause()
             throw error
         }
+    }
+
+    /// Apply presentation preferences only to events the SDK notification
+    /// client admitted. All account data and event facts come from Matrix.
+    private static func suppressesTeamNotification(_ status: NotificationStatus, client: Client,
+                                                   notifications: NotificationClient,
+                                                   roomID: String, eventID: String, ownUserID: String) async -> Bool {
+        guard case let .event(item) = status, case let .timeline(event) = item.event,
+              event.eventId() == eventID else { return false }
+        let cachedRoom = try? client.getRoom(roomId: roomID)
+        guard let room = (try? notifications.getRoom(roomId: roomID)) ?? cachedRoom else { return false }
+        var create = (try? await room.stateEvents(eventType: .roomCreate))?.first { $0.stateKey.isEmpty }
+        if create == nil, let cachedRoom {
+            create = (try? await cachedRoom.stateEvents(eventType: .roomCreate))?.first { $0.stateKey.isEmpty }
+        }
+        guard TeamNotificationPolicy.applies(
+            toRoomType: MobileRoomTypePolicy.roomType(createContentJSON: create?.contentJson)
+        ) else { return false }
+
+        let raw: String?
+        do { raw = try await client.accountData(eventType: TeamNotificationPolicy.legacyType) }
+        catch { return false }
+        let legacy = raw.flatMap(TeamNotificationPolicy.Legacy.parse)
+        guard raw == nil || legacy != nil else { return false }
+
+        let rootID = event.threadRootEventId() ?? item.threadId
+        async let account = notificationRecord(.account, client: client)
+        async let hours = notificationRecord(.quietHours, client: client)
+        async let channel = notificationRecord(.channel(roomID), client: client)
+        async let thread = notificationRecord(rootID.map { .thread(roomID: roomID, rootID: $0) }, client: client)
+        let policy = await TeamNotificationPolicy(roomID: roomID, rootID: rootID, legacy: legacy,
+                                                  account: account, quietHours: hours, channel: channel, thread: thread)
+        var inherited = false
+        if policy.legacyChannel == .mentions || policy.legacyChannel == .nothing {
+            let settings = await client.getNotificationSettings()
+            do { inherited = try await settings.getUserDefinedRoomNotificationMode(roomId: roomID) == nil }
+            catch { /* A failed read carries no evidence of inheritance. */ }
+        }
+        let now = Date.now
+        if policy.suppressesAdmittedNotification(roomIsInherited: inherited, hasAttention: true, now: now) {
+            return true
+        }
+        guard policy.suppressesAdmittedNotification(roomIsInherited: inherited, hasAttention: false, now: now)
+        else { return false }
+
+        let mentions = TeamNotificationPolicy.intentionalMentions(eventJSON: item.rawEvent, ownUserID: ownUserID)
+        if mentions.direct { return false }
+        if mentions.room, let levels = try? await room.getPowerLevels(),
+           (try? levels.canUserTriggerRoomNotification(userId: event.senderId())) == true { return false }
+        // The extension can use the SDK's cached thread summary. It does not
+        // fetch thread history while the notification delivery deadline runs.
+        if let rootID,
+           let thread = cachedRoom?.threadListService().items().first(where: { $0.rootEvent.eventId == rootID }),
+           thread.rootEvent.sender == ownUserID || thread.latestEvent?.sender == ownUserID { return false }
+        return true
+    }
+
+    private static func notificationRecord(_ target: TeamNotificationPolicy.Target?, client: Client) async
+        -> TeamNotificationPolicy.Record? {
+        guard let target, let raw = try? await client.accountData(eventType: target.eventType) else { return nil }
+        return TeamNotificationPolicy.Record.parse(raw, for: target)
     }
 
     static func presentation(_ status: NotificationStatus, eventID: String, ownUserID: String,

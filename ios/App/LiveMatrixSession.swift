@@ -718,31 +718,12 @@ final class LiveMatrixSession {
         }
     }
 
-    /// Mute is an explicit room mode. Unmute asks the SDK to restore the
-    /// account's encrypted/direct default instead of guessing `allMessages`.
+    @ObservationIgnored var changingRoomNotificationModes = Set<String>()
+
+    /// The existing binary mute controls share the room notification command.
     func setMuted(roomID: String, isMuted: Bool) async -> Bool {
-        guard var row = rooms.first(where: { $0.roomID == roomID }) else { return false }
         do {
-            try runtime.requireCurrent()
-            let settings = await runtime.client.getNotificationSettings()
-            if isMuted {
-                try await settings.setRoomNotificationMode(roomId: roomID, mode: .mute)
-            } else {
-                // RoomInfo may transiently publish unknown encryption during a
-                // restart. Wait for the same live session to answer rather than
-                // restoring the wrong account default or flashing a rollback.
-                let deadline = ProcessInfo.processInfo.systemUptime + 3
-                while row.isEncrypted == nil, ProcessInfo.processInfo.systemUptime < deadline {
-                    try runtime.requireCurrent()
-                    try await Task.sleep(for: .milliseconds(250))
-                    guard let refreshed = rooms.first(where: { $0.roomID == roomID }) else { return false }
-                    row = refreshed
-                }
-                guard let isEncrypted = row.isEncrypted else { return false }
-                try await settings.unmuteRoom(roomId: roomID, isEncrypted: isEncrypted,
-                                              isOneToOne: row.isDirect && row.memberCount <= 2)
-            }
-            try runtime.requireCurrent()
+            try await setRoomNotificationChoice(roomID: roomID, choice: isMuted ? .set(.off) : .restoreDefault)
             return true
         } catch {
             return false
