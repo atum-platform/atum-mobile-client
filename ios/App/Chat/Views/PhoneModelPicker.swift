@@ -50,6 +50,8 @@ struct PhoneConversationModelPicker: View {
     /// The row a successful write made current. Nil clears the chip's
     /// cached pick so it follows the returned destination.
     var onPick: (PhoneModelPickerProjection.Row?) -> Void = { _ in }
+    /// A Work pick the server saved (W4-Y2): the chip names it at once.
+    var onWorkPick: (WorkModelSelection) -> Void = { _ in }
 
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destinationRead: PhoneModelPickerDestinationRead
@@ -79,6 +81,12 @@ struct PhoneConversationModelPicker: View {
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
     /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
     @State private var confirming: PendingChatGPTTraining?
+    /// W4-Y2: this picker's Work selection, made when it opens and retired
+    /// when it closes. Opening reads it; only a Work row's tap writes it.
+    @State private var work: PhoneModelPickerWorkSelection?
+    /// A cloud pick landed after the last Work read: the server cleared the
+    /// Work choice, so the cloud rows stop yielding before the reread lands.
+    @State private var cloudPickedSinceWorkRead = false
 
     private struct ConversationModelWrite: Hashable, Sendable {
         let model: String
@@ -101,7 +109,8 @@ struct PhoneConversationModelPicker: View {
          onSnapshot: @escaping (ManagedModelSnapshot) -> Void = { _ in },
          onDestination: @escaping (ManagedModelDestinationSnapshot) -> Void = { _ in },
          accountState: PhoneModelPickerAccount? = nil,
-         onPick: @escaping (PhoneModelPickerProjection.Row?) -> Void = { _ in }) {
+         onPick: @escaping (PhoneModelPickerProjection.Row?) -> Void = { _ in },
+         onWorkPick: @escaping (WorkModelSelection) -> Void = { _ in }) {
         self.design = design
         self.actions = actions
         self.destinations = destinations
@@ -110,6 +119,7 @@ struct PhoneConversationModelPicker: View {
         self.onSnapshot = onSnapshot
         self.onDestination = onDestination
         self.onPick = onPick
+        self.onWorkPick = onWorkPick
         _snapshot = State(initialValue: initialSnapshot)
         _destinationRead = State(initialValue: PhoneModelPickerDestinationRead(
             cached: initialDestination, canRead: destinations != nil
@@ -137,7 +147,27 @@ struct PhoneConversationModelPicker: View {
             destination, destination: cloudDestination, account: account,
             destinationReady: destinationReadState == .ready
         ).map { pickedAtumModel == nil ? $0 : $0.selecting(false) }
-        return atum + subscriptions
+        return PhoneModelPickerProjection.yieldingToWork(atum + subscriptions, answering: answeringWork)
+    }
+
+    /// The Work model that answers now, unless a cloud pick replaced it.
+    private var answeringWork: WorkModelSelection? {
+        cloudPickedSinceWorkRead ? nil : PhoneModelPickerProjection.answeringWork(work?.value)
+    }
+
+    private var workSaving: WorkModelSelection? {
+        if case let .saving(choice)? = work?.value?.saveState { return choice }
+        return nil
+    }
+
+    private var workSaveFailed: Bool {
+        if case .failed? = work?.value?.saveState { return true }
+        return false
+    }
+
+    private var workRows: PhoneModelPickerList.WorkRows? {
+        guard let work else { return nil }
+        return .init(rows: work.rows, saving: workSaving, select: chooseWork)
     }
 
     private func thinking(in rows: [PhoneModelPickerProjection.Row]) -> PhoneModelPickerProjection.Thinking? {
@@ -161,7 +191,7 @@ struct PhoneConversationModelPicker: View {
                                            isSelectionCurrent: { lifetime.isCurrent(confirming.selection) },
                                            onConfirmed: { confirmed(confirming, status: $0) },
                                            onKeep: { self.confirming = nil })
-            } else if !rows.isEmpty || !handoffs.isEmpty {
+            } else if !rows.isEmpty || !handoffs.isEmpty || work?.rows.isEmpty == false {
                 PhoneModelPickerList(
                     design: design,
                     matrixAccountID: actions?.matrixAccountID ?? destinations?.matrixAccountID ?? "",
@@ -169,7 +199,7 @@ struct PhoneConversationModelPicker: View {
                     rows: rows,
                     context: .conversation,
                     savingRowID: savingRowID,
-                    saveFailed: saveFailed,
+                    saveFailed: saveFailed || workSaveFailed,
                     thinking: thinking,
                     savingEffort: savingEffort,
                     selectEffort: { level in
@@ -183,6 +213,7 @@ struct PhoneConversationModelPicker: View {
                     destinationStatus: PhoneModelPickerStatus.destination(destinationReadState),
                     providerStatuses: PhoneModelPickerStatus.providers(account),
                     handoffs: handoffs,
+                    work: workRows,
                     // Every picker load refreshes the destination, offer and
                     // account sources together under one bounded budget.
                     retry: { _ in Task { await load() } },
@@ -214,10 +245,12 @@ struct PhoneConversationModelPicker: View {
         let budget = PhoneModelPickerRead()
         unavailable = false
         loadFailed = false
+        if work == nil { work = destinations?.makeWorkSelection?(accountState) }
         async let accountLoad: Void = loadAccount(within: budget)
+        async let workLoad: Void = loadWork(within: budget)
         async let offerRead = loadOffer(within: budget, isCurrent: { lifetime.isCurrentLoad(token) })
         async let defaultsRead = loadDestination(within: budget, token: token)
-        let (offer, defaults, _) = await (offerRead, defaultsRead, accountLoad)
+        let (offer, defaults, _, _) = await (offerRead, defaultsRead, accountLoad, workLoad)
         guard lifetime.isCurrentLoad(token) else { return }
         if case .value? = offer { return }
         if case .value? = defaults { return }
@@ -227,6 +260,36 @@ struct PhoneConversationModelPicker: View {
 
     private func loadAccount(within budget: PhoneModelPickerRead) async {
         if let read = destinations?.subscriptions?.read { await accountState.reload(read, within: budget) }
+    }
+
+    /// A read only: opening the picker never writes a Work or cloud choice.
+    private func loadWork(within budget: PhoneModelPickerRead = PhoneModelPickerRead()) async {
+        guard let work else { return }
+        await work.reload(within: budget)
+        if work.value?.readState == .ready { cloudPickedSinceWorkRead = false }
+    }
+
+    /// A Work row's tap: `work_selection_set` for that plan and model, and
+    /// nothing else. The cloud choice is left as it is.
+    private func chooseWork(_ choice: WorkModelSelection) {
+        guard let work, savingRowID == nil, savingEffort == nil, workSaving == nil,
+              let row = work.rows.first(where: { $0.id == choice }), row.selectable,
+              !(row.selected && !cloudPickedSinceWorkRead) else { return }
+        saveFailed = false
+        Task { @MainActor in
+            await work.save(choice)
+            guard work.value?.readySnapshot?.selection == choice else { return }
+            cloudPickedSinceWorkRead = false
+            pickedAtum = nil
+            onWorkPick(choice)
+        }
+    }
+
+    /// A cloud write the owner chose has landed. The server cleared the Work
+    /// choice with it; reread so Current follows the server, not this guess.
+    private func cloudPickLanded() {
+        cloudPickedSinceWorkRead = true
+        Task { @MainActor in await loadWork() }
     }
 
     private func loadOffer(within budget: PhoneModelPickerRead, isCurrent: @escaping @MainActor () -> Bool) async
@@ -259,6 +322,7 @@ struct PhoneConversationModelPicker: View {
     }
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
+        guard workSaving == nil else { return }
         if row.isSubscription { return chooseSubscription(row) }
         let model = row.model
         guard savingRowID == nil, savingEffort == nil, atumWritable, row.source == .atum,
@@ -277,7 +341,7 @@ struct PhoneConversationModelPicker: View {
     /// A thinking-level change writes the model that answers now with the new
     /// level: the same fenced save a model pick makes.
     private func chooseEffort(_ level: ManagedModelEffort, shownModel: String) {
-        guard savingRowID == nil, savingEffort == nil, atumWritable, let snapshot,
+        guard savingRowID == nil, savingEffort == nil, workSaving == nil, atumWritable, let snapshot,
               let thinking = thinking(in: rows), thinking.model == shownModel,
               thinking.canChange(to: level) else { return }
         savingEffort = level
@@ -300,6 +364,7 @@ struct PhoneConversationModelPicker: View {
                 apply(value)
                 reportAtumPick(value.choice.model)
                 writes.settled()
+                cloudPickLanded()
             case let .conflict(latest):
                 if let latest { apply(latest) }
                 saveFailed = true
@@ -331,6 +396,7 @@ struct PhoneConversationModelPicker: View {
                 applyDestination(value)
                 onPick(nil)
                 destinationWrites.settled()
+                cloudPickLanded()
                 // The initial offer may have been read before this write.
                 // Read again to recover thinking levels for the saved model.
                 _ = await loadOffer(within: PhoneModelPickerRead(), isCurrent: { lifetime.isCurrent(selection) })
@@ -391,6 +457,8 @@ struct PhoneConversationModelPicker: View {
     /// follow-up or a write after this.
     private func retire() {
         lifetime.retire()
+        work?.retire()
+        work = nil
         if destinationReadState == .loading { destinationRead.settle(.unavailable) }
         accountState.retire(keepingSettled: true)
         confirming = nil
@@ -426,6 +494,7 @@ struct PhoneConversationModelPicker: View {
                 applyDestination(value)
                 onPick(PhoneModelPickerProjection.settledDestinationPick(row, destination: value))
                 subscriptionWrites.settled()
+                cloudPickLanded()
             case .cancelled: break
             case let .consentRequired(status, latest):
                 // The consent changed under the write: nothing was retried.
@@ -510,6 +579,9 @@ struct PhoneModelDestinationsPicker: View {
     @State private var confirming: PendingChatGPTTraining?
     /// Selection lifetime (desktop `beginSelection`): closing retires every pending pick.
     @State private var lifetime = ModelPickerLifetime()
+    /// W4-Y2: the same Work selection as the composer's picker.
+    @State private var work: PhoneModelPickerWorkSelection?
+    @State private var cloudPickedSinceWorkRead = false
 
     private struct DestinationModelWrite: Hashable, Sendable {
         let destination: String
@@ -533,7 +605,7 @@ struct PhoneModelDestinationsPicker: View {
                                            isSelectionCurrent: { lifetime.isCurrent(confirming.selection) },
                                            onConfirmed: { confirmed(confirming, status: $0) },
                                            onKeep: { self.confirming = nil })
-            } else if !rows.isEmpty || !handoffs.isEmpty {
+            } else if !rows.isEmpty || !handoffs.isEmpty || work?.rows.isEmpty == false {
                 PhoneModelPickerList(
                     design: design,
                     matrixAccountID: actions.matrixAccountID,
@@ -541,7 +613,7 @@ struct PhoneModelDestinationsPicker: View {
                     rows: rows,
                     context: .cloudAssistant,
                     savingRowID: savingRowID,
-                    saveFailed: saveFailed,
+                    saveFailed: saveFailed || workSaveFailed,
                     planConnects: PhoneModelPickerList.planConnects(account),
                     makeConnectionsPoll: actions.subscriptions?.makeConnectionsPoll,
                     onConnectionsChanged: { registry in
@@ -550,6 +622,7 @@ struct PhoneModelDestinationsPicker: View {
                     destinationStatus: PhoneModelPickerStatus.destination(destinationReadState),
                     providerStatuses: PhoneModelPickerStatus.providers(account),
                     handoffs: handoffs,
+                    work: workRows,
                     retry: { _ in Task { await load() } },
                     select: choose
                 )
@@ -573,7 +646,9 @@ struct PhoneModelDestinationsPicker: View {
         destinationReadState = .loading
         offer = nil
         let budget = PhoneModelPickerRead()
+        if work == nil { work = actions.makeWorkSelection?(accountState) }
         async let accountLoad: Void = loadAccount(within: budget)
+        async let workLoad: Void = loadWork(within: budget)
         async let offerLoad: Void = loadOffer(within: budget, token: token)
         let result = await budget.scoped(isCurrent: actions.isCurrent) { await actions.read() }
         if lifetime.isCurrentLoad(token) {
@@ -585,7 +660,48 @@ struct PhoneModelDestinationsPicker: View {
                 snapshot = nil
             }
         }
-        _ = await (accountLoad, offerLoad)
+        _ = await (accountLoad, offerLoad, workLoad)
+    }
+
+    private func loadWork(within budget: PhoneModelPickerRead = PhoneModelPickerRead()) async {
+        guard let work else { return }
+        await work.reload(within: budget)
+        if work.value?.readState == .ready { cloudPickedSinceWorkRead = false }
+    }
+
+    private var answeringWork: WorkModelSelection? {
+        cloudPickedSinceWorkRead ? nil : PhoneModelPickerProjection.answeringWork(work?.value)
+    }
+
+    private var workSaving: WorkModelSelection? {
+        if case let .saving(choice)? = work?.value?.saveState { return choice }
+        return nil
+    }
+
+    private var workSaveFailed: Bool {
+        if case .failed? = work?.value?.saveState { return true }
+        return false
+    }
+
+    private var workRows: PhoneModelPickerList.WorkRows? {
+        guard let work else { return nil }
+        return .init(rows: work.rows, saving: workSaving, select: chooseWork)
+    }
+
+    private func chooseWork(_ choice: WorkModelSelection) {
+        guard let work, savingRowID == nil, workSaving == nil,
+              let row = work.rows.first(where: { $0.id == choice }), row.selectable,
+              !(row.selected && !cloudPickedSinceWorkRead) else { return }
+        saveFailed = false
+        Task { @MainActor in
+            await work.save(choice)
+            if work.value?.readySnapshot?.selection == choice { cloudPickedSinceWorkRead = false }
+        }
+    }
+
+    private func cloudPickLanded() {
+        cloudPickedSinceWorkRead = true
+        Task { @MainActor in await loadWork() }
     }
 
     private func loadOffer(within budget: PhoneModelPickerRead, token: ModelPickerLifetime.Token) async {
@@ -605,10 +721,10 @@ struct PhoneModelDestinationsPicker: View {
                                                    cloudEligibleAliases: cloudEligibleAliases,
                                                    destinationReady: destinationReadState == .ready)
         } ?? []
-        return atum + PhoneModelPickerProjection.subscriptions(
+        return PhoneModelPickerProjection.yieldingToWork(atum + PhoneModelPickerProjection.subscriptions(
             snapshot, destination: destination, account: account,
             destinationReady: destinationReadState == .ready
-        )
+        ), answering: answeringWork)
     }
 
     private var cloudEligibleAliases: Set<String> {
@@ -617,6 +733,7 @@ struct PhoneModelDestinationsPicker: View {
     }
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
+        guard workSaving == nil else { return }
         if row.isSubscription { return chooseSubscription(row) }
         guard savingRowID == nil, destinationReadState == .ready, let snapshot,
               PhoneModelPickerProjection.canSelectAtumModel(
@@ -638,6 +755,7 @@ struct PhoneModelDestinationsPicker: View {
                 self.snapshot = snapshot
                 saveFailed = false
                 writes.settled()
+                cloudPickLanded()
             case .cancelled: break
             case let .refused(latest), let .consentRequired(_, latest):
                 if let latest {
@@ -693,6 +811,8 @@ struct PhoneModelDestinationsPicker: View {
 
     private func retire() {
         lifetime.retire()
+        work?.retire()
+        work = nil
         if destinationReadState == .loading { destinationReadState = .unavailable }
         accountState.retire()
         confirming = nil
@@ -725,6 +845,7 @@ struct PhoneModelDestinationsPicker: View {
                 self.snapshot = snapshot
                 saveFailed = false
                 subscriptionWrites.settled()
+                cloudPickLanded()
             case .cancelled: break
             case let .consentRequired(status, latest):
                 // The consent changed under the write: nothing was retried.

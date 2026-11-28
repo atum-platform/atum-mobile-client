@@ -16,6 +16,16 @@ struct PhoneModelPickerList: View {
 
     typealias Row = PhoneModelPickerProjection.Row
 
+    /// W4-Y2: the assistant's Work models from connected plan catalogs, each
+    /// one a real pick (`work_selection_set`). Nil keeps the W4-X2 read-only
+    /// hand-off, for a host that cannot write a Work selection.
+    struct WorkRows {
+        let rows: [PhoneModelPickerProjection.WorkRow]
+        /// The pick in flight; its row shows progress instead of the check.
+        let saving: WorkModelSelection?
+        let select: (WorkModelSelection) -> Void
+    }
+
     let design: LiveDesign
     let matrixAccountID: String
     let destinationID: String
@@ -48,6 +58,7 @@ struct PhoneModelPickerList: View {
     /// Plans Work reports on a Mac: read-only models with a hand-off to the
     /// Mac, never a native consent the phone cannot host.
     let handoffs: [PhoneModelPickerProjection.WorkPlanHandoff]
+    let work: WorkRows?
     let retry: (PhoneModelPickerStatus.Source) -> Void
     let select: (Row) -> Void
 
@@ -85,11 +96,13 @@ struct PhoneModelPickerList: View {
          destinationStatus: PhoneModelPickerStatus? = nil,
          providerStatuses: [PhoneModelPickerStatus] = [],
          handoffs: [PhoneModelPickerProjection.WorkPlanHandoff] = [],
+         work: WorkRows? = nil,
          retry: @escaping (PhoneModelPickerStatus.Source) -> Void = { _ in },
          select: @escaping (Row) -> Void) {
         self.destinationStatus = destinationStatus
         self.providerStatuses = providerStatuses
         self.handoffs = handoffs
+        self.work = work
         self.retry = retry
         self.design = design
         self.matrixAccountID = matrixAccountID
@@ -140,10 +153,12 @@ struct PhoneModelPickerList: View {
                     ForEach(providerStatuses) { statusRow($0) }
                 }
             }
-            if !browsing {
+            if work != nil {
+                ForEach(shownWorkPlans, id: \.self) { workSection($0) }
+            } else if !browsing {
                 ForEach(shownHandoffs) { handoffSection($0) }
             }
-            if layout.isEmpty, shownHandoffs.isEmpty || browsing {
+            if layout.isEmpty, (work == nil ? (shownHandoffs.isEmpty || browsing) : shownWorkPlans.isEmpty) {
                 Section {
                     Text(verbatim: emptyCopy)
                         .foregroundStyle(atum.color(.soft, scheme: scheme))
@@ -440,6 +455,88 @@ struct PhoneModelPickerList: View {
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier(handoffID)
         }
+    }
+
+    // MARK: Work models (W4-Y2)
+
+    /// The Work rows drawn now. As for the hand-off, ChatGPT's Work models
+    /// are not listed beside a ChatGPT relay line still loading or failed,
+    /// unless one of them is the saved choice. A search or a filter keeps
+    /// the rows it matches, as it does for every other connection.
+    private var shownWorkRows: [PhoneModelPickerProjection.WorkRow] {
+        guard let work else { return [] }
+        let relayLine = providerStatuses.contains(where: { $0.source == .chatGPT })
+        return work.rows.filter { row in
+            if relayLine, row.id.plan == .codex, !row.selected { return false }
+            if filter.favoritesOnly || filter.connection != nil { return false }
+            guard !trimmedQuery.isEmpty else { return true }
+            let words = row.displayName + " " + copy.text(.planAccount, [.text(row.id.plan.productName)])
+            return words.range(of: trimmedQuery, options: [.caseInsensitive, .diacriticInsensitive],
+                               locale: Locale(identifier: design.locale)) != nil
+        }
+    }
+
+    /// Plans in the order their first Work row appears.
+    private var shownWorkPlans: [AccountPlan] {
+        var seen = Set<AccountPlan>()
+        return shownWorkRows.compactMap { seen.insert($0.id.plan).inserted ? $0.id.plan : nil }
+    }
+
+    /// One connected plan's Work models (desktop `relayRoutes`): the plan's
+    /// mark and "{Plan} plan" over its models, the saved one checked and
+    /// Current. A pick here writes the Work selection only; it never writes
+    /// a cloud choice. A row the catalog cannot offer now is drawn dimmed.
+    private func workSection(_ plan: AccountPlan) -> some View {
+        let planName = copy.text(.planAccount, [.text(plan.productName)])
+        return Section {
+            ForEach(shownWorkRows.filter { $0.id.plan == plan }) { row in
+                workRow(row)
+            }
+        } header: {
+            HStack(spacing: design.kit.space(.s3)) {
+                AccountPlanMark(design: design, plan: plan, size: 20)
+                Text(verbatim: planName)
+            }
+            .font(.body)
+            .foregroundStyle(atum.color(.muted, scheme: scheme))
+            .textCase(nil)
+            .frame(minHeight: design.kit.phoneControlHeight(.regular), alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("phone.model.work." + plan.pickerID)
+        }
+    }
+
+    private func workRow(_ row: PhoneModelPickerProjection.WorkRow) -> some View {
+        let saving = work?.saving == row.id
+        let busy = work?.saving != nil || savingRowID != nil
+        return Button {
+            guard row.selectable, !row.selected, !busy else { return }
+            work?.select(row.id)
+        } label: {
+            HStack(spacing: design.kit.space(.s3)) {
+                AccountPlanMark(design: design, plan: row.id.plan, size: 20)
+                HStack(alignment: .firstTextBaseline, spacing: 6) { // design-lint: allow: desktop #119 puts the check 6 pt after the name
+                    Text(verbatim: row.displayName)
+                        .foregroundStyle(atum.color(row.selectable || row.selected ? .ink : .soft, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if row.selected, !saving { check }
+                }
+                Spacer(minLength: design.kit.space(.s2))
+                if saving {
+                    ProgressView().controlSize(.small)
+                        .accessibilityLabel(copy.state(.saving))
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!row.selectable && !row.selected)
+        .frame(minHeight: 52)
+        .listRowBackground(rowBackground(selected: row.selected))
+        .accessibilityValue(saving ? copy.state(.saving) : row.selected ? copy.text(.current) : "")
+        .accessibilityAddTraits(row.selected ? .isSelected : [])
+        .accessibilityIdentifier("phone.model.work." + row.id.plan.pickerID + ".model." + row.id.model)
     }
 
     // MARK: Layout

@@ -105,6 +105,12 @@ struct AssistantCard: View {
     @State private var nameRefusal: String?
     @State private var conflict: AgentDefinitionSnapshot?
     @State private var modelSnapshot: ManagedModelSnapshot?
+    /// W4-Y2: what the Model row names, as the composer chip does (desktop
+    /// #143): the Work model that answers, else the cloud's saved choice.
+    /// These are reads only; opening the card writes nothing.
+    @State private var modelDestination: ManagedModelDestinationSnapshot?
+    @State private var modelWork: PhoneModelPickerWorkSelection?
+    @State private var modelAccount = PhoneModelPickerAccount()
     @State private var modelPresented = false
     @State private var destinationsPresented = false
     @State private var routinesPresented = false
@@ -300,12 +306,17 @@ struct AssistantCard: View {
             enqueue(old)
         }
         .onDisappear {
+            modelWork?.retire()
+            modelWork = nil
             routineTask?.cancel()
             routineTask = nil
             routineProbe?.cancel()
             routineProbed = false
             routinePhase = .idle
             enqueueAllDirty()
+        }
+        .onChange(of: modelPresented || destinationsPresented) { _, open in
+            if !open { Task { await loadModelFace() } }
         }
         .sheet(isPresented: $modelPresented) {
             NavigationStack {
@@ -315,7 +326,9 @@ struct AssistantCard: View {
                         actions: models,
                         destinations: modelDestinations,
                         initialSnapshot: modelSnapshot,
-                        onSnapshot: { value in modelSnapshot = value }
+                        initialDestination: modelDestination,
+                        onSnapshot: { value in modelSnapshot = value },
+                        onDestination: { value in modelDestination = value }
                     )
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
@@ -762,6 +775,14 @@ struct AssistantCard: View {
     }
 
     private var modelValue: String? {
+        let work = PhoneModelPickerProjection.answeringWork(modelWork?.value)
+        if let face = PhoneModelPickerProjection.workFace(work, reported: modelAccount.value?.workPlanHandoffs ?? []) {
+            return face.name
+        }
+        if let face = PhoneModelPickerProjection.chip(pick: nil, destination: modelDestination,
+                                                      offer: modelSnapshot, account: modelAccount.value) {
+            return face.name
+        }
         guard let snapshot = modelSnapshot else { return nil }
         let choice = snapshot.choice
         return snapshot.models.first(where: { $0.alias == choice.model })?.displayName
@@ -915,10 +936,23 @@ struct AssistantCard: View {
     }
 
     @MainActor private func loadModel() async {
-        guard let models, modelSnapshot == nil else { return }
-        if case let .value(value) = await models.read() {
+        async let work: Void = loadModelFace()
+        if let models, modelSnapshot == nil, case let .value(value) = await models.read() {
             modelSnapshot = value
         }
+        await work
+    }
+
+    /// The destination, Work selection and (when either names a plan's
+    /// model) the account catalog, so the row names what answers. Reads only.
+    @MainActor private func loadModelFace() async {
+        guard let modelDestinations else { return }
+        if case let .value(value) = await modelDestinations.read() { modelDestination = value }
+        if modelWork == nil { modelWork = modelDestinations.makeWorkSelection?(modelAccount) }
+        await modelWork?.reload()
+        let plan = PhoneModelPickerProjection.answeringWork(modelWork?.value) != nil
+            || modelDestination?.choice(for: try! ManagedModelDestinationID("cloud"))?.source.isSubscription == true
+        if plan, let read = modelDestinations.subscriptions?.read { await modelAccount.reload(read) }
     }
 
     @MainActor private func apply(_ value: AgentDefinitionSnapshot) {

@@ -31,6 +31,32 @@ public struct PhoneModelPickerWorkSelectionState: Equatable, Sendable {
     }
 }
 
+/// The two owner calls a Work picker makes. The app binds them to the live
+/// `NativeDomainClient`; the scripted host binds synthetic answers for
+/// captures. Nothing here can name another assistant than the one bound.
+public struct WorkSelectionCalls {
+    public typealias Read = @MainActor (NativeID, @escaping NativeDispatchGate) async throws
+        -> WorkModelSelectionSnapshot
+    public typealias Write = @MainActor (NativeID, WorkModelSelection, Int64, @escaping NativeDispatchGate) async throws
+        -> WorkModelSelectionWriteResult
+
+    let read: Read
+    let write: Write
+
+    public init(read: @escaping Read, write: @escaping Write) {
+        self.read = read
+        self.write = write
+    }
+
+    @MainActor public init(client: NativeDomainClient) {
+        read = { agent, isCurrent in try await client.workSelection(agentPrincipal: agent, isCurrent: isCurrent) }
+        write = { agent, selection, revision, isCurrent in
+            try await client.setWorkSelection(agentPrincipal: agent, selection: selection,
+                                              expectedRevision: revision, isCurrent: isCurrent)
+        }
+    }
+}
+
 /// One picker's Work state for a single assistant and live owner session.
 /// A new pick supersedes the previous pick. The dispatch gate also covers
 /// token refresh, when sending a previously valid pick can become unsafe.
@@ -50,7 +76,7 @@ public final class PhoneModelPickerWorkSelection {
         return PhoneModelPickerProjection.workRows(reported: account.value?.workPlanHandoffs ?? [], state: value)
     }
 
-    private let client: NativeDomainClient
+    private let calls: WorkSelectionCalls
     private let account: PhoneModelPickerAccount
     private let isCurrent: NativeDispatchGate
     private var state = PhoneModelPickerWorkSelectionState()
@@ -66,10 +92,16 @@ public final class PhoneModelPickerWorkSelection {
         }))
     }
 
-    public init(agentPrincipal: NativeID, client: NativeDomainClient,
+    public convenience init(agentPrincipal: NativeID, client: NativeDomainClient,
+                            account: PhoneModelPickerAccount, isCurrent: @escaping NativeDispatchGate) {
+        self.init(agentPrincipal: agentPrincipal, calls: WorkSelectionCalls(client: client),
+                  account: account, isCurrent: isCurrent)
+    }
+
+    public init(agentPrincipal: NativeID, calls: WorkSelectionCalls,
                 account: PhoneModelPickerAccount, isCurrent: @escaping NativeDispatchGate) {
         self.agentPrincipal = agentPrincipal
-        self.client = client
+        self.calls = calls
         self.account = account
         self.isCurrent = isCurrent
     }
@@ -108,10 +140,7 @@ public final class PhoneModelPickerWorkSelection {
             guard canWrite(), !Task.isCancelled else { return }
             let result: WorkModelSelectionWriteResult
             do {
-                result = try await client.setWorkSelection(
-                    agentPrincipal: agentPrincipal, selection: choice, expectedRevision: base.revision,
-                    isCurrent: canWrite
-                )
+                result = try await calls.write(agentPrincipal, choice, base.revision, canWrite)
             } catch {
                 // The write might have landed before its reply was lost. Keep
                 // the name but require readback before another write.
@@ -157,7 +186,7 @@ public final class PhoneModelPickerWorkSelection {
         let current: NativeDispatchGate = { self.owns(operation) }
         let answer = await budget.withinSource { () -> WorkModelSelectionSnapshot? in
             guard current() else { return nil }
-            return try? await self.client.workSelection(agentPrincipal: self.agentPrincipal, isCurrent: current)
+            return try? await self.calls.read(self.agentPrincipal, current)
         }
         guard owns(operation) else { return nil }
         guard !Task.isCancelled else {

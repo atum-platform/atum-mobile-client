@@ -34,7 +34,8 @@ public enum PhoneModelPickerProjection {
             for model in handoff.models {
                 guard let choice = WorkModelSelection(plan: handoff.plan, model: model.id),
                       seen.insert(choice).inserted else { continue }
-                rows.append(.init(id: choice, displayName: model.displayName, selected: choice == current,
+                rows.append(.init(id: choice, displayName: ModelDisplayName.name(model: model.id, displayName: model.displayName),
+                                  selected: choice == current,
                                   selectable: state?.eligibility.allows(choice) == true))
             }
         }
@@ -44,6 +45,41 @@ public enum PhoneModelPickerProjection {
                               selected: saved == current, selectable: state?.eligibility.allows(saved) == true))
         }
         return rows
+    }
+
+    /// The Work model that answers, as the composer chip and the card's
+    /// Model row name it (desktop #143 `relayCurrentName`): the connected
+    /// catalog's display name, else readable words for the id. Never the plan
+    /// alone and never an Atum line-up name.
+    public struct WorkFace: Equatable, Sendable {
+        public let selection: WorkModelSelection
+        public let name: String
+        public var plan: AccountPlan { selection.plan }
+    }
+
+    public static func workFace(_ selection: WorkModelSelection?, reported: [WorkPlanHandoff]) -> WorkFace? {
+        guard let selection else { return nil }
+        let listed = reported.first { $0.plan == selection.plan }?.models
+            .first { $0.id.utf8.elementsEqual(selection.model.utf8) }
+        return WorkFace(selection: selection,
+                        name: ModelDisplayName.name(model: selection.model, displayName: listed?.displayName))
+    }
+
+    /// The Work selection the phone last read for this assistant. A cached
+    /// one still names the model during a refresh or after a failed read, as
+    /// the W4-Y1 contract allows; only `readySnapshot` makes a row Current.
+    public static func answeringWork(_ state: PhoneModelPickerWorkSelectionState?) -> WorkModelSelection? {
+        if case let .saving(choice)? = state?.saveState { return choice }
+        return state?.snapshot?.selection
+    }
+
+    /// While a Work model answers, no cloud row is Current (desktop
+    /// `!relayCurrent`), so tapping Atum's or a subscription's row is a real,
+    /// explicit switch. Nothing here writes: the server clears the Work choice
+    /// only when the owner picks a cloud row (work-route v1.3 §151-153).
+    public static func yieldingToWork(_ rows: [Row], answering work: WorkModelSelection?) -> [Row] {
+        guard work != nil else { return rows }
+        return rows.map { $0.selected ? $0.selecting(false) : $0 }
     }
 
     public struct Row: Equatable, Sendable {
