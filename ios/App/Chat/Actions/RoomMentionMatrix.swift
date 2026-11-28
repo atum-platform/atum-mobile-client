@@ -29,6 +29,8 @@ enum RoomMentionMatrix {
     }
 
     /// The text and reply paths share this check immediately before enqueue.
+    /// `mentions.room` is desktop's `@channel` decision (`RoomMentionRules`);
+    /// Matrix power is read again here, so a demotion drops it silently.
     static func message(_ text: String, mentions: OutgoingMentions,
                         in room: Room) async throws -> RoomMessageEventContentWithoutRelation {
         let roomMention = mentions.room ? await canNotify(in: room) : false
@@ -37,7 +39,8 @@ enum RoomMentionMatrix {
             content: TextMessageContent(body: text, formatted: formatted)))
         // Presence of an empty m.mentions suppresses the legacy @room push
         // rule. Ordinary text still uses the existing plain body.
-        guard roomMention || !mentions.userIDs.isEmpty || text.lowercased().contains(RoomMentionRules.token)
+        guard roomMention || !mentions.userIDs.isEmpty
+                || text.lowercased().contains(RoomMentionRules.legacyToken) || RoomMentionRules.mentionsRoomToken(text)
         else { return content }
         return content.withMentions(mentions: Mentions(userIds: mentions.userIDs, room: roomMention))
     }

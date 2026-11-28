@@ -4044,13 +4044,17 @@ final class LiveAppModel {
             }
             context.companyTurnScope = .privateCos(binding: binding)
         }
-        return ConversationRoomInfo(roomID: roomID, title: title, context: context,
-                                    knownNames: knownAgentAndBotNames,
-                                    catalogBotUserIDs: catalogBotUserIDs,
-                                    languageCode: appLanguage,
-                                    roomIsEncrypted: room.isEncrypted,
-                                    isMarkedUnread: room.isMarkedUnread,
-                                    shareActivity: shareActivity)
+        var info = ConversationRoomInfo(roomID: roomID, title: title, context: context,
+                                        knownNames: knownAgentAndBotNames,
+                                        catalogBotUserIDs: catalogBotUserIDs,
+                                        languageCode: appLanguage,
+                                        roomIsEncrypted: room.isEncrypted,
+                                        isMarkedUnread: room.isMarkedUnread,
+                                        shareActivity: shareActivity)
+        if case .channel = context.companyTurnScope {
+            info.roomMentionAuthority = companyWorkspace.viewerMayMentionChannel(roomID: roomID)
+        }
+        return info
     }
 
     struct PrivateCosTurnKey: Equatable {

@@ -1496,6 +1496,16 @@ final class CompanyWorkspaceModel {
         return copy.role(me.role)
     }
 
+    /// Decision 7: desktop's `mentionRoom` platform half for a company
+    /// channel (channel owner, or company owner/admin). The phone's channel
+    /// directory (wire 1.1) carries no channel owner, so only the company
+    /// admin role can open it here; anything unknown stays closed.
+    func viewerMayMentionChannel(roomID: String) -> Bool {
+        guard isCompanyChannel(roomID), let claim = roomDirectory.claim(roomID: roomID),
+              let me = snapshotsByCompany[claim.companyID]?.members.first(where: \.isSelf) else { return false }
+        return me.role == .admin && me.state == .active
+    }
+
     /// A company channel's platform member count (desktop's capsule count).
     func channelMemberCount(roomID: String) -> Int? {
         guard let claim = roomDirectory.claim(roomID: roomID),

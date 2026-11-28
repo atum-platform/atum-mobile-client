@@ -91,35 +91,47 @@ final class ChatActionParityTests: XCTestCase {
         XCTAssertNil(LinkPreview.Metadata(json: "{}")?.card(url: url, image: nil))
     }
 
-    func testRoomMentionRequiresAnExplicitSurvivingPick() throws {
-        XCTAssertFalse(RoomMentionRules.offersSuggestion(for: "ro", canNotifyRoom: false))
-        XCTAssertNil(RoomMentionRules.insert(into: "Hi @ro", canNotifyRoom: false))
-        var ledger = MentionLedger()
-        ledger.stage(text: "Hi @room")
-        XCTAssertEqual(ledger.mentions(for: "Hi @room"), .none)
-        ledger.delivered(text: "Hi @room")
-        let pick = try XCTUnwrap(RoomMentionRules.insert(into: "  Hi @ro", canNotifyRoom: true))
-        ledger.registerRoomMention(in: pick.draft, offset: pick.offset)
-        ledger.draftChanged(to: pick.draft + "please read")
-        ledger.stage(text: "Hi @room please read")
-        XCTAssertTrue(ledger.mentions(for: "Hi @room please read").room)
-        ledger.refused(text: "Hi @room please read", draft: "New\nHi @room please read")
-        ledger.stage(text: "New\nHi @room please read")
-        XCTAssertTrue(ledger.mentions(for: "New\nHi @room please read").room)
+    func testChannelMentionFollowsDesktopScope() throws {
+        typealias Scope = RoomMentionRules.Scope
+        let channel = Scope(isCompanyChannel: true, hasAuthority: true, canNotifyRoom: true, audience: 19)
+        XCTAssertEqual(RoomMentionRules.token, "@channel")
+        XCTAssertTrue(RoomMentionRules.offersSuggestion(for: "ch", scope: channel))
+        XCTAssertTrue(RoomMentionRules.offersSuggestion(for: "", scope: channel))
+        XCTAssertFalse(RoomMentionRules.offersSuggestion(for: "ro", scope: channel))
+        XCTAssertEqual(RoomMentionRules.insert(into: "  Hi @ch", scope: channel), "  Hi @channel ")
 
-        ledger.registerRoomMention(in: "@room then @room ", offset: 11)
-        ledger.draftChanged(to: "@room then ")
-        ledger.draftChanged(to: "@room then @room")
-        ledger.stage(text: "@room then @room")
-        XCTAssertEqual(ledger.mentions(for: "@room then @room"), .none)
+        // Never in a DM, a company conversation or a people group, and never
+        // without both Matrix power and platform authority.
+        for closed in [Scope(isCompanyChannel: false, hasAuthority: true, canNotifyRoom: true, audience: 3),
+                       Scope(isCompanyChannel: true, hasAuthority: false, canNotifyRoom: true, audience: 3),
+                       Scope(isCompanyChannel: true, hasAuthority: true, canNotifyRoom: false, audience: 3),
+                       Scope(isCompanyChannel: true, hasAuthority: true, canNotifyRoom: true, audience: nil),
+                       Scope.none] {
+            XCTAssertFalse(RoomMentionRules.offersSuggestion(for: "ch", scope: closed))
+            XCTAssertNil(RoomMentionRules.insert(into: "Hi @ch", scope: closed))
+            XCTAssertFalse(RoomMentionRules.requested(in: "Please read @channel.", scope: closed))
+        }
 
-        var duplicate = MentionLedger()
-        duplicate.registerRoomMention(in: "@room", offset: 0)
-        duplicate.stage(text: "@room")
-        duplicate.stage(text: "@room")
-        XCTAssertEqual(duplicate.mentions(for: "@room"), .none)
-        duplicate.delivered(text: "@room")
-        XCTAssertEqual(duplicate.mentions(for: "@room"), .none)
+        // Desktop `matrixRoomMentionRequested`: a whole token, picked or typed.
+        XCTAssertTrue(RoomMentionRules.requested(in: "Please read @channel.", scope: channel))
+        XCTAssertTrue(RoomMentionRules.requested(in: "(@Channel) now", scope: channel))
+        XCTAssertFalse(RoomMentionRules.requested(in: "mail@channel.example", scope: channel))
+        XCTAssertFalse(RoomMentionRules.requested(in: "@channels", scope: channel))
+        XCTAssertFalse(RoomMentionRules.requested(in: "Hi @room", scope: channel))
+
+        // Desktop confirms at 20 people. Without its exported words the phone
+        // withholds room intent there rather than skip the confirmation.
+        let large = Scope(isCompanyChannel: true, hasAuthority: true, canNotifyRoom: true, audience: 20)
+        XCTAssertFalse(channel.needsConfirmation)
+        XCTAssertTrue(large.needsConfirmation)
+        XCTAssertTrue(large.allowsRoomMention)
+        XCTAssertFalse(RoomMentionRules.offersSuggestion(for: "ch", scope: large))
+        XCTAssertFalse(RoomMentionRules.requested(in: "@channel", scope: large))
+
+        // Either token keeps the legacy body rule off with an empty m.mentions.
+        XCTAssertTrue(RoomMentionRules.mentionsRoomToken("Hi @room"))
+        XCTAssertTrue(RoomMentionRules.mentionsRoomToken("Hi @channel!"))
+        XCTAssertFalse(RoomMentionRules.mentionsRoomToken("Ordinary text"))
     }
 
     func testUpgradeRequiresBacklinkAndLeavesInaccessibleHistoryReachable() {

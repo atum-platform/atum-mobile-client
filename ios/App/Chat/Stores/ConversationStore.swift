@@ -38,6 +38,9 @@ struct ConversationRoomInfo: Sendable {
     /// TS-6b: the thread this store shows (its root's event ID); nil for the
     /// room's own timeline.
     var threadRootID: String? = nil
+    /// Decision 7: the platform authority desktop's `mentionRoom` asks for
+    /// (channel owner or company owner/admin). Only read in a company channel.
+    var roomMentionAuthority = false
 }
 
 /// Builds the room's typing controller (WS3's `TypingController`, B10–B12)
@@ -212,14 +215,41 @@ final class LiveConversationStore: ConversationStore {
         return MentionRules.suggestions(for: query, in: mentionCandidates)
     }
 
+    /// Decision 7: desktop's `@channel` scope. Only a company channel (its
+    /// room timeline or one of its threads) can ever allow it.
+    private var isCompanyChannel: Bool {
+        if case .channel = info.context.companyTurnScope { return true }
+        return false
+    }
+
+    /// Desktop counts the joined humans other than the sender. Unknown until
+    /// the member list arrives, which keeps `@channel` closed.
+    private var roomMentionAudience: Int? {
+        guard !mentionCandidates.isEmpty else { return nil }
+        let machines = (info.context.knownAgentUserIDs ?? []).union(info.catalogBotUserIDs)
+            .union(info.context.agentUserIDs)
+        return mentionCandidates.count { !machines.contains($0.userID) }
+    }
+
+    var roomMentionScope: RoomMentionRules.Scope {
+        #if DEBUG
+        if scriptedChannelMention {
+            return RoomMentionRules.Scope(isCompanyChannel: true, hasAuthority: true,
+                                          canNotifyRoom: canMentionRoom, audience: roomMentionAudience)
+        }
+        #endif
+        return RoomMentionRules.Scope(isCompanyChannel: isCompanyChannel, hasAuthority: info.roomMentionAuthority,
+                                      canNotifyRoom: canMentionRoom, audience: roomMentionAudience)
+    }
+
     var offersRoomMention: Bool {
         guard editTarget == nil, ComposerRules.offersMentions(kind: kind),
               let query = MentionRules.activeQuery(in: draftValue) else { return false }
-        return RoomMentionRules.offersSuggestion(for: query, canNotifyRoom: canMentionRoom)
+        return RoomMentionRules.offersSuggestion(for: query, scope: roomMentionScope)
     }
 
     private func observeRoomMentionPermission(in room: Room, generation: UInt64) {
-        guard ComposerRules.offersMentions(kind: kind) else { return }
+        guard ComposerRules.offersMentions(kind: kind), isCompanyChannel, info.roomMentionAuthority else { return }
         let (updates, handle) = RoomMentionMatrix.permissionUpdates(in: room)
         roomMentionPowerTask = Task { [weak self] in
             defer { handle.cancel() }
@@ -234,7 +264,8 @@ final class LiveConversationStore: ConversationStore {
     private func refreshRoomMentionPermission() async {
         let opened = generation
         let available: Bool
-        if core.isAttached, let room, ComposerRules.offersMentions(kind: kind) {
+        if core.isAttached, let room, ComposerRules.offersMentions(kind: kind), isCompanyChannel,
+           info.roomMentionAuthority {
             available = await RoomMentionMatrix.canNotify(in: room)
         } else {
             available = false
@@ -250,15 +281,19 @@ final class LiveConversationStore: ConversationStore {
         let opened = generation
         await refreshRoomMentionPermission()
         guard generation == opened, !isClosed, !Task.isCancelled, draftValue == original, offersRoomMention,
-              let inserted = RoomMentionRules.insert(into: original, canNotifyRoom: canMentionRoom)
+              let inserted = RoomMentionRules.insert(into: original, scope: roomMentionScope)
         else { return }
-        draft = inserted.draft
-        mentionPicks.registerRoomMention(in: inserted.draft, offset: inserted.offset)
+        draft = inserted
     }
 
     #if DEBUG
-    /// `-AtumScriptedChatActions mention` only: a scripted room has no power levels.
-    func scriptRoomMentionPermission(_ allowed: Bool) { canMentionRoom = allowed }
+    /// `-AtumScriptedChatActions mention` only: a scripted room has no power
+    /// levels or channel directory, so it stands in for an authorized channel.
+    @ObservationIgnored private var scriptedChannelMention = false
+    func scriptRoomMentionPermission(_ allowed: Bool) {
+        scriptedChannelMention = allowed
+        canMentionRoom = allowed
+    }
     #endif
 
     /// Puts the pick into the draft (an edit by the person) and remembers who
@@ -526,22 +561,14 @@ final class LiveConversationStore: ConversationStore {
 
     /// B8 "Xóa" on a failed send, or on a held one.
     func deleteSend(_ itemID: String) {
-        discardHeldRoomMention(itemID)
         run(core.abort(itemID))
         sync()
     }
 
     /// B20 "Xóa" on my message.
     func delete(_ itemID: String) {
-        discardHeldRoomMention(itemID)
         run(core.delete(itemID))
         sync()
-    }
-
-    private func discardHeldRoomMention(_ itemID: String) {
-        if let send = core.pendingSends.first(where: { $0.id == itemID }) {
-            mentionPicks.discardRoomMentions(for: send.text)
-        }
     }
 
     /// B22.
@@ -983,7 +1010,11 @@ final class LiveConversationStore: ConversationStore {
                 sendLostTimeline(text, replyToEventID: replyToEventID, roomKind: roomKind)
                 return
             }
-            let mentions = mentionPicks.mentions(for: text)
+            // Desktop decides room intent from the sent text and the channel's
+            // scope at send time; the SDK seam rechecks Matrix power after this.
+            let people = mentionPicks.mentions(for: text)
+            let mentions = OutgoingMentions(userIDs: people.userIDs, formattedHTML: people.formattedHTML,
+                                            room: RoomMentionRules.requested(in: text, scope: roomMentionScope))
             do {
                 try await controller.send(text: text, replyToEventID: replyToEventID, mentions: mentions)
                 mentionPicks.delivered(text: text)

@@ -345,10 +345,11 @@ private struct RoomUpgradeLine: View {
 
 // MARK: S14 room mention row
 
-/// The `@room` suggestion in the composer's `@` list (desktop's role-gated
-/// `@channel` row: a round mark, then the token). The token is Matrix
-/// syntax, not copy; desktop's hint line names a channel, which a people
-/// group is not, so the phone shows the token alone (doc: missing key).
+/// Desktop's role-gated `@channel` row in a company channel's `@` list (a
+/// round mark, then the token), after the people (decision 7). The token is
+/// Matrix syntax, not copy. Desktop's hint "Notify everyone in this channel"
+/// (`mentionChannelHint`) is not in the pinned export yet, so the row shows
+/// the token alone until the export wave carries it (doc: missing keys).
 struct RoomMentionSuggestionRow: View {
     let design: LiveDesign
     let pick: () -> Void
