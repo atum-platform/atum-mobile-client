@@ -90,6 +90,9 @@ struct PersonalChatRestoreSession {
 
 enum PersonalChatRestoreEntry {
     case launch
+    /// Dormant since 28 Nov 2026: the shell no longer issues it, because a
+    /// tab return keeps Chats' own stack (`Router.retainedRoomID(for:)`).
+    /// The policy and its tests stay until the engine is pruned.
     case chatsTap
 }
 

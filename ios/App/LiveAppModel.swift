@@ -7151,7 +7151,7 @@ final class LiveAppModel {
         return liveMatrix.isCheckingPersonalChatCompanyClaim
     }
 
-    /// The shell calls this on launch or on an explicit Chats tap. It owns the
+    /// The shell calls this on launch (a tab return never restores). It owns the
     /// navigation generation and supplies a unique ID for each restore intent.
     /// Opening and returning the canonical room ID happen without suspension.
     @discardableResult

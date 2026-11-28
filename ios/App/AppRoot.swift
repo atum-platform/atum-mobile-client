@@ -369,8 +369,6 @@ struct AppRoot: View {
                 titles: model.assistantTitles
             )
         )
-        let coversChatsTap = router.chatRestoreIntent?.entry == .chatsTap
-            && router.coversChatsRootForRestore
         return RootTabs(
             router: router,
             design: design,
@@ -392,12 +390,6 @@ struct AppRoot: View {
                                router.presentationChanged(active)
                            }
                        })
-                // A Chats tap whose restore is still deciding shows the
-                // ground, not a roster the chat would replace a moment later.
-                .accessibilityHidden(coversChatsTap)
-                .overlay {
-                    if coversChatsTap { design.color("ground", scheme: scheme).ignoresSafeArea() }
-                }
                 .onAppear {
                     model.recordChatListSnapshot(accountID: account.matrixUserID,
                                                  rows: home.rows)
@@ -1344,18 +1336,11 @@ struct AppRoot: View {
         router.onOpenApp = { slug in requestAppOpen(slug) }
         router.onUserSelectedTab = { tab in
             openRequestGeneration &+= 1
-            let retainedRoomID: String? = switch tab {
-            case .home: router.homeRoomID
-            case .teamSpace: router.teamSpaceRoomID
-            case .drive, .store: nil
-            }
-            if let retainedRoomID {
+            // A tab return keeps that tab's stack: its open chat reopens, a
+            // root stays the root. It never restores the last chat; only
+            // the account scope's launch intent does.
+            if let retainedRoomID = router.retainedRoomID(for: tab) {
                 requestRoomOpen(retainedRoomID)
-            } else if tab == .home {
-                // An explicit Chats tap at its root reopens the last chat
-                // (desktop #121). Each tap is a new intent.
-                router.beginChatRestore(.chatsTap)
-                attemptChatRestore()
             }
         }
         router.dismissPresentation = {

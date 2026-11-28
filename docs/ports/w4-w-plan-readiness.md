@@ -59,6 +59,8 @@ The registry transport test passed on phone `origin/main` at `236b918`
 before the readiness change. The Debug simulator build and all eight
 `AccountConnectionsStateTests` passed on `dc363d23`.
 The focused Swift package run passed all 31 tests after the stub fix.
+The merge from phone `origin/main` at `236b918` did not alter the Swift
+package sources, tests, or fixtures.
 
 Focused coverage lives in `WorkPlanReadinessTests`,
 `AccountConnectionsTransportTests`, and `AccountConnectionsStateTests`.
