@@ -18,8 +18,8 @@ import SwiftUI
 /// sender, time, edit and delivery (`ChatRowText.speech`).
 struct BubbleMeta: View {
     let row: ChatRow
-    /// On my own bubble: `on-bubble-own`, quietened; elsewhere desktop's
-    /// faint ink.
+    /// On a `bubble-own` fill: `on-bubble-own`, quietened; elsewhere
+    /// `ink-3`. Only true when the fill really is `bubble-own`.
     var onOwnBubble = false
     /// On a photo: ink on a glass capsule, so it reads over any picture.
     var onMedia = false
@@ -90,18 +90,21 @@ struct BubbleMeta: View {
     }
 
     /// Desktop's `gap: 0.1875rem` between "đã sửa", the time and the clock.
-    static let innerGap: CGFloat = 3
+    /// The Kit's 4-pt grid has no 3 pt step (`s1` is 4); this hairline gap
+    /// inside one caption run is kept to desktop's value on purpose.
+    static let innerGap: CGFloat = 3 // design-lint: allow (desktop 0.1875rem; below the 4-pt grid)
 
     private func color(_ theme: ChatTheme) -> Color {
         let kit = theme.design.kit
         if onMedia { return kit.color(.ink, scheme: scheme) }
-        // Desktop `--atum-ink-faint` (#9096A0 light, #666B74 dark) is closest
-        // to the Kit's `ink-4` (#8A8F98, #6E737C) on people's bubbles:
-        // about 3.2:1 on `surface` in light and 3.4:1 in dark, a touch above
-        // desktop's own 3.0:1. Like desktop, it is quiet secondary type that
-        // VoiceOver never reads (the bubble's label carries the time).
+        // People's bubbles, placeholders and file cards: Kit `ink-3`, the
+        // quietest text ink (`ink-4` is icons and strokes only). On `surface`
+        // that is 5.95:1 in light and 6.34:1 in dark; on `ground` (a
+        // placeholder) 5.45:1 and 6.92:1. Desktop draws a fainter
+        // `--atum-ink-faint` (about 3.0:1); the phone keeps the token
+        // contract instead.
         return onOwnBubble ? kit.color(.onBubbleOwn, scheme: scheme).opacity(Self.ownOpacity)
-                           : kit.color(.ink4, scheme: scheme)
+                           : kit.color(.ink3, scheme: scheme)
     }
 
     // MARK: The room on the last line (desktop `--matrix-meta-room`)

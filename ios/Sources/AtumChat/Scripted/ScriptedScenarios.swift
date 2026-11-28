@@ -105,6 +105,7 @@ public enum ScriptedScenarios {
         case .chatBubblesLive: return chat(ScriptedChats.chatBubblesLive(env))
         case .chatAgentDesk: return chat(ScriptedChats.chatAgentDesk(env))
         case .chatCorners: return chat(ScriptedChats.chatCorners(env))
+        case .chatCornersText: return chat(ScriptedChats.chatCornersText(env))
         }
     }
 

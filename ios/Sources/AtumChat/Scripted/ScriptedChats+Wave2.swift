@@ -27,24 +27,39 @@ extension ScriptedChats {
                               initial: writer.items, names: Cast.names)
     }
 
-    /// `chat.corners` (Polish P7 r2): a 1:1 chat with Huy whose bubbles show
-    /// the corner (time, "đã sửa", the sending clock) on every kind: a photo
-    /// without and with a caption, a file card (the time on its second
-    /// line), a deleted message, wrapped Vietnamese, right-to-left Arabic
-    /// and CJK text, my edited message, a failed one (no corner time) and,
-    /// last, one still sending.
+    /// `chat.corners` (Polish P7): a 1:1 chat with Huy whose bubbles show
+    /// the corner on everything that is not plain text, theirs and mine, so
+    /// all of it fits the bottom-anchored first screen: a photo without and
+    /// with a caption, a file card with media (the time on its second line)
+    /// and my file card without media (the corner on its own row, `surface`
+    /// ink), then a deleted message from each side (no fill, so mine takes
+    /// the people's ink too). The text kinds are `chat.corners-text`.
     static func chatCorners(_ env: ScriptedEnvironment) -> ScriptedScript {
         let name = ScriptedScenario.chatCorners.rawValue
         let context = RoomContext(kind: .person, ownUserID: Cast.me)
         var writer = ScriptedWriter(scenario: name, context: context, calendar: env.calendar)
         writer.add(.image(width: 1600, height: 900), from: Cast.huy, at: env.ago(minutes: 40),
                    media: scriptedMedia(name + ".photo", mimetype: "image/jpeg", filename: "photo.jpg"))
-        writer.add(.image(width: 1200, height: 900), from: Cast.me, at: env.ago(minutes: 39),
-                   body: "Con đường nhỏ sau cơn mưa, nhìn từ cửa sổ quán.",
+        writer.add(.image(width: 1600, height: 1000), from: Cast.me, at: env.ago(minutes: 39),
+                   body: "Con đường nhỏ sau cơn mưa.",
                    media: scriptedMedia(name + ".caption", mimetype: "image/jpeg", filename: "caption.jpg"))
         writer.add(.file(name: "bao-cao-quy-3.pdf"), from: Cast.huy, at: env.ago(minutes: 38),
                    media: scriptedMedia(name + ".file", mimetype: "application/pdf", filename: "bao-cao-quy-3.pdf"))
-        writer.add(.placeholder(.redacted), from: Cast.huy, at: env.ago(minutes: 37))
+        writer.add(.file(name: "ngan-sach.xlsx"), from: Cast.me, at: env.ago(minutes: 37))
+        writer.add(.placeholder(.redacted), from: Cast.huy, at: env.ago(minutes: 36))
+        writer.add(.placeholder(.redacted), from: Cast.me, at: env.ago(minutes: 35))
+        return ScriptedScript(name: name, title: "Huy", context: context,
+                              initial: writer.items, names: Cast.names)
+    }
+
+    /// `chat.corners-text` (Polish P7 r3): the corner on text bubbles:
+    /// "Ok", wrapped Vietnamese, right-to-left Arabic and CJK text, my
+    /// edited and Hebrew messages, a failed one (no corner time) and, last,
+    /// one still sending.
+    static func chatCornersText(_ env: ScriptedEnvironment) -> ScriptedScript {
+        let name = ScriptedScenario.chatCornersText.rawValue
+        let context = RoomContext(kind: .person, ownUserID: Cast.me)
+        var writer = ScriptedWriter(scenario: name, context: context, calendar: env.calendar)
         writer.add(from: Cast.huy, at: env.ago(minutes: 30), body: "Ok")
         writer.add(from: Cast.huy, at: env.ago(minutes: 29),
                    body: "Mình gửi bản báo cáo rồi, bạn xem phần ngân sách giúp mình trước buổi họp nhé.")

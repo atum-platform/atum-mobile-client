@@ -147,7 +147,8 @@ public enum Grouping {
             }
         }
 
-        // Corner times (Polish P7) and edits (TL-5), on bubbles only.
+        // Corner times (Polish P7) and edits (TL-5), on bubbles only. For the
+        // run-end rule instead, append `&& result[index].position?.endsRun == true`.
         for (index, row) in rows.enumerated() {
             guard result[index].position != nil else { continue }
             let item = row.item

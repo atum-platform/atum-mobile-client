@@ -80,9 +80,32 @@ with `main` at `236b918` for review r2.
     Against `bubble-own` that is about 7.9:1 in light and 5.2:1 in dark.
     Desktop's own-bubble inks are changing on its `feat/dark-own-bubble`
     branch; recheck when that lands.
-  - On a person's bubble: Kit `ink-4` (#8A8F98 / #6E737C), the closest token to
-    desktop's `--atum-ink-faint` (#9096A0 / #666B74). That is about 3.2:1 in
-    light and 3.4:1 in dark, slightly above desktop's 3.0:1.
+    It is used only where the fill really is `bubble-own`: my text and my
+    captioned photo. My deleted message (a stroke over `ground`, no fill) and
+    my file card (`surface`) take the people's ink, since `on-bubble-own`
+    there was about 1.05:1 in light (r2 review P1).
+  - On a person's bubble, a placeholder or a file card: Kit `ink-3`, the
+    quietest **text** ink (`ink-4` is "icons and strokes only, never text",
+    `AtumKit.swift`). Measured with the vendored tokens: on `surface` 5.95:1
+    light / 6.34:1 dark; on `ground` 5.45:1 / 6.92:1. **Desktop differs on
+    purpose:** it draws `--atum-ink-faint` (#9096A0 / #666B74, about 3.0:1).
+    The phone follows the Kit token contract instead of matching that
+    fainter ink. (`ink-4` measured 3.25:1 / 3.41:1 on `surface`, below the
+    text floor.)
+- **The 3 pt gap.** `BubbleMeta.innerGap = 3` is desktop's `0.1875rem`. The
+  Kit's 4-pt grid has no 3 pt step, so the line carries a
+  `design-lint: allow` note rather than a token.
+
+### The time rule: every settled bubble (revertible in one line)
+
+The phone follows desktop's `timeEligible`: every settled bubble shows its
+time. The coordinator is confirming this with the owner. Going back to the
+run-end rule is one line: `ios/Sources/AtumChat/Grouping.swift:155`,
+`result[index].showsTime = showsTime(item)` becomes
+`result[index].showsTime = showsTime(item) && result[index].position?.endsRun == true`
+(the comment above it says so). The tests that assert every bubble's time
+(`GroupingTests`, `BubbleGroupingTests`, `ProjectionS1Tests`) would flip with
+it.
 
 ### Deferred / differences kept
 
@@ -116,15 +139,15 @@ with `main` at `236b918` for review r2.
     that no longer exists, so it passed vacuously.
   - The dead `answer.copy` exclusions are gone from `S1MatrixUITests`,
     `ChatKindsUITests` and `ComposerAndMenuUITests`.
-- New scripted scenario `chat.corners`, a 1:1 with Huy. It has, in order:
-  - a photo without a caption;
-  - my photo with a caption;
-  - a file card;
-  - a deleted message;
-  - "Ok", then a wrapped Vietnamese message;
-  - Arabic, then Chinese;
-  - my edited message, then my Hebrew message;
-  - a failed message, then one still sending.
+- Two scripted scenarios, each a 1:1 with Huy, sized so that everything is on
+  the bottom-anchored first screen (r3 split them; in r2 the photos were
+  scrolled off the top):
+  - `chat.corners`: a photo without a caption, my photo with a caption, his
+    file card with media, my file card without media, his deleted message,
+    my deleted message.
+  - `chat.corners-text`: "Ok", a wrapped Vietnamese message, Arabic,
+    Chinese, my edited message, my Hebrew message, a failed message, then
+    one still sending.
 
 ## Verification
 

@@ -245,7 +245,8 @@ struct MessageBubbleRow: View {
                 .background(card, in: shape)
                 .atumKitElevation(.one, in: shape)
             } else {
-                withMeta(theme, placement: cornerPlacement(endsInText: false, text: ""), bottomPad: 10) {
+                withMeta(theme, placement: cornerPlacement(endsInText: false, text: ""), bottomPad: 10,
+                         onOwnFill: false) {
                     FileCard(name: name)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -259,7 +260,7 @@ struct MessageBubbleRow: View {
             // keeps its meaning (B19).
             let placeholder = ChatRowText.placeholder(reason, copy: theme.copy)
             let corner = cornerPlacement(endsInText: true, text: placeholder)
-            withMeta(theme, placement: corner, bottomPad: 9) {
+            withMeta(theme, placement: corner, bottomPad: 9, onOwnFill: false) {
                 Text(AttributedString(placeholder).endingIn(room(theme, corner)))
                     .font(.body.italic())
                     .foregroundStyle(theme.quiet(scheme))
@@ -361,15 +362,19 @@ struct MessageBubbleRow: View {
 
     /// The content with the meta in its corner. The layout is always there,
     /// so the content keeps its identity when the corner changes.
+    /// `onOwnFill` is true only when the bubble really is filled with
+    /// `bubble-own`: a placeholder (a stroke over `ground`) and a file card
+    /// (`surface`) are not, even when mine, so their corner takes the
+    /// people's ink. `on-bubble-own` there measured about 1.05:1 in light.
     private func withMeta<Content: View>(_ theme: ChatTheme, placement: BubbleCornerPlacement,
-                                         bottomPad: CGFloat,
+                                         bottomPad: CGFloat, onOwnFill: Bool? = nil,
                                          @ViewBuilder content: () -> Content) -> some View {
         let kit = theme.design.kit
         return BubbleCornerLayout(placement: placement, contentBottom: bottomPad,
                                   edge: kit.space(.s3), bottom: kit.space(.s2)) {
             content()
             if placement != .hidden {
-                BubbleMeta(row: row, onOwnBubble: trailing)
+                BubbleMeta(row: row, onOwnBubble: onOwnFill ?? trailing)
             }
         }
     }
