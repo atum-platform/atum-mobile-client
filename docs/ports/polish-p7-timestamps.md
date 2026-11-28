@@ -199,3 +199,36 @@ See the session log at the end of this file.
     covers the Debug build, `S6PresentationTests` and light/dark/AX-L shots
     of `chat.people`, `chat.bubbles-group`, `chat.actions` and
     `chat.corners`.
+- 2026-11-28/29 review r2 (Opus, HOLD) findings fixed in r3 (`b200cc9`):
+  1. P1: `withMeta(onOwnFill:)` (`MessageBubbleRow.swift` ~365-377). A
+     placeholder and a media-less file card pass `false`, so my deleted
+     message and my file card use `ink-3`, not `on-bubble-own`.
+  2. P2: the people's corner uses `ink-3` (`BubbleMeta.swift` `color(_:)`).
+  3. P3: `chat.corners` now holds only photos, files and deleted messages
+     (both sides) and fits the first screen. The text kinds moved to
+     `chat.corners-text`.
+  4. P3: `innerGap` carries a `design-lint: allow` note (no 3 pt token).
+
+  Contrast, measured from the vendored `atum-kit-tokens.json`:
+  - `ink-3`: on `surface` 5.95:1 light / 6.34:1 dark; on `ground` 5.45:1 /
+    6.92:1.
+  - `on-bubble-own`@0.66 on `bubble-own`: 7.96:1 light / 5.24:1 dark.
+  - Before the fix, on `ground` it was 1.06:1 in light.
+
+  Verification:
+  - Locked run (launchd `io.atum.lock.p7r3`, head `b200cc9`; log
+    `logs/run-r3.log`, `logs/r3/`):
+    - `swift test` AtumChatTests: 822 tests, exit 0. They include
+      `GroupingTests`, `BubbleGroupingTests`, `ProjectionS1Tests` and
+      `ProbeAndLaunchTests`. A separate focused run was killed while still
+      waiting on the lock, so this run is the evidence.
+    - Debug build-for-testing exit 0.
+    - `S6PresentationTests` (8 tests) exit 0.
+    - 12/12 screenshots in `screens/r3/`, of `chat.people`,
+      `chat.bubbles-group`, `chat.corners` and `chat.corners-text`.
+  - Checked by eye:
+    - My deleted message and my file card read clearly in light and dark.
+    - The photo capsule is visible, and so is the captioned photo's corner.
+    - At AX-L the photos scroll above the first screen; files and deleted
+      messages stay visible.
+  - `design_lint.py` exit 0. `public_guard.py` exit 0.
