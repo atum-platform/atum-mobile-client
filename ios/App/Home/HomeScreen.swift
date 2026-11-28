@@ -521,7 +521,10 @@ struct HomeScreen: View {
             .protonTopUpSheet(design: design, isPresented: $protonTopUpPresented)
     }
 
-    @ViewBuilder private var homeBody: some View {
+    /// Home is built in stages, each its own `some View`: one modifier chain
+    /// this long timed out the hosted runner's type checker (P6 fix 1).
+    /// Stage 1: the roster, its chips inset and the ground.
+    private var homeContent: some View {
         Group {
             if presentation.rows.isEmpty {
                 emptyContent
@@ -550,6 +553,11 @@ struct HomeScreen: View {
         }
         .background(HomeSearchActivity(active: $searchActive))
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+    }
+
+    /// Stage 2: the P6 root header (title, toolbar, system search).
+    private var homeHeader: some View {
+        homeContent
         // P6 (UX audit issue 7, owner 28 Nov 2026): the one iOS root header.
         // A large "Chats" title with the system search in the bar's drawer,
         // the account face leading and compose trailing (Messages, Element X).
@@ -557,10 +565,8 @@ struct HomeScreen: View {
         .navigationTitle(copy(.chats))
         .navigationBarTitleDisplayMode(.large)
         .toolbar { homeToolbar }
-        .searchable(text: search?.text ?? .constant(""),
-                    placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: Text(verbatim: scope == .deviceOnly ? searchWords.text(.phonePrivatePlaceholder)
-                                     : copy(.searchPlaceholder)))
+        .searchable(text: searchText, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: searchPrompt)
         .searchFocused($searchFocused)
         // The keyboard's Search ends typing and keeps the query and its results.
         .onSubmit(of: .search) { searchFocused = false }
@@ -568,6 +574,11 @@ struct HomeScreen: View {
         .onChange(of: searchActive) { _, active in
             if !active { search?.dismiss() }
         }
+    }
+
+    /// Stage 3: Home's own sheets.
+    private var homeSheets: some View {
+        homeHeader
         .sheet(isPresented: $startChatPresented) {
             HomeStartChatSheet(design: design,
                                rows: presentation.rows,
@@ -597,6 +608,11 @@ struct HomeScreen: View {
                 Color.clear.onAppear { founderDraftPresented = false }
             }
         }
+    }
+
+    /// Stage 4: tasks and change handlers (search, badge, scene).
+    private var homeLifecycle: some View {
+        homeSheets
         .task(id: presentation.state) {
             showsDelayedLoadingMark = false
             guard presentation.state == .loading, presentation.rows.isEmpty else { return }
@@ -658,6 +674,11 @@ struct HomeScreen: View {
             guard router.homeRoomID == nil, old != new else { return }
             AccessibilityNotification.Announcement(copy(.errorGeneric)).post()
         }
+    }
+
+    /// Stage 5: the confirmation dialogs, rename and the block list.
+    private var homeBody: some View {
+        homeLifecycle
         .onChange(of: dismissPresentationRequest) { _, _ in
             pendingDeleteRoomID = nil
             startChatPresented = false
@@ -801,6 +822,15 @@ struct HomeScreen: View {
     private var rosterQuery: String { scope == .plain ? query : "" }
 
     private var searchWords: HomeSearchWords { HomeSearchWords(design: design) }
+
+    /// The system search's text: the ML3 controller's, else nothing yet.
+    private var searchText: Binding<String> { search?.text ?? .constant("") }
+
+    /// The system search's prompt: plain, or the device-only placeholder.
+    private var searchPrompt: Text {
+        Text(verbatim: scope == .deviceOnly ? searchWords.text(.phonePrivatePlaceholder)
+                 : copy(.searchPlaceholder))
+    }
 
     /// The account face (owner decision 6): Settings, and what needs the
     /// person, as desktop's rail account carries both (`HomeAccountFace`).

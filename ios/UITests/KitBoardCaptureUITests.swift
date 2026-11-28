@@ -79,7 +79,7 @@ final class KitBoardSettingsCaptureUITests: TranscriptUITestCase {
         Thread.sleep(forTimeInterval: 1.5)
         keepScreenshot("kit-team-header", of: app)
         XCTAssertTrue(openCompanyTitleMenu(app, "Studio"))
-        app.buttons.matching(identifier: "company.header").firstMatch.tap()
+        companiesMenuItem(app).tap()
         XCTAssertTrue(element(app, "company.switcher").waitForExistence(timeout: 3))
         Thread.sleep(forTimeInterval: 1.5)
         keepScreenshot("kit-team-switcher", of: app)

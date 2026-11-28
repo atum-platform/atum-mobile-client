@@ -848,35 +848,41 @@ struct TeamSpaceScreen: View {
     /// item gets the system large-content view at accessibility sizes.
     private var viewMenu: some View {
         Menu {
-            Picker(selection: page) {
-                ForEach(pageTabs, id: \.self) { tab in
-                    Text(verbatim: team.page(tab)).tag(tab)
-                        .accessibilityIdentifier("company.page." + tab.rawValue)
-                }
-            } label: {
-                Text(verbatim: team.pagesLabel)
-            }
-            .pickerStyle(.inline)
-            if page.wrappedValue == .board {
-                Picker(selection: Binding(get: { boardPreference.wrappedValue.view },
-                                          set: { boardPreference.wrappedValue = boardPreference.wrappedValue
-                                              .selecting($0) })) {
-                    ForEach(CompanyBoardView.allCases, id: \.self) { view in
-                        Text(verbatim: team.boardView(view)).tag(view)
-                            .accessibilityIdentifier("company.board.view." + view.rawValue)
+            // Titled sections (the exported "Company pages" and "Board views"):
+            // the page's Board and the board view's Board share one word, and
+            // untitled they read as two checked "Board" rows (P6 fix 1).
+            Section {
+                Picker(selection: page) {
+                    ForEach(pageTabs, id: \.self) { tab in
+                        Text(verbatim: team.page(tab)).tag(tab)
+                            .accessibilityIdentifier("company.page." + tab.rawValue)
                     }
                 } label: {
-                    Text(verbatim: team.boardViews)
+                    Text(verbatim: team.pagesLabel)
                 }
                 .pickerStyle(.inline)
-                if viewerMemberRef != nil {
-                    Toggle(isOn: Binding(
-                        get: { boardPreference.wrappedValue.mineOn(viewer: viewerMemberRef) },
-                        set: { _ in boardPreference.wrappedValue = boardPreference.wrappedValue
-                            .togglingMine(viewer: viewerMemberRef) })) {
-                        Text(verbatim: team.mine)
+            } header: {
+                Text(verbatim: team.pagesLabel)
+            }
+            if page.wrappedValue == .board {
+                Section {
+                    Picker(selection: boardViewSelection) {
+                        ForEach(CompanyBoardView.allCases, id: \.self) { view in
+                            Text(verbatim: team.boardView(view)).tag(view)
+                                .accessibilityIdentifier("company.board.view." + view.rawValue)
+                        }
+                    } label: {
+                        Text(verbatim: team.boardViews)
                     }
-                    .accessibilityIdentifier("company.board.mine")
+                    .pickerStyle(.inline)
+                    if viewerMemberRef != nil {
+                        Toggle(isOn: mineSelection) {
+                            Text(verbatim: team.mine)
+                        }
+                        .accessibilityIdentifier("company.board.mine")
+                    }
+                } header: {
+                    Text(verbatim: team.boardViews)
                 }
             }
         } label: {
@@ -885,6 +891,19 @@ struct TeamSpaceScreen: View {
         .accessibilityLabel(Text(verbatim: team.pagesLabel))
         .accessibilityValue(Text(verbatim: viewValue))
         .accessibilityIdentifier("company.pages")
+    }
+
+    /// The board's Board · List choice, kept in the board preference.
+    private var boardViewSelection: Binding<CompanyBoardView> {
+        Binding(get: { boardPreference.wrappedValue.view },
+                set: { boardPreference.wrappedValue = boardPreference.wrappedValue.selecting($0) })
+    }
+
+    /// Mine on the board, for the signed-in member.
+    private var mineSelection: Binding<Bool> {
+        Binding(get: { boardPreference.wrappedValue.mineOn(viewer: viewerMemberRef) },
+                set: { _ in boardPreference.wrappedValue = boardPreference.wrappedValue
+                    .togglingMine(viewer: viewerMemberRef) })
     }
 
     /// What the view menu has chosen, in words: the page, then on the Board

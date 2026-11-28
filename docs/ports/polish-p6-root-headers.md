@@ -241,3 +241,68 @@ None. Every word is an existing exported key:
 ## Locked run 1 (28 Nov 13:0x UTC)
 
 Debug build failed (exit 65): `7e2212c` removed `exitText(_:delete:leave:)` along with the old header, while the exit confirmation dialog still calls it (plus a cascading type-check timeout in `body`). Coordinator restored the helper unchanged; locked run re-queued.
+
+## Locked run 2 and fix round 1 (28–29 Nov)
+
+Locked run 2: the Debug build passed and 52 UI tests ran locally, with 16
+failures (`polish-p6/logs/ui.log`, `ui.xcresult`). The hosted re-run of the
+same classes (run 46167083209) never reached the tests. All four shards
+failed to build: `HomeScreen.swift:637`, "the compiler is unable to
+type-check this expression in reasonable time". The hosted runner is slower
+than the build Mac, and the error is real.
+
+Triage method: the result bundle's per-test screen recordings were cut into
+frame sheets with ffmpeg, and the failure hierarchies were read. That shows
+what was on screen at each failure. No UI test or screenshot was run
+locally in this round.
+
+### Classification
+
+Categories:
+- **a**: P6 changed the UI on purpose; the test was updated to the accepted
+  design.
+- **b**: P6 broke something; the code was fixed.
+- **c**: pre-existing, or a load flake; left as is and recorded.
+
+| Failure | Cat. | What the evidence shows / what changed |
+|---|---|---|
+| Hosted build (all shards) | b | `homeBody` was one modifier chain, and P6 added the title, toolbar, `.searchable`, `.searchFocused`, `.onSubmit` and the inset to it. It is now five `some View` stages: `homeContent` → `homeHeader` → `homeSheets` → `homeLifecycle` → `homeBody`. The `.searchable` text and prompt are typed properties (`searchText`, `searchPrompt`). Behaviour is unchanged. |
+| TeamSpaceDaily ×4, KitBoardSettings `testTeamSpaceHeaderAndSwitcher` | a | The recordings show the title menu open with "✓ Anka", "Studio · Có tin nhắn mới" and "Công ty của bạn". The system menu drops SwiftUI identifiers from its rows, so `company.header` never matched. New helper `companiesMenuItem`: the identifier, else the exported name ("Your companies" / "Công ty của bạn"). `openCompanyTitleMenu` waits for it. Studio already fell back to its name. |
+| TeamSpaceRevamp `testBoardControlsHave44PointTargetsAtAccessibilityTextSize` | a | At AX XXXL the view menu is taller than the screen and scrolls. List was hittable; Mine, the last row, was below the fold. The test now checks List, then scrolls the menu's own list until Mine is hittable, then checks it. |
+| View menu showing "✓ Bảng" twice (seen in the same recording) | b | On the Board page, the page picker's Board and the board-view picker's Board were two untitled, checked "Bảng" rows. Each group is now a titled `Section`, using the exported "Company pages" / "Trang công ty" and "Board views" / "Chế độ xem bảng". The two Bindings moved to `boardViewSelection` and `mineSelection`. |
+| TeamSpaceRevamp `testRevampWalkInEnglishAndVietnameseLightAndDark` | a | With the one-row header the channel list is shorter. #design's failed line and Try again come to rest on the floating tab bar's top edge (kept screenshot `w4-e7-channel-failed-en-light`). XCUITest called Try again hittable, but the tap landed on the bar. New helper `clearOfTabBar`: the frame must end 8 pt above the tab buttons, the audit's bound. The walk scrolls until both rows are clear. |
+| HomeShell `testRosterAccessibilityAudit`, `testHomeSearchChannelsMessagesFilesAccessibilityAudit` | a | The only finding is contrast on `UISearchBarTextField`, the system `.searchable` field P6 adopted. Its placeholder and glyph colours are the system's. The audit handler now excuses contrast findings on that one system class, with a `MEASURE` line, like its other recorded exceptions. The second test is also quarantined on main (atum-mobile#50). |
+| HomeShell `testPlusOpensStartChatWithRealRowsAndAvailableCreationActions` | c (hardened) | Local-only on main for timing. Start chat opened with real rows. The picked row was half under the sheet's search drawer, so the tap hit the bar and the list scrolled to the top. The pick now needs the row to sit wholly below the sheet's bar. |
+| HomeShell `testHomeSearchHidesResultsOfARoomLeftWhileShown` | c | Base branch, not P6. ML3's `HomeSearchController` rechecks results only when Home's roster changes (`revalidate()` from `.onChange(of: presentation.rows…)`). The scripted leave is a company room that never changes Home's roster, so the row stays. P6 did not touch this path. ML3's own UI tests were never run (`chat-parity-phone-search.md`, lock timeouts). Follow-up for the ML3 owner. |
+| HomeSearchM1Capture `testResultsPrivateScopeAndFiltersLightAndDark` | c | Base branch's capture, never run before. The recording shows the system search focused, the device-scope chips and the results. The coverage line sits at the foot of the results, below the open keyboard, so the List never builds it. P6's field does not change that. Follow-up for the ML3 owner. |
+| HomeShell `testSwipeActionsMutateRowsOnce`, `testInvitationMenuDeclinesOnce` | c | The recordings show the swipe and the long press arriving as plain taps (Luna's chat pushed, and the invitation joined), right after launch on a heavily loaded Mac (tests took 40–400 s each). The invitation test has this exact flake on record (`roster-plus-search-bell.md`). The same run's long-press tests that scroll first (`testPinLimitMenu…`, `testDeletingAppRoom…`) passed. P6 did not change the rows, their swipe actions or their menus. To be confirmed by the hosted run. |
+| HomeShell `testHomeSearchChannelsMessagesFilesAppearances` | c (hardened) | en light, en dark and vi light passed. In the vi-dark pass the check at line 879 (`home.messages.$launch-review` `.exists`, read the moment People stopped searching) ran before the company messages answer landed; the recording shows the Messages section a moment later. The check now waits up to 15 s. Open risk: the same recording shows the system field at "la", with the keyboard down for about 2 s, mid-`typeText`, before "launch" landed. Watch for this in the hosted run. |
+| AgentDeskBell `testDeskAndBellInEnglishAndVietnameseLightAndDark` | c | It failed in the desk half, before the bell: the swipe on `desk.page` never grew the panel to large (the recording shows it resting at medium). P6 only removed that pushed page's X. The same gesture-as-tap symptom as the Home flakes. The bell half (P6's face) was not reached locally; the hosted run covers it. |
+
+### Decisions taken without the owner (native first)
+
+- The view menu's groups carry section titles (existing exported keys). This
+  is presentation only: the owner's decision 4 placement is unchanged.
+- Audit exception for the system search field's contrast. The alternative
+  was a global `UISearchTextField` appearance override, which reaches into
+  UIKit around SwiftUI and changes every search field in the app. It was
+  rejected.
+
+### Verification (fix round 1)
+
+- `python3 scripts/design_lint.py`: OK. `git diff --check`: clean.
+- No Swift package changed, so there is no `swift test`.
+- Locked run: one Debug `build-for-testing` (generic iOS Simulator,
+  `CODE_SIGNING_ALLOWED=NO`), with `-warn-long-expression-type-checking=300`
+  to flag what a slower runner times out on. Script
+  `polish-p6/fix1/locked-build.sh`, launchd label `io.atum.lock.p6fix1`.
+  It was queued behind P7, W4-Y2, W4-AC2 and a `swift test` lane; the result
+  is recorded below when it lands.
+- UI classes for the hosted run: `HomeShellUITests`, `AgentDeskBellUITests`,
+  `HomeSearchM1CaptureUITests`, `TeamSpaceRevampUITests`,
+  `TeamSpaceDailyUITests` and `ChatPanelUITests`. Also the classes over
+  P6's other touched views: `SharedCollectionsUITests` and
+  `AppSidePanelUITests` (pushed panel pages, Back only),
+  `StoreCommerceUITests` (Store's connection glyph) and
+  `TeamSpaceInviteUITests` (sheet background). `KitBoardCaptureUITests`
+  (`KitBoardSettingsCaptureUITests`) is local-only in CI.

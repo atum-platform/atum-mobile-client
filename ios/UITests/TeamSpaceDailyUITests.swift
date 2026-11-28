@@ -124,7 +124,7 @@ final class TeamSpaceDailyUITests: TranscriptUITestCase {
         let app = launchWorkplace()
         // P6: the title menu's Companies opens the switcher sheet.
         XCTAssertTrue(openCompanyTitleMenu(app, "Anka"), boundedHierarchy(app))
-        app.buttons.matching(identifier: "company.header").firstMatch.tap()
+        companiesMenuItem(app).tap()
         XCTAssertTrue(element(app, "company.switcher").waitForExistence(timeout: 3), boundedHierarchy(app))
         XCTAssertTrue(element(app, "company.switch.current.anka").exists, "a check on the current company")
         XCTAssertFalse(element(app, "company.switch.current.studio").exists)
@@ -139,7 +139,7 @@ final class TeamSpaceDailyUITests: TranscriptUITestCase {
     func testCreateCompanyFromTheSwitcherSendsTheNameAndShowsTheNewCompany() {
         let app = launchWorkplace()
         XCTAssertTrue(openCompanyTitleMenu(app, "Anka"), boundedHierarchy(app))
-        app.buttons.matching(identifier: "company.header").firstMatch.tap()
+        companiesMenuItem(app).tap()
         XCTAssertTrue(element(app, "company.create.open").waitForExistence(timeout: 3))
         element(app, "company.create.open").tap()
         let field = app.textFields.matching(identifier: "company.create.name").firstMatch
@@ -159,7 +159,7 @@ final class TeamSpaceDailyUITests: TranscriptUITestCase {
     func testAClosedCreateIsSaidUnderTheNameAndTheNameStays() {
         let app = launchWorkplace()
         XCTAssertTrue(openCompanyTitleMenu(app, "Anka"), boundedHierarchy(app))
-        app.buttons.matching(identifier: "company.header").firstMatch.tap()
+        companiesMenuItem(app).tap()
         XCTAssertTrue(element(app, "company.create.open").waitForExistence(timeout: 3))
         element(app, "company.create.open").tap()
         let field = app.textFields.matching(identifier: "company.create.name").firstMatch

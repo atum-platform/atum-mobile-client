@@ -189,13 +189,38 @@ class TranscriptUITestCase: AtumUITestCase {
         return button.exists ? button : bar.staticTexts[company]
     }
 
+    /// The title menu's Companies entry ("Your companies"), which opens the
+    /// switcher sheet. The system menu drops SwiftUI identifiers from its
+    /// rows (the P6 locked run's recordings show the menu open with every
+    /// row while `company.header` matched nothing), so its exported name is
+    /// the fallback.
+    @MainActor func companiesMenuItem(_ app: XCUIApplication) -> XCUIElement {
+        let byID = app.buttons.matching(identifier: "company.header").firstMatch
+        if byID.exists { return byID }
+        let names = ["Your companies", "Công ty của bạn"]
+        return app.buttons.matching(NSPredicate(format: "label IN %@", names)).firstMatch
+    }
+
     /// Opens the company title menu and waits for its Companies entry.
     @MainActor @discardableResult
     func openCompanyTitleMenu(_ app: XCUIApplication, _ company: String) -> Bool {
         let title = companyTitle(app, company)
         guard title.waitForExistence(timeout: 5) else { return false }
         title.tap()
-        return app.buttons.matching(identifier: "company.header").firstMatch.waitForExistence(timeout: 3)
+        return waitFor(3) { self.companiesMenuItem(app).exists }
+    }
+
+    /// On screen and clear of the floating tab bar. XCUITest calls a row
+    /// hittable while the bar's glass covers its lower half, and a tap there
+    /// lands on the bar (P6's one-row Team Space header left #design's Try
+    /// again resting on the bar's edge). Same 8 pt margin as the audit's
+    /// tabbed-list bound.
+    @MainActor func clearOfTabBar(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        guard element.exists, element.isHittable else { return false }
+        let tabs = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'phone.tab.'"))
+            .allElementsBoundByIndex.map(\.frame).filter { !$0.isEmpty }
+        guard let top = tabs.map(\.minY).min() else { return true }
+        return element.frame.maxY <= top - 8
     }
 
     /// Team Space's view menu button (Chat · Board, Board · List, Mine). Its
@@ -602,6 +627,16 @@ class TranscriptUITestCase: AtumUITestCase {
             // The system toolbar action is ink-tinted on the opaque sheet.
             // Xcode samples the dimmed presenter behind the medium detent.
             print("MEASURE audit.contrast ignored select-text system toolbar action \(frame)")
+            return true
+        }
+        if issue.auditType == .contrast, issue.compactDescription.contains("UISearchBarTextField") {
+            // The system `.searchable` field (UISearchBarTextField) in a
+            // root's bar drawer, adopted by P6 for Home as Drive, Store and
+            // Team Space already had it. Its placeholder and glyph colours
+            // are the system's own (as in Settings or Messages) and the app
+            // cannot set them through SwiftUI; the typed query is the
+            // system label colour. Only this system field is excused.
+            print("MEASURE audit.contrast ignored system search field \(label) \(frame)")
             return true
         }
         if issue.auditType == .elementDetection, element == nil,

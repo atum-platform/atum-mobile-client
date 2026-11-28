@@ -251,10 +251,14 @@ final class HomeShellUITests: TranscriptUITestCase {
         // HC-5: New group is the People section's last row, as on desktop.
         XCTAssertTrue(revealStartChatNewGroup(app).exists, "no inline New group row")
 
-        // Any row still in view after the scroll opens its conversation.
+        // Any row still in view after the scroll opens its conversation: one
+        // wholly under the sheet's bar and search drawer, not a row the bar
+        // half covers (a tap there lands on the bar and scrolls to the top).
+        let sheetBar = app.navigationBars["Bắt đầu trò chuyện"]
+        let barBottom = sheetBar.exists ? sheetBar.frame.maxY : 0
         let existing = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH 'home.startChat.row.'")
-        ).allElementsBoundByIndex.first { $0.isHittable && $0.isEnabled }
+        ).allElementsBoundByIndex.first { $0.isHittable && $0.isEnabled && $0.frame.minY >= barBottom }
         XCTAssertNotNil(existing, "Start chat has no existing conversation")
         existing?.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home.scripted.destination"]
@@ -875,8 +879,11 @@ final class HomeShellUITests: TranscriptUITestCase {
         XCTAssertTrue(element(app, "home.section.channels").waitForExistence(timeout: 15), boundedHierarchy(app))
         XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
         // At AX sizes the List draws only what fits; Messages may be below.
+        // The company messages answer can land just after People's (the P6
+        // locked run's vi-dark pass showed them a moment later): wait for it.
         if !size.contains("Accessibility") {
-            XCTAssertTrue(element(app, "home.messages.$launch-review").exists, boundedHierarchy(app))
+            XCTAssertTrue(element(app, "home.messages.$launch-review").waitForExistence(timeout: 15),
+                          boundedHierarchy(app))
         }
         return app
     }

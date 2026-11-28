@@ -64,15 +64,27 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         XCTAssertTrue(list.waitForExistence(timeout: 5), boundedHierarchy(app))
         let mine = app.switches[expected.mine].exists ? app.switches[expected.mine] : app.buttons[expected.mine]
         XCTAssertTrue(mine.waitForExistence(timeout: 5), boundedHierarchy(app))
-        for control in [list, mine] {
-            XCTAssertTrue(control.isHittable, boundedHierarchy(app))
-            XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.label)
-            XCTAssertTrue(app.frame.contains(control.frame), control.label)
+        // At AX XXXL the menu is taller than the screen and scrolls; Mine,
+        // its last row, starts below the fold (the P6 locked run's recording).
+        checkMenuTarget(list, app)
+        // The menu's own list: the last (topmost) one under the List row.
+        let menuList = app.collectionViews.allElementsBoundByIndex.last {
+            $0.frame.contains(CGPoint(x: list.frame.midX, y: list.frame.midY))
         }
+        for _ in 0..<4 where !mine.isHittable { menuList?.swipeUp(velocity: .slow) }
+        checkMenuTarget(mine, app)
         keepScreenshot("p6-team-space-view-menu-ax", of: app)
         mine.tap()
         XCTAssertTrue(waitFor(3) { (self.companyViewMenu(app).value as? String)?.hasSuffix(expected.mine) == true },
                       "Mine did not turn on: \(boundedHierarchy(app))")
+    }
+
+    /// A view-menu row at AX XXXL: on screen, hittable, at least 44 pt tall.
+    @MainActor
+    private func checkMenuTarget(_ control: XCUIElement, _ app: XCUIApplication) {
+        XCTAssertTrue(control.isHittable, "\(control.label): \(boundedHierarchy(app))")
+        XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.label)
+        XCTAssertTrue(app.frame.contains(control.frame), control.label)
     }
 
     @MainActor
@@ -105,7 +117,7 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         // List makes its row only once it scrolls near: scroll until it exists.
         XCTAssertTrue(app.buttons.matching(identifier: "company.channel.general").firstMatch
             .waitForExistence(timeout: 5), boundedHierarchy(app))
-        for _ in 0..<6 where !(channel.exists && channel.isHittable) { app.swipeUp(velocity: .slow) }
+        for _ in 0..<6 where !clearOfTabBar(app, channel) { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(channel.waitForExistence(timeout: 2), boundedHierarchy(app))
         channel.tap()
         XCTAssertTrue(waitFor(3) { designOpens() - before == 1 }, "the tap did not ask to open #design")
@@ -113,7 +125,7 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         // #design is the last row on a 6.1" screen; the line under it is made once the List
         // scrolls it on screen.
         let retry = app.buttons.matching(identifier: "company.channel.retry").firstMatch
-        for _ in 0..<4 where !(retry.exists && retry.isHittable) { app.swipeUp(velocity: .slow) }
+        for _ in 0..<4 where !clearOfTabBar(app, retry) { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(retry.waitForExistence(timeout: 3), "no failed line: \(boundedHierarchy(app))")
         XCTAssertTrue(element(app, "company.channel.failed").exists, boundedHierarchy(app))
         XCTAssertTrue(app.staticTexts[expected.channelFailed].exists, boundedHierarchy(app))
