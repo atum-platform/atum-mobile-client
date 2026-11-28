@@ -205,9 +205,12 @@ struct MessageBubbleRow: View {
                             }
                         }
                     if !row.item.body.isEmpty {
+                        // The caption spans the card, so the meta sits in
+                        // the card's corner, not after a short caption.
                         withMeta(theme, inline: true, trailingPad: 12, bottomPad: 10) {
                             mediaCaption(theme)
                                 .accessibilityHidden(true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12)
                                 .padding(.top, 8)
                                 .padding(.bottom, 10)

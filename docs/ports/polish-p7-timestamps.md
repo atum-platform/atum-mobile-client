@@ -99,3 +99,5 @@ See the session log at the end of this file.
 
 - 2026-11-28: implemented. Design lint OK (baseline locked in: the removed copy
   row took one padding and one font size with it).
+- 2026-11-28: self-review fix. An image caption now spans the card, so its
+  corner time sits in the card's corner and not right after a short caption.
