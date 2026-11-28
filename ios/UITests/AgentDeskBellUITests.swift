@@ -63,14 +63,11 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         keepScreenshot("w4-e3-desk-\(tag)", of: app)
 
         // Large: its folder opens in place, Back returns; More shows the routines.
-        // Swipe on the panel itself: it grows to large (a swipe on the app can land on the chat).
-        // The desk is a list, which builds a group once it is on screen: the
-        // agent's own files can sit under the medium fold.
-        element(app, "desk.page").swipeUp()
+        expandDesk(app)
         XCTAssertTrue(element(app, "desk.page").waitForExistence(timeout: 3), "the panel closed: \(boundedHierarchy(app))")
         XCTAssertTrue(element(app, "desk.files.own").waitForExistence(timeout: 3), "no own files")
         let folder = element(app, "desk.own.folder.reports")
-        XCTAssertTrue(folder.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(folder, in: element(app, "desk.page")), boundedHierarchy(app))
         folder.tap()
         XCTAssertTrue(element(app, "desk.own.file.q3-summary.md").waitForExistence(timeout: 3), boundedHierarchy(app))
         element(app, "desk.own.back").tap()
@@ -132,7 +129,7 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertTrue(element(app, "chat.more").waitForExistence(timeout: 15), boundedHierarchy(app))
         element(app, "chat.more").tap()
         XCTAssertTrue(element(app, "desk.page").waitForExistence(timeout: 5), boundedHierarchy(app))
-        element(app, "desk.page").swipeUp()
+        expandDesk(app)
         let broken = app.buttons["desk.file.save.chat.agent-desk.file.8"]
         XCTAssertTrue(broken.waitForExistence(timeout: 3), boundedHierarchy(app))
         broken.tap()
@@ -149,6 +146,18 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         keepScreenshot("w4-e3-desk-save-picker-\(tag)", of: app)
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
+    }
+
+    @MainActor
+    private func expandDesk(_ app: XCUIApplication) {
+        let sheet = element(app, "info.sheet")
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+        // Start on the grabber. A swipe inside the collection can scroll it
+        // while leaving the sheet at its medium detent.
+        let grabber = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+        grabber.press(forDuration: 0.05, thenDragTo: end)
+        XCTAssertTrue(waitFor(5) { sheet.frame.minY < app.frame.height * 0.3 },
+                      "the desk sheet did not expand: \(boundedHierarchy(app))")
     }
 
     @MainActor
