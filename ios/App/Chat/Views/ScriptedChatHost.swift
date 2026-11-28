@@ -722,6 +722,7 @@ struct ScriptedChatHost: View {
                         requestID: requestID, refreshAfterSecondConflict: true, isCurrent: { true },
                         fetch: { scriptedModelDestinations }
                     ) { _, _ in
+                        UITestProbe.append("model-pick-started", to: "model-pick.txt")
                         while !FileManager.default.fileExists(atPath: release.path) {
                             try await Task.sleep(for: .milliseconds(100))
                         }

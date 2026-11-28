@@ -121,13 +121,17 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         let pick = reveal(app, "phone.model.row.gpt-6.1")
         XCTAssertTrue(pick.isEnabled)
         pick.tap()
+        let started = probe.appendingPathComponent("model-pick.txt")
+        guard eventually(20, { FileManager.default.fileExists(atPath: started.path) }) else {
+            return XCTFail("the model write did not start before dismissal")
+        }
         element(app, "composer.model.close").tap()
 
         let chip = element(app, AccessibilityID.composerModel)
         let saving = locale == "en" ? "Saving…" : "Đang lưu…"
         let pending = NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", saving, "GPT-6.1")
         let pendingChip = expectation(for: pending, evaluatedWith: chip)
-        wait(for: [pendingChip], timeout: Self.waitSeconds)
+        wait(for: [pendingChip], timeout: 15)
 
         let message = "Message while model is pending"
         let composer = field(app)
@@ -135,13 +139,13 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         composer.typeText(message)
         element(app, AccessibilityID.composerSend).tap()
         XCTAssertTrue(labelContains(element(app, AccessibilityID.transcript), message)
-            .waitForExistence(timeout: Self.waitSeconds))
+            .waitForExistence(timeout: 15))
         XCTAssertTrue(pending.evaluate(with: chip), chip.label)
 
         try Data().write(to: release)
         let settled = expectation(for: NSPredicate(format: "label CONTAINS %@ AND NOT label BEGINSWITH %@",
                                                    "GPT-6.1", saving), evaluatedWith: chip)
-        wait(for: [settled], timeout: Self.waitSeconds)
+        wait(for: [settled], timeout: 15)
     }
 
     // MARK: Helpers

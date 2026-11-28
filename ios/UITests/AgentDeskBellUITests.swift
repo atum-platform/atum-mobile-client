@@ -77,33 +77,34 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         let pause = app.switches["desk.pause"]
         XCTAssertTrue(revealByScrolling(pause, in: page), boundedHierarchy(app))
         XCTAssertEqual(pause.value as? String, "0", "one routine is live: not paused")
+        // Activate the native switch while the controls are on screen. Wait
+        // for the collection to settle so the tap cannot just stop scrolling.
+        let knob = pause.switches.firstMatch
+        XCTAssertTrue(revealByScrolling(knob, in: page), boundedHierarchy(app))
+        var lastKnobFrame = CGRect.null
+        XCTAssertTrue(waitFor(5) {
+            let frame = knob.frame
+            defer { lastKnobFrame = frame }
+            return knob.isHittable && !frame.isEmpty && frame == lastKnobFrame
+        }, "Pause switch did not come to rest")
+        let probeCount = probeLines("agent-desk.txt").count
+        knob.tap()
+        XCTAssertTrue(waitFor(12) {
+            self.probeLines("agent-desk.txt").dropFirst(probeCount).contains { $0.text == "control pause" }
+        }, "Pause did not reach the host")
+        XCTAssertTrue(waitFor(12) { (pause.value as? String) == "1" }, "Pause did not move: \(boundedHierarchy(app))")
+
         let more = element(app, "desk.more")
         XCTAssertTrue(revealByScrolling(more, in: page), boundedHierarchy(app))
         more.tap()
         let brief = app.switches["desk.routine.job-brief"]
         // More opens the routines under the controls, past the fold.
         XCTAssertTrue(revealByScrolling(brief, in: page), boundedHierarchy(app))
-        XCTAssertEqual(brief.value as? String, "1")
+        XCTAssertEqual(brief.value as? String, "0", "the routine did not pause with it")
         let review = app.switches["desk.routine.job-review"]
         XCTAssertTrue(revealByScrolling(review, in: page), boundedHierarchy(app))
         XCTAssertEqual(review.value as? String, "0")
         keepScreenshot("w4-e3-desk-controls-\(tag)", of: app)
-
-        // The labelled switch can cover the whole list row. Tap the native
-        // switch inside it and keep it clear of the sheet's edges.
-        let knob = pause.switches.firstMatch
-        guard revealByScrolling(knob, in: page, up: false, verticalInset: 20) else {
-            XCTFail("Pause switch did not come into the sheet's tap area: \(boundedHierarchy(app))")
-            return
-        }
-        let probeCount = probeLines("agent-desk.txt").count
-        knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(waitFor(3) { (pause.value as? String) == "1" }, "Pause did not move: \(boundedHierarchy(app))")
-        XCTAssertTrue(revealByScrolling(brief, in: page), boundedHierarchy(app))
-        XCTAssertEqual(brief.value as? String, "0", "the routine did not pause with it")
-        XCTAssertTrue(waitFor(3) {
-            self.probeLines("agent-desk.txt").dropFirst(probeCount).contains { $0.text == "control pause" }
-        }, "Pause did not reach the host")
 
         // All settings is the agent's card, one Back away. With two sent files it
         // sits below the fold: scroll to it as a person does and tap it once the

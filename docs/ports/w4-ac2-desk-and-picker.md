@@ -20,3 +20,5 @@ Review fixes passed 257 focused Swift package tests, 13 standalone macOS desk ho
 The first locked Debug build caught assignments inside the SwiftUI result builder for the pending chip. Its display state now resolves before the view builder runs. The second build compiled the app and caught a nested test fixture whose observation macro needs file-level access.
 
 The next locked Debug build passed, as did all 28 focused AppTests and all three picker UI tests. The desk UI test hit the same half-height sheet with collection and grabber gestures on iOS 27. It now uses the suite's scroll-to-control helper to exercise the desk at its current detent.
+
+A slower simulator pass reached the desk's routine controls and timed out on the Pause tap and picker status. The desk test activates the native switch after the list stops moving, before scrolling into More. The picker test waits for the scripted store to start its held write before dismissing.
