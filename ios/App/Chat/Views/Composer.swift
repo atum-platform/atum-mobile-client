@@ -709,7 +709,7 @@ private struct ComposerModelChoiceButton: View {
         if let destinations, case let .value(value) = await destinations.read() { adopt(destination: value) }
         // The Work selection answers ahead of the cloud choice (desktop #143).
         // A read only: the chip never writes a Work or cloud choice.
-        if work == nil { work = destinations?.makeWorkSelection?(accountState) }
+        if work?.value == nil { work = destinations?.makeWorkSelection?() }
         if !Task.isCancelled, !presented, let work {
             await work.reload()
             if work.value?.readState == .ready {
@@ -739,7 +739,8 @@ private struct ComposerModelChoiceButton: View {
     }
 
     private var workFace: PhoneModelPickerProjection.WorkFace? {
-        PhoneModelPickerProjection.workFace(answeringWork, reported: accountState.value?.workPlanHandoffs ?? [])
+        PhoneModelPickerProjection.workFace(answeringWork, reported: accountState.value?.workPlanHandoffs ?? [],
+                                            state: work?.value)
     }
 
     private func adopt(offer: ManagedModelSnapshot) {

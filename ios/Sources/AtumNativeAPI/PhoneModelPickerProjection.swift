@@ -26,43 +26,40 @@ public enum PhoneModelPickerProjection {
 
     /// The Work identity includes the plan even when two catalogs report the
     /// same model ID. A saved model stays visible if its catalog omits it.
-    public static func workRows(reported: [WorkPlanHandoff], state: PhoneModelPickerWorkSelectionState?) -> [WorkRow] {
-        let current = state?.readySnapshot?.selection
-        var seen = Set<WorkModelSelection>()
-        var rows: [WorkRow] = []
-        for handoff in reported {
-            for model in handoff.models {
-                guard let choice = WorkModelSelection(plan: handoff.plan, model: model.id),
-                      seen.insert(choice).inserted else { continue }
-                rows.append(.init(id: choice, displayName: ModelDisplayName.name(model: model.id, displayName: model.displayName),
-                                  selected: choice == current,
-                                  selectable: state?.eligibility.allows(choice) == true))
-            }
+    public static func workRows(state: PhoneModelPickerWorkSelectionState?) -> [WorkRow] {
+        guard let state else { return [] }
+        let current = state.readySnapshot?.selection
+        var rows = state.selectableModels.map { model in
+            let name = ModelDisplayName.name(model: model.choice.model, displayName: model.name)
+            return WorkRow(id: model.choice, displayName: name, selected: model.choice == current, selectable: true)
         }
-        if let saved = state?.snapshot?.selection, seen.insert(saved).inserted {
+        if let saved = state.snapshot?.selection, !rows.contains(where: { $0.id == saved }) {
             let modelName = ModelDisplayName.destinationLabel(model: saved.model)
             rows.append(.init(id: saved, displayName: "\(saved.plan.productName) · \(modelName)",
-                              selected: saved == current, selectable: state?.eligibility.allows(saved) == true))
+                              selected: saved == current, selectable: false))
         }
         return rows
     }
 
     /// The Work model that answers, as the composer chip and the card's
-    /// Model row name it (desktop #143 `relayCurrentName`): the connected
-    /// catalog's display name, else readable words for the id. Never the plan
-    /// alone and never an Atum line-up name.
+    /// Model row name it (desktop #143 `relayCurrentName`): the eligible
+    /// catalog's display name, the account catalog's label for a saved model
+    /// outside eligibility, or readable words for the id.
     public struct WorkFace: Equatable, Sendable {
         public let selection: WorkModelSelection
         public let name: String
         public var plan: AccountPlan { selection.plan }
     }
 
-    public static func workFace(_ selection: WorkModelSelection?, reported: [WorkPlanHandoff]) -> WorkFace? {
+    public static func workFace(_ selection: WorkModelSelection?, reported: [WorkPlanHandoff],
+                                state: PhoneModelPickerWorkSelectionState? = nil) -> WorkFace? {
         guard let selection else { return nil }
+        let eligible = state?.selectableModels.first { $0.choice == selection }
         let listed = reported.first { $0.plan == selection.plan }?.models
             .first { $0.id.utf8.elementsEqual(selection.model.utf8) }
         return WorkFace(selection: selection,
-                        name: ModelDisplayName.name(model: selection.model, displayName: listed?.displayName))
+                        name: ModelDisplayName.name(model: selection.model,
+                                                    displayName: eligible?.name ?? listed?.displayName))
     }
 
     /// The Work selection the phone last read for this assistant. A cached
@@ -597,8 +594,9 @@ public enum PhoneModelPickerProjection {
     /// The offer can drive thinking only when its choice agrees with the
     /// selected Atum row. The offer and destination have separate revisions.
     public static func conversationThinking(offer: ManagedModelSnapshot,
-                                            rows: [Row]) -> Thinking? {
-        guard rows.contains(where: { $0.selected && $0.source == .atum && $0.model == offer.choice.model })
+                                            rows: [Row], work: WorkModelSelectionSnapshot?) -> Thinking? {
+        guard work?.permitsCloudEffortWrite(at: offer.revision) == true,
+              rows.contains(where: { $0.selected && $0.source == .atum && $0.model == offer.choice.model })
         else { return nil }
         return thinking(offer)
     }

@@ -1107,14 +1107,27 @@ public struct AgentsRead: Sendable {
         return snapshot
     }
 
-    public func writeManagedModel(agentPrincipal: NativeID,
-                                  value: ManagedModelWrite) async throws -> ManagedModelSnapshot {
-        let snapshot = try await putModelChoice(ManagedModelSnapshot.self,
-                                                url: agentURL(agentPrincipal, suffix: "model-choice"), value: value)
+    public func writeManagedModel(agentPrincipal: NativeID, value: ManagedModelWrite,
+                                  isCurrent: NativeDispatchGate = { true }) async throws -> ManagedModelSnapshot {
+        let snapshot = try await putModelChoice(
+            ManagedModelSnapshot.self, url: agentURL(agentPrincipal, suffix: "model-choice"),
+            value: value, isCurrent: isCurrent
+        )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse
         }
         return snapshot
+    }
+
+    /// The managed and Work choices share a revision. An effort-only change
+    /// must keep the revision at which the picker observed no Work selection.
+    public func writeManagedModelEffort(agentPrincipal: NativeID, value: ManagedModelWrite,
+                                        work: WorkModelSelectionSnapshot, isCurrent: NativeDispatchGate) async throws
+        -> ManagedModelSnapshot {
+        guard work.permitsCloudEffortWrite(at: value.expectedRevision) else {
+            throw ContractViolation.invalidValue
+        }
+        return try await writeManagedModel(agentPrincipal: agentPrincipal, value: value, isCurrent: isCurrent)
     }
 
     /// Reads the server's one default per agent destination. The snapshot is
@@ -1223,6 +1236,14 @@ public struct AgentsRead: Sendable {
         let request = try JSONEncoder().encode(WorkModelSelectionReadRequest(agentPrincipal: agentPrincipal))
         let answer = try await phoneDeviceServices(request: request, isCurrent: isCurrent)
         return try decode(WorkModelSelectionSnapshot.self, data: answer)
+    }
+
+    public func workPlanEligibility(
+        agentPrincipal: NativeID, isCurrent: NativeDispatchGate = { true }
+    ) async throws -> WorkPlanEligibilitySnapshot {
+        let request = try JSONEncoder().encode(WorkPlanEligibilityReadRequest(agentPrincipal: agentPrincipal))
+        let answer = try await phoneDeviceServices(request: request, isCurrent: isCurrent)
+        return try decode(WorkPlanEligibilitySnapshot.self, data: answer)
     }
 
     /// A single compare-and-swap. The picker owns the eligibility and retry

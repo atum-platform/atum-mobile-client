@@ -41,17 +41,18 @@ import XCTest
     func testOpeningReadsOnlyAndNamesTheSavedPlanModel() async {
         var reads = 0
         var writes = 0
-        let account = await account([opus, luna])
+        let eligible = eligibility([opus, luna])
         let picker = PhoneModelPickerWorkSelection(agentPrincipal: agent, calls: WorkSelectionCalls(
             read: { _, _ in
                 reads += 1
                 return try NativeAPI.decode(WorkModelSelectionSnapshot.self, from: Data(
                     #"{"revision":6,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}"#.utf8))
             },
+            readEligibility: { _, _ in eligible },
             write: { _, _, _, _ in
                 writes += 1
                 return .conflict
-            }), account: account, isCurrent: { true })
+            }), isCurrent: { true })
         await picker.reload()
         await picker.reload()
         XCTAssertEqual(reads, 2)
@@ -60,15 +61,21 @@ import XCTest
         XCTAssertEqual(picker.rows.filter(\.selected).map(\.id), [opus])
         XCTAssertEqual(picker.rows.first { $0.id == opus }?.displayName, "Claude Opus 5.5")
         XCTAssertEqual(Set(picker.rows.filter(\.selectable).map(\.id)), [opus, luna])
+        XCTAssertEqual(picker.rows.first { $0.id == luna }?.displayName, "GPT-6 Luna")
+        let accountCatalog = [PhoneModelPickerProjection.WorkPlanHandoff(
+            plan: .claude, models: [.init(id: opus.model, displayName: "Older catalog name")])]
+        XCTAssertEqual(PhoneModelPickerProjection.workFace(opus, reported: accountCatalog, state: picker.value)?.name,
+                       "Claude Opus 5.5")
     }
 
     func testAPickWritesOnlyTheWorkSelectionAndBecomesCurrent() async {
         var written: [(WorkModelSelection, Int64)] = []
         var saved = try! NativeAPI.decode(WorkModelSelectionSnapshot.self,
                                           from: Data(#"{"revision":3,"selection":null}"#.utf8))
-        let account = await account([opus, luna])
+        let eligible = eligibility([opus, luna])
         let picker = PhoneModelPickerWorkSelection(agentPrincipal: agent, calls: WorkSelectionCalls(
             read: { _, _ in saved },
+            readEligibility: { _, _ in eligible },
             write: { _, selection, revision, _ in
                 written.append((selection, revision))
                 saved = try NativeAPI.decode(WorkModelSelectionSnapshot.self, from: Data("""
@@ -76,7 +83,7 @@ import XCTest
                     "model":"\(selection.model)"}}
                     """.utf8))
                 return .saved(saved)
-            }), account: account, isCurrent: { true })
+            }), isCurrent: { true })
         await picker.reload()
         XCTAssertNil(PhoneModelPickerProjection.answeringWork(picker.value))
         await picker.save(luna)
@@ -87,28 +94,27 @@ import XCTest
     }
 
     func testARetiredPickerNamesNothing() async {
-        let account = await account([opus])
+        let eligible = eligibility([opus])
         let picker = PhoneModelPickerWorkSelection(agentPrincipal: agent, calls: WorkSelectionCalls(
             read: { _, _ in
                 try NativeAPI.decode(WorkModelSelectionSnapshot.self, from: Data(
                     #"{"revision":6,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}"#.utf8))
             },
-            write: { _, _, _, _ in .conflict }), account: account, isCurrent: { true })
+            readEligibility: { _, _ in eligible },
+            write: { _, _, _, _ in .conflict }), isCurrent: { true })
         await picker.reload()
         picker.retire()
         XCTAssertNil(PhoneModelPickerProjection.answeringWork(picker.value))
         XCTAssertTrue(picker.rows.isEmpty)
     }
 
-    private func account(_ choices: [WorkModelSelection]) async -> PhoneModelPickerAccount {
-        let names = ["claude-opus-5-5": "Claude Opus 5.5", "gpt-6-luna": "GPT-6 Luna"]
-        let mac = AccountConnectionDevice(deviceServiceID: "mac", displayName: "Mac", stale: true, observedAt: 1)
-        let registry = AccountConnections(connections: Dictionary(grouping: choices, by: \.plan).map { plan, choices in
-            AccountConnection(id: plan.rawValue, kind: .plan, status: .connected, devices: [mac],
-                              models: choices.map { .init(id: $0.model, displayName: names[$0.model] ?? $0.model) })
-        })
-        let account = PhoneModelPickerAccount()
-        await account.reload(.init(chatGPT: { nil }, openCodeGo: { nil }, accountConnections: { registry }))
-        return account
+    private func eligibility(_ choices: [WorkModelSelection]) -> WorkPlanEligibilitySnapshot {
+        let plans = Dictionary(grouping: choices, by: \.plan).map { plan, choices -> [String: Any] in
+            ["plan": plan.rawValue, "status": "selectable", "models": choices.map {
+                ["id": $0.model, "displayName": $0 == opus ? "Claude Opus 5.5" : $0.model]
+            }]
+        }
+        return try! NativeAPI.decode(WorkPlanEligibilitySnapshot.self,
+                                     from: JSONSerialization.data(withJSONObject: ["plans": plans]))
     }
 }

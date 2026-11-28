@@ -170,8 +170,15 @@ struct PhoneConversationModelPicker: View {
         return .init(rows: work.rows, saving: workSaving, select: chooseWork)
     }
 
+    private var workForThinking: WorkModelSelectionSnapshot? {
+        guard !cloudPickedSinceWorkRead, let work, work.agentPrincipal == snapshot?.agentPrincipal,
+              let state = work.value else { return nil }
+        if case .saving = state.saveState { return nil }
+        return state.readySnapshot
+    }
+
     private func thinking(in rows: [PhoneModelPickerProjection.Row]) -> PhoneModelPickerProjection.Thinking? {
-        snapshot.flatMap { PhoneModelPickerProjection.conversationThinking(offer: $0, rows: rows) }
+        snapshot.flatMap { PhoneModelPickerProjection.conversationThinking(offer: $0, rows: rows, work: workForThinking) }
     }
 
     var body: some View {
@@ -245,7 +252,7 @@ struct PhoneConversationModelPicker: View {
         let budget = PhoneModelPickerRead()
         unavailable = false
         loadFailed = false
-        if work == nil { work = destinations?.makeWorkSelection?(accountState) }
+        if work?.value == nil { work = destinations?.makeWorkSelection?() }
         async let accountLoad: Void = loadAccount(within: budget)
         async let workLoad: Void = loadWork(within: budget)
         async let offerRead = loadOffer(within: budget, isCurrent: { lifetime.isCurrentLoad(token) })
@@ -283,13 +290,6 @@ struct PhoneConversationModelPicker: View {
             pickedAtum = nil
             onWorkPick(choice)
         }
-    }
-
-    /// A cloud write the owner chose has landed. The server cleared the Work
-    /// choice with it; reread so Current follows the server, not this guess.
-    private func cloudPickLanded() {
-        cloudPickedSinceWorkRead = true
-        Task { @MainActor in await loadWork() }
     }
 
     private func loadOffer(within budget: PhoneModelPickerRead, isCurrent: @escaping @MainActor () -> Bool) async
@@ -341,22 +341,25 @@ struct PhoneConversationModelPicker: View {
     /// A thinking-level change writes the model that answers now with the new
     /// level: the same fenced save a model pick makes.
     private func chooseEffort(_ level: ManagedModelEffort, shownModel: String) {
-        guard savingRowID == nil, savingEffort == nil, workSaving == nil, atumWritable, let snapshot,
+        guard savingRowID == nil, savingEffort == nil, atumWritable, let snapshot, let work = workForThinking,
               let thinking = thinking(in: rows), thinking.model == shownModel,
               thinking.canChange(to: level) else { return }
         savingEffort = level
-        save(snapshot, model: thinking.model, effort: level)
+        save(snapshot, model: thinking.model, effort: level, work: work)
     }
 
-    private func save(_ snapshot: ManagedModelSnapshot, model: String, effort: ManagedModelEffort) {
+    private func save(_ snapshot: ManagedModelSnapshot, model: String, effort: ManagedModelEffort,
+                      work workFence: WorkModelSelectionSnapshot? = nil) {
         guard let actions else { return }
         saveFailed = false
         // The same ID only for an identical retry; a different pick gets its own.
         let operation = writes.begin(ConversationModelWrite(model: model, effort: effort,
                                                             revision: snapshot.revision))
         Task { @MainActor in
-            let result = await actions.save(snapshot, model, effort, operation)
-            guard !Task.isCancelled else { return }
+            let result = await actions.save(snapshot, model, effort, operation, workFence) {
+                workFence == nil || workFence == workForThinking
+            }
+            guard !Task.isCancelled, work?.value != nil || workFence == nil else { return }
             savingRowID = nil
             savingEffort = nil
             switch result {
@@ -364,7 +367,9 @@ struct PhoneConversationModelPicker: View {
                 apply(value)
                 reportAtumPick(value.choice.model)
                 writes.settled()
-                cloudPickLanded()
+                cloudPickedSinceWorkRead = true
+                await loadWork()
+                return
             case let .conflict(latest):
                 if let latest { apply(latest) }
                 saveFailed = true
@@ -374,6 +379,7 @@ struct PhoneConversationModelPicker: View {
                 // payload so an identical explicit retry is an idempotent replay.
                 saveFailed = true
             }
+            if workFence != nil { await loadWork() }
         }
     }
 
@@ -396,10 +402,13 @@ struct PhoneConversationModelPicker: View {
                 applyDestination(value)
                 onPick(nil)
                 destinationWrites.settled()
-                cloudPickLanded()
+                cloudPickedSinceWorkRead = true
                 // The initial offer may have been read before this write.
                 // Read again to recover thinking levels for the saved model.
-                _ = await loadOffer(within: PhoneModelPickerRead(), isCurrent: { lifetime.isCurrent(selection) })
+                let budget = PhoneModelPickerRead()
+                async let workLoad: Void = loadWork(within: budget)
+                _ = await loadOffer(within: budget, isCurrent: { lifetime.isCurrent(selection) })
+                await workLoad
             case .cancelled: break
             case let .refused(latest), let .consentRequired(_, latest):
                 if let latest { applyDestination(latest) }
@@ -463,6 +472,7 @@ struct PhoneConversationModelPicker: View {
         accountState.retire(keepingSettled: true)
         confirming = nil
         savingRowID = nil
+        savingEffort = nil
     }
 
     /// The write itself, against the snapshot the picker holds now, under the
@@ -494,7 +504,8 @@ struct PhoneConversationModelPicker: View {
                 applyDestination(value)
                 onPick(PhoneModelPickerProjection.settledDestinationPick(row, destination: value))
                 subscriptionWrites.settled()
-                cloudPickLanded()
+                cloudPickedSinceWorkRead = true
+                await loadWork()
             case .cancelled: break
             case let .consentRequired(status, latest):
                 // The consent changed under the write: nothing was retried.
@@ -646,7 +657,7 @@ struct PhoneModelDestinationsPicker: View {
         destinationReadState = .loading
         offer = nil
         let budget = PhoneModelPickerRead()
-        if work == nil { work = actions.makeWorkSelection?(accountState) }
+        if work?.value == nil { work = actions.makeWorkSelection?() }
         async let accountLoad: Void = loadAccount(within: budget)
         async let workLoad: Void = loadWork(within: budget)
         async let offerLoad: Void = loadOffer(within: budget, token: token)

@@ -775,8 +775,10 @@ struct AssistantCard: View {
     }
 
     private var modelValue: String? {
-        let work = PhoneModelPickerProjection.answeringWork(modelWork?.value)
-        if let face = PhoneModelPickerProjection.workFace(work, reported: modelAccount.value?.workPlanHandoffs ?? []) {
+        let work = modelWork?.value
+        if let face = PhoneModelPickerProjection.workFace(PhoneModelPickerProjection.answeringWork(work),
+                                                         reported: modelAccount.value?.workPlanHandoffs ?? [],
+                                                         state: work) {
             return face.name
         }
         if let face = PhoneModelPickerProjection.chip(pick: nil, destination: modelDestination,
@@ -948,7 +950,7 @@ struct AssistantCard: View {
     @MainActor private func loadModelFace() async {
         guard let modelDestinations else { return }
         if case let .value(value) = await modelDestinations.read() { modelDestination = value }
-        if modelWork == nil { modelWork = modelDestinations.makeWorkSelection?(modelAccount) }
+        if modelWork?.value == nil { modelWork = modelDestinations.makeWorkSelection?() }
         await modelWork?.reload()
         let plan = PhoneModelPickerProjection.answeringWork(modelWork?.value) != nil
             || modelDestination?.choice(for: try! ManagedModelDestinationID("cloud"))?.source.isSubscription == true

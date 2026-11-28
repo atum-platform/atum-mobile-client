@@ -1,8 +1,7 @@
 import Foundation
 import Observation
+import os
 
-/// Which picks the account's connected-plan catalog offers on the phone.
-/// The owner write checks assistant and plan authorization on the server.
 public enum WorkModelEligibility: Equatable, Sendable {
     case unknown
     case known(Set<WorkModelSelection>)
@@ -24,32 +23,89 @@ public struct PhoneModelPickerWorkSelectionState: Equatable, Sendable {
     public fileprivate(set) var snapshot: WorkModelSelectionSnapshot?
     public fileprivate(set) var readState: PhoneModelPickerReadState = .unavailable
     public fileprivate(set) var saveState: SaveState = .idle
-    public fileprivate(set) var eligibility: WorkModelEligibility = .unknown
+    public fileprivate(set) var planEligibility: WorkPlanEligibilitySnapshot?
 
     public var readySnapshot: WorkModelSelectionSnapshot? {
         readState == .ready ? snapshot : nil
     }
+
+    public var eligibility: WorkModelEligibility {
+        guard planEligibility != nil else { return .unknown }
+        return .known(Set(selectableModels.map(\.choice)))
+    }
+
+    var selectableModels: [(choice: WorkModelSelection, name: String)] {
+        (planEligibility?.plans ?? []).flatMap { row -> [(WorkModelSelection, String)] in
+            guard row.status == .selectable, let plan = AccountPlan(rawValue: row.plan) else { return [] }
+            return row.models.compactMap { model in
+                WorkModelSelection(plan: plan, model: model.id).map { ($0, model.displayName) }
+            }
+        }
+    }
 }
 
-/// The two owner calls a Work picker makes. The app binds them to the live
-/// `NativeDomainClient`; the scripted host binds synthetic answers for
-/// captures. Nothing here can name another assistant than the one bound.
+/// Orders in-flight intents per assistant across picker and client lifetimes.
+@MainActor private final class WorkSelectionWriteQueue {
+    private static var active: [NativeID: WorkSelectionWriteQueue] = [:]
+    private var latest: UUID
+    private var pending: CheckedContinuation<Bool, Never>?
+
+    private init(latest: UUID) { self.latest = latest }
+
+    static func run(for assistant: NativeID, onQueued: () -> Void,
+                    _ work: (_ isLatest: @escaping NativeDispatchGate) async -> Void) async {
+        let intent = UUID()
+        let queue: WorkSelectionWriteQueue
+        if let running = active[assistant] {
+            queue = running
+            queue.latest = intent
+            onQueued()
+            let promoted = await withCheckedContinuation { next in
+                queue.pending?.resume(returning: false)
+                queue.pending = next
+            }
+            guard promoted else { return }
+        } else {
+            queue = WorkSelectionWriteQueue(latest: intent)
+            active[assistant] = queue
+        }
+        defer {
+            if let next = queue.pending {
+                queue.pending = nil
+                next.resume(returning: true)
+            } else {
+                active[assistant] = nil
+            }
+        }
+        guard queue.latest == intent, !Task.isCancelled else { return }
+        await work { queue.latest == intent }
+    }
+}
+
+/// Owner calls shared by the live client and the scripted picker.
 public struct WorkSelectionCalls {
-    public typealias Read = @MainActor (NativeID, @escaping NativeDispatchGate) async throws
+    public typealias Read = @MainActor (NativeID, NativeDispatchGate) async throws
         -> WorkModelSelectionSnapshot
-    public typealias Write = @MainActor (NativeID, WorkModelSelection, Int64, @escaping NativeDispatchGate) async throws
+    public typealias ReadEligibility = @MainActor (NativeID, NativeDispatchGate) async throws
+        -> WorkPlanEligibilitySnapshot
+    public typealias Write = @MainActor (NativeID, WorkModelSelection, Int64, NativeDispatchGate) async throws
         -> WorkModelSelectionWriteResult
 
     let read: Read
+    let readEligibility: ReadEligibility
     let write: Write
 
-    public init(read: @escaping Read, write: @escaping Write) {
+    public init(read: @escaping Read, readEligibility: @escaping ReadEligibility, write: @escaping Write) {
         self.read = read
+        self.readEligibility = readEligibility
         self.write = write
     }
 
     @MainActor public init(client: NativeDomainClient) {
         read = { agent, isCurrent in try await client.workSelection(agentPrincipal: agent, isCurrent: isCurrent) }
+        readEligibility = { agent, isCurrent in
+            try await client.workPlanEligibility(agentPrincipal: agent, isCurrent: isCurrent)
+        }
         write = { agent, selection, revision, isCurrent in
             try await client.setWorkSelection(agentPrincipal: agent, selection: selection,
                                               expectedRevision: revision, isCurrent: isCurrent)
@@ -58,26 +114,21 @@ public struct WorkSelectionCalls {
 }
 
 /// One picker's Work state for a single assistant and live owner session.
-/// A new pick supersedes the previous pick. The dispatch gate also covers
-/// token refresh, when sending a previously valid pick can become unsafe.
 @available(macOS 14.0, *)
 @MainActor @Observable
 public final class PhoneModelPickerWorkSelection {
+    public typealias ReadSelection = @MainActor (NativeDispatchGate) async throws -> WorkModelSelectionSnapshot
+    public typealias ReadEligibility = @MainActor (NativeDispatchGate) async throws -> WorkPlanEligibilitySnapshot
+    public typealias WriteSelection = @MainActor (WorkModelSelection, Int64, NativeDispatchGate) async throws
+        -> WorkModelSelectionWriteResult
+
     public let agentPrincipal: NativeID
-    public var value: PhoneModelPickerWorkSelectionState? {
-        guard scopeIsCurrent else { return nil }
-        var value = state
-        value.eligibility = eligibility
-        return value
-    }
+    public var value: PhoneModelPickerWorkSelectionState? { scopeIsCurrent ? state : nil }
+    public var rows: [PhoneModelPickerProjection.WorkRow] { PhoneModelPickerProjection.workRows(state: value) }
 
-    public var rows: [PhoneModelPickerProjection.WorkRow] {
-        guard let value else { return [] }
-        return PhoneModelPickerProjection.workRows(reported: account.value?.workPlanHandoffs ?? [], state: value)
-    }
-
-    private let calls: WorkSelectionCalls
-    private let account: PhoneModelPickerAccount
+    private let readSelection: ReadSelection
+    private let readEligibility: ReadEligibility
+    private let writeSelection: WriteSelection
     private let isCurrent: NativeDispatchGate
     private var state = PhoneModelPickerWorkSelectionState()
     private var retired = false
@@ -85,24 +136,29 @@ public final class PhoneModelPickerWorkSelection {
 
     private var scopeIsCurrent: Bool { !retired && isCurrent() }
 
-    private var eligibility: WorkModelEligibility {
-        guard let snapshot = account.value, snapshot.accountConnectionsState == .ready else { return .unknown }
-        return .known(Set(snapshot.workPlanHandoffs.flatMap { handoff in
-            handoff.models.compactMap { WorkModelSelection(plan: handoff.plan, model: $0.id) }
-        }))
-    }
-
     public convenience init(agentPrincipal: NativeID, client: NativeDomainClient,
-                            account: PhoneModelPickerAccount, isCurrent: @escaping NativeDispatchGate) {
-        self.init(agentPrincipal: agentPrincipal, calls: WorkSelectionCalls(client: client),
-                  account: account, isCurrent: isCurrent)
+                            isCurrent: @escaping NativeDispatchGate) {
+        self.init(agentPrincipal: agentPrincipal, calls: WorkSelectionCalls(client: client), isCurrent: isCurrent)
     }
 
-    public init(agentPrincipal: NativeID, calls: WorkSelectionCalls,
-                account: PhoneModelPickerAccount, isCurrent: @escaping NativeDispatchGate) {
+    public convenience init(agentPrincipal: NativeID, calls: WorkSelectionCalls,
+                            isCurrent: @escaping NativeDispatchGate) {
+        self.init(agentPrincipal: agentPrincipal,
+                  readSelection: { try await calls.read(agentPrincipal, $0) },
+                  readEligibility: { try await calls.readEligibility(agentPrincipal, $0) },
+                  writeSelection: { selection, revision, current in
+                      try await calls.write(agentPrincipal, selection, revision, current)
+                  },
+                  isCurrent: isCurrent)
+    }
+
+    public init(agentPrincipal: NativeID, readSelection: @escaping ReadSelection,
+                readEligibility: @escaping ReadEligibility, writeSelection: @escaping WriteSelection,
+                isCurrent: @escaping NativeDispatchGate) {
         self.agentPrincipal = agentPrincipal
-        self.calls = calls
-        self.account = account
+        self.readSelection = readSelection
+        self.readEligibility = readEligibility
+        self.writeSelection = writeSelection
         self.isCurrent = isCurrent
     }
 
@@ -110,11 +166,15 @@ public final class PhoneModelPickerWorkSelection {
         guard scopeIsCurrent, !Task.isCancelled else { return }
         if case .saving = state.saveState { return }
         generation &+= 1
-        _ = await readSnapshot(generation, within: budget)
+        let current: NativeDispatchGate = { [mine = generation] in self.owns(mine) }
+        state.planEligibility = nil
+        async let selection = refreshSelection(within: budget, isCurrent: current)
+        async let eligibility: Void = refreshEligibility(within: budget, isCurrent: current)
+        _ = await (selection, eligibility)
     }
 
     public func save(_ choice: WorkModelSelection) async {
-        guard scopeIsCurrent, !Task.isCancelled, eligibility.allows(choice) else { return }
+        guard scopeIsCurrent, !Task.isCancelled, state.eligibility.allows(choice) else { return }
         generation &+= 1
         let mine = generation
         state.saveState = .saving(choice)
@@ -122,34 +182,60 @@ public final class PhoneModelPickerWorkSelection {
             if owns(mine), case .saving = state.saveState { state.saveState = .idle }
         }
 
+        await WorkSelectionWriteQueue.run(for: agentPrincipal, onQueued: {
+            // The prior write can change the revision before this pick runs.
+            state.readState = .unavailable
+        }) { isLatest in
+            let current: NativeDispatchGate = { self.owns(mine) && isLatest() }
+            defer {
+                if self.owns(mine), !isLatest() { self.state.readState = .unavailable }
+            }
+            await self.performSave(choice, while: current)
+        }
+    }
+
+    private func performSave(_ choice: WorkModelSelection, while current: @escaping NativeDispatchGate) async {
         var base: WorkModelSelectionSnapshot
         if let ready = state.readySnapshot {
             base = ready
         } else {
-            guard let first = await readSnapshot(mine, within: .init()) else {
-                if owns(mine), !Task.isCancelled { state.saveState = .failed(.other) }
+            guard let first = await refreshSelection(within: .init(), isCurrent: current) else {
+                if current(), !Task.isCancelled { state.saveState = .failed(.other) }
                 return
             }
             base = first
         }
 
-        let canWrite: NativeDispatchGate = {
-            self.owns(mine) && self.eligibility.allows(choice)
+        // A publication can expire while the picker is open.
+        await refreshEligibility(within: .init(), isCurrent: current)
+        let canWrite: NativeDispatchGate = { current() && self.state.eligibility.allows(choice) }
+        if current(), state.planEligibility == nil, !Task.isCancelled {
+            state.saveState = .failed(.other)
         }
         for attempt in 0...1 {
             guard canWrite(), !Task.isCancelled else { return }
             let result: WorkModelSelectionWriteResult
             do {
-                result = try await calls.write(agentPrincipal, choice, base.revision, canWrite)
+                let revision = base.revision
+                // Keep the queue occupied until the transport settles, even
+                // when a caller cancels or a newer pick withdraws retries.
+                let cancelled = OSAllocatedUnfairLock(initialState: false)
+                result = try await withTaskCancellationHandler {
+                    try await Task { @MainActor in
+                        try await self.writeSelection(choice, revision) {
+                            canWrite() && !cancelled.withLock { $0 }
+                        }
+                    }.value
+                } onCancel: {
+                    cancelled.withLock { $0 = true }
+                }
             } catch {
-                // The write might have landed before its reply was lost. Keep
-                // the name but require readback before another write.
-                guard owns(mine) else { return }
+                guard current() else { return }
                 state.readState = .failed
                 if canWrite(), !Task.isCancelled { state.saveState = .failed(.other) }
                 return
             }
-            guard owns(mine) else { return }
+            guard current() else { return }
             guard !Task.isCancelled else {
                 state.readState = .failed
                 return
@@ -160,12 +246,15 @@ public final class PhoneModelPickerWorkSelection {
                 return
             }
 
-            // Read back the server's choice even after a second conflict.
-            // Only the first conflict can earn a retry, against a newer revision.
-            let latest = await readSnapshot(mine, within: .init())
-            guard owns(mine), !Task.isCancelled else { return }
+            guard attempt == 0 else {
+                state.readState = .failed
+                state.saveState = .failed(.conflict)
+                return
+            }
+            let latest = await refreshSelection(within: .init(), isCurrent: current)
+            guard current(), !Task.isCancelled else { return }
             if latest?.selection == choice { return }
-            guard attempt == 0, let latest, latest.revision > base.revision, canWrite() else {
+            guard let latest, latest.revision > base.revision, canWrite() else {
                 state.saveState = .failed(.conflict)
                 return
             }
@@ -179,26 +268,33 @@ public final class PhoneModelPickerWorkSelection {
         generation == operation && scopeIsCurrent
     }
 
-    private func readSnapshot(_ operation: UInt64, within budget: PhoneModelPickerRead) async
+    private func refreshSelection(within budget: PhoneModelPickerRead, isCurrent: @escaping NativeDispatchGate) async
         -> WorkModelSelectionSnapshot? {
-        guard owns(operation), !Task.isCancelled else { return nil }
+        guard isCurrent(), !Task.isCancelled else { return nil }
         state.readState = .loading
-        let current: NativeDispatchGate = { self.owns(operation) }
-        let answer = await budget.withinSource { () -> WorkModelSelectionSnapshot? in
-            guard current() else { return nil }
-            return try? await self.calls.read(self.agentPrincipal, current)
-        }
-        guard owns(operation) else { return nil }
+        let answer = await budget.withinSource {
+            try? await self.readSelection(isCurrent)
+        } ?? nil
+        guard isCurrent() else { return nil }
         guard !Task.isCancelled else {
             state.readState = .unavailable
             return nil
         }
-        guard let snapshot = answer ?? nil else {
+        guard let snapshot = answer else {
             state.readState = .failed
             return nil
         }
         state.snapshot = snapshot
         state.readState = .ready
         return snapshot
+    }
+
+    private func refreshEligibility(within budget: PhoneModelPickerRead, isCurrent: @escaping NativeDispatchGate) async {
+        guard isCurrent(), !Task.isCancelled else { return }
+        let answer = await budget.withinSource {
+            try? await self.readEligibility(isCurrent)
+        } ?? nil
+        guard isCurrent(), !Task.isCancelled else { return }
+        state.planEligibility = answer
     }
 }

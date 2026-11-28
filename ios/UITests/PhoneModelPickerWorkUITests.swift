@@ -73,7 +73,9 @@ final class PhoneModelPickerWorkUITests: TranscriptUITestCase {
         XCTAssertTrue(waitFor(10) { self.writes().contains { $0.hasPrefix("saved nhat-thuc") } },
                       "the owner's cloud pick was not written: \(writes())")
         XCTAssertTrue(waitFor(10) { self.writes().contains { $0.hasPrefix("work cleared") } })
-        XCTAssertTrue(waitFor(10) { !self.element(app, self.opus).isSelected },
+        // The eligibility reread can briefly remove these lazy rows.
+        let cleared = reveal(app, opus)
+        XCTAssertTrue(waitFor(10) { cleared.exists && !cleared.isSelected },
                       "the cleared Work model still reads as Current")
         element(app, "composer.model.close").tap()
         XCTAssertTrue(waitFor(10) { !chip.label.hasPrefix("Claude Opus 5.5") }, "chip: \(chip.label)")

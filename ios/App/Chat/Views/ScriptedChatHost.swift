@@ -244,14 +244,22 @@ struct ScriptedChatHost: View {
                                     ? AssistantModelActions(
                                         matrixAccountID: script.context.ownUserID,
                                         read: { .value(scriptedModels) },
-                                        save: { _, model, effort, _ in
+                                        save: { snapshot, model, effort, _, work, isCurrent in
+                                            guard isCurrent() else { return .failed }
+                                            if let work {
+                                                let current = scriptedWorkSnapshot
+                                                guard work == current,
+                                                      current.permitsCloudEffortWrite(at: snapshot.revision) else {
+                                                    return .conflict(scriptedModels)
+                                                }
+                                            }
                                             scriptedModels = Self.models(model: model, effort: effort,
-                                                                          revision: Int(scriptedModels.revision + 1))
+                                                                          revision: Self.nextCloudRevision(after: scriptedModels.revision))
                                             UITestProbe.append(
                                                 "saved \(model) \(scriptedModels.revision) \(effort.rawValue)",
                                                 to: "model-choice.txt"
                                             )
-                                            await Self.cloudWriteClearsWork()
+                                            Self.cloudWriteClearsWork(at: scriptedModels.revision)
                                             return .saved(scriptedModels)
                                         }
                                     ) : nil,
@@ -268,13 +276,13 @@ struct ScriptedChatHost: View {
                                             scriptedModelDestinations = Self.modelDestinations(
                                                 destination: destination,
                                                 model: model,
-                                                revision: Int(scriptedModelDestinations.revision + 1)
+                                                revision: await Self.nextCloudRevision(after: scriptedModelDestinations.revision)
                                             )
-                                            await Self.cloudWriteClearsWork()
+                                            await Self.cloudWriteClearsWork(at: scriptedModelDestinations.revision)
                                             return .saved(scriptedModelDestinations)
                                         },
                                         subscriptions: scriptedSubscriptions,
-                                        makeWorkSelection: Self.makeScriptedWork
+                                        makeWorkSelection: makeScriptedWork
                                     ) : nil,
                                 assistantPresentation: script.context.kind == .assistant
                                     ? AssistantPresentationActions(
@@ -717,9 +725,9 @@ struct ScriptedChatHost: View {
                 let next = Self.subscriptionDestinations(
                     source: source == .opencodeGo ? "opencode_go" : "chatgpt_plan",
                     model: model, effort: effort.rawValue,
-                    revision: Int(scriptedModelDestinations.revision + 1))
+                    revision: Self.nextCloudRevision(after: scriptedModelDestinations.revision))
                 scriptedModelDestinations = next
-                Self.cloudWriteClearsWork()
+                Self.cloudWriteClearsWork(at: next.revision)
                 return .saved(next)
             },
             training: ChatGPTTrainingActions(
@@ -740,8 +748,8 @@ struct ScriptedChatHost: View {
 
     /// `-AtumScriptedWork claude:claude-opus-5-5` (W4-Y2): the assistant's
     /// saved Work selection, read and written through synthetic owner calls;
-    /// `none` starts with no Work choice. Use with `-AtumScriptedConnections
-    /// work` so the plan's catalog lists the models. Synthetic data.
+    /// `none` starts with no Work choice. The flag also supplies synthetic
+    /// assistant eligibility independently of the account connections.
     static let workFlag = "-AtumScriptedWork"
     fileprivate static let workDemo: String? = {
         let arguments = ProcessInfo.processInfo.arguments
@@ -755,22 +763,30 @@ struct ScriptedChatHost: View {
         return ScriptedChatHost.workSnapshot(revision: parts.count == 2 ? 4 : 0, selection: selection)
     }()
 
-    /// The picker factory for `-AtumScriptedWork`; nil keeps the W4-X2 hand-off.
-    @MainActor private static var makeScriptedWork: (@MainActor (PhoneModelPickerAccount) -> PhoneModelPickerWorkSelection?)? {
-        guard workDemo != nil else { return nil }
-        return { account in
-            PhoneModelPickerWorkSelection(agentPrincipal: try! NativeID("14600000-0000-4000-8000-0000000000a1"),
-                                          calls: ScriptedChatHost.scriptedWorkCalls, account: account,
+    @MainActor private var scriptedWorkSnapshot: WorkModelSelectionSnapshot {
+        Self.workDemo == nil ? .init(revision: scriptedModels.revision, selection: nil) : Self.scriptedWork
+    }
+
+    @MainActor private var makeScriptedWork: (@MainActor () -> PhoneModelPickerWorkSelection?)? {
+        // The work account fixture without a Work picker still exercises W4-X2.
+        if Self.workDemo == nil, Self.scriptedConnectionsDemo == "work" { return nil }
+        return {
+            PhoneModelPickerWorkSelection(agentPrincipal: scriptedModels.agentPrincipal, calls: scriptedWorkCalls,
                                           isCurrent: { true })
         }
     }
 
+    @MainActor private static func nextCloudRevision(after revision: Int64) -> Int {
+        Int(max(revision, workDemo == nil ? 0 : scriptedWork.revision) + 1)
+    }
+
     /// The platform's 0536 trigger: any cloud model write clears the Work
     /// selection (work-route v1.3 §151-153). Only an owner's cloud pick gets here.
-    @MainActor fileprivate static func cloudWriteClearsWork() {
-        guard workDemo != nil, scriptedWork.selection != nil else { return }
-        scriptedWork = workSnapshot(revision: Int(scriptedWork.revision) + 1, selection: NSNull())
-        UITestProbe.append("work cleared \(scriptedWork.revision)", to: "model-choice.txt")
+    @MainActor private static func cloudWriteClearsWork(at revision: Int64) {
+        guard workDemo != nil else { return }
+        let hadSelection = scriptedWork.selection != nil
+        scriptedWork = workSnapshot(revision: Int(revision), selection: NSNull())
+        if hadSelection { UITestProbe.append("work cleared \(revision)", to: "model-choice.txt") }
     }
 
     private static func workSnapshot(revision: Int, selection: Any) -> WorkModelSelectionSnapshot {
@@ -779,11 +795,18 @@ struct ScriptedChatHost: View {
                                      from: JSONSerialization.data(withJSONObject: value))
     }
 
-    @MainActor private static var scriptedWorkCalls: WorkSelectionCalls {
+    @MainActor private var scriptedWorkCalls: WorkSelectionCalls {
         WorkSelectionCalls(
-            read: { _, _ in ScriptedChatHost.scriptedWork },
-            write: { _, selection, revision, isCurrent in
+            read: { _, isCurrent in
                 guard isCurrent() else { throw ScriptedReadFailure() }
+                return scriptedWorkSnapshot
+            },
+            readEligibility: { _, isCurrent in
+                guard isCurrent(), Self.workDemo != nil else { throw ScriptedReadFailure() }
+                return Self.scriptedWorkEligibility
+            },
+            write: { _, selection, revision, isCurrent in
+                guard isCurrent(), Self.workDemo != nil else { throw ScriptedReadFailure() }
                 guard revision == ScriptedChatHost.scriptedWork.revision else { return .conflict }
                 ScriptedChatHost.scriptedWork = ScriptedChatHost.workSnapshot(revision: Int(revision) + 1, selection: [
                     "provider": "atum-work", "plan": selection.plan.rawValue, "model": selection.model])
@@ -792,6 +815,17 @@ struct ScriptedChatHost: View {
                 return .saved(ScriptedChatHost.scriptedWork)
             })
     }
+
+    private static let scriptedClaudeModels = [
+        ["id": "claude-sonnet-5-5", "displayName": "Claude Sonnet 5.5"],
+        ["id": "claude-opus-5-5", "displayName": "Claude Opus 5.5"],
+    ]
+    private static let scriptedWorkEligibility: WorkPlanEligibilitySnapshot = {
+        let plan: [String: Any] = ["plan": "claude", "status": "selectable", "models": scriptedClaudeModels]
+        let value = ["plans": [plan]]
+        return try! NativeAPI.decode(WorkPlanEligibilitySnapshot.self,
+                                     from: JSONSerialization.data(withJSONObject: value))
+    }()
 
     /// `-AtumScriptedPickerReads chatgpt-failed,destination-failed` (W4-X2):
     /// the picker's ChatGPT relay read throws, and/or its destination readback
@@ -866,11 +900,14 @@ struct ScriptedChatHost: View {
     /// has Claude connected on that Mac, so the picker draws its Work models
     /// read-only with the hand-off to the Mac. Synthetic data.
     static let connectionsFlag = "-AtumScriptedConnections"
-    private static let scriptedAccountConnections: AccountConnections? = {
+    private static let scriptedConnectionsDemo: String? = {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: connectionsFlag), index + 1 < arguments.count,
               ["plans", "work"].contains(arguments[index + 1]) else { return nil }
-        let work = arguments[index + 1] == "work"
+        return arguments[index + 1]
+    }()
+    private static let scriptedAccountConnections: AccountConnections? = {
+        guard let demo = scriptedConnectionsDemo else { return nil }
         let reach: [String: Any] = ["chat": "relay", "work": "native", "agents": "all"]
         let none: [String: Any] = ["chat": "none", "work": "none", "agents": "all"]
         func plan(_ id: String, connected: Bool) -> [String: Any] {
@@ -880,14 +917,13 @@ struct ScriptedChatHost: View {
                                       "displayName": "MacBook Pro", "status": "connected",
                                       "observedAt": 1_760_000_000_000]] : [],
              "models": !connected ? []
-                 : id == "claude" ? [["id": "claude-sonnet-5-5", "displayName": "Claude Sonnet 5.5"],
-                                     ["id": "claude-opus-5-5", "displayName": "Claude Opus 5.5"]]
+                 : id == "claude" ? scriptedClaudeModels
                  : [["id": "gpt-6.1", "displayName": "GPT-6.1"]],
              "reach": connected ? reach : none]
         }
         let value: [String: Any] = ["profile": "atum.account-connections/1",
                                     "connections": [plan("codex", connected: true),
-                                                    plan("claude", connected: work),
+                                                    plan("claude", connected: demo == "work"),
                                                     plan("antigravity", connected: false)]]
         return try! NativeAPI.decode(AccountConnections.self, from: JSONSerialization.data(withJSONObject: value))
     }()

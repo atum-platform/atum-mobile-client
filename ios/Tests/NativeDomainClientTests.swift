@@ -968,6 +968,49 @@ import AtumChat
         XCTAssertEqual(calls, ["GET", "PUT", "GET", "PUT"])
     }
 
+    func testThinkingDoesNotRebaseAWriteOverAConcurrentWorkPick() async throws {
+        let principal = try NativeID(agentPrincipal)
+        let api = client(TestAuthorization(first: "p2-model-token"))
+        let picker = ManagedModelPickerState<ManagedModelSnapshot>(revision: \.revision)
+        var managedRevision = 4
+        var attempts: [Int] = []
+        var calls: [String] = []
+        NativeDomainProtocol.state.handler = { request in
+            calls.append(request.httpMethod ?? "")
+            switch request.httpMethod {
+            case "POST":
+                return .json(Data(#"{"revision":4,"selection":null}"#.utf8))
+            case "GET":
+                return .json(try! self.managedModelBody(revision: managedRevision))
+            default:
+                let data = try! XCTUnwrap(self.body(of: request))
+                let body = try! XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                attempts.append(try! XCTUnwrap(body["expectedRevision"] as? Int))
+                // Desktop picked Work between the phone read and the managed write.
+                managedRevision = 5
+                return .init(status: 409, chunks: [
+                    Data(#"{"error":"matrix_409","details":{"reason":"revision_conflict"},"revision":5}"#.utf8)
+                ])
+            }
+        }
+        let work = try await api.workSelection(agentPrincipal: principal)
+        let fetch = { try await api.managedModels(agentPrincipal: principal) }
+        let initial = try await picker.read(isCurrent: { true }, fetch: fetch)
+        let result = await picker.save(
+            from: initial, choice: .offer(model: "sonnet", effort: .high),
+            requestID: ModelWriteRequests<NativeID>.freshID(),
+            refreshAfterSecondConflict: false, isCurrent: { true }, fetch: fetch
+        ) { fence, id in
+            let write = try ManagedModelWrite(requestId: id, snapshot: fence, model: "sonnet", effort: .high)
+            return try await api.writeManagedModelEffort(agentPrincipal: principal, value: write,
+                                                         work: work, isCurrent: { true })
+        }
+        guard case let .refused(latest) = result else { return XCTFail("The Work revision should stop the retry") }
+        XCTAssertEqual(latest?.revision, 5)
+        XCTAssertEqual(attempts, [4])
+        XCTAssertEqual(calls, ["POST", "GET", "PUT", "GET"])
+    }
+
     func testDestinationRevisionConflictRetriesOnceAndKeepsTheFinalReadback() async throws {
         let principal = try NativeID(agentPrincipal)
         let requestID = ModelWriteRequests<NativeID>.freshID()
