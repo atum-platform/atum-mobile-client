@@ -207,4 +207,33 @@ None. Every word is an existing exported key:
 
 ## Verification
 
-Filled in after the locked run.
+- `python3 scripts/design_lint.py`: exit 0. The baseline was lowered for P6's
+  four files only: `CompanySpaceViews`, `CompanyWorkspaceViews`,
+  `TeamSpaceRevampViews` and `HomeScreen`.
+- `python3 -m unittest tests.test_design_lint`: OK.
+- `python3 scripts/public_guard.py --base origin/main --head HEAD`: exit 0,
+  by its own exit code.
+- No Swift package code changed (`ios/Sources` untouched), so no
+  `swift test` was needed.
+- **Locked run: queued, not yet run.** It was queued at 15:09 (+07),
+  28 Nov 2026, behind the shared heavy-build lock. At 16:41 it still had
+  not started.
+  - Script: `/Volumes/AtumTestFlight/polish-p6/locked-run.sh`.
+  - It does a Debug `build-for-testing` with the temporary capture class
+    `polish-p6/harness/PolishP6CaptureUITests.swift`. The class is copied
+    in, and the project is restored after the build.
+  - Then the UI tests: `HomeShellUITests`, `AgentDeskBellUITests`,
+    `HomeSearchM1CaptureUITests`, `TeamSpaceRevampUITests`,
+    `TeamSpaceDailyUITests`, `ChatPanelUITests` and
+    `KitBoardSettingsCaptureUITests/testTeamSpaceHeaderAndSwitcher`.
+  - Then the captures: `p6-{home,team-space,drive,store}-{light,dark,ax-large}`,
+    plus the face's badge and list, the active search, and Team Space's title
+    menu and view menu.
+  - Then `xcrun simctl shutdown all`.
+  - Results go to `polish-p6/logs/`: `run.txt`, `build.log`, `ui.log`,
+    `ui.summary.txt`, `ui.xcresult`, `capture.*`. Shots go to
+    `polish-p6/screens/`.
+- **Not verified yet:** none of the changed SwiftUI has been compiled. The
+  updated UI tests have not run. The test helpers that find the system
+  search's Cancel and the company title menu are written against the
+  system's accessibility names, and the run must confirm them.
