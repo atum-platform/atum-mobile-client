@@ -29,13 +29,14 @@ shown, as on desktop.
 
 | Store state | Card | Words |
 | --- | --- | --- |
-| `pending` | open, actions as `canDecide` | question, fields, `approve`, `decline` |
+| `pending` | open, actions as `canDecide` and the approval restrictions below | question, fields, `approve` where supported, `decline` |
 | `deciding(.approve)` | open, both disabled, spinner on Approve | `approving` ("Approving…") |
 | `deciding(.decline)` | open, both disabled | `declining` ("Declining…") |
 | `reconciling` | open, both disabled, no busy word | (nothing is known to be in flight) |
 | `failedRetryable` | open, actions as `canDecide` | `retry` under the actions |
 | `approved` / `declined` / `superseded` / `changed` | one line: summary + state | assistant `approved`…`changed`; Work `work.approved`…`work.changed` |
 | `closed` / `expired` | one line | assistant `closed`; Work `work.expired` (desktop folds the two the same way) |
+| `outcomeUnknown` | one line | pinned `Unknown` when a Work proposal disappears after an ambiguous decision |
 | `unsupported`, or an unsupported source or kind | nothing | desktop's strict reader drops these |
 
 The settled summary follows desktop `summary`: a message's subject, an event's
@@ -65,15 +66,14 @@ the card ID captured from the projection the owner tapped.
    speaks Work's own settled lines, and Work alone asks for draft, label and
    mailbox changes. Gap: desktop should export a phone line for "From Work on
    your Mac" (en and vi); the phone can then draw it under the question.
-3. **No Mac hand-off.** A Work approval is carried out by Shell, and its outcome
-   goes back to Work. Desktop's card says only "Approved." and offers nothing to
-   continue on the Mac, so the phone offers nothing either. "Open Atum → Work on
-   your Mac to continue" is not pinned. It would be needed only if a later wave
-   adds a Work step that has to finish on the Mac.
-4. **A cleared Calendar location or description draws nothing**, as on desktop
-   (`draft.location && …`). The W4-AA1 store types it as `cleared`, but no
-   pinned key says "will be removed". Gap: once desktop shows it, the phone
-   should show it with the same words.
+3. **Work Gmail mailbox actions and draft replacement are Decline-only.** The
+   card uses the pinned "Needs your OK on your Mac" line. The store also
+   rejects an attempted phone approval before calling Shell.
+4. **Explicit Calendar clears get removal rows.** An omitted field has no
+   row. A cleared location shows "Location" and "Clear". A cleared description
+   uses the closest pinned field label, "Details", and keeps the proposal
+   Decline-only until a precise description key is available. The same store
+   restriction applies in chat and Work.
 5. **Reconciling shows no words.** Desktop has no such state: its unavailable
    answer returns to pending with "Couldn't reach Atum. Try again." The phone
    store holds an ambiguous decision disabled until a read proves the outcome.
@@ -103,7 +103,7 @@ the card ID captured from the projection the owner tapped.
 - Colors are kit roles only: an open card is `surface` with elevation one, a
   settled card is `sunk`, labels are `ink-3` and the quote rule is `line`. Both
   schemes come from the token export. The design lint has no new findings.
-- Vietnamese uses the pinned vi strings for all 49 keys the card speaks.
+- Vietnamese uses the pinned vi strings for all 53 keys the card speaks.
   Japanese and Chinese fall back to English for the card keys, as desktop
   does.
 
@@ -123,17 +123,62 @@ the card ID captured from the projection the owner tapped.
 
 ## Follow-ups (not in this slice)
 
-- From review r2 of W4-AA1: a lost Calendar create receipt can show as
-  "expired". If the create succeeded but its receipt was lost, Shell removes
-  the proposal, and the next list settles the card as expired for Work (closed
-  for an assistant). A Shell status contract is needed to tell those outcomes
-  apart.
-- A pinned "From Work on your Mac" line (decision 2) and pinned words for
-  cleared Calendar fields (decision 4).
+- A Shell status contract is needed to recover the actual result after a lost
+  receipt. When a successful list omits a Work proposal after an ambiguous
+  decision, including a disappearance seen while the receipt was in flight,
+  the phone settles it as `outcomeUnknown`. An explicit matching receipt still
+  settles as approved or declined.
+- A pinned "From Work on your Mac" line (decision 2).
 - Desktop's delivered acknowledgement and typed approval (W4-AA1 open
   questions) are not on the phone.
 
+## Review r1 consent fixes and W4-C9 handoff
+
+- Calendar PATCH sends an explicit empty `location` or `description` and
+  leaves omitted fields out of the body. See Shell `api-executor.ts:537–553`
+  at platform `fd831c390`. The phone retains those differences in the existing
+  card grid as typed removal values. The reused `desktop.common.clear` supplies
+  the operation. The reused `desktop.atum.workspace.tabDetails` is a broader
+  label than Calendar's description, so its removal stays Decline-only.
+- Shell `work-proposals.ts:24–35` digests the mailbox request itself. Its
+  permitted keys are the action, source, operation, target ID and optional
+  labels (`matrix-google-tool-request.ts:125,372–392`). `gmail-mail.ts:453–480`
+  operates on that exact message or thread ID. Desktop #134 at `583cd334`
+  shows only the scope and optional labels (`google-write-card.tsx:226–234`).
+  Phone approval requires a human-readable target summary bound to the
+  proposal digest, such as subject with sender or snippet. The handoff copy
+  directs the owner to the Mac, whose existing card has the same preview gap.
+- Shell compares the regenerated outgoing draft preview with the confirmed
+  payload (`api-executor.ts:508–535`). It carries the destination `draftId`.
+  `gmail-compose.ts:715–719,757–781` replaces all MIME content with a Gmail
+  `PUT`. Re-enabling phone approval requires a digest-bound revision of the
+  existing Gmail draft that Shell verifies as a precondition to replacement.
+
+Proposed desktop export keys for W4-C9, with English source text:
+
+| Key | Proposed English | Current phone copy |
+| --- | --- | --- |
+| `shared.matrix-google-write-copy.MATRIX_GOOGLE_WRITE_COPY.labels.description` | Description | Details, Decline-only |
+| `src.matrix.google-write-card-copy.copies.labels.cleared` | Will be removed | Clear |
+| `src.matrix.google-write-card-copy.copies.work.approvalOnMac` | Open Atum on your Mac to review this request. | Needs your OK on your Mac |
+| `src.matrix.google-write-card-copy.copies.work.outcomeUnknown` | We couldn’t confirm what happened to this request. | Unknown |
+
 ## Verification
+
+### Review r1 fixes
+
+- The locked package test filter covers `GoogleWriteCardPresentationTests`,
+  `GoogleWriteProposalDecoderTests`, `GoogleWriteProposalStoreTests` and
+  `AtumCopyTests`, followed by a Debug arm64 build for the iPhone simulator.
+  Local evidence is under `/Volumes/AtumTestFlight/w4-aa2-r2/`.
+- The focused regressions cover omission versus explicit removal, the
+  Decline-only presentation and dispatch path, and an ambiguous Work outcome
+  when the proposal disappears before or after the receipt is lost.
+- Design lint passed with 601 baseline findings, all 10 lint tests passed,
+  the desktop export pin verified, all 13 copy and project-source checks
+  passed, and `git diff --check` passed.
+
+### Original port
 
 - Focused package tests: `GoogleWriteCardPresentationTests` (8 cases) cover
   the email and event blocks, busy, reconciling and retry phases, the settled

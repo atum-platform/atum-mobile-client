@@ -168,6 +168,34 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
 @MainActor final class GoogleWriteProposalStoreTests: XCTestCase {
     private typealias Fixture = GoogleProposalFixtures
 
+    func testApprovalRestrictionsBlockDispatchAndAllowDecline() async throws {
+        let rows = [
+            Fixture.row(1, work: true, draft: #"{"action":"mailbox","sourceId":"gmail","operation":"add_labels","messageId":"target","labels":["Important"]}"#,
+                        digest: "db8bc0b1a288a1114533c68b1bb6b453676626c2604c5e717289d6f16871841d"),
+            Fixture.row(2, work: true, draft: #"{"action":"update_draft","sourceId":"google:gmail","draftId":"saved","to":[],"subject":"","body":"","quote":"","references":[],"attachments":[]}"#,
+                        digest: "620687ac11276d180d1c9c8706d7f4ae7d24bbfd4b8670e153f73f0ae2888e26"),
+            Fixture.row(3, work: true, draft: #"{"action":"update_event","sourceId":"google:calendar:Q2FsZW5kYXIgQQ","eventId":"target","title":"Review","start":"2026-11-26T08:00:00+07:00","end":"2026-11-26T09:00:00+07:00","location":"","description":""}"#,
+                        digest: "7bd4894a7eb645759eefdd2c0bccccfe87804c31028e80c70b8ad2807d18c109"),
+        ]
+        let proposals = try Fixture.decode(rows)
+        XCTAssertEqual(proposals.map(\.kind), [.mailbox, .updateDraft, .updateEvent])
+        XCTAssertTrue(proposals.allSatisfy(\.digestMatchesPreview))
+        for proposal in proposals {
+            let store = GoogleWriteProposalStore()
+            let api = ProposalAPI()
+            api.proposals = [proposal]
+            store.bind(accountID: "owner-a", api: api)
+            await store.refresh()
+            let card = try XCTUnwrap(store.cards.first)
+            XCTAssertEqual(card.state, .pending)
+            await store.decide(.approve, cardID: card.id)
+            XCTAssertTrue(api.decisions.isEmpty)
+            await store.decide(.decline, cardID: card.id)
+            XCTAssertEqual(api.decisions.map(\.0), [.decline])
+            XCTAssertEqual(store.cards.first?.state, .declined)
+        }
+    }
+
     func testMountFocusPollAndAssistantHintAreScopedToVisibleConsumers() async throws {
         let clock = ProposalPollClock()
         let store = GoogleWriteProposalStore(sleep: { try await clock.sleep() })
@@ -436,7 +464,30 @@ final class GoogleWriteProposalDecoderTests: XCTestCase {
 
         next.proposals = []
         await store.refresh()
-        XCTAssertEqual(store.cards.first?.state, .expired)
+        XCTAssertEqual(store.cards.first?.state, .outcomeUnknown)
+    }
+
+    func testWorkDisappearanceDuringDecisionKeepsOutcomeUnknownIfReceiptIsLost() async throws {
+        for (result, expected) in [(GoogleWriteDecisionResult.ambiguous, GoogleWriteProposalState.outcomeUnknown),
+                                   (.accepted, .approved), (.unavailable, .expired)] {
+            let store = GoogleWriteProposalStore()
+            let api = ProposalAPI()
+            api.proposals = [try Fixture.proposal(1, work: true)]
+            api.holdDecision = true
+            store.bind(accountID: "owner-a", api: api)
+            await store.refresh()
+            let cardID = try XCTUnwrap(store.cards.first?.id)
+            let caller = Task { await store.decide(.approve, cardID: cardID) }
+            await until { api.decisionContinuation != nil }
+            api.proposals = []
+            await store.refresh()
+            XCTAssertEqual(store.cards.first?.state, .deciding(.approve))
+
+            api.finishDecision(result)
+            await caller.value
+            XCTAssertEqual(store.cards.first?.state, expected)
+            XCTAssertFalse(store.cards.first?.canDecide ?? true)
+        }
     }
 
     func testOutcomeMappingAndRetry() async throws {

@@ -47,16 +47,41 @@ final class GoogleWriteCardPresentationTests: XCTestCase {
         ])
     }
 
-    func testEventOmitsIdentifiersAndAClearedFieldAsDesktopDoes() throws {
-        let card = try XCTUnwrap(card(.work, kind: .updateEvent, lines: event))
-        XCTAssertEqual(card.glyph, .calendar)
-        XCTAssertEqual(card.question, "shared.matrix-google-write-copy.MATRIX_GOOGLE_WRITE_COPY.message.update-event")
-        XCTAssertEqual(card.blocks, [
+    func testEventShowsRemovalRowsOnlyForExplicitClears() throws {
+        let omitted = Array(event.dropLast(2))
+        let unchanged = try XCTUnwrap(card(.work, kind: .updateEvent, lines: omitted))
+        XCTAssertEqual(unchanged.glyph, .calendar)
+        XCTAssertEqual(unchanged.question, "shared.matrix-google-write-copy.MATRIX_GOOGLE_WRITE_COPY.message.update-event")
+        XCTAssertEqual(unchanged.blocks, [
             .row(label: Keys.title, value: .text("Review")),
             .row(label: Keys.start, value: .time("2026-11-26T08:00:00+07:00")),
             .row(label: Keys.end, value: .time("2026-11-26T09:00:00+07:00")),
-            .text("Discuss"),
         ])
+        let clearLocation = try XCTUnwrap(card(.work, kind: .updateEvent, lines: event))
+        XCTAssertEqual(clearLocation.blocks, unchanged.blocks + [
+            .row(label: Keys.location, value: .removal(Keys.clear)), .text("Discuss"),
+        ])
+        XCTAssertTrue(clearLocation.showsApprove)
+        let clearBoth = try XCTUnwrap(card(.work, kind: .updateEvent,
+                                          lines: omitted + [.cleared(.location), .cleared(.description)]))
+        XCTAssertEqual(clearBoth.blocks, unchanged.blocks + [
+            .row(label: Keys.location, value: .removal(Keys.clear)),
+            .row(label: Keys.details, value: .removal(Keys.clear)),
+        ])
+        XCTAssertFalse(clearBoth.showsApprove)
+        XCTAssertEqual(clearBoth.phase, .open(canDecide: true, busy: nil, retryLine: nil))
+    }
+
+    func testGmailMailboxAndDraftReplacementOfferDeclineAndMacNotice() throws {
+        let mailbox = try XCTUnwrap(card(.work, kind: .mailbox, lines: [.mailboxTarget(conversation: true)],
+                                        operation: .trash))
+        let replacement = try XCTUnwrap(card(.work, kind: .updateDraft))
+        for blocked in [mailbox, replacement] {
+            XCTAssertFalse(blocked.showsApprove)
+            XCTAssertEqual(blocked.approvalNotice, Keys.approvalOnMac)
+            XCTAssertEqual(blocked.phase, .open(canDecide: true, busy: nil, retryLine: nil))
+        }
+        XCTAssertTrue(try XCTUnwrap(card(.work, kind: .createDraft)).showsApprove)
     }
 
     func testBusyReconcilingAndRetryStates() throws {
@@ -89,6 +114,7 @@ final class GoogleWriteCardPresentationTests: XCTestCase {
             XCTAssertEqual(card(.work, state: state)?.phase, .settled(summary: "Plan", line: prefix + workLine), "\(state)")
             XCTAssertEqual(card(state: state)?.isOpen, false)
         }
+        XCTAssertEqual(card(.work, state: .outcomeUnknown)?.phase, .settled(summary: "Plan", line: Keys.unknown))
     }
 
     func testSettledSummaryNamesTheRequest() throws {
@@ -130,8 +156,8 @@ final class GoogleWriteCardPresentationTests: XCTestCase {
     func testEveryCardKeyIsPinnedWithoutArgumentsInEnglishAndVietnamese() throws {
         let copy = try AtumCopy()
         let keys = Keys.all
-        // All 50 pinned card keys except `work.source` ("From Work on this Mac"), which the phone omits.
-        XCTAssertEqual(Set(keys).count, 49)
+        // 49 card keys and four reused pinned strings for removal, handoff and uncertain outcome.
+        XCTAssertEqual(Set(keys).count, 53)
         XCTAssertFalse(keys.contains("src.matrix.google-write-card-copy.copies.work.source"))
         for key in keys {
             XCTAssertEqual(copy.parameterKinds(key), [], key)

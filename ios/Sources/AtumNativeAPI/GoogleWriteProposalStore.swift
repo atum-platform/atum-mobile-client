@@ -8,7 +8,7 @@ public enum GoogleWriteProposalSurface: Hashable, Sendable {
 
 public enum GoogleWriteProposalState: Equatable, Sendable {
     case pending, deciding(GoogleWriteDecision), reconciling, failedRetryable
-    case approved, declined, superseded, expired, changed, closed, unsupported
+    case approved, declined, superseded, expired, changed, closed, outcomeUnknown, unsupported
 
     fileprivate var canDecide: Bool { self == .pending || self == .failedRetryable }
 
@@ -141,6 +141,7 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
               let index = entries.firstIndex(where: { $0.proposal.id == cardID.proposalID }),
               entries[index].state.canDecide else { return }
         let proposal = entries[index].proposal
+        guard decision == .decline || proposal.kind.phoneApprovalRestriction(for: proposal.previewLines) == nil else { return }
         let key = DecisionKey(accountID: accountID, proposalID: proposal.id)
         guard inFlight[key] == nil, reconciling[key] == nil else { return }
         entries[index].state = .deciding(decision)
@@ -179,6 +180,9 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
         case .accepted: state = decision == .approve ? .approved : .declined
         case .refused: state = entry.proposal.source == .work ? .expired : .closed
         case .changed: state = .changed
+        case .ambiguous where entry.proposal.source == .work &&
+            (entry.listResolution == .expired || entry.listResolution == .superseded):
+            state = .outcomeUnknown
         case .unavailable, .ambiguous: state = entry.listResolution ?? .failedRetryable
         }
         entries[index].state = state
@@ -264,6 +268,9 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
             let resolution: GoogleWriteProposalState?
             if let latest = byID[entry.proposal.id] {
                 resolution = entry.proposal.sameApproval(as: latest) ? nil : .changed
+            } else if entry.proposal.source == .work,
+                      reconciling[DecisionKey(accountID: accountID, proposalID: entry.proposal.id)] != nil {
+                resolution = .outcomeUnknown
             } else {
                 let replaced = proposals.contains { $0.source == entry.proposal.source }
                 resolution = replaced ? .superseded : (entry.proposal.source == .work ? .expired : .closed)
@@ -313,6 +320,23 @@ public struct GoogleWriteProposalCard: Equatable, Identifiable, Sendable {
                                            canDecide: state.canDecide && inFlight[key] == nil)
         }
         if cards != next { cards = next }
+    }
+}
+
+enum GoogleWritePhoneApprovalRestriction {
+    case requiresMac, calendarDescriptionClear
+}
+
+extension GoogleWriteProposalKind {
+    func phoneApprovalRestriction(for lines: [GoogleWritePreviewLine]) -> GoogleWritePhoneApprovalRestriction? {
+        switch self {
+        // The mailbox payload identifies the target only by ID. The replacement
+        // preview carries no draft revision that Shell can check before writing.
+        case .mailbox, .updateDraft: .requiresMac
+        // The pin has no exact description label for the removal row.
+        case .updateEvent where lines.contains(.cleared(.description)): .calendarDescriptionClear
+        default: nil
+        }
     }
 }
 

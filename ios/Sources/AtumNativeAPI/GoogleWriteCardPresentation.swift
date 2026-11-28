@@ -5,7 +5,8 @@ import Foundation
 /// #134) from one store projection to its question, field rows, actions and
 /// settled line. Every word is a pinned copy key; the view resolves them.
 ///
-/// - Only a card the store can decide offers Approve and Decline enabled.
+/// - A card the store can decide offers Decline and, when the proposal can be
+///   approved on the phone, Approve.
 ///   A decision in flight shows "Approving…" or "Declining…" on its own button
 ///   and disables both. A reconciling card (an ambiguous answer the store is
 ///   still checking) keeps both disabled without a busy word, since nothing is
@@ -24,6 +25,7 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
     /// A field row's value. Times and sizes stay typed for the view to format.
     public enum Value: Equatable, Sendable {
         case text(String)
+        case removal(String)
         /// An RFC 3339 timestamp from Shell, shown in the owner's locale.
         case time(String)
         case attachments([GoogleWriteAttachment])
@@ -54,6 +56,8 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
     public let question: String
     public let blocks: [Block]
     public let phase: Phase
+    public let showsApprove: Bool
+    public let approvalNotice: String?
 
     public var isOpen: Bool {
         if case .open = phase { return true }
@@ -88,6 +92,9 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
         self.glyph = glyph
         self.question = question
         blocks = Self.blocks(lines, resolve: resolve)
+        let restriction = kind.phoneApprovalRestriction(for: lines)
+        showsApprove = restriction == nil
+        approvalNotice = restriction == .requiresMac ? resolve(Keys.approvalOnMac) : nil
 
         switch state {
         case .pending:
@@ -98,7 +105,7 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
             phase = .open(canDecide: false, busy: decision == .approve ? .approve : .decline, retryLine: nil)
         case .reconciling:
             phase = .open(canDecide: false, busy: nil, retryLine: nil)
-        case .approved, .declined, .superseded, .expired, .closed, .changed, .unsupported:
+        case .approved, .declined, .superseded, .expired, .closed, .changed, .outcomeUnknown, .unsupported:
             phase = .settled(summary: Self.summary(lines, question: question),
                              line: resolve(Keys.settled(state, work: work)))
         }
@@ -142,6 +149,9 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
                 blocks.append(.row(label: resolve(Keys.location), value: .text(location)))
             case let .description(text):
                 blocks.append(.text(text))
+            case let .cleared(field):
+                let label = field == .location ? Keys.location : Keys.details
+                blocks.append(.row(label: resolve(label), value: .removal(resolve(Keys.clear))))
             case let .mailboxTarget(conversation):
                 blocks.append(.row(label: resolve(Keys.appliesTo),
                                    value: .text(resolve(conversation ? Keys.conversation : Keys.oneEmail))))
@@ -149,9 +159,7 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
                 blocks.append(.row(label: resolve(Keys.labels), value: .text(labels.joined(separator: ", "))))
             case let .name(name):
                 blocks.append(.row(label: resolve(Keys.name), value: .text(name)))
-            // Identifiers are for Shell, not the owner. An empty list, body
-            // or quote draws nothing, and a cleared Calendar location or
-            // description has no line on desktop (`draft.location && …`).
+            // Identifiers are for Shell. Empty recipient, attachment and quote values have no rows.
             default:
                 continue
             }
@@ -227,6 +235,10 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
         public static let approving = "src.matrix.google-write-card-copy.copies.approving"
         public static let declining = "src.matrix.google-write-card-copy.copies.declining"
         static let retry = "src.matrix.google-write-card-copy.copies.retry"
+        static let approvalOnMac = "src.matrix.mobile-copy.mobileScreensCopy.relay.needsOk"
+        static let unknown = "desktop.atum.awareness.epistemic.unknown"
+        static let clear = "desktop.common.clear"
+        static let details = "desktop.atum.workspace.tabDetails"
 
         static let to = "shared.matrix-google-write-copy.MATRIX_GOOGLE_WRITE_COPY.labels.to"
         static let cc = "shared.matrix-google-write-copy.MATRIX_GOOGLE_WRITE_COPY.labels.cc"
@@ -278,6 +290,7 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
         /// Desktop: `work ? copy.work[closed → expired] : copy[expired → closed]`.
         static func settled(_ state: GoogleWriteProposalState, work: Bool) -> String {
             switch (state, work) {
+            case (.outcomeUnknown, _): unknown
             case (.approved, false): "src.matrix.google-write-card-copy.copies.approved"
             case (.declined, false): "src.matrix.google-write-card-copy.copies.declined"
             case (.superseded, false): "src.matrix.google-write-card-copy.copies.superseded"
@@ -295,8 +308,10 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
         static var all: [String] {
             let kinds: [GoogleWriteProposalKind] = [.sendEmail, .createEvent, .updateEvent, .createDraft,
                                                     .updateDraft, .createLabel]
-            let states: [GoogleWriteProposalState] = [.approved, .declined, .superseded, .changed, .closed, .expired]
-            return [approve, decline, approving, declining, retry, to, cc, bcc, subject, forwarded, attachments,
+            let states: [GoogleWriteProposalState] = [.approved, .declined, .superseded, .changed, .closed, .expired,
+                                                      .outcomeUnknown]
+            return [approve, decline, approving, declining, retry, approvalOnMac, clear, details,
+                    to, cc, bcc, subject, forwarded, attachments,
                     inReplyTo, title, start, end, location, quote, truncated, name, labels, appliesTo,
                     conversation, oneEmail]
                 + kinds.compactMap { question($0, operation: nil) }

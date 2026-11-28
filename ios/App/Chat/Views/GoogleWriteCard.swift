@@ -174,6 +174,11 @@ struct GoogleWriteCard: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             fields
+            if let notice = presentation.approvalNotice {
+                Text(verbatim: notice)
+                    .font(kit.font(.caption))
+                    .foregroundStyle(kit.color(.ink3, scheme: scheme))
+            }
             actions(canDecide: canDecide, busy: busy)
             if let retryLine {
                 Text(verbatim: retryLine)
@@ -263,7 +268,7 @@ struct GoogleWriteCard: View {
     private func value(_ value: GoogleWriteCardPresentation.Value) -> some View {
         let locale = Locale(identifier: design.locale)
         let text = switch value {
-        case let .text(text): text
+        case let .text(text), let .removal(text): text
         case let .time(time): GoogleWriteCardPresentation.time(time, locale: locale, timeZone: .current)
         case let .attachments(files): GoogleWriteCardPresentation.attachments(files, locale: locale)
         }
@@ -310,12 +315,12 @@ struct GoogleWriteCard: View {
 
         if typeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: kit.space(.s2)) {
-                approve
+                if presentation.showsApprove { approve }
                 decline
             }
         } else {
             HStack(spacing: kit.space(.s2)) {
-                approve
+                if presentation.showsApprove { approve }
                 decline
             }
         }
