@@ -191,12 +191,14 @@ struct PhoneModelPickerList: View {
         .onChange(of: rows) { _, _ in disclosure.settle(sections) }
         .onChange(of: failedStatuses, initial: true) { _, next in announceFailures(next) }
         .sheet(item: $connecting) { request in
-            AccountPlanConnectSheet(design: design, plan: request.plan,
-                                    makePoll: request.handoff ? nil : makeConnectionsPoll,
-                                    onLanded: { landing in
-                                        if let registry = landing.registry { onConnectionsChanged(registry) }
-                                        return true
-                                    })
+            AccountPlanConnectSheet(design: design, request: request,
+                                    makePoll: request.handoff ? nil : makeConnectionsPoll) { poll, request, announce in
+                await poll.follow(request) { landing in
+                    if let registry = landing.registry { onConnectionsChanged(registry) }
+                    announce()
+                    return true
+                }
+            }
         }
     }
 
@@ -219,7 +221,7 @@ struct PhoneModelPickerList: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                 let connect = Button(AccountConnectionsWords.text(AccountConnectionsCopy.connect, design: design)) {
-                    connecting = AccountPlanConnectRequest(plan: plan)
+                    connecting = AccountPlanConnectRequest(plan: plan, wasSignedOut: true)
                 }
                 .buttonStyle(.atumSecondary)
                 .accessibilityLabel(AccountConnectionsWords.text(AccountConnectionsCopy.sheetTitle(plan),

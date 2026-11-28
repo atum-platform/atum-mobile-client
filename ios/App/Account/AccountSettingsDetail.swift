@@ -119,9 +119,10 @@ struct AccountSettingsDetail: View {
         }
         .sheet(item: $connectionsModel.connecting) { request in
             if let connections = actions.accountConnections {
-                AccountPlanConnectSheet(design: design, plan: request.plan, makePoll: connections.makePoll,
-                                        onReadiness: { connectionsModel.applyReadiness($0, actions: connections) },
-                                        onLanded: { connectionsModel.landed($0, actions: connections) })
+                AccountPlanConnectSheet(design: design, request: request, makePoll: connections.makePoll) {
+                    poll, request, announce in
+                    await connectionsModel.follow(poll, request: request, actions: connections, onLanded: announce)
+                }
             }
         }
         .accessibilityIdentifier("account.settings." + section.page.rawValue)

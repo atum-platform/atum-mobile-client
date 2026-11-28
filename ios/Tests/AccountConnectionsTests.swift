@@ -306,7 +306,7 @@ final class AccountConnectionsTests: XCTestCase {
 /// The read is the desktop's own request on the existing device-services
 /// transport: a POST of exactly `{"operation":"account_connections_read"}`.
 @MainActor final class AccountConnectionsTransportTests: XCTestCase {
-    func testReadinessPostsExactOperationWithStoredBearerAndTreatsFailuresAsUnavailable() async throws {
+    func testReadinessPostsExactOperationAndSeparatesUnsupportedFromUnavailable() async throws {
         let probe = PollProbe()
         let client = NativeDomainClient(
             testAuthorization: { forceRefresh in
@@ -327,12 +327,17 @@ final class AccountConnectionsTests: XCTestCase {
         XCTAssertEqual(seen.body, try WorkPlanReadinessTests.fixture("request", trim: true))
         XCTAssertNil(seen.version)
 
-        for status in [400, 404, 401, 503, 200] {
+        for status in [400, 404, 405, 501, 401, 403, 408, 429, 500, 503, 200] {
             // Older servers reject the unknown operation with invalid input.
             let error = status == 400 ? #"{"error":"invalid"}"# : "{}"
             AccountConnectionsProtocol.reset(answers: [(status, Data(error.utf8)), (200, response)])
             let refused = await client.workPlanReadiness()
-            XCTAssertEqual(refused, .unavailable, "HTTP \(status)")
+            if [400, 404, 405, 501].contains(status) {
+                XCTAssertNotEqual(refused, .unavailable, "HTTP \(status) signals an unsupported operation")
+                XCTAssertNil(refused.snapshot)
+            } else {
+                XCTAssertEqual(refused, .unavailable, "HTTP \(status)")
+            }
             XCTAssertEqual(AccountConnectionsProtocol.requests, 1, "HTTP \(status) must not replay")
         }
         probe.stored = nil

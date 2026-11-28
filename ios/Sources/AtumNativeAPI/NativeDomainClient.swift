@@ -1218,9 +1218,13 @@ public struct AgentsRead: Sendable {
     /// Optional owner read. Use the current bearer without rotation or replay,
     /// including when the operation is unavailable on an older server.
     public func workPlanReadiness() async -> WorkPlanReadinessRead {
-        guard let body = try? await phoneDeviceServices(request: WorkPlanReadinessContract.requestBody, rotation: false),
-              body.count <= AccountConnectionsContract.maximumResponseBytes,
-              let snapshot = try? decode(WorkPlanReadiness.self, data: body) else { return .unavailable }
+        guard let result = try? await phoneDeviceServicesResponse(request: WorkPlanReadinessContract.requestBody,
+                                                                  rotation: false) else { return .unavailable }
+        // The legacy route can reject the operation without a recognizable error body.
+        if [400, 404, 405, 501].contains(result.status) { return .unsupported }
+        guard [200, 201].contains(result.status),
+              result.body.count <= AccountConnectionsContract.maximumResponseBytes,
+              let snapshot = try? decode(WorkPlanReadiness.self, data: result.body) else { return .unavailable }
         return .available(snapshot)
     }
 
@@ -1607,6 +1611,24 @@ public struct AgentsRead: Sendable {
     func phoneDeviceServices(request: Data? = nil, revoking id: UUID? = nil,
                              listVersion: String = PhoneRegistryContract.listVersion,
                              controllerKeys: Bool = false, rotation: Bool = true) async throws -> Data {
+        let result = try await phoneDeviceServicesResponse(request: request, revoking: id, listVersion: listVersion,
+                                                           controllerKeys: controllerKeys, rotation: rotation)
+        guard result.status == 200 || (result.status == 201 && id == nil && request != nil) else {
+            // A proxy's non-JSON 5xx page is an outage, not a refusal.
+            guard let failure = try? JSONDecoder().decode(PhoneRegistryError.self, from: result.body) else {
+                throw result.status >= 500 ? NativeDomainClientFailure.transportUnavailable
+                    : NativeDomainClientFailure.invalidResponse
+            }
+            guard failure.error.rawValue == "matrix_\(result.status)" else { throw NativeDomainClientFailure.invalidResponse }
+            throw failure
+        }
+        return result.body
+    }
+
+    private func phoneDeviceServicesResponse(request: Data?, revoking id: UUID? = nil,
+                                             listVersion: String = PhoneRegistryContract.listVersion,
+                                             controllerKeys: Bool = false, rotation: Bool) async throws
+        -> NativeDomainHTTPResponse {
         let root = Self.baseURL.appendingPathComponent("device-services")
         let url = controllerKeys ? Self.baseURL.appendingPathComponent("cloud/controller-keys")
             : (id.map { root.appendingPathComponent($0.uuidString.lowercased()) } ?? root)
@@ -1634,16 +1656,7 @@ public struct AgentsRead: Sendable {
             if result.status == 401 { authenticationFailureObserver(NativeDomainClientFailure.authenticationRefused) }
         }
         try requireActiveTask()
-        guard (method == "POST" ? [200, 201] : [200]).contains(result.status) else {
-            // A proxy's non-JSON 5xx page is an outage, not a refusal.
-            guard let failure = try? JSONDecoder().decode(PhoneRegistryError.self, from: result.body) else {
-                throw result.status >= 500 ? NativeDomainClientFailure.transportUnavailable
-                    : NativeDomainClientFailure.invalidResponse
-            }
-            guard failure.error.rawValue == "matrix_\(result.status)" else { throw NativeDomainClientFailure.invalidResponse }
-            throw failure
-        }
-        return result.body
+        return result
     }
 
     private func perform(url: URL, token: String, method: String,

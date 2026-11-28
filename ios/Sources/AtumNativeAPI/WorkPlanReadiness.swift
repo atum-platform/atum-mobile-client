@@ -9,6 +9,7 @@ public enum WorkPlanReadinessContract {
 
 public enum WorkPlanReadinessRead: Equatable, Sendable {
     case available(WorkPlanReadiness)
+    case unsupported
     case unavailable
 
     public var snapshot: WorkPlanReadiness? {

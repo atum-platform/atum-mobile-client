@@ -44,6 +44,168 @@ final class AccountConnectionsStateTests: XCTestCase {
             """.utf8))
     }
 
+    private func follow(_ poll: AccountPlanPoll, model: AccountConnectionsModel,
+                        actions: AccountConnectionsActions, wasSignedOut: Bool) async -> Bool {
+        await model.follow(poll, request: .init(plan: .antigravity, wasSignedOut: wasSignedOut), actions: actions)
+    }
+
+    private func sheetClient(bearer: String) -> NativeDomainClient {
+        NativeDomainClient(testAuthorization: { _ in
+            XCTFail("A sheet read must use the stored bearer")
+            return bearer
+        }, protocolClasses: [ConnectionsStateProtocol.self], testStoredAuthorization: { bearer })
+    }
+
+    func testTransientReadinessCannotCompleteMacSignIn() async throws {
+        let signIn = registry([.antigravity: true])
+        let grantMissing = try readiness("grant_missing")
+        let client = sheetClient(bearer: "fixture-outage")
+        let poll = AccountPlanPoll(isCurrent: { true }, readReadiness: { await client.workPlanReadiness() },
+                                   readRegistry: { try? await client.accountConnections(.poll) })
+        for wasSignedOut in [false, true] {
+            let model = AccountConnectionsModel()
+            let before = wasSignedOut ? registry([.antigravity: false]) : signIn
+            let current = actions(readiness: { .available(grantMissing) }) { before }
+            await model.reload(current)
+            let landed = await follow(poll, model: model, actions: current, wasSignedOut: wasSignedOut)
+            XCTAssertFalse(landed, "HTTP 503 cannot confirm sign-in, even if the registry changes")
+            XCTAssertEqual(model.readiness, grantMissing)
+            XCTAssertEqual(model.load, .loaded(before))
+        }
+    }
+
+    func testLegacyReadinessCannotCompleteAnExistingMacSignIn() async {
+        let client = sheetClient(bearer: "fixture-legacy")
+        let poll = AccountPlanPoll(isCurrent: { true }, readReadiness: { await client.workPlanReadiness() },
+                                   readRegistry: { try? await client.accountConnections(.poll) })
+        let model = AccountConnectionsModel()
+        let current = actions { self.registry([.antigravity: true]) }
+        await model.reload(current)
+        let landed = await follow(poll, model: model, actions: current, wasSignedOut: false)
+        XCTAssertFalse(landed, "HTTP 400 still requires a fresh sign-in")
+    }
+
+    func testNewerNegativeReadinessVetoesLegacySignIn() async throws {
+        let client = sheetClient(bearer: "fixture-legacy")
+        let registryStarted = expectation(description: "Legacy poll registry is in flight")
+        let gate = ConnectionsReadGate()
+        let model = AccountConnectionsModel()
+        let signedOut = registry([.antigravity: false])
+        let signedIn = registry([.antigravity: true])
+        let current = actions { signedOut }
+        let negative = try readiness("not_connected")
+        await model.reload(current)
+
+        let poll = AccountPlanPoll(isCurrent: { true }, readReadiness: { await client.workPlanReadiness() },
+                                   readRegistry: {
+            registryStarted.fulfill()
+            await gate.wait()
+            return signedIn
+        })
+        let landing = Task { await follow(poll, model: model, actions: current, wasSignedOut: true) }
+        await fulfillment(of: [registryStarted], timeout: 5)
+        await model.reload(actions(readiness: { .available(negative) }) { signedIn })
+        await gate.release()
+        let landed = await landing.value
+        XCTAssertFalse(landed)
+        XCTAssertEqual(model.readiness, negative)
+    }
+
+    func testRegistryPollStartsBeforeReadinessCanConsumeBearerMargin() async {
+        let registryStarted = expectation(description: "Stored bearer accepted for registry while readiness is pending")
+        let gate = ConnectionsReadGate()
+        var bearerValidity = NativeDomainClient.pollBearerMargin + 1
+        let client = NativeDomainClient(testAuthorization: { _ in
+            XCTFail("The registry poll must never refresh the bearer")
+            return "fixture-legacy"
+        }, protocolClasses: [ConnectionsStateProtocol.self], testStoredAuthorization: {
+            guard bearerValidity > NativeDomainClient.pollBearerMargin else { return nil }
+            registryStarted.fulfill()
+            return "fixture-legacy"
+        })
+        var registry: AccountConnections?
+        let poll = AccountPlanPoll(isCurrent: { true }, readReadiness: {
+            await gate.wait()
+            bearerValidity -= 2
+            return .unavailable
+        }, readRegistry: {
+            let answer = try? await client.accountConnections(.poll)
+            registry = answer
+            return answer
+        })
+        let model = AccountConnectionsModel()
+        let current = actions { self.registry([.antigravity: false]) }
+        await model.reload(current)
+        let landing = Task { await follow(poll, model: model, actions: current, wasSignedOut: true) }
+        await fulfillment(of: [registryStarted], timeout: 3)
+        await gate.release()
+        _ = await landing.value
+        XCTAssertEqual(AccountConnectionsView.planRow(registry, .antigravity).state, .signedIn)
+    }
+
+    func testLaterReadinessRequestWinsWithSameServerTimestamp() async throws {
+        let model = AccountConnectionsModel()
+        let old = try readiness()
+        let newer = try readiness("not_connected", checkedAt: old.checkedAt)
+        let registry = registry([.antigravity: true])
+        let readinessStarted = expectation(description: "Older readiness is in flight")
+        let gate = ConnectionsReadGate()
+        let slow = actions(readiness: {
+            readinessStarted.fulfill()
+            await gate.wait()
+            return .available(old)
+        }) { registry }
+        let refresh = Task { await model.reload(slow) }
+        await fulfillment(of: [readinessStarted], timeout: 5)
+        await model.reload(actions(readiness: { .available(newer) }) { registry })
+        await gate.release()
+        await refresh.value
+        XCTAssertEqual(model.readiness, newer)
+    }
+
+    func testReadinessAcceptsAClockStepBackBeforeAndAfterClearing() async throws {
+        let model = AccountConnectionsModel()
+        let first = try readiness()
+        let second = try readiness("grant_missing", checkedAt: first.checkedAt - 1_000)
+        let third = try readiness("not_connected", checkedAt: second.checkedAt - 1_000)
+        let registry = registry([.antigravity: true])
+
+        await model.reload(actions(readiness: { .available(first) }) { registry })
+        await model.reload(actions(readiness: { .available(second) }) { registry })
+        XCTAssertEqual(model.readiness, second)
+        await model.reload(actions { registry })
+        XCTAssertNil(model.readiness)
+        await model.reload(actions(readiness: { .available(third) }) { registry })
+        XCTAssertEqual(model.readiness, third)
+    }
+
+    func testNewerReadinessForSamePlanLandsWithoutOverwritingNewerRegistry() async throws {
+        let model = AccountConnectionsModel()
+        let older = try readiness()
+        let newer = try readiness(checkedAt: older.checkedAt + 1)
+        let olderRegistry = registry([.antigravity: true])
+        let newerRegistry = registry([.antigravity: true, .claude: true])
+        let current = actions { self.registry([.antigravity: false]) }
+        await model.reload(current)
+
+        let registryStarted = expectation(description: "Poll registry is in flight")
+        let gate = ConnectionsReadGate()
+        let poll = AccountPlanPoll(isCurrent: { true }, readReadiness: { .available(older) },
+                                   readRegistry: {
+            registryStarted.fulfill()
+            await gate.wait()
+            return olderRegistry
+        })
+        let landing = Task { await follow(poll, model: model, actions: current, wasSignedOut: true) }
+        await fulfillment(of: [registryStarted], timeout: 5)
+        await model.reload(actions(readiness: { .available(newer) }) { newerRegistry })
+        await gate.release()
+        let landed = await landing.value
+        XCTAssertTrue(landed)
+        XCTAssertEqual(model.readiness, newer)
+        XCTAssertEqual(model.load, .loaded(newerRegistry))
+    }
+
     func testThePickerOffersConnectOnlyOnceTheRegistryHasAnswered() {
         XCTAssertEqual(PhoneModelPickerList.planConnects(nil), [])
         XCTAssertEqual(PhoneModelPickerList.planConnects(PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)), [],
@@ -101,18 +263,19 @@ final class AccountConnectionsStateTests: XCTestCase {
         let newer = registry([.antigravity: true])
         let ready = try readiness()
         let currentActions = actions(readiness: { .available(ready) }) { newer }
-        let landing = AccountPlanLanding(readiness: ready, registry: newer)
+        let poll = currentActions.makePoll()
         // The sheet lands while the refresh is still reading.
         await model.reload(actions {
-            model.applyReadiness(ready, actions: currentActions)
-            XCTAssertTrue(model.landed(landing, actions: currentActions))
+            let landed = await self.follow(poll, model: model, actions: currentActions, wasSignedOut: true)
+            XCTAssertTrue(landed)
             return old
         })
         XCTAssertEqual(model.load, .loaded(newer))
         XCTAssertEqual(model.readiness, ready)
         // Nor does a failed refresh that was in flight.
         await model.reload(actions {
-            XCTAssertTrue(model.landed(landing, actions: currentActions))
+            let landed = await self.follow(poll, model: model, actions: currentActions, wasSignedOut: true)
+            XCTAssertTrue(landed)
             return nil
         })
         XCTAssertEqual(model.load, .loaded(newer))
@@ -147,8 +310,8 @@ final class AccountConnectionsStateTests: XCTestCase {
         XCTAssertEqual(model.scope, newActions.scope)
         XCTAssertEqual(model.load, .loaded(newRegistry))
         XCTAssertNil(model.readiness)
-        model.applyReadiness(ready, actions: oldActions)
-        XCTAssertFalse(model.landed(AccountPlanLanding(readiness: ready, registry: oldRegistry), actions: oldActions))
+        let landed = await follow(oldActions.makePoll(), model: model, actions: oldActions, wasSignedOut: true)
+        XCTAssertFalse(landed)
         XCTAssertEqual(model.load, .loaded(newRegistry))
         XCTAssertNil(model.readiness)
     }
@@ -157,44 +320,52 @@ final class AccountConnectionsStateTests: XCTestCase {
         let ready = try readiness()
         let missing = try readiness("grant_missing")
         var current = true
-        var registryReads = 0
         var published: [WorkPlanReadiness] = []
         var landings: [AccountPlanLanding] = []
         let signIn = registry([.antigravity: true])
-        let readRegistry: @MainActor () async -> AccountConnections? = { registryReads += 1; return signIn }
+        let request = AccountPlanConnectRequest(plan: .antigravity, wasSignedOut: true)
+        let readRegistry: @MainActor () async -> AccountConnections? = { signIn }
         let publish: @MainActor (WorkPlanReadiness) -> Void = { published.append($0) }
         let land: @MainActor (AccountPlanLanding) -> Bool = { landings.append($0); return true }
 
         let poll = AccountPlanPoll(isCurrent: { current }, readReadiness: { .available(missing) },
                                    readRegistry: readRegistry)
-        let grantMissing = await poll.follow(.antigravity, onReadiness: publish, onLanded: land)
+        let grantMissing = await poll.follow(request, onReadiness: publish, onLanded: land)
         XCTAssertFalse(grantMissing)
-        XCTAssertEqual(registryReads, 0)
         XCTAssertEqual(published, [missing])
         let lateReadiness = AccountPlanPoll(isCurrent: { current }, readReadiness: {
             current = false
             return .available(ready)
         }, readRegistry: readRegistry)
-        let retired = await lateReadiness.follow(.antigravity, onReadiness: publish, onLanded: land)
+        let retired = await lateReadiness.follow(request, onReadiness: publish, onLanded: land)
         XCTAssertFalse(retired)
-        XCTAssertEqual(registryReads, 0)
         XCTAssertEqual(published, [missing])
 
         current = true
+        let readinessPublished = expectation(description: "Ready publishes before the held registry")
+        let gate = ConnectionsReadGate()
         let lateRegistry = AccountPlanPoll(isCurrent: { current }, readReadiness: { .available(ready) }, readRegistry: {
+            await gate.wait()
             current = false
             return await readRegistry()
         })
-        let retiredDuringRegistry = await lateRegistry.follow(.antigravity, onReadiness: publish, onLanded: land)
+        let follow = Task {
+            await lateRegistry.follow(request, onReadiness: {
+                publish($0)
+                readinessPublished.fulfill()
+            }, onLanded: land)
+        }
+        await fulfillment(of: [readinessPublished], timeout: 5)
+        await gate.release()
+        let retiredDuringRegistry = await follow.value
         XCTAssertFalse(retiredDuringRegistry)
-        XCTAssertEqual(registryReads, 1)
         XCTAssertEqual(published, [missing, ready])
         XCTAssertTrue(landings.isEmpty)
 
         current = true
         let registryUnavailable = AccountPlanPoll(isCurrent: { current }, readReadiness: { .available(ready) },
                                                   readRegistry: { nil })
-        let landed = await registryUnavailable.follow(.antigravity, onReadiness: publish, onLanded: land)
+        let landed = await registryUnavailable.follow(request, onReadiness: publish, onLanded: land)
         XCTAssertTrue(landed)
         XCTAssertEqual(landings.count, 1)
         XCTAssertEqual(landings.first?.readiness, ready)
@@ -202,10 +373,7 @@ final class AccountConnectionsStateTests: XCTestCase {
     }
 
     func testUnsupportedReadinessStillFollowsMacSignInAndUpdatesThePicker() async throws {
-        let client = NativeDomainClient(testAuthorization: { _ in
-            XCTFail("A sheet read must use the stored bearer")
-            return "fixture-legacy"
-        }, protocolClasses: [ConnectionsStateProtocol.self], testStoredAuthorization: { "fixture-legacy" })
+        let client = sheetClient(bearer: "fixture-legacy")
         let before = registry([.antigravity: false])
         let model = AccountConnectionsModel()
         let picker = PhoneModelPickerAccount()
@@ -216,12 +384,15 @@ final class AccountConnectionsStateTests: XCTestCase {
 
         let poll = AccountPlanPoll(isCurrent: { true }, readReadiness: { await client.workPlanReadiness() },
                                    readRegistry: { try? await client.accountConnections(.poll) })
-        let landed = await poll.follow(.antigravity, onReadiness: { _ in XCTFail("HTTP 400 has no readiness") },
+        let request = AccountPlanConnectRequest(plan: .antigravity, wasSignedOut: true)
+        let settingsLanded = await model.follow(poll, request: request, actions: currentActions)
+        let landed = await poll.follow(request, onReadiness: { _ in XCTFail("HTTP 400 has no readiness") },
                                        onLanded: { landing in
             XCTAssertNil(landing.readiness)
             if let registry = landing.registry { picker.landed(registry) }
-            return model.landed(landing, actions: currentActions)
+            return true
         })
+        XCTAssertTrue(settingsLanded)
         XCTAssertTrue(landed)
         XCTAssertFalse(PhoneModelPickerList.planConnects(picker.value).contains(.antigravity))
         let signedIn = try XCTUnwrap(picker.value?.accountConnections)
@@ -278,17 +449,12 @@ final class AccountConnectionsStateTests: XCTestCase {
             await gate.wait()
             return olderRegistry
         })
-        let follow = Task {
-            await poll.follow(.antigravity, onReadiness: { model.applyReadiness($0, actions: currentActions) },
-                              onLanded: { model.landed($0, actions: currentActions) })
-        }
+        let follow = Task { await self.follow(poll, model: model, actions: currentActions, wasSignedOut: true) }
         await fulfillment(of: [registryStarted], timeout: 5)
-        XCTAssertEqual(model.readiness, older, "Readiness publishes while the registry is held")
         await model.reload(actions(readiness: { .available(newer) }) { newerRegistry })
         await gate.release()
         let landed = await follow.value
         XCTAssertFalse(landed, "The sheet must not announce a superseded confirmation")
-        model.applyReadiness(older, actions: currentActions)
         XCTAssertEqual(model.readiness, newer)
         XCTAssertEqual(model.load, .loaded(newerRegistry))
     }
@@ -365,6 +531,9 @@ private final class ConnectionsStateProtocol: URLProtocol, @unchecked Sendable {
         case ("Bearer fixture-legacy", WorkPlanReadinessContract.requestBody):
             status = 400
             response = #"{"error":"matrix_400"}"#
+        case ("Bearer fixture-outage", WorkPlanReadinessContract.requestBody):
+            status = 503
+            response = #"{"error":"matrix_503"}"#
         case ("Bearer fixture-renewed", WorkPlanReadinessContract.requestBody):
             status = 200
             let now = Int64(Date().timeIntervalSince1970 * 1_000)
@@ -374,6 +543,7 @@ private final class ConnectionsStateProtocol: URLProtocol, @unchecked Sendable {
                 "antigravity":{"state":"ready","validUntil":\(now + 60_000)}}}
             """
         case ("Bearer fixture-legacy", AccountConnectionsContract.requestBody),
+             ("Bearer fixture-outage", AccountConnectionsContract.requestBody),
              ("Bearer fixture-renewed", AccountConnectionsContract.requestBody):
             status = 200
             response = """

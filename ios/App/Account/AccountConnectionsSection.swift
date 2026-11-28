@@ -31,24 +31,31 @@ struct AccountPlanPoll {
     let readReadiness: @MainActor () async -> WorkPlanReadinessRead
     let readRegistry: @MainActor () async -> AccountConnections?
 
-    func follow(_ plan: AccountPlan, onReadiness: @MainActor (WorkPlanReadiness) -> Void,
+    func follow(_ request: AccountPlanConnectRequest,
+                onReadiness: @MainActor (WorkPlanReadiness) -> Void = { _ in },
+                latestReadiness: @MainActor (WorkPlanReadiness?) -> WorkPlanReadiness? = { $0 },
                 onLanded: @MainActor (AccountPlanLanding) -> Bool) async -> Bool {
         guard isCurrent(), !Task.isCancelled else { return false }
-        let readiness = await readReadiness().snapshot
+        // Each read can take the stored bearer before the other spends its validity margin.
+        async let registryRead = readRegistry()
+        let result = await readReadiness()
         guard isCurrent(), !Task.isCancelled else { return false }
-        if let readiness {
-            onReadiness(readiness)
-            guard AccountConnectionsView.connectLanded(readiness, plan: plan) else { return false }
-        }
-        let registry = await readRegistry()
+        if let snapshot = result.snapshot { onReadiness(snapshot) }
+        let observedReady = AccountConnectionsView.connectLanded(result.snapshot, plan: request.plan)
+        let registry = await registryRead
         guard isCurrent(), !Task.isCancelled else { return false }
-        if let readiness {
-            guard AccountConnectionsView.connectLanded(readiness, plan: plan) else { return false }
-        } else {
-            // An older server can still confirm Mac sign-in through its registry.
-            guard AccountConnectionsView.planRow(registry, plan).state == .signedIn else { return false }
+        let latest = latestReadiness(result.snapshot)
+        let stillReady = AccountConnectionsView.connectLanded(latest, plan: request.plan)
+        switch result {
+        case .available:
+            guard observedReady, stillReady else { return false }
+        case .unsupported:
+            guard request.wasSignedOut, latest == nil || stillReady,
+                  AccountConnectionsView.planRow(registry, request.plan).state == .signedIn else { return false }
+        case .unavailable:
+            return false
         }
-        return onLanded(AccountPlanLanding(readiness: readiness, registry: registry))
+        return onLanded(AccountPlanLanding(readiness: result.snapshot, registry: registry))
     }
 }
 
@@ -82,9 +89,9 @@ final class AccountConnectionsModel {
     private(set) var readiness: WorkPlanReadiness?
     private(set) var scope: AccountConnectionsActions.Scope?
     var connecting: AccountPlanConnectRequest?
-    /// A newer refresh or sheet registry update supersedes a pending registry read.
-    @ObservationIgnored private var generation = 0
-    @ObservationIgnored private var lastReadinessCheck: Int64?
+    @ObservationIgnored private var sequence = 0
+    @ObservationIgnored private var registryRequest = 0
+    @ObservationIgnored private var readinessRequest = 0
 
     func reload(_ actions: AccountConnectionsActions) async {
         guard actions.isCurrent(), !Task.isCancelled else { return }
@@ -92,18 +99,14 @@ final class AccountConnectionsModel {
             scope = actions.scope
             load = .loading
             readiness = nil
-            lastReadinessCheck = nil
             connecting = nil
         } else if case .failed = load {
             load = .loading
         }
-        generation += 1
-        let mine = generation
-        let previousReadiness = readiness
+        let registryOrder = nextRequest()
+        registryRequest = registryOrder
         let registry = await actions.read()
-        // A refresh that read "Not connected" before the sheet saw the plan
-        // land must not undo that newer answer.
-        guard mine == generation, actions.isCurrent(), !Task.isCancelled else { return }
+        guard registryOrder == registryRequest, isCurrent(actions) else { return }
         if let registry {
             load = .loaded(registry)
         } else if case .loading = load {
@@ -111,32 +114,51 @@ final class AccountConnectionsModel {
         }
         // The registry read may rotate an expired or refused bearer. Readiness
         // can use the replacement only after that foreground read settles.
+        let order = nextRequest()
+        readinessRequest = order
         let result = await actions.readReadiness()
-        guard scope == actions.scope, actions.isCurrent(), !Task.isCancelled else { return }
-        if let snapshot = result.snapshot {
-            applyReadiness(snapshot, actions: actions)
-        } else if mine == generation, readiness == previousReadiness {
-            readiness = nil
-        }
+        applyReadiness(result.snapshot, order: order, actions: actions)
     }
 
-    func applyReadiness(_ snapshot: WorkPlanReadiness, actions: AccountConnectionsActions) {
-        guard scope == actions.scope, actions.isCurrent(),
-              lastReadinessCheck.map({ snapshot.checkedAt >= $0 }) ?? true else { return }
-        lastReadinessCheck = snapshot.checkedAt
+    func follow(_ poll: AccountPlanPoll, request: AccountPlanConnectRequest, actions: AccountConnectionsActions,
+                onLanded: @MainActor () -> Void = {}) async -> Bool {
+        guard isCurrent(actions), poll.isCurrent() else { return false }
+        let order = nextRequest()
+        readinessRequest = order
+        return await poll.follow(request, onReadiness: { snapshot in
+            applyReadiness(snapshot, order: order, actions: actions)
+        }, latestReadiness: { _ in readiness }, onLanded: { landing in
+            guard isCurrent(actions) else { return false }
+            // A speculative sheet read leaves the foreground registry alone
+            // until it confirms a landing. A newer registry keeps its own order.
+            if let registry = landing.registry, order > registryRequest {
+                registryRequest = order
+                load = .loaded(registry)
+            } else if landing.readiness == nil {
+                let currentRegistry = AccountConnectionsContent(load: load, readiness: readiness).registry
+                guard AccountConnectionsView.planRow(currentRegistry, request.plan).state == .signedIn else {
+                    return false
+                }
+            }
+            onLanded()
+            return true
+        })
+    }
+
+    private func applyReadiness(_ snapshot: WorkPlanReadiness?, order: Int, actions: AccountConnectionsActions) {
+        // Each request yields one snapshot. Its checkedAt validates the wire
+        // timestamps, while the local request order also works across a clock step.
+        guard order == readinessRequest, isCurrent(actions) else { return }
         readiness = snapshot
     }
 
-    /// Recheck the published snapshot after the optional registry read. A
-    /// superseded confirmation must not replace newer state or finish the sheet.
-    func landed(_ landing: AccountPlanLanding, actions: AccountConnectionsActions) -> Bool {
-        guard scope == actions.scope, actions.isCurrent(),
-              landing.readiness.map({ $0 == readiness }) ?? true else { return false }
-        if let registry = landing.registry {
-            generation += 1
-            load = .loaded(registry)
-        }
-        return true
+    private func nextRequest() -> Int {
+        sequence += 1
+        return sequence
+    }
+
+    private func isCurrent(_ actions: AccountConnectionsActions) -> Bool {
+        scope == actions.scope && actions.isCurrent() && !Task.isCancelled
     }
 }
 
@@ -229,7 +251,8 @@ struct AccountConnectionsSections: View {
             identifier: "account.settings.connections.plan." + row.plan.rawValue) {
             if row.offersConnect {
                 Button(words(AccountConnectionsCopy.connect)) {
-                    model.connecting = AccountPlanConnectRequest(plan: row.plan)
+                    let wasSignedOut = content.registry.map { AccountConnectionsView.planRow($0, row.plan).offersConnect }
+                    model.connecting = AccountPlanConnectRequest(plan: row.plan, wasSignedOut: wasSignedOut == true)
                 }
                 .buttonStyle(.atumSecondary)
                 .accessibilityLabel(words(AccountConnectionsCopy.sheetTitle(row.plan)))
@@ -343,6 +366,8 @@ struct AccountConnectionsSections: View {
 
 struct AccountPlanConnectRequest: Identifiable, Equatable {
     let plan: AccountPlan
+    /// Captured from the registry when the person taps Connect.
+    var wasSignedOut = false
     /// A Work plan that is already connected on a Mac: the sheet only hands
     /// off to Atum on the Mac (desktop's Allow sheet on a device without Work).
     var handoff = false
@@ -366,11 +391,10 @@ struct AccountPlanConnectSheet: View {
     static let doneBeat: Duration = .milliseconds(2_500)
 
     let design: LiveDesign
-    let plan: AccountPlan
+    let request: AccountPlanConnectRequest
     /// Makes the poll once, when the sheet first follows; nil: no follow.
     let makePoll: AccountPlanPollFactory?
-    var onReadiness: @MainActor (WorkPlanReadiness) -> Void = { _ in }
-    let onLanded: @MainActor (AccountPlanLanding) -> Bool
+    let followPoll: @MainActor (AccountPlanPoll, AccountPlanConnectRequest, @MainActor () -> Void) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -381,6 +405,7 @@ struct AccountPlanConnectSheet: View {
     @State private var landed = false
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var plan: AccountPlan { request.plan }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -444,11 +469,9 @@ struct AccountPlanConnectSheet: View {
             do { try await Task.sleep(for: Self.pollInterval) } catch { return }
             guard scenePhase == .active else { return }
             guard poll.isCurrent() else { return }
-            let completed = await poll.follow(plan, onReadiness: onReadiness) { landing in
-                guard onLanded(landing) else { return false }
+            let completed = await followPoll(poll, request) {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { landed = true }
                 UIAccessibility.post(notification: .announcement, argument: words(AccountConnectionsCopy.done(plan)))
-                return true
             }
             guard completed else { continue }
             do { try await Task.sleep(for: Self.doneBeat) } catch { return }

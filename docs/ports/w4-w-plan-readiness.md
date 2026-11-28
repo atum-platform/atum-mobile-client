@@ -6,11 +6,12 @@ assistants can use ChatGPT, Claude, and Antigravity. The response profile
 `atum.work-plan-readiness/1` requires all three plans and rejects extra
 fields. The checked-in fixtures cover the request and response.
 
-`NativeDomainClient.workPlanReadiness()` returns `.available(snapshot)` or
-`.unavailable`. It uses only the current session's usable stored bearer.
-An unsupported operation, a 404, a failed request, an invalid response, or
-an unusable bearer yields `.unavailable`. The read never refreshes a bearer,
-replays a 401, or reports an authentication failure to the session.
+`NativeDomainClient.workPlanReadiness()` uses the current session's usable
+stored bearer. It returns `.available(snapshot)` for a valid response and
+`.unsupported` for HTTP 400, 404, 405, or 501. Transport failures, other
+HTTP failures, invalid responses, and an unusable bearer yield
+`.unavailable`. The read never refreshes a bearer, replays a 401, or reports
+an authentication failure to the session.
 
 ## State contract for the UI
 
@@ -38,15 +39,24 @@ read-failure text until its status is known. Home hubs come from the registry
 when it answers, and a later failed refresh keeps the last successful registry.
 
 The connect sheet used by Settings and the picker polls every three seconds
-while active. An unexpired `ready` confirms cloud readiness and publishes
-before the optional registry read for Mac details. When readiness is
-unavailable, including HTTP 400 on servers without the operation, a fresh
-Mac sign-in in the registry completes the existing sheet flow and updates
-the picker. Cloud readiness remains unknown in that case. Both poll reads
-use the stored bearer without rotation and are fenced by account and client.
-Settings compares the response's `checkedAt` within that scope and checks
-that the confirmation still matches before accepting the landing and
-announcing success.
+while active. It starts both reads independently with the stored bearer and
+fences both by account and client. The sheet can therefore start its registry
+read while the bearer still meets the 60-second margin. Settings can display
+readiness while the sheet's registry read for Mac details is pending.
+
+An unexpired `ready` can confirm the requested plan. On a server that
+signals the readiness operation is unsupported, the sheet can confirm a
+registry change from signed out at the time Connect was tapped to signed in.
+That path leaves cloud readiness unknown and still updates the picker after
+Mac sign-in. A transient poll failure leaves the sheet waiting.
+
+Settings orders readiness replies by a local request sequence. The response's
+`checkedAt` still validates the grant's time bounds. Clearing the visible
+snapshot or switching account discards the prior server timestamp. Immediately
+before announcing success, the sheet checks the latest state for the requested
+plan, including grant expiry. The Settings registry has its own request order
+so an older sheet result can complete the sheet without replacing newer Mac
+or tool details.
 
 The engineering handoff uses the existing sheet and copy, including the
 Mac handoff instruction for `.needsRenew`. Layout and copy updates belong
@@ -80,3 +90,13 @@ held, and registry failure and recovery alongside readiness.
 The locked run uses Swift Package Manager and the `AtumMobileStateTests`
 Debug scheme. The public boundary is checked against the committed branch
 with `python3 scripts/public_guard.py --base origin/main --head HEAD`.
+
+The final review fixes add seven state regressions. They cover transient and
+legacy failures with existing sign-in, a newer negative answer during a legacy
+registry read, concurrent polling near bearer expiry, equal server timestamps,
+a backward clock step before and after clearing, and a newer ready answer
+with a newer registry. All seven failed on `7352c18` and passed with the
+fixes in a macOS XCTest probe using the app's polling and state code. The
+transport classification test also failed on `7352c18` and passed with the
+fixes. The focused Swift package run passed 145 tests. The queued app-target
+run remains the app's simulator verification.
