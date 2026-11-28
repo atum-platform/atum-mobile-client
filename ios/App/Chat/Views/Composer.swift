@@ -624,22 +624,21 @@ private struct ComposerModelChoiceButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
-    var body: some View {
-        let face: PhoneModelPickerProjection.ChipFace?
-        let label: String
+    private var display: (face: PhoneModelPickerProjection.ChipFace?, label: String) {
         switch presentation {
         case let .pending(modelName):
-            face = nil
             let status = savingChoice ? design.text("desktop.common.saving")
                 : design.text("desktop.atum.managedModel.turnStatus.reconciliation_pending")
-            label = "\(status) · \(modelName)"
+            return (nil, "\(status) · \(modelName)")
         case let .confirmed(value):
-            face = value
-            label = value.name
+            return (value, value.name)
         case nil:
-            face = nil
-            label = design.text("desktop.atum.settings.model")
+            return (nil, design.text("desktop.atum.settings.model"))
         }
+    }
+
+    var body: some View {
+        let (face, label) = display
         let warning = face?.planUnavailable.map { PhoneModelPickerCopy(design: design).planWarning($0) }
         // The desktop's chip (model-picker-spec.json `trigger`, #119): a plain
         // capsule, the answering model's mark before its name, weight 500,

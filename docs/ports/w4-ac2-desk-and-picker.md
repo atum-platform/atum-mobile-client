@@ -16,3 +16,5 @@ The UI handoff is in `AgentDeskPage.swift:34`, `:177` and `:292`. Once W4-C9 upd
 - The desk's navigation destination now has a view identity keyed by principal and account generation. A hosted SwiftUI test changes both while staying in one room. A separate host-state test holds a failed folder's retry until navigation to another folder completes.
 
 Review fixes passed 257 focused Swift package tests, 13 standalone macOS desk host-state tests and seven copy-pin checks. The iOS AppTests and focused UI suites run under the shared simulator build lock.
+
+The first locked Debug build caught assignments inside the SwiftUI result builder for the pending chip. Its display state now resolves before the view builder runs.
