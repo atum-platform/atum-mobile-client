@@ -128,6 +128,11 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
     /// A7/A8). Nil for every other row.
     public var progress: ChatProgress?
     public var companyTurn: CompanyTurnMarker? = nil
+    /// Eligible plain-room URL from a settled text event. Loading is owned
+    /// by the open chat and rechecks the SDK room before asking the server.
+    public var linkPreviewURL: URL? = nil
+    /// The displayed event's explicit Matrix room mention intent.
+    public var hasRoomMention = false
     /// The Chief of Staff greeting's pill and titled board link, parsed only
     /// in this account's company-private CoS room (desktop
     /// `privateCosAgentPill` / `privateCosBoardLink`). Nil everywhere else.

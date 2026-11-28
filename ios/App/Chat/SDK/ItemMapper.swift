@@ -150,6 +150,7 @@ final class ItemMapper {
                     json: original ?? event.lazyProvider.latestJson())
             }
         }
+        ChatActionEventFacts.apply(from: event, to: &item, plainRoom: room.isEncrypted == false)
         return MappedItem(item: item, uniqueID: uniqueID,
                           replyDetails: hiddenPlaintext ? nil : replyDetails(event.content),
                           isTokenParked: Self.isTokenParked(event.localSendState),

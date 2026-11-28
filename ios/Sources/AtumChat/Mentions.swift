@@ -43,14 +43,16 @@ public struct MentionRosterEntry: Equatable, Sendable {
 public struct OutgoingMentions: Equatable, Sendable {
     public let userIDs: [String]
     public let formattedHTML: String?
+    public let room: Bool
 
     public static let none = OutgoingMentions(userIDs: [], formattedHTML: nil)
 
-    public var isEmpty: Bool { userIDs.isEmpty }
+    public var isEmpty: Bool { userIDs.isEmpty && !room }
 
-    public init(userIDs: [String], formattedHTML: String?) {
+    public init(userIDs: [String], formattedHTML: String?, room: Bool = false) {
         self.userIDs = userIDs
         self.formattedHTML = formattedHTML
+        self.room = room
     }
 }
 

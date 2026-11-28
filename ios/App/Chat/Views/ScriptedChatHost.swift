@@ -386,6 +386,8 @@ struct ScriptedChatHost: View {
                         // Chat parity S4/S5 captures (`-AtumScriptedGroupThreads`).
                         .modifier(ScriptedGroupThreadsCapture(store: store, design: design,
                                                               title: scriptedTitle ?? script.title))
+                        // Chat parity ML6 captures (`-AtumScriptedChatActions`).
+                        .modifier(ScriptedChatActionsCapture(store: store, design: design))
                     }
                 }
         }

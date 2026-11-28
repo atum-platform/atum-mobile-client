@@ -7,7 +7,7 @@
 /// Display order (chat parity M2; ML6 extends it, see
 /// `docs/implementation/chat-parity-ml1-threads-pins.md`, "Menu contract"):
 /// react · reply · replyInThread · copy · selectText · pin/unpin ·
-/// [ML6: forward] · edit · report · delete. Navigation and sharing actions
+/// forward · edit · report · delete. Navigation and sharing actions
 /// come before the editing and destructive ones.
 public enum MessageMenuItem: Equatable, Hashable, Sendable {
     /// The reaction palette (B22), the desktop set.
@@ -25,6 +25,8 @@ public enum MessageMenuItem: Equatable, Hashable, Sendable {
     case pin
     /// "Unpin": the same message is already in the shared list.
     case unpin
+    /// Sends a fresh copy in another chat after choosing a destination.
+    case forward
     /// "Sửa": my text messages in people chats only.
     case edit
     /// "Báo cáo": another sender's message, including assistants and app
@@ -64,6 +66,14 @@ public struct PinMenuContext: Equatable, Sendable {
         self.pinnedEventIDs = pinnedEventIDs
         self.canChange = canChange
         self.awaitingSync = awaitingSync
+    }
+}
+
+public struct ForwardMenuContext: Equatable, Sendable {
+    public let canOpenPicker: Bool
+
+    public init(canOpenPicker: Bool) {
+        self.canOpenPicker = canOpenPicker
     }
 }
 
@@ -107,7 +117,8 @@ public enum MessageMenuRules {
     /// Text/media report eligibility is independent of room and sender kind;
     /// app-bot room notices also qualify.
     public static func items(for item: ChatItem, in kind: RoomKind,
-                             threads: Bool = false, pins: PinMenuContext? = nil) -> [MessageMenuItem] {
+                             threads: Bool = false, pins: PinMenuContext? = nil,
+                             forward: ForwardMenuContext? = nil) -> [MessageMenuItem] {
         switch item.kind {
         case .message, .image, .file: break
         case .notice where kind == .appBot && ReportPolicy.mayReportMessage(item, in: kind): break
@@ -123,12 +134,23 @@ public enum MessageMenuRules {
         if hasText { items.append(.copy) }
         if hasText, isAnswer(item, in: kind) { items.append(.selectText) }
         if !isBotRoom, let pins, let pinItem = pinItem(for: item, pins: pins) { items.append(pinItem) }
+        if forward != nil, forwardEventID(for: item) != nil { items.append(.forward) }
         if ChatItemRules.canEdit(item, in: kind) { items.append(.edit) }
         if ReportPolicy.mayReportMessage(item, in: kind) {
             items.append(.report)
         }
         if !isBotRoom, ChatItemRules.canDelete(item) || isHeldSend(item) { items.append(.delete) }
         return items
+    }
+
+    /// Only settled messages with a source event can be inspected by the SDK.
+    /// The SDK adapter checks the original event and its displayed revision.
+    public static func forwardEventID(for item: ChatItem) -> String? {
+        guard ChatItemRules.canReply(item), let eventID = item.eventID, isPinEventID(eventID) else { return nil }
+        switch item.kind {
+        case .message, .notice, .image, .file: return eventID
+        default: return nil
+        }
     }
 
     /// The thread root a "Reply in thread" on `item` opens: the message's own
@@ -165,9 +187,11 @@ public enum MessageMenuRules {
 
     /// Whether a shown item can run now. Pin and unpin wait for the previous
     /// write to reach sync, so a stale list is never written.
-    public static func isEnabled(_ menuItem: MessageMenuItem, pins: PinMenuContext?) -> Bool {
+    public static func isEnabled(_ menuItem: MessageMenuItem, pins: PinMenuContext?,
+                                 forward: ForwardMenuContext? = nil) -> Bool {
         switch menuItem {
         case .pin, .unpin: pins.map { $0.canChange && !$0.awaitingSync } ?? false
+        case .forward: forward?.canOpenPicker == true
         default: true
         }
     }

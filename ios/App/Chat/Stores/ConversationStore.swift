@@ -38,6 +38,9 @@ struct ConversationRoomInfo: Sendable {
     /// TS-6b: the thread this store shows (its root's event ID); nil for the
     /// room's own timeline.
     var threadRootID: String? = nil
+    /// Decision 7: the platform authority desktop's `mentionRoom` asks for
+    /// (channel owner or company owner/admin). Only read in a company channel.
+    var roomMentionAuthority = false
 }
 
 /// Builds the room's typing controller (WS3's `TypingController`, B10–B12)
@@ -192,6 +195,8 @@ final class LiveConversationStore: ConversationStore {
     /// the members are known; empty until then and in rooms that offer no
     /// mention picker.
     private(set) var mentionCandidates = [MentionCandidate]()
+    private(set) var canMentionRoom = false
+    @ObservationIgnored private var roomMentionPowerTask: Task<Void, Never>?
     /// The picks of the draft being typed, and of each message on its way.
     /// A pick lives only while its text is in the draft; a sent message takes
     /// its picks with it (a refused send gives them back), so a name typed by
@@ -209,6 +214,87 @@ final class LiveConversationStore: ConversationStore {
               let query = MentionRules.activeQuery(in: draftValue) else { return [] }
         return MentionRules.suggestions(for: query, in: mentionCandidates)
     }
+
+    /// Decision 7: desktop's `@channel` scope. Only a company channel (its
+    /// room timeline or one of its threads) can ever allow it.
+    private var isCompanyChannel: Bool {
+        if case .channel = info.context.companyTurnScope { return true }
+        return false
+    }
+
+    /// Desktop counts the joined humans other than the sender. Unknown until
+    /// the member list arrives, which keeps `@channel` closed.
+    private var roomMentionAudience: Int? {
+        guard !mentionCandidates.isEmpty else { return nil }
+        let machines = (info.context.knownAgentUserIDs ?? []).union(info.catalogBotUserIDs)
+            .union(info.context.agentUserIDs)
+        return mentionCandidates.count { !machines.contains($0.userID) }
+    }
+
+    var roomMentionScope: RoomMentionRules.Scope {
+        #if DEBUG
+        if scriptedChannelMention {
+            return RoomMentionRules.Scope(isCompanyChannel: true, hasAuthority: true,
+                                          canNotifyRoom: canMentionRoom, audience: roomMentionAudience)
+        }
+        #endif
+        return RoomMentionRules.Scope(isCompanyChannel: isCompanyChannel, hasAuthority: info.roomMentionAuthority,
+                                      canNotifyRoom: canMentionRoom, audience: roomMentionAudience)
+    }
+
+    var offersRoomMention: Bool {
+        guard editTarget == nil, ComposerRules.offersMentions(kind: kind),
+              let query = MentionRules.activeQuery(in: draftValue) else { return false }
+        return RoomMentionRules.offersSuggestion(for: query, scope: roomMentionScope)
+    }
+
+    private func observeRoomMentionPermission(in room: Room, generation: UInt64) {
+        guard ComposerRules.offersMentions(kind: kind), isCompanyChannel, info.roomMentionAuthority else { return }
+        let (updates, handle) = RoomMentionMatrix.permissionUpdates(in: room)
+        roomMentionPowerTask = Task { [weak self] in
+            defer { handle.cancel() }
+            for await _ in updates {
+                guard let self, self.generation == generation, !self.isClosed, !Task.isCancelled else { break }
+                await self.refreshRoomMentionPermission()
+            }
+        }
+    }
+
+    /// Refresh on open and on room power or membership updates.
+    private func refreshRoomMentionPermission() async {
+        let opened = generation
+        let available: Bool
+        if core.isAttached, let room, ComposerRules.offersMentions(kind: kind), isCompanyChannel,
+           info.roomMentionAuthority {
+            available = await RoomMentionMatrix.canNotify(in: room)
+        } else {
+            available = false
+        }
+        guard generation == opened, !isClosed, !Task.isCancelled else { return }
+        canMentionRoom = available
+    }
+
+    /// Recheck power on selection as well as on send, because a sheet can
+    /// outlive the permission snapshot it opened with.
+    func pickRoomMention() async {
+        let original = draftValue
+        let opened = generation
+        await refreshRoomMentionPermission()
+        guard generation == opened, !isClosed, !Task.isCancelled, draftValue == original, offersRoomMention,
+              let inserted = RoomMentionRules.insert(into: original, scope: roomMentionScope)
+        else { return }
+        draft = inserted
+    }
+
+    #if DEBUG
+    /// `-AtumScriptedChatActions mention` only: a scripted room has no power
+    /// levels or channel directory, so it stands in for an authorized channel.
+    @ObservationIgnored private var scriptedChannelMention = false
+    func scriptRoomMentionPermission(_ allowed: Bool) {
+        scriptedChannelMention = allowed
+        canMentionRoom = allowed
+    }
+    #endif
 
     /// Puts the pick into the draft (an edit by the person) and remembers who
     /// the inserted text stands for.
@@ -640,6 +726,8 @@ final class LiveConversationStore: ConversationStore {
             }
             startTyping(on: room)
             await install(controller, generation: generation)
+            guard generation == self.generation, !isClosed else { return }
+            observeRoomMentionPermission(in: room, generation: generation)
         } catch {
             guard generation == self.generation, !isClosed else { return }
             attachFailed(outcome: "open_failed")
@@ -707,6 +795,9 @@ final class LiveConversationStore: ConversationStore {
     /// than linger on a signal nobody is listening to (never faked, B10).
     func detach() {
         generation &+= 1
+        canMentionRoom = false
+        roomMentionPowerTask?.cancel()
+        roomMentionPowerTask = nil
         closeTimeline()
         stopTyping()
         core.detached()
@@ -731,6 +822,8 @@ final class LiveConversationStore: ConversationStore {
         guard !isClosed else { return }
         let leaving = core.leaving()
         isClosed = true
+        roomMentionPowerTask?.cancel()
+        roomMentionPowerTask = nil
         turnStop.onScheduleSettled = nil
         turnStop.announce = nil
         searchPage?.cancel()
@@ -910,7 +1003,6 @@ final class LiveConversationStore: ConversationStore {
     /// the next timeline; one the SDK refused puts its text back in the
     /// composer (the hotfix rule), or in the room's draft after Back.
     private func enqueueSend(text: String, replyToEventID: String?) {
-        let mentions = mentionPicks.mentions(for: text)
         let previous = sendTail
         let roomID = roomID
         let roomKind = info.context.kind.rawValue
@@ -920,6 +1012,11 @@ final class LiveConversationStore: ConversationStore {
                 sendLostTimeline(text, replyToEventID: replyToEventID, roomKind: roomKind)
                 return
             }
+            // Desktop decides room intent from the sent text and the channel's
+            // scope at send time; the SDK seam rechecks Matrix power after this.
+            let people = mentionPicks.mentions(for: text)
+            let mentions = OutgoingMentions(userIDs: people.userIDs, formattedHTML: people.formattedHTML,
+                                            room: RoomMentionRules.requested(in: text, scope: roomMentionScope))
             do {
                 try await controller.send(text: text, replyToEventID: replyToEventID, mentions: mentions)
                 mentionPicks.delivered(text: text)

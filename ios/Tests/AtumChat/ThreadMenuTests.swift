@@ -91,11 +91,18 @@ final class ThreadMenuTests: XCTestCase {
 
     func testGroupMenuOrderMatchesM2() {
         let answer = F.text("answer", from: F.agent, "Three that fit")
-        XCTAssertEqual(MessageMenuRules.items(for: answer, in: .group, threads: true, pins: pins()),
-                       [.react, .reply, .replyInThread, .copy, .pin, .report])
+        let forward = ForwardMenuContext(canOpenPicker: true)
+        XCTAssertEqual(MessageMenuRules.items(for: answer, in: .group, threads: true, pins: pins(), forward: forward),
+                       [.react, .reply, .replyInThread, .copy, .pin, .forward, .report])
         XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Ok"), in: .group, threads: true,
-                                              pins: pins(["$m"])),
-                       [.react, .reply, .replyInThread, .copy, .unpin, .edit, .delete])
+                                              pins: pins(["$m"]), forward: forward),
+                       [.react, .reply, .replyInThread, .copy, .unpin, .forward, .edit, .delete])
+        XCTAssertFalse(MessageMenuRules.items(for: answer, in: .group).contains(.forward))
+        XCTAssertNil(MessageMenuRules.forwardEventID(for: F.echo("sending")))
+        XCTAssertTrue(MessageMenuRules.isEnabled(.forward, pins: pins(awaitingSync: true), forward: forward))
+        XCTAssertFalse(MessageMenuRules.isEnabled(.forward, pins: pins(),
+                                                  forward: ForwardMenuContext(canOpenPicker: false)))
+        XCTAssertTrue(MessageMenuRules.isEnabled(.copy, pins: nil, forward: nil))
     }
 
     func testPeopleDMOffersPinsButNoThreads() {

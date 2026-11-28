@@ -327,6 +327,10 @@ struct HomePresentation: Equatable {
     /// Company channels' share of the app-icon count (Team Space mentions),
     /// by the same rule as the rows.
     var companyAppIconRows: [Badge.AppIconRow]
+    /// Chat parity S15: replaced rooms whose joined, confirming replacement
+    /// is also listed. The list leaves them out; search still finds them,
+    /// so the earlier history stays reachable (desktop #160).
+    var hiddenUpgradePredecessors: Set<String> = []
 
     init(state: HomeLoadState, rows: [HomeRow] = [],
          showsNotificationPrompt: Bool = false,
@@ -879,7 +883,10 @@ struct HomeScreen: View {
         guard scope == .plain else { return [] }
         let locale = Locale(identifier: design.locale)
         let needle = HomeSearch.normalize(rosterQuery, locale: locale)
-        guard !needle.isEmpty else { return presentation.rows }
+        guard !needle.isEmpty else {
+            let hidden = presentation.hiddenUpgradePredecessors
+            return hidden.isEmpty ? presentation.rows : presentation.rows.filter { !hidden.contains($0.roomID) }
+        }
         return presentation.rows.filter {
             HomeSearch.normalize($0.name, locale: locale).contains(needle)
                 || PersonHandleText.matches($0.handle, needle: needle)
