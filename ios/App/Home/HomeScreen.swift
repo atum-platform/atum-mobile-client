@@ -484,9 +484,11 @@ struct HomeScreen: View {
     @State private var filterScroll = HomeFilterScrollRequest()
     @State private var rowVisibility = HomeRowVisibility()
     @State private var openingHitID: ChatSearchEventTarget?
-    /// While the top search field has focus (or a query), the face and the
-    /// pencil step aside for Cancel.
+    /// The system search field's focus (`.searchFocused`).
     @FocusState private var searchFocused: Bool
+    /// The system search is presented (`isSearching`, read inside the
+    /// searchable content): from the first tap until Cancel.
+    @State private var searchActive = false
     @State private var accountArt: AtumAvatarArt?
     @State private var startChatPresented = false
     @State private var founderDraftPresented = false
@@ -507,7 +509,6 @@ struct HomeScreen: View {
     @State private var openingPersonID: String?
     @State private var openingResultID: String?
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.protonTopUp) private var protonTopUp
@@ -521,29 +522,52 @@ struct HomeScreen: View {
     }
 
     @ViewBuilder private var homeBody: some View {
-        VStack(spacing: 0) {
-            header
-            if presentation.showsDomainReauthentication {
-                HomeDomainReauthenticationCard(
-                    design: design,
-                    busy: presentation.domainReauthenticationBusy,
-                    action: actions.reauthenticateDomain
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-            }
-            Group {
-                if presentation.rows.isEmpty {
-                    emptyContent
-                } else if showsNoResults {
-                    noSearchResults
-                } else {
-                    roster
-                }
+        Group {
+            if presentation.rows.isEmpty {
+                emptyContent
+            } else if showsNoResults {
+                noSearchResults
+            } else {
+                roster
             }
         }
+        // Over the content's own scroll view, so the large title still
+        // collapses with the roster and the chips stay under the search.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                chipsRow
+                if presentation.showsDomainReauthentication {
+                    HomeDomainReauthenticationCard(
+                        design: design,
+                        busy: presentation.domainReauthenticationBusy,
+                        action: actions.reauthenticateDomain
+                    )
+                    .padding(.horizontal, atum.kit.space(.s4))
+                    .padding(.bottom, atum.kit.space(.s2))
+                }
+            }
+            .motion(.quick, value: searching)
+        }
+        .background(HomeSearchActivity(active: $searchActive))
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
+        // P6 (UX audit issue 7, owner 28 Nov 2026): the one iOS root header.
+        // A large "Chats" title with the system search in the bar's drawer,
+        // the account face leading and compose trailing (Messages, Element X).
+        // It replaces the hidden bar and the hand-built top row.
+        .navigationTitle(copy(.chats))
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar { homeToolbar }
+        .searchable(text: search?.text ?? .constant(""),
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: Text(verbatim: scope == .deviceOnly ? searchWords.text(.phonePrivatePlaceholder)
+                                     : copy(.searchPlaceholder)))
+        .searchFocused($searchFocused)
+        // The keyboard's Search ends typing and keeps the query and its results.
+        .onSubmit(of: .search) { searchFocused = false }
+        // The system Cancel: back to the plain scope with nothing typed.
+        .onChange(of: searchActive) { _, active in
+            if !active { search?.dismiss() }
+        }
         .sheet(isPresented: $startChatPresented) {
             HomeStartChatSheet(design: design,
                                rows: presentation.rows,
@@ -733,64 +757,35 @@ struct HomeScreen: View {
             })
     }
 
-    private func exitText(_ action: ChatExitAction, delete: String, leave: String) -> String {
-        design.text(action == .deleteChat ? delete : leave)
-    }
-/** Preserve user-visible identity, state and recovery behavior across connection changes. */
-    /// the top centre): the account face (44 circle) leading, the Kit search
-    /// field in the middle, the glass plus (44) trailing. While searching,
-    /// Cancel replaces the face and the plus. At accessibility sizes the face
-    /// and plus sit on their own row above the field.
-    ///
-    /// The field is one stable child of its row in every state: only the
-    /// controls around it come and go. Rebuilding it on focus (an `if` that
-    /// swapped whole rows) dropped the keyboard the moment the field was
-    /// tapped (HomeShellUITests' search test caught it on the simulator).
-    private var header: some View {
-        let accessible = dynamicTypeSize.isAccessibilitySize
-        return VStack(spacing: 8) {
-            if accessible && !searching {
-                HStack(spacing: 10) {
-                    accountButton
-                    Spacer(minLength: 0)
-                    attentionBell
-                    createButton
-                }
+    /// The S2 device-only scope while searching, the S16 list filter while
+    /// not: one slot under the bar's search, never both.
+    @ViewBuilder private var chipsRow: some View {
+        if searching, let search, search.offersDeviceScope {
+            HomeSearchScopeChips(design: design, scope: search.scope) { scope in
+                search.select(scope)
             }
-            HStack(spacing: 10) {
-                if !accessible && !searching { accountButton }
-                searchField
-                if searching {
-                    Button(copy(.cancel)) { endSearch() }
-                        .buttonStyle(.plain)
-                        .font(.body)
-                        .foregroundStyle(atum.color(.ink, scheme: scheme))
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier("home.search.cancel")
-                } else if !accessible {
-                    attentionBell
-                    createButton
-                }
-            }
-            // S2: the device-only scope is chosen before typing; S16: the
-            // list filter while not searching. One slot, never both.
-            if searching, let search, search.offersDeviceScope {
-                HomeSearchScopeChips(design: design, scope: search.scope) { scope in
-                    search.select(scope)
-                }
-            } else if !searching, !presentation.rows.isEmpty {
-                HomeFilterChips(design: design, selection: filterSession.effective(in: availableFilters),
-                                available: availableFilters, select: selectFilter)
-            }
+            .padding(.horizontal, atum.kit.space(.s4))
+            .padding(.bottom, atum.kit.space(.s2))
+        } else if !searching, !presentation.rows.isEmpty {
+            HomeFilterChips(design: design, selection: filterSession.effective(in: availableFilters),
+                            available: availableFilters, select: selectFilter)
+                .padding(.horizontal, atum.kit.space(.s4))
+                .padding(.bottom, atum.kit.space(.s2))
         }
-        .padding(.horizontal, atum.kit.space(.s4))
-        .padding(.top, 2)
-        .padding(.bottom, atum.kit.space(.s2))
-        .background(atum.color(.ground, scheme: scheme))
-        .motion(.quick, value: searching)
     }
 
-    private var searching: Bool { searchFocused || !query.isEmpty || scope == .deviceOnly }
+    /// The account face leading (it carries what needs the person, as
+    /// desktop's rail account does) and compose trailing. The face is drawn
+    /// whole, without the bar's shared glass, as a profile picture.
+    @ToolbarContentBuilder private var homeToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) { accountButton }
+            .sharedBackgroundVisibility(.hidden)
+        if canStartChat {
+            ToolbarItem(placement: .topBarTrailing) { createButton }
+        }
+    }
+
+    private var searching: Bool { searchActive || searchFocused || !query.isEmpty || scope == .deviceOnly }
 
     /// The field's text belongs to the search controller (its input token
     /// drops a keystroke from a replaced scope).
@@ -801,46 +796,24 @@ struct HomeScreen: View {
     /// never filters the roster or Team Space channels.
     private var rosterQuery: String { scope == .plain ? query : "" }
 
-    private var searchField: some View {
-        HomeSearchField(query: search?.text ?? .constant(""),
-                        prompt: scope == .deviceOnly ? searchWords.text(.phonePrivatePlaceholder)
-                            : copy(.searchPlaceholder),
-                        label: copy(.search), focused: $searchFocused)
-    }
-
-    private func endSearch() {
-        search?.dismiss()
-        searchFocused = false
-    }
-
     private var searchWords: HomeSearchWords { HomeSearchWords(design: design) }
 
+    /// The account face (owner decision 6): Settings, and what needs the
+    /// person, as desktop's rail account carries both (`HomeAccountFace`).
     private var accountButton: some View {
-        Button { router.presentAccount() } label: {
-            AtumAvatar(kind: .person, name: accountName, art: accountArt, size: 44)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Circle())
-        }
-        .task(id: accountAvatarURL) {
-            accountArt = nil
-            guard let uri = accountAvatarURL, let load = actions.loadMatrixThumbnail else { return }
-            let side = AtumAvatar.thumbnailPixelSide(for: 44)
-            guard let data = await load(uri, side), !Task.isCancelled else { return }
-            accountArt = await AtumAvatarArt.load(data: data, pixelSide: side)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(verbatim: copy(.settings)))
-        .accessibilityIdentifier("home.account")
-    }
-
-    /// Desktop #48's title-bar bell (W4-E3): what needs the person, from the
-    /// causes the phone itself knows (`AttentionBellPolicy`).
-    private var attentionBell: some View {
-        AttentionBell(design: design, items: attentionItems) { kind in
+        HomeAccountFace(design: design, name: accountName, art: accountArt, items: attentionItems,
+                        openSettings: { router.presentAccount() }) { kind in
             switch kind {
             case .signIn: actions.reauthenticateDomain?()
             case .protons: protonTopUpPresented = true
             }
+        }
+        .task(id: accountAvatarURL) {
+            accountArt = nil
+            guard let uri = accountAvatarURL, let load = actions.loadMatrixThumbnail else { return }
+            let side = AtumAvatar.thumbnailPixelSide(for: HomeAccountFace.size)
+            guard let data = await load(uri, side), !Task.isCancelled else { return }
+            accountArt = await AtumAvatarArt.load(data: data, pixelSide: side)
         }
     }
 
@@ -849,25 +822,15 @@ struct HomeScreen: View {
                                         freshSpendable: protonTopUp?.balance()))
     }
 
-    /// Desktop #48: New chat is the Kit's plus icon button to the right of
-    /// the roster search (`MatrixStartChatButton`, Phosphor `plus`), same
-    /// action and spoken name as before.
-    @ViewBuilder private var createButton: some View {
-        if canStartChat {
-            Button { startChatPresented = true } label: {
-                // A text style, held to the 44 pt glass circle it sits in.
-                Image(atum.symbol(.plus))
-                    .font(.title3.weight(.light))
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(atum.color(.ink, scheme: scheme))
-            .modifier(LiveGlass(design: design, radius: 22))
-            .accessibilityLabel(copy(.startChat))
-            .accessibilityIdentifier("home.create")
+    /// New chat (desktop #48 `MatrixStartChatButton`, Phosphor `plus`), same
+    /// action and spoken name as before, now a system bar button: the bar
+    /// draws its glass and its large-content view.
+    private var createButton: some View {
+        Button { startChatPresented = true } label: {
+            atum.barIcon(.plus)
         }
+        .accessibilityLabel(copy(.startChat))
+        .accessibilityIdentifier("home.create")
     }
 
     private var canStartChat: Bool {
@@ -1454,62 +1417,16 @@ private struct HomeBadgeUpdate: Equatable {
     let isActive: Bool
 }
 
-/// The Kit search field (`.ak-field--search`): a full-radius capsule on
-/// `fill-quiet` with no ring, the magnifier (16, light) and placeholder in
-/// ink-3, the query in `.body` ink; 44 pt tall on the phone (Kit regular
-/// control height). `prompt` is the placeholder drawn in the field, `label`
-/// its spoken name (desktop's `placeholder` and `aria-label`).
-private struct HomeSearchField: View {
-    @Binding var query: String
-    let prompt: String
-    let label: String
-    var focused: FocusState<Bool>.Binding
-    @Environment(\.atum) private var atum
-    @Environment(\.colorScheme) private var scheme
+/// Reports the system search's `isSearching` to Home. The value exists only
+/// inside the searchable content, so this sits in Home's background there.
+private struct HomeSearchActivity: View {
+    @Binding var active: Bool
+    @Environment(\.isSearching) private var isSearching
 
     var body: some View {
-        if let atum {
-            HStack(spacing: 8) {
-                // The text style beside the field's, so it scales with the prompt.
-                Image(atum.symbol(.search))
-                    .font(.callout.weight(.light))
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .accessibilityHidden(true)
-                // Vertical, so the prompt wraps instead of clipping at large
-                // text sizes (the accessibility audit); Return never adds a line.
-                TextField(text: $query,
-                          prompt: Text(verbatim: prompt).foregroundStyle(atum.color(.muted, scheme: scheme)),
-                          axis: .vertical) {
-                    EmptyView()
-                }
-                .lineLimit(1...3)
-                .onChange(of: query) { _, value in
-                    guard value.contains("\n") else { return }
-                    query = value.replacingOccurrences(of: "\n", with: "")
-                    focused.wrappedValue = false
-                }
-                .focused(focused)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-                .accessibilityLabel(label)
-                .accessibilityIdentifier("home.search")
-                if !query.isEmpty {
-                    Button { query = "" } label: {
-                        Image(atum.symbol(.close))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .accessibilityLabel(Text(verbatim: label))
-                    .accessibilityIdentifier("home.search.clear")
-                }
-            }
-            .font(.body)
-            .foregroundStyle(atum.color(.ink, scheme: scheme))
-            .padding(.horizontal, atum.kit.space(.s3))
-            .frame(maxWidth: .infinity, minHeight: atum.kit.phoneControlHeight(.regular))
-            .background(atum.kitColor(.fillQuiet, scheme: scheme), in: Capsule())
-        }
+        Color.clear
+            .onChange(of: isSearching, initial: true) { _, value in active = value }
+            .accessibilityHidden(true)
     }
 }
 
@@ -1565,8 +1482,7 @@ private struct HomeStartChatSheet: View {
                 destination(route)
             }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme))
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationTitle(copy(.startTitle))
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $queryText, placement: .navigationBarDrawer(displayMode: .always),
@@ -1784,7 +1700,7 @@ private struct HomeStartChatSheet: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(atum.color(.ground, scheme: scheme))
+            .background(.bar)
             .overlay(alignment: .top) {
                 Rectangle().fill(atum.color(.frame, scheme: scheme)).frame(height: 0.5)
             }
@@ -1952,8 +1868,7 @@ private struct HomeAddFriendView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(atum.color(.ground, scheme: scheme))
+        // P6: a sheet keeps the system sheet background, not a custom fill.
         .navigationTitle(copy(.addFriendTitle))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: query) {
@@ -2111,7 +2026,7 @@ struct FounderDraftSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
             }
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationTitle(Text(verbatim: draft.name))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2234,8 +2149,7 @@ private struct HomeNewGroupView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(atum.color(.ground, scheme: scheme))
+        // P6: a sheet keeps the system sheet background, not a custom fill.
         .navigationTitle(copy(.groupCreateTitle))
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -2251,7 +2165,7 @@ private struct HomeNewGroupView: View {
             .accessibilityIdentifier("home.newGroup.create")
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(atum.color(.ground, scheme: scheme))
+            .background(.bar)
             .overlay(alignment: .top) {
                 Rectangle().fill(atum.color(.frame, scheme: scheme)).frame(height: 0.5)
             }

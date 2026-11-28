@@ -265,22 +265,26 @@ struct TeamSpaceScreen: View {
                 emptyState
             } else if presentation.workspace != nil, page.wrappedValue == .board {
                 CompanyBoardPage(design: design, companyID: presentation.workspace?.id ?? "",
-                                 selectedCardID: boardCard, viewer: viewerMemberRef,
-                                 preference: boardPreference)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        CompanyPagesBar(design: design, tabs: pageTabs, selection: page)
-                    }
+                                 selectedCardID: boardCard)
             } else {
                 list
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
-        // FlowPhone › Team: a large title under the switcher. The board's short
-        // "Team" has no exported key (gap F12); "Team space" is the current name.
-        .navigationTitle(design.text("src.matrix.mobile-device-copy.mobileDeviceCopy.teamSpaceTitle"))
-        .navigationBarTitleDisplayMode(.large)
+        // P6 (UX audit issue 7, owner decision 4): one header row. The open
+        // company's name is the inline title and its title menu switches
+        // company; the page, Board · List and Mine sit in one bar menu. It
+        // replaces the company capsule, the large title and the segmented
+        // rows. With no company the root keeps the large "Team space" (the
+        // board's short "Team" has no exported key, gap F12).
+        .navigationTitle(presentation.workspace?.title
+                         ?? design.text("src.matrix.mobile-device-copy.mobileDeviceCopy.teamSpaceTitle"))
+        .navigationBarTitleDisplayMode(presentation.workspace == nil ? .large : .inline)
+        .toolbarTitleMenu { titleMenu }
         .toolbar { toolbar }
+        .sensoryFeedback(.selection, trigger: page.wrappedValue)
+        .sensoryFeedback(.selection, trigger: boardPreference.wrappedValue.view)
         .sheet(isPresented: $showsOverview) {
             if let workspace = presentation.workspace {
                 CompanyOverviewSheet(design: design, workspace: workspace,
@@ -619,11 +623,6 @@ struct TeamSpaceScreen: View {
                     prompt: Text(verbatim: team.sidebarSearch(company: presentation.workspace?.title ?? "")))
         // The box filters as you type; the keyboard's Search runs company message search.
         .onSubmit(of: .search) { openMessageSearch() }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if presentation.workspace != nil {
-                CompanyPagesBar(design: design, tabs: pageTabs, selection: page)
-            }
-        }
         .accessibilityIdentifier("company.channels")
     }
 
@@ -733,8 +732,10 @@ struct TeamSpaceScreen: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         if let workspace = presentation.workspace {
-            // FlowPhone: the company switcher is a leading glass capsule.
-            ToolbarItem(placement: .topBarLeading) { header(workspace) }
+            // P6 root header rule: the page's view menu, then the company's
+            // Activity and "…" as their own group.
+            ToolbarItem(placement: .topBarTrailing) { viewMenu }
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
             // Desktop: Activity is an icon at the end of the switcher's row, always there
             // while a company is open (`activity-button.tsx`).
             ToolbarItem(placement: .topBarTrailing) {
@@ -806,36 +807,97 @@ struct TeamSpaceScreen: View {
         .accessibilityIdentifier("company.menu")
     }
 
-    /// The current company: its logo (or initial) in a circle, its name and a
-    /// chevron. It is always the switcher (one company or many), and a mark
-    /// beside it says another company has something waiting.
-    /// The tile in the bar's 44 pt glass capsule (FlowPhone › Team draws it at
-    /// about 26 pt). A capsule drawn by the view itself lost its name and caret
-    /// to the bar's vibrancy on iOS 26, so the bar's own glass is kept.
-    static let headerLogo: CGFloat = 28
-
-    private func header(_ workspace: CompanyWorkspacePresentation) -> some View {
-        let others = TeamSpaceBadges.tab(
-            companies: presentation.switcher.filter { !$0.isActive }.map(\.badge),
-            pendingInvitations: 0)
-        return Button { showsSwitcher = true } label: {
-            // Its own view type: iOS 26 bars lift plain Text and Image out of a
-            // button's label (they drew the tile and the badge, not the name or
-            // the caret); a custom view is hosted whole, as the chat title is.
-            CompanyHeaderLabel(design: design, title: workspace.title,
-                               logoURI: presentation.logos[workspace.id],
-                               logoSize: Self.headerLogo, others: others,
-                               loadMatrixThumbnail: actions.loadMatrixThumbnail)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+    /// The open company's title menu (`.toolbarTitleMenu`, owner decision 4):
+    /// every company, the open one checked and each with its mark in words,
+    /// then Companies, the switcher sheet with invitations and Create.
+    @ViewBuilder private var titleMenu: some View {
+        if presentation.workspace != nil {
+            Section {
+                ForEach(presentation.switcher) { entry in
+                    Button {
+                        actions.selectCompany(entry.id)
+                    } label: {
+                        let mark = copy.markDescription(entry.badge).joined(separator: ", ")
+                        if entry.isActive {
+                            Label {
+                                Text(verbatim: entry.title)
+                                if !mark.isEmpty { Text(verbatim: mark) }
+                            } icon: {
+                                atum.barIcon(.check)
+                            }
+                        } else {
+                            Text(verbatim: entry.title)
+                            if !mark.isEmpty { Text(verbatim: mark) }
+                        }
+                    }
+                    .accessibilityAddTraits(entry.isActive ? .isSelected : [])
+                    .accessibilityIdentifier("company.title.switch." + entry.id)
+                }
+            }
+            Button { showsSwitcher = true } label: {
+                Label { Text(verbatim: copy.companiesTitle) } icon: { atum.barIcon(.briefcase) }
+            }
+            .accessibilityIdentifier("company.header")
         }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: workspace.title))
-        .accessibilityValue(Text(verbatim: copy.markDescription(others).joined(separator: ", ")))
-        .accessibilityHint(Text(verbatim: copy.companiesTitle))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("company.header")
+    }
+
+    /// Chat · Board (then Marketplace), and on the Board its Board · List and
+    /// Mine (desktop `company-space-tabs.tsx`, `company-board.tsx` header), in
+    /// one bar menu: Drive's "…" pattern (UX audit issue 7). The bar shows the
+    /// page by name; the system menu's rows follow Dynamic Type, and the bar
+    /// item gets the system large-content view at accessibility sizes.
+    private var viewMenu: some View {
+        Menu {
+            Picker(selection: page) {
+                ForEach(pageTabs, id: \.self) { tab in
+                    Text(verbatim: team.page(tab)).tag(tab)
+                        .accessibilityIdentifier("company.page." + tab.rawValue)
+                }
+            } label: {
+                Text(verbatim: team.pagesLabel)
+            }
+            .pickerStyle(.inline)
+            if page.wrappedValue == .board {
+                Picker(selection: Binding(get: { boardPreference.wrappedValue.view },
+                                          set: { boardPreference.wrappedValue = boardPreference.wrappedValue
+                                              .selecting($0) })) {
+                    ForEach(CompanyBoardView.allCases, id: \.self) { view in
+                        Text(verbatim: team.boardView(view)).tag(view)
+                            .accessibilityIdentifier("company.board.view." + view.rawValue)
+                    }
+                } label: {
+                    Text(verbatim: team.boardViews)
+                }
+                .pickerStyle(.inline)
+                if viewerMemberRef != nil {
+                    Toggle(isOn: Binding(
+                        get: { boardPreference.wrappedValue.mineOn(viewer: viewerMemberRef) },
+                        set: { _ in boardPreference.wrappedValue = boardPreference.wrappedValue
+                            .togglingMine(viewer: viewerMemberRef) })) {
+                        Text(verbatim: team.mine)
+                    }
+                    .accessibilityIdentifier("company.board.mine")
+                }
+            }
+        } label: {
+            Text(verbatim: team.page(page.wrappedValue))
+        }
+        .accessibilityLabel(Text(verbatim: team.pagesLabel))
+        .accessibilityValue(Text(verbatim: viewValue))
+        .accessibilityIdentifier("company.pages")
+    }
+
+    /// What the view menu has chosen, in words: the page, then on the Board
+    /// List when chosen (Board is the page's own name) and Mine when on.
+    private var viewValue: String {
+        var parts = [team.page(page.wrappedValue)]
+        if page.wrappedValue == .board {
+            if boardPreference.wrappedValue.view != .board {
+                parts.append(team.boardView(boardPreference.wrappedValue.view))
+            }
+            if boardPreference.wrappedValue.mineOn(viewer: viewerMemberRef) { parts.append(team.mine) }
+        }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: Channel sections (TS-13)
@@ -1194,8 +1256,7 @@ struct CompanySwitcherSheet: View {
                     EmptyView()
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationTitle(copy.companiesTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1456,41 +1517,5 @@ struct CompanyRolePill: View {
             .overlay(Capsule().strokeBorder(atum.color(.frame, scheme: scheme), lineWidth: 0.5))
             .lineLimit(1)
             .fixedSize()
-    }
-}
-
-/// FlowPhone › Team: the company's logo circle, its name in subheadline semibold
-/// and the up/down caret, plus a mark when another company has something
-/// waiting; drawn inside the bar's glass capsule.
-private struct CompanyHeaderLabel: View {
-    let design: LiveDesign
-    let title: String
-    let logoURI: String?
-    let logoSize: CGFloat
-    let others: Badge
-    let loadMatrixThumbnail: ((String, Int) async -> Data?)?
-
-    @Environment(\.colorScheme) private var scheme
-    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            CompanyLogo(name: title, logoURI: logoURI, size: logoSize,
-                        loadMatrixThumbnail: loadMatrixThumbnail)
-            Text(verbatim: title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(atum.color(.ink, scheme: scheme))
-                .lineLimit(1)
-            // A bar draws no custom symbol, even inside a custom view.
-            AtumBarIcon.image(atum.symbol(.chevronUpDown), pointSize: 14)
-                .foregroundStyle(atum.kitColor(.ink3, scheme: scheme))
-                .accessibilityHidden(true)
-            if others != .none {
-                HomeBadgeView(design: design, badge: others, pinned: false)
-                    .accessibilityHidden(true)
-                    .accessibilityIdentifier("company.header.badge")
-            }
-        }
-        .fixedSize()
     }
 }

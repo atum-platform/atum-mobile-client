@@ -489,8 +489,7 @@ struct TeamSpaceThreadsSheet: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .overlay { if rows == nil, isLoading { ProgressView() } }
             .refreshable { await reload() }
             .onChange(of: filter) { _, _ in visible = CompanyThreads.pageSize }

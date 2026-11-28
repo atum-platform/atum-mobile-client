@@ -69,18 +69,17 @@ final class KitBoardSettingsCaptureUITests: TranscriptUITestCase {
         let tab = app.buttons.matching(identifier: "phone.tab.team_space").firstMatch
         XCTAssertTrue(tab.waitForExistence(timeout: 15))
         tab.tap()
-        let header = element(app, "company.header")
-        XCTAssertTrue(header.waitForExistence(timeout: 5), "no company header")
-        if header.label != "Studio" {
-            header.tap()
-            let studio = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Studio")).firstMatch
-            XCTAssertTrue(studio.waitForExistence(timeout: 3))
-            studio.tap()
-            XCTAssertTrue(element(app, "company.header").waitForExistence(timeout: 3))
+        // P6: the open company is the bar's inline title; its menu switches.
+        XCTAssertTrue(openCompanyTitleMenu(app, "Anka") || companyTitle(app, "Studio").exists,
+                      "no company title")
+        if !companyTitle(app, "Studio").exists {
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Studio")).firstMatch.tap()
+            XCTAssertTrue(companyTitle(app, "Studio").waitForExistence(timeout: 3))
         }
         Thread.sleep(forTimeInterval: 1.5)
         keepScreenshot("kit-team-header", of: app)
-        element(app, "company.header").tap()
+        XCTAssertTrue(openCompanyTitleMenu(app, "Studio"))
+        app.buttons.matching(identifier: "company.header").firstMatch.tap()
         XCTAssertTrue(element(app, "company.switcher").waitForExistence(timeout: 3))
         Thread.sleep(forTimeInterval: 1.5)
         keepScreenshot("kit-team-switcher", of: app)

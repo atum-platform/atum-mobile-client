@@ -38,6 +38,7 @@ struct StoreScreen: View {
     @State private var showsPurchased = false
     @State private var query = ""
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.showsConnectionGlyph) private var showsConnectionGlyph
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
     private var kit: AtumKit { design.kit }
@@ -58,8 +59,14 @@ struct StoreScreen: View {
         .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
         .navigationTitle(copy("src.matrix.mobile-device-copy.mobileDeviceCopy.uiStore"))
         .navigationBarTitleDisplayMode(.large)
+        // P6 root header rule: trailing items are system bar items, status
+        // first and only while it says something (no empty glass), then the
+        // root's own control, here the balance.
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { ConnectionGlyph(design: design) }
+            if showsConnectionGlyph {
+                ToolbarItem(placement: .topBarTrailing) { ConnectionGlyph(design: design) }
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            }
             // FlowPhone › Store: the balance once, in the top bar, as the
             // Proton mark and whole Protons. Pressing it opens the top-up
             // (desktop `discover-view.tsx:563-581`, lane 4 W14).

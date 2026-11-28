@@ -121,11 +121,7 @@ struct AgentDeskPage: View {
         .background(atum.color(.ground, scheme: scheme).opacity(0.001))
         .navigationTitle(info.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                ChatPanelCloseButton(design: design, close: close)
-            }
-        }
+        // A page pushed inside the panel: the system Back only (P6 rule).
         .onChange(of: info.isMuted) { _, value in muted = value }
         .onAppear { model.appear() }
         .onDisappear { model.disappear() }

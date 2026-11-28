@@ -7,73 +7,30 @@ import SwiftUI
 
 // MARK: Pages (TS-10)
 
-/// Chat · Board (then Marketplace while the company Store answers): a segmented
-/// control under the company header, the phone's form of the desktop's title-bar
-/// tabs (`company-space-tabs.tsx`).
-struct CompanyPagesBar: View {
-    let design: LiveDesign
-    let tabs: [CompanySpaceTab]
-    @Binding var selection: CompanySpaceTab
-
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    private var copy: TeamSpaceCopy { TeamSpaceCopy(design: design) }
-    private var kit: AtumKit { design.kit }
-
-    var body: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                // The system segmented control keeps its small fixed text at
-                // accessibility sizes (UX audit issue 9): the same choice,
-                // drawn with segments that scale.
-                TeamSpaceSegments(design: design, items: tabs, selection: $selection,
-                                  title: { copy.page($0) },
-                                  identifier: { "company.page." + $0.rawValue },
-                                  label: copy.pagesLabel)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Picker(selection: $selection) {
-                    ForEach(tabs, id: \.self) { tab in
-                        Text(verbatim: copy.page(tab)).tag(tab)
-                            .accessibilityIdentifier("company.page." + tab.rawValue)
-                    }
-                } label: {
-                    Text(verbatim: copy.pagesLabel)
-                }
-                .pickerStyle(.segmented)
-            }
-        }
-        .padding(.horizontal, kit.space(.s4))
-        .padding(.vertical, 6)
-        .sensoryFeedback(.selection, trigger: selection)
-        .accessibilityIdentifier("company.pages")
-    }
-}
+// Chat · Board (then Marketplace while the company Store answers) is the
+// Team Space bar's view menu (`TeamSpaceScreen.viewMenu`, P6), the phone's
+// form of the desktop's title-bar tabs (`company-space-tabs.tsx`).
 
 /// The Board page. The phone has no board read yet (the platform's `board-*`
 /// native routes, TS later), so it shows the desktop board's own unavailable
 /// state rather than an empty board that would look real. Board · List and Mine
-/// sit above it, as the desktop draws its header over the unavailable board (W4-E7).
+/// are in the bar's view menu (P6), as the desktop draws its header over the
+/// unavailable board (W4-E7).
 struct CompanyBoardPage: View {
     let design: LiveDesign
     let companyID: String
     /// The card a board link names (desktop `selectedCardId`).
     @Binding var selectedCardID: String?
-    /// The viewer's own member (desktop `viewerMemberRef`), for Mine.
-    var viewer: String?
-    @Binding var preference: CompanyBoardPreference
     @Environment(\.colorScheme) private var scheme
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            CompanyBoardControls(design: design, viewer: viewer, preference: $preference)
-            ContentUnavailableView {
-                Text(verbatim: TeamSpaceCopy(design: design).boardUnavailable)
-                    .font(.body)
-                    .foregroundStyle(atum.color(.soft, scheme: scheme))
-            }
-            .accessibilityIdentifier("company.board.unavailable")
+        ContentUnavailableView {
+            Text(verbatim: TeamSpaceCopy(design: design).boardUnavailable)
+                .font(.body)
+                .foregroundStyle(atum.color(.soft, scheme: scheme))
         }
+        .accessibilityIdentifier("company.board.unavailable")
     }
 }
 
@@ -241,8 +198,7 @@ struct CompanyOverviewSheet: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationTitle(team.companyOverview)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -374,8 +330,7 @@ struct TeamSpaceActivitySheet: View {
                 }
             }
             .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .refreshable { await reload() }
             .onChange(of: filter) { _, _ in visible = CompanyActivityFeed.pageSize }
             .navigationTitle(copy.activityTitle)
@@ -487,8 +442,7 @@ struct TeamSpaceSavedSheet: View {
                 }
             }
             .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationTitle(copy.savedTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

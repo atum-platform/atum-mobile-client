@@ -263,11 +263,7 @@ struct AppPanelPageView: View {
         .background(AtumVisualSystem(design: design).color(.ground, scheme: scheme).opacity(0.001))
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                ChatPanelCloseButton(design: design, close: close)
-            }
-        }
+        // A page pushed inside the panel: the system Back only (P6 rule).
         .task(id: attempt) {
             guard launchedAttempt != attempt else { return }
             launchedAttempt = attempt

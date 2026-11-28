@@ -161,6 +161,61 @@ class TranscriptUITestCase: AtumUITestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    /// Home's search (P6 root header): the system `.searchable` field in the
+    /// bar's drawer. The system field takes no identifier of ours.
+    @MainActor func homeSearch(_ app: XCUIApplication) -> XCUIElement {
+        app.searchFields.firstMatch
+    }
+
+    /// The system search field's own clear button.
+    @MainActor func homeSearchClear(_ app: XCUIApplication) -> XCUIElement {
+        homeSearch(app).buttons.firstMatch
+    }
+
+    /// The system search's Cancel beside the field (iOS 26 can draw it as an
+    /// X), named by the system in the app's language.
+    @MainActor func searchCancel(_ app: XCUIApplication) -> XCUIElement {
+        let names = ["Cancel", "Hủy", "Huỷ", "Close", "Đóng"]
+        let named = NSPredicate(format: "label IN %@ OR identifier IN %@", names, names)
+        let inBar = app.navigationBars.buttons.matching(named).firstMatch
+        return inBar.exists ? inBar : app.buttons.matching(named).firstMatch
+    }
+
+    /// Team Space's inline company title, which opens its title menu (P6
+    /// `.toolbarTitleMenu`, owner decision 4).
+    @MainActor func companyTitle(_ app: XCUIApplication, _ company: String) -> XCUIElement {
+        let bar = app.navigationBars.firstMatch
+        let button = bar.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", company)).firstMatch
+        return button.exists ? button : bar.staticTexts[company]
+    }
+
+    /// Opens the company title menu and waits for its Companies entry.
+    @MainActor @discardableResult
+    func openCompanyTitleMenu(_ app: XCUIApplication, _ company: String) -> Bool {
+        let title = companyTitle(app, company)
+        guard title.waitForExistence(timeout: 5) else { return false }
+        title.tap()
+        return app.buttons.matching(identifier: "company.header").firstMatch.waitForExistence(timeout: 3)
+    }
+
+    /// Team Space's view menu button (Chat · Board, Board · List, Mine). Its
+    /// value says what is chosen: the page, then the board's view and Mine.
+    @MainActor func companyViewMenu(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(identifier: "company.pages").firstMatch
+    }
+
+    /// Opens the view menu and returns its item, by identifier, else by name
+    /// (a menu row can lose a SwiftUI identifier).
+    @MainActor func companyViewMenuItem(_ app: XCUIApplication, id: String, name: String) -> XCUIElement {
+        let menu = companyViewMenu(app)
+        if menu.waitForExistence(timeout: 5) { menu.tap() }
+        let byID = app.buttons.matching(identifier: id).firstMatch
+        if byID.waitForExistence(timeout: 2) { return byID }
+        let switchByID = app.switches.matching(identifier: id).firstMatch
+        if switchByID.exists { return switchByID }
+        return app.switches[name].exists ? app.switches[name] : app.buttons[name]
+    }
+
     /// The chat panel's scrolling list (`ChatInfoHome`, a system inset-grouped
     /// `List` since UX polish P2): a collection view inside `info.sheet`. A list
     /// builds only the rows on screen, so a row below the fold exists only once

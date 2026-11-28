@@ -48,24 +48,31 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         return app
     }
 
+    /// P6: Chat · Board, Board · List and Mine are the bar's view menu. The
+    /// menu's rows follow Dynamic Type and keep 44 pt targets at AX sizes.
     @MainActor
     func testBoardControlsHave44PointTargetsAtAccessibilityTextSize() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone list")
         let app = launch(language: "vi", dark: false, contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
-        let page = app.buttons.matching(identifier: "company.page.board").firstMatch
+        let expected = try XCTUnwrap(words["vi"])
+        let page = companyViewMenuItem(app, id: "company.page.board", name: expected.board)
         XCTAssertTrue(page.waitForExistence(timeout: 5), boundedHierarchy(app))
         page.tap()
-        let board = app.buttons.matching(identifier: "company.board.view.board").firstMatch
-        let list = app.buttons.matching(identifier: "company.board.view.list").firstMatch
-        let mine = app.switches[words["vi"]!.mine]
+        XCTAssertTrue(waitFor(3) { (self.companyViewMenu(app).value as? String)?.hasPrefix(expected.board) == true },
+                      boundedHierarchy(app))
+        let list = companyViewMenuItem(app, id: "company.board.view.list", name: expected.list)
+        XCTAssertTrue(list.waitForExistence(timeout: 5), boundedHierarchy(app))
+        let mine = app.switches[expected.mine].exists ? app.switches[expected.mine] : app.buttons[expected.mine]
         XCTAssertTrue(mine.waitForExistence(timeout: 5), boundedHierarchy(app))
-        for control in [board, list, mine] {
+        for control in [list, mine] {
             XCTAssertTrue(control.isHittable, boundedHierarchy(app))
             XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.label)
             XCTAssertTrue(app.frame.contains(control.frame), control.label)
         }
+        keepScreenshot("p6-team-space-view-menu-ax", of: app)
         mine.tap()
-        XCTAssertTrue(waitFor(3) { self.isOn(mine) })
+        XCTAssertTrue(waitFor(3) { (self.companyViewMenu(app).value as? String)?.hasSuffix(expected.mine) == true },
+                      "Mine did not turn on: \(boundedHierarchy(app))")
     }
 
     @MainActor
@@ -123,51 +130,44 @@ final class TeamSpaceRevampUITests: TranscriptUITestCase {
         app.swipeDown(velocity: .fast)
     }
 
-    /// A button-style toggle reads as selected, or as a toggle whose value is 1.
-    @MainActor
-    private func isOn(_ toggle: XCUIElement) -> Bool {
-        toggle.isSelected || (toggle.value as? String) == "1"
-    }
-
-    /// Board · List and Mine over the board's unavailable state.
+    /// Board · List and Mine over the board's unavailable state, chosen in the
+    /// bar's view menu (P6). The menu button's value says the choice.
     @MainActor
     private func checkBoardViews(_ app: XCUIApplication, expected: Words, tag: String) {
-        let chatPage = app.buttons.matching(identifier: "company.page.chat").firstMatch
-        let boardPage = app.buttons.matching(identifier: "company.page.board").firstMatch
+        let menu = companyViewMenu(app)
+        let value = { menu.value as? String ?? "" }
+        XCTAssertTrue(menu.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertEqual(value(), expected.chat)
+        XCTAssertEqual(menu.frame.midY, app.navigationBars.firstMatch.frame.midY,
+                       accuracy: app.navigationBars.firstMatch.frame.height / 2, "the view menu is on the bar")
+        let boardPage = companyViewMenuItem(app, id: "company.page.board", name: expected.board)
         XCTAssertTrue(boardPage.waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertEqual(boardPage.label, expected.board)
+        keepScreenshot("p6-view-menu-chat-\(tag)", of: app)
         boardPage.tap()
-        let board = app.buttons.matching(identifier: "company.board.view.board").firstMatch
-        let list = app.buttons.matching(identifier: "company.board.view.list").firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertEqual(board.label, expected.board)
-        XCTAssertEqual(list.label, expected.list)
-        XCTAssertTrue(board.isSelected)
-        // The controls sit over the board's own unavailable state (the phone has no board read).
-        XCTAssertTrue(app.staticTexts[expected.boardUnavailable].exists, boundedHierarchy(app))
+        XCTAssertTrue(waitFor(3) { value() == expected.board }, "Board not chosen: \(value())")
+        // The board's own unavailable state (the phone has no board read).
+        XCTAssertTrue(app.staticTexts[expected.boardUnavailable].waitForExistence(timeout: 3), boundedHierarchy(app))
 
+        let list = companyViewMenuItem(app, id: "company.board.view.list", name: expected.list)
+        XCTAssertTrue(list.waitForExistence(timeout: 3), boundedHierarchy(app))
+        keepScreenshot("p6-view-menu-board-\(tag)", of: app)
         list.tap()
-        XCTAssertTrue(waitFor(3) { list.isSelected }, "List not chosen")
-        // A button-style Toggle is a switch named by its label; its identifier has lost to the
-        // screen's before, so it is found the way a person names it.
-        let mine = app.switches[expected.mine]
+        XCTAssertTrue(waitFor(3) { value() == expected.board + ", " + expected.list }, "List not chosen: \(value())")
+        let mine = companyViewMenuItem(app, id: "company.board.mine", name: expected.mine)
         XCTAssertTrue(mine.waitForExistence(timeout: 3), boundedHierarchy(app))
-        for control in [board, list, mine] {
-            XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.label)
-        }
-        XCTAssertFalse(isOn(mine))
         mine.tap()
-        XCTAssertTrue(waitFor(3) { self.isOn(mine) }, "Mine did not turn on: \(self.boundedHierarchy(app))")
-        XCTAssertTrue(list.isSelected, "Mine changed the view")
+        XCTAssertTrue(waitFor(3) { value() == [expected.board, expected.list, expected.mine].joined(separator: ", ") },
+                      "Mine did not turn on: \(value())")
         keepScreenshot("w4-e7-board-list-mine-\(tag)", of: app)
 
-        XCTAssertEqual(chatPage.label, expected.chat)
-        chatPage.tap()
+        companyViewMenuItem(app, id: "company.page.chat", name: expected.chat).tap()
         XCTAssertTrue(element(app, "company.channel.general").waitForExistence(timeout: 3))
         // The page keeps its choices for the session.
-        boardPage.tap()
-        XCTAssertTrue(waitFor(3) { list.isSelected && self.isOn(mine) }, "Board · List and Mine were not kept")
-        chatPage.tap()
+        companyViewMenuItem(app, id: "company.page.board", name: expected.board).tap()
+        XCTAssertTrue(waitFor(3) { value() == [expected.board, expected.list, expected.mine].joined(separator: ", ") },
+                      "Board · List and Mine were not kept: \(value())")
+        companyViewMenuItem(app, id: "company.page.chat", name: expected.chat).tap()
+        XCTAssertTrue(element(app, "company.channel.general").waitForExistence(timeout: 3))
     }
 
     /// The header box: nothing matched says so; "Search “launch”" opens the results

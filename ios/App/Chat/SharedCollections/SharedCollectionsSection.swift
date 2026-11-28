@@ -206,11 +206,7 @@ struct SharedCollectionPage: View {
         .background(context.atum.color(.ground, scheme: scheme).opacity(0.001))
         .navigationTitle(context.copy.title(section))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                ChatPanelCloseButton(design: design, close: close)
-            }
-        }
+        // A page pushed inside the panel: the system Back only (P6 rule).
         .task(id: controller.generation) {
             await controller.model(section)?.seeAll()
         }

@@ -148,10 +148,9 @@ struct CompanyInviteSheet: View {
                                               canRevoke: abilities.revokeInviteLink, actions: actions)
                 }
             }
-            .scrollContentBackground(.hidden)
             // At large text the keyboard covers the row and the link: scrolling puts it away.
             .scrollDismissesKeyboard(.immediately)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -543,8 +542,7 @@ struct CompanyInviteJoinSheet: View {
 
                 Section { primaryButton }
             }
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -706,8 +704,7 @@ struct CompanyChannelCreateSheet: View {
                     .accessibilityIdentifier("company.channel.create.submit")
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(atum.color(.ground, scheme: scheme).ignoresSafeArea())
+            // P6: a sheet keeps the system sheet background, not a custom fill.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

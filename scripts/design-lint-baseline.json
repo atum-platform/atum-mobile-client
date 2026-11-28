@@ -168,7 +168,7 @@
       "padding": 1
     },
     "ios/App/Company/CompanySpaceViews.swift": {
-      "padding": 7,
+      "padding": 6,
       "spacing": 13
     },
     "ios/App/Company/CompanyThreadsViews.swift": {
@@ -177,7 +177,7 @@
     },
     "ios/App/Company/CompanyWorkspaceViews.swift": {
       "padding": 40,
-      "spacing": 16,
+      "spacing": 15,
       "radius": 1
     },
     "ios/App/Company/ConversationViews.swift": {
@@ -187,12 +187,12 @@
       "animation": 1
     },
     "ios/App/Company/TeamSpaceRevampViews.swift": {
-      "padding": 2,
+      "padding": 1,
       "spacing": 3
     },
     "ios/App/Home/HomeScreen.swift": {
-      "padding": 51,
-      "spacing": 36,
+      "padding": 48,
+      "spacing": 32,
       "radius": 2,
       "animation": 1
     },

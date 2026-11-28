@@ -151,39 +151,46 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
     }
 
+    /// P6 (owner decision 6): the bell lives in the account face, as on
+    /// desktop's rail account. The face wears the dot and says what waits;
+    /// its list acts and ends with Settings. With nothing waiting the face
+    /// opens Settings.
     @MainActor
     private func checkBell(language: String, tag: String) throws {
         let expected = try XCTUnwrap(words[language])
-        // Something needs the person: the badged bell says it, its list acts.
+        let settings = language == "vi" ? "Cài đặt" : "Settings"
+        // Something needs the person: the badged face says it, its list acts.
         var app = launch(.homeRoster, language: language, extra: ["-AtumScriptedSignInAgain"])
-        let bell = app.buttons.matching(identifier: "home.bell").firstMatch
-        let search = app.textFields.matching(identifier: "home.search").firstMatch
+        let face = app.buttons.matching(identifier: "home.account").firstMatch
         let plus = app.buttons.matching(identifier: "home.create").firstMatch
-        XCTAssertTrue(bell.waitForExistence(timeout: 15), boundedHierarchy(app))
-        XCTAssertEqual(bell.label, expected.needsYou + " " + expected.signIn)
-        XCTAssertLessThan(search.frame.maxX, bell.frame.minX + Self.framePoints, "bell right of search")
-        XCTAssertLessThan(bell.frame.maxX, plus.frame.minX + Self.framePoints, "bell left of plus")
+        XCTAssertTrue(face.waitForExistence(timeout: 15), boundedHierarchy(app))
+        XCTAssertEqual(face.label, settings + ", " + expected.needsYou + " " + expected.signIn)
+        XCTAssertEqual(face.value as? String, "1")
+        XCTAssertTrue(element(app, "home.account.badge").exists, boundedHierarchy(app))
+        XCTAssertFalse(app.buttons.matching(identifier: "home.bell").firstMatch.exists, "the bell is gone")
+        XCTAssertLessThan(face.frame.maxX, plus.frame.minX + Self.framePoints, "face leading, plus trailing")
         keepScreenshot("w4-e3-bell-badge-\(tag)", of: app)
-        bell.tap()
-        let item = app.buttons.matching(identifier: "home.bell.item.sign_in").firstMatch
+        face.tap()
+        let item = app.buttons.matching(identifier: "home.account.attention.sign_in").firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 3), boundedHierarchy(app))
         XCTAssertTrue(app.staticTexts[expected.bell].exists)
+        XCTAssertTrue(app.buttons.matching(identifier: "home.account.settings").firstMatch.exists,
+                      "Settings is the list's last row")
         keepScreenshot("w4-e3-bell-list-\(tag)", of: app)
         item.tap()
         XCTAssertTrue(waitFor(3) { self.probeLines("home-actions.txt").contains { $0.text == "reauthenticate" } })
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
 
-        // Nothing needs the person: a quiet bell and one line.
+        // Nothing needs the person: a quiet face that opens Settings.
         app = launch(.homeRoster, language: language)
-        let quiet = app.buttons.matching(identifier: "home.bell").firstMatch
+        let quiet = app.buttons.matching(identifier: "home.account").firstMatch
         XCTAssertTrue(quiet.waitForExistence(timeout: 15), boundedHierarchy(app))
-        XCTAssertEqual(quiet.label, expected.bell)
-        quiet.tap()
-        let nothing = element(app, "home.bell.nothing")
-        XCTAssertTrue(nothing.waitForExistence(timeout: 3), boundedHierarchy(app))
-        XCTAssertEqual(nothing.label, expected.nothing)
+        XCTAssertEqual(quiet.label, settings)
+        XCTAssertFalse(element(app, "home.account.badge").exists)
         keepScreenshot("w4-e3-bell-empty-\(tag)", of: app)
+        quiet.tap()
+        XCTAssertTrue(element(app, "account.screen").waitForExistence(timeout: 3), boundedHierarchy(app))
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
     }

@@ -28,7 +28,7 @@ final class HomeSearchM1CaptureUITests: TranscriptUITestCase {
             element(app, "home.filter.all").tap()
 
             // S1: plain results grouped by chat, company-only label, coverage.
-            let search = element(app, "home.search")
+            let search = homeSearch(app)
             var focused = false
             for _ in 0..<4 where !focused {
                 search.tap()

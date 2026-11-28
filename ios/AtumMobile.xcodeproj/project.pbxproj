@@ -325,7 +325,7 @@
 		F083B6E5ABED51DE40C024F6 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 051CBCE4EB6371437CB463AE /* LICENSE */; };
 		F0A0C3B6AFD5AB5C803C8D97 /* AccountProfileEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896B46FF8920F34300401246 /* AccountProfileEditor.swift */; };
 		F18BB8507585F8EF716E8CE3 /* ChatScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC86D770CEC88C3D071341B /* ChatScreen.swift */; };
-		F1ABD8253A578883B102350B /* AttentionBell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 166CD9EAE660B4F66A288CC9 /* AttentionBell.swift */; };
+		F1ABD8253A578883B102350B /* HomeAccountFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 166CD9EAE660B4F66A288CC9 /* HomeAccountFace.swift */; };
 		F1F6386584D4268229E88321 /* LiveMediaFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C53ED80960A9FC81832D4E29 /* LiveMediaFile.swift */; };
 		F3554B20CE1845FDB358EA2A /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 3321C10CB12E085D9D92FF11 /* InfoPlist.xcstrings */; };
 		F4E87FE2DDB5853BE9A5B8AD /* TeamSpaceDailyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27BE008882050F4882F2CB36 /* TeamSpaceDailyUITests.swift */; };
@@ -420,7 +420,7 @@
 		15C880F0C004C94EFEC6EBA2 /* AttachmentPreparer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPreparer.swift; sourceTree = "<group>"; };
 		15F28920580D117DD7F5F3EC /* DriveShareFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveShareFileTests.swift; sourceTree = "<group>"; };
 		15F6614A6EB16B2D06489CDC /* TeamSpacePendingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamSpacePendingCopy.swift; sourceTree = "<group>"; };
-		166CD9EAE660B4F66A288CC9 /* AttentionBell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionBell.swift; sourceTree = "<group>"; };
+		166CD9EAE660B4F66A288CC9 /* HomeAccountFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAccountFace.swift; sourceTree = "<group>"; };
 		16E80A4F8381968AECF596C5 /* rich-text-notices.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rich-text-notices.json"; sourceTree = "<group>"; };
 		17126229509607B4CFA25A4C /* Textual-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Textual-LICENSE.txt"; sourceTree = "<group>"; };
 		17CA4634D4BB32072A0A9001 /* ProtonTopUp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtonTopUp.swift; sourceTree = "<group>"; };
@@ -911,7 +911,7 @@
 			isa = PBXGroup;
 			children = (
 				EBDDABD1E87CBD4A35035D6F /* AppCardSheet.swift */,
-				166CD9EAE660B4F66A288CC9 /* AttentionBell.swift */,
+				166CD9EAE660B4F66A288CC9 /* HomeAccountFace.swift */,
 				5B22B553C86E35E7243B206D /* HomeAssistantActivity.swift */,
 				145AEE2A828558E0B54CF34D /* HomeGlobalSearch.swift */,
 				7A62AC0017F1BE9B51BF2BB5 /* HomeScreen.swift */,
@@ -1767,7 +1767,7 @@
 				9CE5EC213498C0B2ED79040F /* AttachSheet.swift in Sources */,
 				0DB02DBDBB94CA899ED4006F /* AttachmentPreparer.swift in Sources */,
 				3E61CE0DF718650931A7CB11 /* AttachmentTray.swift in Sources */,
-				F1ABD8253A578883B102350B /* AttentionBell.swift in Sources */,
+				F1ABD8253A578883B102350B /* HomeAccountFace.swift in Sources */,
 				B522BB699B2DA98CCDC88396 /* AtumAppearance.swift in Sources */,
 				B9295376C15D2060AD472299 /* AtumAvatar.swift in Sources */,
 				751C1D9424BBC65042A66641 /* AtumKit.swift in Sources */,

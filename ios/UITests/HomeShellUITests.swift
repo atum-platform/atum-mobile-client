@@ -95,13 +95,17 @@ final class HomeShellUITests: TranscriptUITestCase {
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
         // centre and the glass plus share one row. The tab bar has no search.
         let account = app.buttons.matching(identifier: "home.account").firstMatch
-        let search = app.textFields.matching(identifier: "home.search").firstMatch
+        let search = homeSearch(app)
         let plus = app.buttons.matching(identifier: "home.create").firstMatch
         XCTAssertTrue(account.exists && search.exists && plus.exists, boundedHierarchy(app))
-        XCTAssertLessThan(account.frame.midX, search.frame.midX)
-        XCTAssertLessThan(search.frame.midX, plus.frame.midX)
-        XCTAssertEqual(search.frame.midY, account.frame.midY, accuracy: 4, "one top row")
-        XCTAssertFalse(element(app, "home.title").exists, "Chats has no title")
+        // P6 root header (owner, 28 Nov 2026): the face leading and compose
+        // trailing on the bar's row, the large "Chats" title, and the system
+        // search in the bar's drawer under them.
+        XCTAssertLessThan(account.frame.midX, plus.frame.midX)
+        XCTAssertEqual(plus.frame.midY, account.frame.midY, accuracy: 4, "one bar row")
+        XCTAssertLessThan(plus.frame.maxY, search.frame.minY + Self.framePoints, "search under the bar row")
+        XCTAssertTrue(app.navigationBars.staticTexts["Trò chuyện"].exists,
+                      "Home has the large Chats title\n\(boundedHierarchy(app))")
         XCTAssertFalse(app.buttons.matching(identifier: "phone.tab.search").firstMatch.exists)
         XCTAssertFalse(element(app, "company.section").exists,
                        "Personal Home must not contain company rows or invitations\n\(boundedHierarchy(app))")
@@ -118,7 +122,8 @@ final class HomeShellUITests: TranscriptUITestCase {
         XCTAssertTrue(waitFor(2) { teamSpaceTab.isSelected })
         XCTAssertTrue(element(app, "teamSpace.screen").waitForExistence(timeout: 3))
         XCTAssertTrue(element(app, "company.section").exists)
-        XCTAssertTrue(element(app, "company.header").exists, boundedHierarchy(app))
+        // P6: the open company is the bar's inline title (its title menu switches).
+        XCTAssertTrue(companyTitle(app, "Anka").exists, boundedHierarchy(app))
         XCTAssertTrue(app.buttons.matching(identifier: "company.channel.general").firstMatch.exists,
                       boundedHierarchy(app))
         homeTab.tap()
@@ -163,7 +168,7 @@ final class HomeShellUITests: TranscriptUITestCase {
                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
         app.launch()
 
-        let field = app.descendants(matching: .any).matching(identifier: "home.search").firstMatch
+        let field = homeSearch(app)
         XCTAssertTrue(field.waitForExistence(timeout: 15), "Top search field did not appear")
         field.tap()
         field.typeText("lan")
@@ -172,7 +177,7 @@ final class HomeShellUITests: TranscriptUITestCase {
         XCTAssertTrue(lan.waitForExistence(timeout: 15), "Search did not show Lan")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atum'")).firstMatch.exists)
 
-        let clear = app.buttons.matching(identifier: "home.search.clear").firstMatch
+        let clear = homeSearchClear(app)
         XCTAssertTrue(clear.waitForExistence(timeout: 15), "Search clear did not appear")
         clear.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atum'")).firstMatch
@@ -184,24 +189,26 @@ final class HomeShellUITests: TranscriptUITestCase {
         // empty copy. Main already checks the current global-search copy.
         XCTAssertTrue(app.staticTexts["Không tìm thấy kết quả nào"].waitForExistence(timeout: 15),
                       "Search did not show the no-results state for zzz")
-        app.buttons.matching(identifier: "home.search.clear").firstMatch.tap()
+        homeSearchClear(app).tap()
 
-        app.buttons.matching(identifier: "home.search.cancel").firstMatch.tap()
+        searchCancel(app).tap()
         XCTAssertTrue(app.buttons.matching(identifier: "home.create").firstMatch.waitForExistence(timeout: 15),
                       "Cancel did not restore the header controls")
         XCTAssertTrue(field.exists, "the search field stays at the top")
     }
 
     /// atum-desktop#48 on the phone: the search reads just "Search" /
-    /// "Tìm kiếm" (spoken "Search everything" / "Tìm mọi thứ", desktop's
-    /// aria-label), and New chat is the plus to the right of the field, on the
-    /// same row, with its old name. en/vi, light and dark, at L.
+    /// "Tìm kiếm", and New chat is the plus with its old name. Since P6 the
+    /// search is the system field in the bar's drawer, under the plus's bar
+    /// row; the system field speaks its prompt, so desktop's separate
+    /// aria-label ("Search everything") is no longer asserted. en/vi, light
+    /// and dark, at L.
     @MainActor
     func testHeaderShortSearchAndPlusAppearances() {
         addTeardownBlock { XCUIDevice.shared.appearance = .light }
-        let words: [String: (placeholder: String, label: String, create: String)] = [
-            "en": ("Search", "Search everything", "Start a chat"),
-            "vi": ("Tìm kiếm", "Tìm mọi thứ", "Bắt đầu trò chuyện"),
+        let words: [String: (placeholder: String, create: String)] = [
+            "en": ("Search", "Start a chat"),
+            "vi": ("Tìm kiếm", "Bắt đầu trò chuyện"),
         ]
         for language in ["en", "vi"] {
             for appearance in [XCUIDevice.Appearance.light, .dark] {
@@ -211,16 +218,15 @@ final class HomeShellUITests: TranscriptUITestCase {
                     + ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "vi" ? "vi_VN" : "en_US",
                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
                 app.launch()
-                let search = app.textFields.matching(identifier: "home.search").firstMatch
+                let search = homeSearch(app)
                 let plus = app.buttons.matching(identifier: "home.create").firstMatch
                 XCTAssertTrue(search.waitForExistence(timeout: 15), boundedHierarchy(app))
                 XCTAssertTrue(plus.waitForExistence(timeout: 3), boundedHierarchy(app))
                 let expected = words[language]!
                 XCTAssertEqual(search.placeholderValue, expected.placeholder)
-                XCTAssertEqual(search.label, expected.label)
                 XCTAssertEqual(plus.label, expected.create)
-                XCTAssertLessThan(search.frame.maxX, plus.frame.minX + Self.framePoints, "plus right of search")
-                XCTAssertEqual(plus.frame.midY, search.frame.midY, accuracy: Self.framePoints, "one row")
+                XCTAssertLessThan(plus.frame.maxY, search.frame.minY + Self.framePoints, "plus on the bar row")
+                XCTAssertGreaterThan(plus.frame.midX, search.frame.midX, "plus trailing")
                 keepScreenshot("roster-plus-\(language)-\(appearance == .dark ? "dark" : "light")", of: app)
                 app.terminate()
                 XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
@@ -605,7 +611,7 @@ final class HomeShellUITests: TranscriptUITestCase {
             + extraArguments
             + probeArguments
         app.launch()
-        let search = element(app, "home.search")
+        let search = homeSearch(app)
         XCTAssertTrue(search.waitForExistence(timeout: 15), boundedHierarchy(app))
         // A loaded simulator can drop the first tap or be slow to hand the
         // field the keyboard: tap again until it has focus.
@@ -629,7 +635,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchFindsAPersonByHandleAndOpensTheirChat() {
         let app = launchPeopleSearch()
-        let search = element(app, "home.search")
+        let search = homeSearch(app)
 
         // One character asks nothing (desktop: two or more).
         search.typeText("@")
@@ -655,7 +661,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchDoesNotListAKnownChatAgainUnderPeople() {
         let app = launchPeopleSearch()
-        element(app, "home.search").typeText("lan")
+        homeSearch(app).typeText("lan")
         XCTAssertTrue(waitFor(15) { self.peopleSearches().contains("peopleSearch lan") },
                       "the directory was not asked")
         // The answer has landed (Lan, already a chat); only the roster's own row shows.
@@ -700,7 +706,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchRosterMatchAccessibilityAuditControl() throws {
         let app = launchPeopleSearch(language: "en", size: "UICTContentSizeCategoryAccessibilityXXXL")
-        element(app, "home.search").typeText("lan\n")
+        homeSearch(app).typeText("lan\n")
         XCTAssertTrue(waitFor(15) { self.peopleSearches().contains("peopleSearch lan") })
         XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
         XCTAssertFalse(element(app, "home.section.people").exists)
@@ -710,9 +716,9 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     private func showPeople(language: String, size: String) -> XCUIApplication {
         let app = launchPeopleSearch(language: language, size: size)
-        // Return ends editing and keeps the query (`HomeSearchField`), so
+        // Return ends editing and keeps the query (the system search, `onSubmit(of: .search)`), so
         // the audit judges the app, not the system keyboard.
-        element(app, "home.search").typeText("@somehandle\n")
+        homeSearch(app).typeText("@somehandle\n")
         let person = element(app, "home.people.@somehandle:atum.test")
         XCTAssertTrue(person.waitForExistence(timeout: 15), boundedHierarchy(app))
         XCTAssertTrue(person.isHittable, "the person row is not reachable at \(size)")
@@ -731,7 +737,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchListsChannelsMessagesAndFilesInDesktopOrder() {
         let app = launchPeopleSearch(language: "en")
-        let search = element(app, "home.search")
+        let search = homeSearch(app)
         search.typeText("l")
         Thread.sleep(forTimeInterval: 0.8)
         XCTAssertEqual(companySearches(), [], "a single character searched the companies")
@@ -768,7 +774,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchResultThatCannotOpenStaysOnHome() {
         let app = launchPeopleSearch(language: "en")
-        element(app, "home.search").typeText("launch\n")
+        homeSearch(app).typeText("launch\n")
         let draft = element(app, "home.messages.$launch-draft")
         XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
         draft.tap()
@@ -789,7 +795,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     func testHomeSearchHidesResultsOfARoomLeftWhileShown() {
         let app = launchPeopleSearch(language: "en",
                                      extraArguments: ["-AtumScriptedLeaveAfterSearch", "!launch-vn:atum.test"])
-        element(app, "home.search").typeText("launch\n")
+        homeSearch(app).typeText("launch\n")
         let draft = element(app, "home.messages.$launch-draft")
         XCTAssertTrue(draft.waitForExistence(timeout: 15), boundedHierarchy(app))
         XCTAssertTrue(waitFor(15) { self.probeLines("home-actions.txt").map(\.text).contains("left !launch-vn:atum.test") })
@@ -804,7 +810,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchChannelOpensItsRoom() {
         let app = launchPeopleSearch(language: "en")
-        element(app, "home.search").typeText("launch viet\n")
+        homeSearch(app).typeText("launch viet\n")
         let channel = element(app, "home.channels.!launch-vn:atum.test")
         XCTAssertTrue(channel.waitForExistence(timeout: 15), boundedHierarchy(app))
         XCTAssertFalse(element(app, "home.channels.!launch:atum.test").exists)
@@ -848,7 +854,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchChannelsMessagesFilesAccessibilityAudit() throws {
         let app = launchPeopleSearch(language: "en", size: "UICTContentSizeCategoryAccessibilityXXXL")
-        element(app, "home.search").typeText("kickoff\n")
+        homeSearch(app).typeText("kickoff\n")
         XCTAssertTrue(element(app, "home.section.channels").waitForExistence(timeout: 15), boundedHierarchy(app))
         XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
         XCTAssertFalse(element(app, "home.section.people").exists)
@@ -865,7 +871,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     private func showGlobalSections(language: String, size: String) -> XCUIApplication {
         let app = launchPeopleSearch(language: language, size: size)
         // Return ends editing and keeps the query, so the keyboard is gone.
-        element(app, "home.search").typeText("launch\n")
+        homeSearch(app).typeText("launch\n")
         XCTAssertTrue(element(app, "home.section.channels").waitForExistence(timeout: 15), boundedHierarchy(app))
         XCTAssertTrue(waitFor(15) { !self.element(app, "home.people.searching").exists })
         // At AX sizes the List draws only what fits; Messages may be below.
@@ -888,7 +894,7 @@ final class HomeShellUITests: TranscriptUITestCase {
     @MainActor
     func testHomeSearchFindsAChatByItsPartnersHandle() {
         let app = launchPeopleSearch()
-        element(app, "home.search").typeText("lannguyen")
+        homeSearch(app).typeText("lannguyen")
         let lan = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Lan'")).firstMatch
         XCTAssertTrue(lan.waitForExistence(timeout: 5), boundedHierarchy(app))
         XCTAssertTrue(lan.label.contains("@lannguyen"), lan.label)
@@ -924,7 +930,7 @@ final class HomeShellUITests: TranscriptUITestCase {
                 let tag = "\(language)-\(appearance == .dark ? "dark" : "light")"
                 XCUIDevice.shared.appearance = appearance
                 let search = launchPeopleSearch(language: language)
-                element(search, "home.search").typeText("lan\n")
+                homeSearch(search).typeText("lan\n")
                 XCTAssertTrue(search.buttons.matching(NSPredicate(format: "label CONTAINS '@lannguyen'")).firstMatch
                     .waitForExistence(timeout: 5), boundedHierarchy(search))
                 keepScreenshot("handles-home-search-\(tag)", of: search)

@@ -81,6 +81,18 @@ struct ChatPanelHost: View {
                     }
                 }
         }
+        // Pushed pages show only the system Back (P6: X on the sheet's root
+        // only), so Escape on an iPad keyboard still closes the panel from
+        // them (the desktop's Esc rule). The root's X carries it there.
+        .background {
+            if !path.isEmpty {
+                Button(action: close) { EmptyView() }
+                    .keyboardShortcut(.cancelAction)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
         .atumDesign(visual: atum)
         .presentationDetents([.medium, .large], selection: $height)
         .presentationDragIndicator(.visible)
@@ -111,8 +123,10 @@ struct ChatPanelHost: View {
     }
 }
 
-/// The panel's close control: the bar's X, and Escape on an iPad keyboard (the
-/// desktop's Esc rule).
+/// The panel's close control: the bar's X on the panel's root page only, and
+/// Escape on an iPad keyboard (the desktop's Esc rule). Pages pushed inside
+/// the panel show the system Back instead (P6 Back-vs-X rule); the host keeps
+/// Escape for them.
 struct ChatPanelCloseButton: View {
     let design: LiveDesign
     let close: () -> Void
@@ -223,11 +237,7 @@ struct ChatMembersPage: View {
         .background(atum.color(.ground, scheme: scheme).opacity(0.001))
         .navigationTitle(design.text("src.matrix.chat-copy.copies.members"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                ChatPanelCloseButton(design: design, close: close)
-            }
-        }
+        // A page pushed inside the panel: the system Back only (P6 rule).
         .confirmationDialog(confirmationTitle, isPresented: Binding(
             get: { confirming != nil }, set: { if !$0 { confirming = nil } }
         ), titleVisibility: .visible, presenting: confirming) { confirmation in

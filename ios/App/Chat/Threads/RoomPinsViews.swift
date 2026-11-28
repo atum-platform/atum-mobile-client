@@ -82,11 +82,7 @@ struct RoomPinnedMessagesPage: View {
         }
         .navigationTitle(copy.pinnedMessages)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                ChatPanelCloseButton(design: design, close: close)
-            }
-        }
+        // A page pushed inside the panel: the system Back only (P6 rule).
         // Each newer snapshot (sync, another client, a local write) re-reads
         // the rows; an older read never replaces a newer list.
         .task(id: live.pins) { await live.loadPinRows() }
