@@ -1,4 +1,5 @@
 import AtumNativeAPI
+import CryptoKit
 import Foundation
 import MatrixRustSDK
 import Network
@@ -167,8 +168,9 @@ final class MatrixSecurityTests: XCTestCase {
 
         // Probe the selected artifact's separate builder-only bootstrap on
         // a fixture that accepts first signing upload without interactive auth.
-        let owner = try await fixtureClient(endpoint, device: "OWNER", autoCrossSigning: true)
+        let owner = try await fixtureClient(endpoint, device: "OWNER", autoCrossSigning: true, oauth: true)
         await owner.encryption().waitForE2eeInitializationTasks()
+        XCTAssertEqual(server.signingUploads, [200])
         let sdk = owner.encryption()
         let native = try await owner.getSessionVerificationController()
         let identity = try await sdk.userIdentity(userId: "@me:example.org", fallbackToServer: false)
@@ -204,18 +206,155 @@ final class MatrixSecurityTests: XCTestCase {
         try await replacement.pause()
     }
 
-    private func fixtureClient(_ endpoint: String, device: String, autoCrossSigning: Bool) async throws -> Client {
-        let client = try await ClientBuilder()
+    func testPinnedBinaryAutoBootstrapPreservesExistingIdentityAndRecovery() async throws {
+        let server = try SecurityFixtureHomeserver()
+        defer { server.stop() }
+        let endpoint = try await server.start()
+        let owner = try await fixtureClient(endpoint, device: "OWNER", autoCrossSigning: true, oauth: true)
+        let sdk = owner.encryption()
+        await sdk.waitForE2eeInitializationTasks()
+        _ = try await sdk.enableRecovery(
+            waitForBackupsToUpload: false, passphrase: nil, progressListener: MatrixRecoverySetupProgress()
+        )
+        let original = try server.recoveryFingerprint()
+        let second = try await fixtureClient(endpoint, device: "SECOND", autoCrossSigning: true, oauth: true)
+        let otherSDK = second.encryption()
+        await otherSDK.waitForE2eeInitializationTasks()
+        let existing = try await otherSDK.userIdentity(userId: "@me:example.org", fallbackToServer: false)
+        XCTAssertNotNil(existing)
+        XCTAssertNotEqual(otherSDK.verificationState(), .verified)
+        do {
+            _ = try await otherSDK.enableRecovery(
+                waitForBackupsToUpload: false, passphrase: nil, progressListener: MatrixRecoverySetupProgress()
+            )
+            XCTFail("This device must not be able to replace the existing backup")
+        } catch RecoveryError.BackupExistsOnServer {
+            // The stock SDK checks for the current server backup before creating one.
+        }
+        XCTAssertEqual(server.signingUploads, [200])
+        XCTAssertEqual(try server.recoveryFingerprint(), original)
+        try await second.pause()
+        try await owner.pause()
+    }
+
+    func testPinnedBinaryAutoBootstrapDoesNotSurfaceOAuthChallenge() async throws {
+        let server = try SecurityFixtureHomeserver(requireSigningApproval: true)
+        defer { server.stop() }
+        let endpoint = try await server.start()
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let deviceKey: String
+        do {
+            let client = try await fixtureClient(
+                endpoint, device: "PHONE", autoCrossSigning: true, oauth: true, storeDirectory: directory
+            )
+            let sdk = client.encryption()
+            await sdk.waitForE2eeInitializationTasks()
+            let localIdentity = try await sdk.userIdentity(userId: "@me:example.org", fallbackToServer: true)
+            XCTAssertNotNil(localIdentity, "A generated local identity does not prove upload succeeded")
+            XCTAssertNotEqual(sdk.verificationState(), .verified)
+            let ed25519 = await sdk.ed25519Key()
+            deviceKey = try XCTUnwrap(ed25519)
+            try await client.pause()
+        }
+        XCTAssertEqual(server.signingUploads, [401])
+
+        // Restore the exact same device store. The rejected identity is still
+        // cached, so a second enable-on-restore does not send an upload.
+        let retry = try await fixtureClient(
+            endpoint, device: "PHONE", autoCrossSigning: true, oauth: true, storeDirectory: directory
+        )
+        let retrySDK = retry.encryption()
+        await retrySDK.waitForE2eeInitializationTasks()
+        let resumedDeviceKey = await retrySDK.ed25519Key()
+        XCTAssertEqual(resumedDeviceKey, deviceKey)
+        XCTAssertEqual(server.signingUploads, [401])
+        XCTAssertFalse(server.hasServerIdentity)
+        XCTAssertNotEqual(retrySDK.verificationState(), .verified)
+        XCTAssertEqual(server.recoveryWrites, [])
+        try await retry.pause()
+    }
+
+    func testPinnedBinaryEnableRecoveryDoesNotBootstrapCrossSigning() async throws {
+        let server = try SecurityFixtureHomeserver()
+        defer { server.stop() }
+        let endpoint = try await server.start()
+        let phone = try await fixtureClient(endpoint, device: "PHONE", autoCrossSigning: false, oauth: true)
+        let sdk = phone.encryption()
+        await sdk.waitForE2eeInitializationTasks()
+        _ = try await sdk.enableRecovery(
+            waitForBackupsToUpload: false, passphrase: nil, progressListener: MatrixRecoverySetupProgress()
+        )
+        XCTAssertEqual(server.signingUploads, [])
+        XCTAssertFalse(server.hasServerIdentity)
+        XCTAssertTrue(server.recoveryWrites.contains("create backup"))
+        XCTAssertNotEqual(sdk.verificationState(), .verified)
+        try await phone.pause()
+    }
+
+    func testPinnedBinaryCanSupersedeBackupCreatedAfterAbsenceCheck() async throws {
+        let server = try SecurityFixtureHomeserver(insertCompetingBackupBeforeCreate: true)
+        defer { server.stop() }
+        let endpoint = try await server.start()
+        let phone = try await fixtureClient(endpoint, device: "PHONE", autoCrossSigning: true, oauth: true)
+        let sdk = phone.encryption()
+        await sdk.waitForE2eeInitializationTasks()
+        let backupExists = try await sdk.backupExistsOnServer()
+        XCTAssertFalse(backupExists)
+        _ = try await sdk.enableRecovery(
+            waitForBackupsToUpload: false, passphrase: nil, progressListener: MatrixRecoverySetupProgress()
+        )
+        XCTAssertEqual(server.activeBackupVersion, "2")
+        XCTAssertEqual(server.recoveryWrites.filter { $0.contains("backup") },
+                       ["create competing backup", "create backup"])
+        try await phone.pause()
+    }
+
+    func testPinnedBinaryResetDeletesRecoveryBeforeOAuthApproval() async throws {
+        let server = try SecurityFixtureHomeserver()
+        defer { server.stop() }
+        let endpoint = try await server.start()
+        let owner = try await fixtureClient(endpoint, device: "OWNER", autoCrossSigning: true, oauth: true)
+        let sdk = owner.encryption()
+        await sdk.waitForE2eeInitializationTasks()
+        _ = try await sdk.enableRecovery(
+            waitForBackupsToUpload: false, passphrase: nil, progressListener: MatrixRecoverySetupProgress()
+        )
+        XCTAssertTrue(server.hasServerBackup)
+        let handle = try await sdk.resetIdentity()
+        let reset = try XCTUnwrap(handle)
+        guard case .oAuth = reset.authType() else { return XCTFail("Expected OAuth reset approval") }
+        XCTAssertEqual(server.signingUploads, [200, 401])
+        XCTAssertFalse(server.hasServerBackup)
+        XCTAssertEqual(Array(server.recoveryWrites.suffix(2)), ["delete backup", "clear default key"])
+        await reset.cancel()
+        try await owner.pause()
+    }
+
+    private func fixtureClient(
+        _ endpoint: String, device: String, autoCrossSigning: Bool, oauth: Bool = false,
+        storeDirectory: URL? = nil
+    ) async throws -> Client {
+        var builder = ClientBuilder()
             .homeserverUrl(url: endpoint)
             .disableWellKnownLookup(disableWellKnownLookup: true)
+            .disableAutomaticTokenRefresh()
             .autoEnableCrossSigning(autoEnableCrossSigning: autoCrossSigning)
             .autoEnableBackups(autoEnableBackups: false)
             .requestConfig(config: RequestConfig(retryLimit: 0, timeout: 3_000,
                                                   maxConcurrentRequests: 4, maxRetryTime: 3_000))
-            .build()
+        if let storeDirectory {
+            builder = builder.sqliteStore(config: SqliteStoreBuilder(
+                dataPath: storeDirectory.path, cachePath: storeDirectory.path
+            ).passphrase(passphrase: "fixture"))
+        }
+        let client = try await builder.build()
         try await client.restoreSession(session: Session(
             accessToken: "fixture-" + device, refreshToken: nil, userId: "@me:example.org",
-            deviceId: device, homeserverUrl: endpoint, oauthData: nil, slidingSyncVersion: .native
+            deviceId: device, homeserverUrl: endpoint,
+            oauthData: oauth ? #"{"client_id":"fixture-mobile"}"# : nil, slidingSyncVersion: .native
         ))
         return client
     }
@@ -309,20 +448,38 @@ private final class NativeSAS: SessionVerificationControllerProtocol, @unchecked
 private final class SecurityFixtureHomeserver: @unchecked Sendable {
     private enum Failure: Error { case unreachable }
     private let listener: NWListener
+    private let requireSigningApproval: Bool
+    private let insertCompetingBackupBeforeCreate: Bool
     private let queue = DispatchQueue(label: "MatrixSecurityTests.fixture")
     private var accountData: [String: [String: Any]] = [:]
     private var deviceKeys: [String: [String: Any]] = [:]
     private var identity: [String: [String: Any]] = [:]
     private var backup: [String: Any]?
     private var roomEvents: [String?] = []
+    private var signingStatuses: [Int] = []
+    private var writes: [String] = []
 
-    init() throws {
+    init(requireSigningApproval: Bool = false, insertCompetingBackupBeforeCreate: Bool = false) throws {
+        self.requireSigningApproval = requireSigningApproval
+        self.insertCompetingBackupBeforeCreate = insertCompetingBackupBeforeCreate
         let config = NWParameters.tcp
         config.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
         listener = try NWListener(using: config)
     }
 
     var roomEncryptionEvents: [String?] { queue.sync { roomEvents } }
+    var signingUploads: [Int] { queue.sync { signingStatuses } }
+    var recoveryWrites: [String] { queue.sync { writes } }
+    var hasServerBackup: Bool { queue.sync { backup != nil } }
+    var activeBackupVersion: String? { queue.sync { backup?["version"] as? String } }
+    var hasServerIdentity: Bool { queue.sync { !identity.isEmpty } }
+
+    func recoveryFingerprint() throws -> SHA256.Digest {
+        try queue.sync {
+            let state: [String: Any] = ["identity": identity, "backup": backup ?? [:], "accountData": accountData]
+            return SHA256.hash(data: try JSONSerialization.data(withJSONObject: state, options: .sortedKeys))
+        }
+    }
 
     func start() async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
@@ -406,6 +563,20 @@ private final class SecurityFixtureHomeserver: @unchecked Sendable {
             return (ok, ["one_time_key_counts": ["signed_curve25519": 50]])
         }
         if path.hasSuffix("/keys/device_signing/upload") {
+            if requireSigningApproval || !identity.isEmpty {
+                signingStatuses.append(401)
+                return ("401 Unauthorized", [
+                    "session": "fixture-approval",
+                    "flows": [["stages": ["m.oauth"]], ["stages": ["org.matrix.cross_signing_reset"]]],
+                    "params": [
+                        "m.oauth": ["url": "https://example.invalid/account?action=org.matrix.cross_signing_reset"],
+                        "org.matrix.cross_signing_reset": [
+                            "url": "https://example.invalid/account?action=org.matrix.cross_signing_reset"
+                        ]
+                    ]
+                ])
+            }
+            signingStatuses.append(200)
             for kind in ["master_key", "self_signing_key", "user_signing_key"] {
                 identity[kind + "s"] = payload[kind] as? [String: Any]
             }
@@ -415,13 +586,34 @@ private final class SecurityFixtureHomeserver: @unchecked Sendable {
         if let eventType = path.components(separatedBy: "/account_data/").last,
            path.contains("/account_data/") {
             let key = eventType.removingPercentEncoding ?? eventType
-            if method == "PUT" { accountData[key] = payload; return (ok, [:]) }
+            if method == "PUT" {
+                if key == "m.secret_storage.default_key", payload["key"] == nil {
+                    writes.append("clear default key")
+                } else {
+                    writes.append("write account data")
+                }
+                accountData[key] = payload
+                return (ok, [:])
+            }
             return accountData[key].map { (ok, $0) } ?? notFound
         }
         if path.hasSuffix("/room_keys/version") || path.hasSuffix("/room_keys/version/1") {
             if method == "POST" {
-                backup = payload.merging(["version": "1", "count": 0, "etag": "fixture"]) { _, new in new }
-                return (ok, ["version": "1"])
+                // Model an independent device's create between the native
+                // GET for the current version and this unconditional POST.
+                if insertCompetingBackupBeforeCreate, backup == nil {
+                    writes.append("create competing backup")
+                    backup = ["version": "1"]
+                }
+                let version = backup == nil ? "1" : "2"
+                writes.append("create backup")
+                backup = payload.merging(["version": version, "count": 0, "etag": "fixture"]) { _, new in new }
+                return (ok, ["version": version])
+            }
+            if method == "DELETE" {
+                writes.append("delete backup")
+                backup = nil
+                return (ok, [:])
             }
             return backup.map { (ok, $0) } ?? notFound
         }
