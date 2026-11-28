@@ -64,4 +64,14 @@ retirement, the saved plan label and a fresh revision following an
 ambiguous write failure.
 
 Design lint passed with its existing baseline and all 10 lint unit tests
-passed. `git diff --check` passed. No local UI tests ran.
+passed. `git diff --check` passed. The standalone public guard passed at
+`de6ea67` against `origin/main`. No local UI tests ran.
+
+The round 2 Swift tests and arm64 Debug app build were submitted as one
+script under the shared build lock. After the lock became available, Swift
+compilation stopped making progress on the `AtumTestFlight` build volume.
+Process samples found both compiler jobs blocked in the kernel rename call.
+A separate temporary-file rename stalled on that volume and completed on
+the host temporary filesystem. The Swift tests have no result and the Debug
+build is waiting for the Swift step in the same batch. Retained logs and the
+batch script are under `/Volumes/AtumTestFlight/w4-y1-r2`.
