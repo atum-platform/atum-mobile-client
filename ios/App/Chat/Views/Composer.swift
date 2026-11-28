@@ -625,6 +625,21 @@ private struct ComposerModelChoiceButton: View {
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
+        let face: PhoneModelPickerProjection.ChipFace?
+        let label: String
+        switch presentation {
+        case let .pending(modelName):
+            face = nil
+            let status = savingChoice ? design.text("desktop.common.saving")
+                : design.text("desktop.atum.managedModel.turnStatus.reconciliation_pending")
+            label = "\(status) · \(modelName)"
+        case let .confirmed(value):
+            face = value
+            label = value.name
+        case nil:
+            face = nil
+            label = design.text("desktop.atum.settings.model")
+        }
         let warning = face?.planUnavailable.map { PhoneModelPickerCopy(design: design).planWarning($0) }
         // The desktop's chip (model-picker-spec.json `trigger`, #119): a plain
         // capsule, the answering model's mark before its name, weight 500,
@@ -634,7 +649,8 @@ private struct ComposerModelChoiceButton: View {
                 if warning != nil {
                     ProviderMark(design: design, art: .template(asset: atum.symbol(.alertCircle),
                                                                 color: atum.color(.danger, scheme: scheme)))
-                } else if let markArt {
+                } else if let face {
+                    let markArt = ProviderMark.art(source: face.source, connectionLabel: face.connectionLabel)
                     ProviderMark(design: design, art: markArt, size: 16)
                 }
                 Text(verbatim: label)
@@ -658,10 +674,13 @@ private struct ComposerModelChoiceButton: View {
                     onSnapshot: { adopt(offer: $0) },
                     onDestination: { adopt(destination: $0) },
                     accountState: accountState,
-                    onPick: { row in
-                        picked = row.map {
-                            .init(row: $0, destinationRevision: latestDestination?.revision,
-                                  offerRevision: latestOffer?.revision)
+                    onPick: { pick in
+                        if pick == nil {
+                            picked = nil
+                        } else if let current = PhoneModelPickerProjection.reconciled(
+                            pick, destination: latestDestination, offer: latestOffer
+                        ) {
+                            picked = current
                         }
                     }
                 )
@@ -699,38 +718,32 @@ private struct ComposerModelChoiceButton: View {
 
     private func adopt(offer: ManagedModelSnapshot) {
         snapshot = offer
-        picked = PhoneModelPickerProjection.reconciled(picked, destination: destination, offer: offer)
+        picked = PhoneModelPickerProjection.reconciled(picked, destination: latestDestination, offer: latestOffer)
     }
 
     /// The destination is the authority for the cloud's saved choice: a newer
     /// one that saves something else ends the pick's hold on the chip.
     private func adopt(destination value: ManagedModelDestinationSnapshot) {
         destination = value
-        picked = PhoneModelPickerProjection.reconciled(picked, destination: value, offer: snapshot)
+        picked = PhoneModelPickerProjection.reconciled(picked, destination: latestDestination, offer: latestOffer)
     }
 
     private static var cloud: ManagedModelDestinationID { try! ManagedModelDestinationID("cloud") }
     private var latestOffer: ManagedModelSnapshot? { actions?.store?.snapshot ?? snapshot }
     private var latestDestination: ManagedModelDestinationSnapshot? { destinations?.store?.snapshot ?? destination }
 
-    /// The chip's name and mark facts (`PhoneModelPickerProjection.chip`):
-    /// a pick still current, else the saved choice's, never a raw id.
-    private var face: PhoneModelPickerProjection.ChipFace? {
-        let submitted = destinations?.store?.submittedChoice ?? actions?.store?.submittedChoice
-        if let pending = PhoneModelPickerProjection.submittedChip(submitted, destination: latestDestination,
-                                                                  account: accountState.value) {
-            return pending
+    private var savingChoice: Bool {
+        if let store = destinations?.store, store.unsettledChoice != nil {
+            return store.submittedChoice != nil
         }
-        return PhoneModelPickerProjection.chip(pick: picked, destination: latestDestination,
-                                               offer: latestOffer, account: accountState.value)
+        return actions?.store?.submittedChoice != nil
     }
 
-    private var label: String { face?.name ?? design.text("desktop.atum.settings.model") }
-
-    /// The same mark the picker row draws, its connection label included.
-    /// Nil (no mark) only while nothing names the choice yet.
-    private var markArt: ProviderMark.Art? {
-        face.map { ProviderMark.art(source: $0.source, connectionLabel: $0.connectionLabel) }
+    private var presentation: PhoneModelPickerProjection.ChipPresentation? {
+        PhoneModelPickerProjection.chipPresentation(
+            unsettled: destinations?.store?.unsettledChoice ?? actions?.store?.unsettledChoice,
+            pick: picked, destination: latestDestination, offer: latestOffer, account: accountState.value
+        )
     }
 }
 

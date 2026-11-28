@@ -1,6 +1,7 @@
 import AtumChat
 import AtumDesign
 import Darwin
+import Observation
 import os
 import SwiftUI
 import UIKit
@@ -90,6 +91,62 @@ final class AgentDeskBellTests: XCTestCase {
         }
         let line = try XCTUnwrap(accessibilityElement(in: host.view, labeled: "Working on it"))
         XCTAssertTrue((line.accessibilityValue ?? "").isEmpty)
+    }
+
+    @MainActor
+    func testSameRoomReplacesTheDeskWhenTheLiveScopeChanges() async throws {
+        let first = Host()
+        let next = Host()
+        let nextSession = Host()
+        first.files = ["": [.listed(Self.listing("home", ["first-file"]))]]
+        next.files = ["": [.listed(Self.listing("home", ["next-file"]))]]
+        nextSession.files = ["": [.listed(Self.listing("home", []))]]
+        let firstPrincipal = try NativeID("01234567-89ab-4def-8123-456789abcdef")
+        let nextPrincipal = try NativeID("01234567-89ab-4def-8123-456789abcdee")
+        func scoped(_ host: Host, _ principal: NativeID, _ generation: UInt64) -> AgentDeskActions {
+            var actions = host.actions()
+            actions.scope = .init(principal: principal, accountGeneration: generation)
+            return actions
+        }
+
+        let scope = DeskScopeFixture(actions: scoped(first, firstPrincipal, 1))
+        let design = try LiveDesign()
+        let info = ChatInfoPresentation(roomID: "!same:atum.test", title: "Desk", kind: .assistant)
+        let host = UIHostingController(rootView: DeskScopePanel(design: design, info: info, scope: scope))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKeyWindow = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            previousKeyWindow?.makeKey()
+        }
+        await until({ first.fileReads == [nil] && first.scheduleReads == 1 }, "first desk did not load")
+        scope.actions = scoped(next, nextPrincipal, 1)
+        await until({ next.fileReads == [nil] && next.scheduleReads == 1 }, "another principal must load its own desk")
+        scope.actions = scoped(nextSession, nextPrincipal, 2)
+        await until({ nextSession.fileReads == [nil] && nextSession.scheduleReads == 1 }, "a new session must reload the desk")
+        XCTAssertEqual(first.fileReads, [nil])
+        XCTAssertEqual(next.fileReads, [nil])
+    }
+
+    @MainActor @Observable
+    private final class DeskScopeFixture {
+        var actions: AgentDeskActions
+
+        init(actions: AgentDeskActions) { self.actions = actions }
+    }
+
+    private struct DeskScopePanel: View {
+        let design: LiveDesign
+        let info: ChatInfoPresentation
+        let scope: DeskScopeFixture
+
+        var body: some View {
+            ChatPanelHost(design: design, info: info, actions: ChatInfoActions(agentDesk: scope.actions),
+                          loadMatrixThumbnail: nil, close: {})
+        }
     }
 
     /// Enable the rendered UIKit accessibility tree inside this unit test process.
@@ -224,6 +281,42 @@ final class AgentDeskBellTests: XCTestCase {
         XCTAssertEqual(model.filesState, .retrying)
         await until({ model.filesState == .ready && model.ownPath == "home/reports" }, "the folder was never retried")
         XCTAssertEqual(host.fileReads, [nil, "home/reports", "home/reports"])
+    }
+
+    @MainActor
+    func testDeferredRetryCannotReplaceTheFolderNavigatedToAfterItStarted() async {
+        let reports = "home/reports"
+        let archive = "home/archive"
+        var reportsReads = 0
+        var retryReply: CheckedContinuation<HostAgentDesk.FilesOutcome, Never>?
+        var retryReturned = false
+        let actions = AgentDeskActions(agentUserID: nil, steers: true, files: { path in
+            switch path {
+            case reports:
+                reportsReads += 1
+                if reportsReads == 1 { return .failed }
+                let reply = await withCheckedContinuation { retryReply = $0 }
+                retryReturned = true
+                return reply
+            case archive: return .listed(Self.listing(archive, ["archived-file"]))
+            default: return .listed(Self.listing("home", ["reports", "archive"]))
+            }
+        })
+        let model = AgentDeskModel(actions: actions)
+        model.appear()
+        defer { model.disappear() }
+        await until({ model.filesState == .ready }, "home never loaded")
+        model.open(reports)
+        await until({ model.filesState == .failed }, "the requested folder did not fail")
+        model.retryFiles()
+        await until({ retryReply != nil }, "retry never sent")
+        model.open(archive)
+        await until({ model.ownPath == archive }, "navigation did not settle")
+        retryReply?.resume(returning: .listed(Self.listing(reports, ["late-file"])))
+        await until({ retryReturned }, "retry never returned")
+        XCTAssertEqual(model.ownPath, archive)
+        XCTAssertEqual(model.ownView?.rows.map(\.name), ["archived-file"])
+        XCTAssertEqual(model.filesState, .ready)
     }
 
     @MainActor

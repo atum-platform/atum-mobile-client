@@ -69,6 +69,7 @@ struct ChatPanelHost: View {
                             AgentDeskPage(design: design, info: info, actions: desk, chat: deskChat,
                                           setMuted: actions.setMuted,
                                           allSettings: { path.removeAll() }, close: close)
+                                .id(desk.scope)
                         }
                     }
                 }

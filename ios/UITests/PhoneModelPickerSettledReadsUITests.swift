@@ -111,10 +111,43 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
         keepEvidence("destination-failed-catalog-\(tag)", of: app)
     }
 
+    @MainActor
+    func testSendingWithThePickerClosedKeepsTheHeldBillingChoicePending() throws {
+        let probe = TranscriptUITestCase.liveEvidence.appendingPathComponent("probe/\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: probe, withIntermediateDirectories: true)
+        let release = probe.appendingPathComponent("release-model-pick")
+        defer { try? Data().write(to: release) }
+        let app = openPicker(reads: "", extra: ["-AtumUITestProbeDir", probe.path, "-AtumScriptedHoldModelPick"])
+        let pick = reveal(app, "phone.model.row.gpt-6.1")
+        XCTAssertTrue(pick.isEnabled)
+        pick.tap()
+        element(app, "composer.model.close").tap()
+
+        let chip = element(app, AccessibilityID.composerModel)
+        let saving = locale == "en" ? "Saving…" : "Đang lưu…"
+        let pending = NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", saving, "GPT-6.1")
+        let pendingChip = expectation(for: pending, evaluatedWith: chip)
+        wait(for: [pendingChip], timeout: Self.waitSeconds)
+
+        let message = "Message while model is pending"
+        let composer = field(app)
+        composer.tap()
+        composer.typeText(message)
+        element(app, AccessibilityID.composerSend).tap()
+        XCTAssertTrue(labelContains(element(app, AccessibilityID.transcript), message)
+            .waitForExistence(timeout: Self.waitSeconds))
+        XCTAssertTrue(pending.evaluate(with: chip), chip.label)
+
+        try Data().write(to: release)
+        let settled = expectation(for: NSPredicate(format: "label CONTAINS %@ AND NOT label BEGINSWITH %@",
+                                                   "GPT-6.1", saving), evaluatedWith: chip)
+        wait(for: [settled], timeout: Self.waitSeconds)
+    }
+
     // MARK: Helpers
 
     @MainActor
-    private func openPicker(reads: String) -> XCUIApplication {
+    private func openPicker(reads: String, extra: [String] = []) -> XCUIApplication {
         let environment = ProcessInfo.processInfo.environment
         let english = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         let vietnamese = ["-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
@@ -125,7 +158,7 @@ final class PhoneModelPickerSettledReadsUITests: WS3UITestCase {
             + (locale == "en" ? english : vietnamese)
             + ["-UIPreferredContentSizeCategoryName", size]
             + ["-AtumScriptedSubscriptions", "ready", "-AtumScriptedConnections", "work",
-               "-AtumScriptedPickerReads", reads]
+               "-AtumScriptedPickerReads", reads] + extra
         app.launch()
         XCTAssertTrue(element(app, AccessibilityID.transcript).waitForExistence(timeout: 15), "no transcript")
         let chip = element(app, AccessibilityID.composerModel)

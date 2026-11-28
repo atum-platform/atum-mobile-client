@@ -8,3 +8,11 @@ Parity target is [desktop #147](https://github.com/atum-platform/atum-desktop/pu
 - Tests cover independent desk retries and empty results, cached folder continuity, stale desk replies, and a submitted picker choice surviving dismissal through conflict readback and consent revalidation. A transport-failure test checks that the pending chip yields to the server's choice. The store uses SwiftUI Observation on iOS and retains the package's macOS 13 compatibility.
 
 The UI handoff is in `AgentDeskPage.swift:34`, `:177` and `:292`. Once W4-C9 updates the pin, use the exported `nothingScheduled`, `scheduleUnavailable`, `noFiles`, `filesUnavailable` and `tryAgain` keys, update the pin coverage, and apply the Opus row and status treatments. The current page uses the existing pinned Pause, Files and generic retry labels, with temporary English status strings borrowed from desktop.
+
+## Review fixes
+
+- A 1.1 pick carries the destination revision from submission. The picker and composer reconcile its receipt against the latest destination before publishing Current. An overlapping read can replace a write receipt only when the server response has a strictly higher revision.
+- The composer marks a submitted name as Saving or Reconciling with pinned copy and no provider mark. Both pickers suppress Current until settlement. A lost reply and failed readback keep the name pending. A fresh authoritative read or an idempotent replay can settle it. A scripted UI test holds the write while the picker closes and the composer sends a message.
+- The desk's navigation destination now has a view identity keyed by principal and account generation. A hosted SwiftUI test changes both while staying in one room. A separate host-state test holds a failed folder's retry until navigation to another folder completes.
+
+Review fixes passed 257 focused Swift package tests, 13 standalone macOS desk host-state tests and seven copy-pin checks. The iOS AppTests and focused UI suites run under the shared simulator build lock.

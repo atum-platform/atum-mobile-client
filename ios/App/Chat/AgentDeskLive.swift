@@ -14,7 +14,8 @@ extension LiveAppModel {
         let principal = context.agent.principal
         let generation = accountScopeGeneration
         var actions = AgentDeskActions(agentUserID: context.agent.matrixUser?.rawValue,
-                                       steers: context.agent.runsOnHermes)
+                                       steers: context.agent.runsOnHermes,
+                                       scope: .init(principal: principal, accountGeneration: generation))
         guard context.agent.runsOnHermes else { return actions }
         // The client checks this at transport start, including its 401 retry.
         let current: NativeDomainClient.DeskSendCheck = { [weak self] in

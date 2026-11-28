@@ -34,6 +34,7 @@ struct ScriptedChatHost: View {
     @State private var scriptedElsewhereSent = false
     @State private var scriptedModels: ManagedModelSnapshot
     @State private var scriptedModelDestinations: ManagedModelDestinationSnapshot
+    @State private var scriptedDestinationStore = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
     /// Set by a scripted training-off confirmation (`-AtumScriptedTraining required`).
     @State private var scriptedTrainingConfirmed = false
     @State private var scriptedPresentation: AgentPresentationSnapshot
@@ -78,7 +79,7 @@ struct ScriptedChatHost: View {
                     + String(repeating: "Plans and writes. ", count: 1_200)
                 : nil))
         _scriptedModels = State(initialValue: Self.models())
-        _scriptedModelDestinations = State(initialValue: Self.subscriptionDemo == nil
+        _scriptedModelDestinations = State(initialValue: Self.subscriptionDemo == nil || UITestProbe.modelPickRelease != nil
             ? Self.modelDestinations() : Self.subscriptionDestinations())
         _scriptedPresentation = State(initialValue: Self.presentation())
         _scriptedRoutines = State(initialValue: Self.routines())
@@ -271,7 +272,8 @@ struct ScriptedChatHost: View {
                                             )
                                             return .saved(scriptedModelDestinations)
                                         },
-                                        subscriptions: scriptedSubscriptions
+                                        subscriptions: scriptedSubscriptions,
+                                        store: UITestProbe.modelPickRelease == nil ? nil : scriptedDestinationStore
                                     ) : nil,
                                 assistantPresentation: script.context.kind == .assistant
                                     ? AssistantPresentationActions(
@@ -706,14 +708,29 @@ struct ScriptedChatHost: View {
                 openCodeGo: { account.openCodeGo },
                 accountConnections: { account.accountConnections }
             ),
-            save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
-                     effort: ManagedModelEffort, _: NativeID,
+            save: { (snapshot: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
+                     effort: ManagedModelEffort, requestID: NativeID,
                      _: ChatGPTTrainingConsent?)
                 -> AssistantModelDestinationSaveResult in
                 let next = Self.subscriptionDestinations(
                     source: source == .opencodeGo ? "opencode_go" : "chatgpt_plan",
                     model: model, effort: effort.rawValue,
                     revision: Int(scriptedModelDestinations.revision + 1))
+                if let release = UITestProbe.modelPickRelease {
+                    let result = await scriptedDestinationStore.save(
+                        from: snapshot, choice: .subscription(source, model: model, effort: effort),
+                        requestID: requestID, refreshAfterSecondConflict: true, isCurrent: { true },
+                        fetch: { scriptedModelDestinations }
+                    ) { _, _ in
+                        while !FileManager.default.fileExists(atPath: release.path) {
+                            try await Task.sleep(for: .milliseconds(100))
+                        }
+                        scriptedModelDestinations = next
+                        return next
+                    }
+                    if case let .saved(receipt) = result { return .saved(receipt) }
+                    return .refused(nil)
+                }
                 scriptedModelDestinations = next
                 return .saved(next)
             },
@@ -938,6 +955,12 @@ enum UITestProbe {
     static let sendReceiptRelease: URL? = {
         guard ProcessInfo.processInfo.arguments.contains("-AtumScriptedHoldSendReceipt") else { return nil }
         return folder?.appendingPathComponent("release-send-receipt")
+    }()
+
+    /// Holds a model write while XCTest sends a message with the picker closed.
+    static let modelPickRelease: URL? = {
+        guard ProcessInfo.processInfo.arguments.contains("-AtumScriptedHoldModelPick") else { return nil }
+        return folder?.appendingPathComponent("release-model-pick")
     }()
 
     /// `-AtumScriptedLateDetails`: the quotes of each older page arrive

@@ -81,6 +81,45 @@ final class ManagedModelPickerStateTests: XCTestCase {
         XCTAssertEqual(older, after)
     }
 
+    func testNewerReadDuringAWriteWinsOverTheReceipt() async throws {
+        let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
+        let (writing, writeNotice) = AsyncStream<Void>.makeStream()
+        let (reading, readNotice) = AsyncStream<Void>.makeStream()
+        var writeReply: CheckedContinuation<Snapshot, Never>?
+        var readReply: CheckedContinuation<Snapshot, Never>?
+        let write = Task {
+            await state.save(from: before, choice: .offer(model: after.model, effort: .high),
+                             requestID: requestID, refreshAfterSecondConflict: false,
+                             isCurrent: { true }, fetch: { before }) { _, _ in
+                await withCheckedContinuation {
+                    writeReply = $0
+                    writeNotice.yield(())
+                    writeNotice.finish()
+                }
+            }
+        }
+        _ = await writing.first(where: { _ in true })
+        let read = Task {
+            try await state.read(isCurrent: { true }) {
+                await withCheckedContinuation {
+                    readReply = $0
+                    readNotice.yield(())
+                    readNotice.finish()
+                }
+            }
+        }
+        _ = await reading.first(where: { _ in true })
+
+        writeReply?.resume(returning: after)
+        guard case .saved = await write.value else { return XCTFail("Expected the write receipt") }
+        XCTAssertEqual(state.snapshot, after)
+        let newer = Snapshot(revision: after.revision + 1, model: before.model)
+        readReply?.resume(returning: newer)
+        let latest = try await read.value
+        XCTAssertEqual(latest, newer)
+        XCTAssertEqual(state.snapshot, newer)
+    }
+
     func testObsoleteIntentCannotRetryAfterAnotherPickDuringItsRead() async throws {
         let state = ManagedModelPickerState<Snapshot>(revision: \.revision)
         let (started, notice) = AsyncStream<Void>.makeStream()

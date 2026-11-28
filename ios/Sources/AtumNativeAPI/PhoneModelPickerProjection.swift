@@ -406,20 +406,6 @@ public enum PhoneModelPickerProjection {
         return rows.first { $0.source == source && $0.model == model }
     }
 
-    /// The composer keeps naming a submitted pick while the sheet is closed.
-    public static func submittedChip(_ choice: ManagedModelPickerChoice?,
-                                     destination: ManagedModelDestinationSnapshot?,
-                                     account: PhoneSubscriptionAccount?) -> ChipFace? {
-        guard let (source, model) = cloudSelection(choice) else { return nil }
-        if source == .atum, let name = ManagedModelLineup.productName(for: model) {
-            return ChipFace(name: name, source: source)
-        }
-        if let row = listedSubscription(source, model: model, destination: destination, account: account) {
-            return ChipFace(subscription: row)
-        }
-        return ChipFace(name: ModelDisplayName.name(model: model), source: source)
-    }
-
     private static func cloudSelection(_ choice: ManagedModelPickerChoice?)
         -> (ManagedModelDestinationSource, String)? {
         switch choice {
@@ -435,8 +421,7 @@ public enum PhoneModelPickerProjection {
     /// authoritative read says something else is saved.
     public struct ChipPick: Equatable, Sendable {
         public let row: Row
-        /// The 1.3+ destination revision the composer held when the pick
-        /// landed; nil when it held none.
+        /// The 1.3+ revision at submission for a 1.1 pick, or in its own destination receipt.
         public let destinationRevision: Int64?
         /// The 1.1 offer revision the composer held when the pick landed.
         public let offerRevision: Int64?
@@ -446,6 +431,16 @@ public enum PhoneModelPickerProjection {
             self.destinationRevision = destinationRevision
             self.offerRevision = offerRevision
         }
+    }
+
+    /// A 1.1 receipt may arrive after a newer destination write. Compare it
+    /// against the revision observed at submission, before publishing Current.
+    public static func settledOfferPick(_ row: Row, offerRevision: Int64, submittedOver: Int64?,
+                                        destination: ManagedModelDestinationSnapshot?,
+                                        offer: ManagedModelSnapshot?) -> ChipPick? {
+        return reconciled(ChipPick(row: row.selecting(true), destinationRevision: submittedOver,
+                                  offerRevision: offerRevision),
+                          destination: destination, offer: offer)
     }
 
     /// The pick, unless a readback newer than it names another saved choice.
@@ -506,6 +501,24 @@ public enum PhoneModelPickerProjection {
             if let name = ManagedModelLineup.productName(for: model) { return ChipFace(name: name, source: .atum) }
         }
         return nil
+    }
+
+    public enum ChipPresentation: Equatable, Sendable {
+        case pending(modelName: String)
+        case confirmed(ChipFace)
+    }
+
+    /// Pending names carry no confirmed route or provider mark, including
+    /// after a lost reply when readback has not established what will bill.
+    public static func chipPresentation(unsettled: ManagedModelPickerChoice?, pick: ChipPick?,
+                                        destination: ManagedModelDestinationSnapshot?, offer: ManagedModelSnapshot?,
+                                        account: PhoneSubscriptionAccount? = nil) -> ChipPresentation? {
+        if let (source, model) = cloudSelection(unsettled) {
+            let name = source == .atum ? ManagedModelLineup.productName(for: model)
+                : listedSubscription(source, model: model, destination: destination, account: account)?.displayName
+            return .pending(modelName: name ?? ModelDisplayName.name(model: model))
+        }
+        return chip(pick: pick, destination: destination, offer: offer, account: account).map(ChipPresentation.confirmed)
     }
 
     /// The subscription row the conversation picker lists for this model once

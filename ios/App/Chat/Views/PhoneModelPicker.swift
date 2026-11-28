@@ -49,7 +49,7 @@ struct PhoneConversationModelPicker: View {
     var onDestination: (ManagedModelDestinationSnapshot) -> Void = { _ in }
     /// The row a successful write made current. Nil clears the chip's
     /// cached pick so it follows the returned destination.
-    var onPick: (PhoneModelPickerProjection.Row?) -> Void = { _ in }
+    var onPick: (PhoneModelPickerProjection.ChipPick?) -> Void = { _ in }
 
     @State private var snapshot: ManagedModelSnapshot?
     @State private var destinationRead: PhoneModelPickerDestinationRead
@@ -82,6 +82,9 @@ struct PhoneConversationModelPicker: View {
     private var submittedChoice: ManagedModelPickerChoice? {
         destinations?.store?.submittedChoice ?? actions?.store?.submittedChoice
     }
+    private var unsettledChoice: ManagedModelPickerChoice? {
+        destinations?.store?.unsettledChoice ?? actions?.store?.unsettledChoice
+    }
 
     private struct ConversationModelWrite: Hashable, Sendable {
         let model: String
@@ -104,7 +107,7 @@ struct PhoneConversationModelPicker: View {
          onSnapshot: @escaping (ManagedModelSnapshot) -> Void = { _ in },
          onDestination: @escaping (ManagedModelDestinationSnapshot) -> Void = { _ in },
          accountState: PhoneModelPickerAccount? = nil,
-         onPick: @escaping (PhoneModelPickerProjection.Row?) -> Void = { _ in }) {
+         onPick: @escaping (PhoneModelPickerProjection.ChipPick?) -> Void = { _ in }) {
         self.design = design
         self.actions = actions
         self.destinations = destinations
@@ -140,7 +143,8 @@ struct PhoneConversationModelPicker: View {
             destination, destination: cloudDestination, account: account,
             destinationReady: destinationReadState == .ready
         ).map { pickedAtumModel == nil ? $0 : $0.selecting(false) }
-        return atum + subscriptions
+        let rows = atum + subscriptions
+        return unsettledChoice == nil ? rows : rows.map { $0.selecting(false) }
     }
 
     private func thinking(in rows: [PhoneModelPickerProjection.Row]) -> PhoneModelPickerProjection.Thinking? {
@@ -305,15 +309,16 @@ struct PhoneConversationModelPicker: View {
         // The same ID only for an identical retry; a different pick gets its own.
         let operation = writes.begin(ConversationModelWrite(model: model, effort: effort,
                                                             revision: snapshot.revision))
+        let submittedOver = (destinations?.store?.snapshot ?? destination)?.revision
         Task { @MainActor in
             let result = await actions.save(snapshot, model, effort, operation)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, destinations?.isCurrent() != false else { return }
             savingRowID = nil
             savingEffort = nil
             switch result {
             case let .saved(value):
                 apply(value)
-                reportAtumPick(value.choice.model)
+                reportAtumPick(value, submittedOver: submittedOver)
                 writes.settled()
             case let .conflict(latest):
                 if let latest { apply(latest) }
@@ -444,7 +449,7 @@ struct PhoneConversationModelPicker: View {
             guard lifetime.isCurrent(selection) else {
                 if case let .saved(value) = result {
                     onDestination(value)
-                    onPick(PhoneModelPickerProjection.settledDestinationPick(row, destination: value))
+                    reportDestinationPick(row, receipt: value)
                 }
                 return
             }
@@ -453,7 +458,7 @@ struct PhoneConversationModelPicker: View {
             case let .saved(value):
                 pickedAtum = nil
                 applyDestination(value)
-                onPick(PhoneModelPickerProjection.settledDestinationPick(row, destination: value))
+                reportDestinationPick(row, receipt: value)
                 subscriptionWrites.settled()
             case .cancelled: break
             case let .consentRequired(status, latest):
@@ -475,12 +480,21 @@ struct PhoneConversationModelPicker: View {
     }
 
     /// The chip's row for an Atum write: the line-up row the list now checks.
-    private func reportAtumPick(_ model: String) {
-        guard let row = rows.first(where: { $0.source == .atum && $0.model == model }) else { return }
-        let selected = row.selecting(true)
-        pickedAtum = .init(row: selected, destinationRevision: destination?.revision,
-                           offerRevision: snapshot?.revision)
-        onPick(selected)
+    private func reportAtumPick(_ receipt: ManagedModelSnapshot, submittedOver: Int64?) {
+        guard let row = rows.first(where: { $0.source == .atum && $0.model == receipt.choice.model }),
+              let pick = PhoneModelPickerProjection.settledOfferPick(
+                  row, offerRevision: receipt.revision, submittedOver: submittedOver,
+                  destination: destinations?.store?.snapshot ?? destination,
+                  offer: actions?.store?.snapshot ?? snapshot
+              ) else { return }
+        pickedAtum = pick
+        onPick(pick)
+    }
+
+    private func reportDestinationPick(_ row: PhoneModelPickerProjection.Row,
+                                       receipt: ManagedModelDestinationSnapshot) {
+        let selected = PhoneModelPickerProjection.settledDestinationPick(row, destination: receipt)
+        onPick(selected.map { .init(row: $0, destinationRevision: receipt.revision, offerRevision: nil) })
     }
 
     private func apply(_ value: ManagedModelSnapshot) {
@@ -639,10 +653,11 @@ struct PhoneModelDestinationsPicker: View {
                                                    cloudEligibleAliases: cloudEligibleAliases,
                                                    destinationReady: destinationReadState == .ready)
         } ?? []
-        return atum + PhoneModelPickerProjection.subscriptions(
+        let rows = atum + PhoneModelPickerProjection.subscriptions(
             snapshot, destination: destination, account: account,
             destinationReady: destinationReadState == .ready
         )
+        return actions.store?.unsettledChoice == nil ? rows : rows.map { $0.selecting(false) }
     }
 
     private var cloudEligibleAliases: Set<String> {

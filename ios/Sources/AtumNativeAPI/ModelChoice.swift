@@ -56,11 +56,14 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
 
     private let revision: KeyPath<Snapshot, Int64>
     public private(set) var snapshot: Snapshot?
-    /// A submitted choice is shared by the pickers for this agent until it settles.
+    /// The write is in flight. An unconfirmed result still permits an explicit retry.
     public private(set) var submittedChoice: ManagedModelPickerChoice?
+    /// The composer cannot name a confirmed route while a write could have reached the server.
+    public var unsettledChoice: ManagedModelPickerChoice? { submittedChoice ?? unconfirmed?.choice }
     private var adoptedWrites = 0
     private var latestIntent = 0
     private var pending: (choice: ManagedModelPickerChoice, fence: Snapshot, id: NativeID)?
+    private var unconfirmed: (intent: Int, choice: ManagedModelPickerChoice, fenceRevision: Int64)?
 
     public init(revision: KeyPath<Snapshot, Int64>) {
         self.revision = revision
@@ -69,14 +72,24 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
     public func read(isCurrent: () -> Bool, fetch: () async throws -> Snapshot) async throws -> Snapshot {
         guard isCurrent(), !Task.isCancelled else { throw NativeDomainClientFailure.cancelled }
         let writesAtStart = adoptedWrites
+        let unconfirmedAtStart = unconfirmed?.intent
         let result: Result<Snapshot, Error>
         do { result = .success(try await fetch()) }
         catch { result = .failure(error) }
         guard isCurrent(), !Task.isCancelled else { throw NativeDomainClientFailure.cancelled }
-        if adoptedWrites != writesAtStart, let snapshot { return snapshot }
+        if adoptedWrites != writesAtStart, let held = self.snapshot {
+            // Only a strictly newer response can outrank an overlapping write receipt.
+            guard case let .success(received) = result, received[keyPath: revision] > held[keyPath: revision]
+            else { return held }
+        }
         let snapshot = try result.get()
         if let held = self.snapshot, snapshot[keyPath: revision] < held[keyPath: revision] { return held }
         self.snapshot = snapshot
+        // A read already in flight before the lost reply may have observed the old route.
+        if let unconfirmed, unconfirmed.intent == unconfirmedAtStart,
+           snapshot[keyPath: revision] >= unconfirmed.fenceRevision {
+            self.unconfirmed = nil
+        }
         return snapshot
     }
 
@@ -125,8 +138,9 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
                 let saved = try await write(fence, id)
                 guard current() else { return inactiveResult() }
                 pending = nil
-                if let held = self.snapshot, saved[keyPath: revision] < held[keyPath: revision] { return .saved(held) }
+                unconfirmed = nil
                 adoptedWrites += 1
+                if let held = self.snapshot, saved[keyPath: revision] < held[keyPath: revision] { return .saved(held) }
                 self.snapshot = saved
                 return .saved(saved)
             } catch is ManagedModelFenceConflict {
@@ -151,6 +165,7 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
                 let refusal: Bool
                 if case NativeDomainClientFailure.http = error { refusal = true } else { refusal = error is ContractViolation }
                 guard refusal else {
+                    unconfirmed = (intent, choice, fence[keyPath: revision])
                     if refreshAfterTransportFailure {
                         // The provider may have applied the write. Keep the replay key and adopt only its readback.
                         _ = try? await read(isCurrent: current, fetch: fetch)

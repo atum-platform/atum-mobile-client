@@ -560,8 +560,9 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         let reopened = try await store.read(isCurrent: { true }) { before }
         XCTAssertEqual(reopened, before)
         XCTAssertEqual(store.submittedChoice, choice)
-        XCTAssertEqual(PhoneModelPickerProjection.submittedChip(store.submittedChoice, destination: reopened,
-                                                                account: nil)?.source, .chatGPTPlan)
+        let pending = PhoneModelPickerProjection.chipPresentation(unsettled: store.unsettledChoice, pick: nil,
+                                                                   destination: reopened, offer: nil)
+        guard case .pending = pending else { return XCTFail("The submitted plan must not read as current") }
 
         firstReply?.resume()
         guard case let .saved(settled) = await write.value else { return XCTFail("The submitted write did not settle") }
@@ -591,6 +592,81 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         XCTAssertNil(store.submittedChoice)
         XCTAssertEqual(store.snapshot, server)
         XCTAssertEqual(PhoneModelPickerProjection.chip(pick: nil, destination: store.snapshot, offer: nil)?.source, .atum)
+    }
+
+    @MainActor
+    func testLostReplyAndFailedReadbackLeaveTheBillingRoutePendingUntilReplay() async throws {
+        let before = try destinationSnapshot(cloudSource: "chatgpt_plan", model: "gpt-6.1")
+        let after = try destinationSnapshot(cloudSource: "atum", model: ManagedModelLineup.hardAlias, revision: 4)
+        let store = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        let choice = ManagedModelPickerChoice.destination(try ManagedModelDestinationID("cloud"),
+                                                          model: ManagedModelLineup.hardAlias)
+        let id = ModelWriteRequests<NativeID>.freshID()
+        _ = try await store.read(isCurrent: { true }) { before }
+        let first = await store.save(from: before, choice: choice, requestID: id,
+                                     refreshAfterSecondConflict: true, isCurrent: { true }, fetch: {
+            throw NativeDomainClientFailure.transportUnavailable
+        }, refreshAfterTransportFailure: true) { _, _ in
+            throw NativeDomainClientFailure.transportUnavailable
+        }
+        guard case .failed = first else { return XCTFail("Expected an ambiguous write") }
+        XCTAssertNil(store.submittedChoice)
+        XCTAssertEqual(store.unsettledChoice, choice)
+        let pending = PhoneModelPickerProjection.chipPresentation(unsettled: store.unsettledChoice, pick: nil,
+                                                                   destination: store.snapshot, offer: nil)
+        XCTAssertEqual(pending, .pending(modelName: "Nhật Thực"))
+
+        let replay = await store.save(from: before, choice: choice, requestID: ModelWriteRequests<NativeID>.freshID(),
+                                      refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { after }) { _, key in
+            XCTAssertEqual(key, id)
+            return after
+        }
+        guard case .saved = replay else { return XCTFail("Expected replay to settle the write") }
+        XCTAssertNil(store.unsettledChoice)
+        XCTAssertEqual(PhoneModelPickerProjection.chipPresentation(unsettled: store.unsettledChoice, pick: nil,
+                                                                   destination: store.snapshot, offer: nil),
+                       .confirmed(.init(name: "Nhật Thực", source: .atum)))
+    }
+
+    @MainActor
+    func testLateAtumReceiptAfterDismissalCannotPublishOverANewerSubscriptionChoice() async throws {
+        let before = try destinationSnapshot()
+        let newer = try destinationSnapshot(cloudSource: "chatgpt_plan", model: "gpt-6.1", revision: 4)
+        let offer = try cloudSnapshot()
+        let destinations = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        let offers = ManagedModelPickerState<ManagedModelSnapshot>(revision: \.revision)
+        _ = try await destinations.read(isCurrent: { true }) { before }
+        let submittedOver = destinations.snapshot?.revision
+        var lifetime = ModelPickerLifetime()
+        let selection = lifetime.beginSelection()
+        let (started, notice) = AsyncStream<Void>.makeStream()
+        var lateReceipt: CheckedContinuation<ManagedModelSnapshot, Never>?
+        let write = Task {
+            await offers.save(from: offer, choice: .offer(model: offer.choice.model, effort: .medium),
+                              requestID: ModelWriteRequests<NativeID>.freshID(), refreshAfterSecondConflict: false,
+                              isCurrent: { true }, fetch: { offer }) { _, _ in
+                await withCheckedContinuation {
+                    lateReceipt = $0
+                    notice.yield(())
+                    notice.finish()
+                }
+            }
+        }
+        _ = await started.first(where: { _ in true })
+        lifetime.retire()
+        XCTAssertFalse(lifetime.isCurrent(selection))
+        _ = await destinations.save(from: before, choice: .subscription(.chatGPTPlan, model: "gpt-6.1", effort: .high),
+                                    requestID: ModelWriteRequests<NativeID>.freshID(), refreshAfterSecondConflict: true,
+                                    isCurrent: { true }, fetch: { newer }) { _, _ in newer }
+        lateReceipt?.resume(returning: offer)
+        guard case let .saved(receipt) = await write.value else { return XCTFail("Expected an Atum receipt") }
+        let row = try XCTUnwrap(PhoneModelPickerProjection.cloud(receipt).first { $0.model == receipt.choice.model })
+        let pick = PhoneModelPickerProjection.settledOfferPick(row, offerRevision: receipt.revision,
+                                                               submittedOver: submittedOver,
+                                                               destination: destinations.snapshot, offer: offers.snapshot)
+        XCTAssertNil(pick)
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: pick, destination: destinations.snapshot,
+                                                       offer: offers.snapshot)?.source, .chatGPTPlan)
     }
 
     @MainActor

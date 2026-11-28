@@ -8,6 +8,11 @@ import UIKit
 /// host routes are offered only for a roster `runtime: "hermes"` agent; the
 /// rest of the desk reads the chat itself.
 struct AgentDeskActions {
+    struct Scope: Hashable {
+        let principal: NativeID
+        let accountGeneration: UInt64
+    }
+
     /// The agent's Matrix user: only its own files are listed as sent here.
     let agentUserID: String?
     /// A native Hermes agent: a message typed now changes what it is doing
@@ -20,6 +25,8 @@ struct AgentDeskActions {
     var files: (@MainActor (String?) async -> HostAgentDesk.FilesOutcome)?
     /// `POST /api/host/agent-control`; nil without the host route.
     var control: (@MainActor (HostAgentDesk.Control) async -> HostAgentDesk.ControlOutcome)?
+    /// A live scope change replaces the desk's view and its cached listings.
+    var scope: Scope?
 }
 
 /// The chat's own state, handed to the panel by the chat screen (the panel's
