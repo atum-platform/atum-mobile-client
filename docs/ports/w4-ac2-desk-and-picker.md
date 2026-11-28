@@ -17,4 +17,4 @@ The UI handoff is in `AgentDeskPage.swift:34`, `:177` and `:292`. Once W4-C9 upd
 
 Review fixes passed 257 focused Swift package tests, 13 standalone macOS desk host-state tests and seven copy-pin checks. The iOS AppTests and focused UI suites run under the shared simulator build lock.
 
-The first locked Debug build caught assignments inside the SwiftUI result builder for the pending chip. Its display state now resolves before the view builder runs.
+The first locked Debug build caught assignments inside the SwiftUI result builder for the pending chip. Its display state now resolves before the view builder runs. The second build compiled the app and caught a nested test fixture whose observation macro needs file-level access.

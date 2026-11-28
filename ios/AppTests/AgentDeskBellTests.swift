@@ -132,7 +132,7 @@ final class AgentDeskBellTests: XCTestCase {
     }
 
     @MainActor @Observable
-    private final class DeskScopeFixture {
+    fileprivate final class DeskScopeFixture {
         var actions: AgentDeskActions
 
         init(actions: AgentDeskActions) { self.actions = actions }
