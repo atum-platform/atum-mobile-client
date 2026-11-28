@@ -25,16 +25,19 @@ struct TeamSpaceSearchMessagesRow: View {
     let action: () -> Void
 
     @Environment(\.colorScheme) private var scheme
+    /// The glyph column grows with the glyph's text style.
+    @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 28
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
     private var copy: TeamSpaceCopy { TeamSpaceCopy(design: design) }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
+                // The text style of the text beside it, so it scales with it.
                 Image(atum.symbol(.search))
-                    .font(.system(size: 17))
+                    .font(.body)
                     .foregroundStyle(atum.color(.muted, scheme: scheme))
-                    .frame(width: 28)
+                    .frame(width: glyphColumn)
                     .accessibilityHidden(true)
                 Text(verbatim: copy.searchFor(query))
                     .font(.body)
@@ -227,6 +230,60 @@ struct CompanyChannelFailedRow: View {
 
 // MARK: Board views
 
+/// A segmented choice drawn with buttons (desktop `ak-seg`). Its labels follow
+/// Dynamic Type, which the system segmented control does not, and each segment
+/// keeps a 44 pt target. The board's Board · List uses it, and so do the Team
+/// Space pages at accessibility text sizes (`CompanyPagesBar`).
+struct TeamSpaceSegments<Item: Hashable>: View {
+    let design: LiveDesign
+    let items: [Item]
+    @Binding var selection: Item
+    let title: (Item) -> String
+    let identifier: (Item) -> String
+    /// The group's spoken name.
+    let label: String
+
+    @Environment(\.colorScheme) private var scheme
+    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
+    /// The selected segment's inset inside the track; its corner follows the track's.
+    private static var inset: CGFloat { 2 }
+
+    var body: some View {
+        HStack(spacing: Self.inset) {
+            ForEach(items, id: \.self) { item in
+                let selected = selection == item
+                Button {
+                    selection = item
+                } label: {
+                    Text(verbatim: title(item))
+                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, kit.space(.s3))
+                        .padding(.vertical, kit.space(.s1))
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background {
+                            if selected {
+                                RoundedRectangle(cornerRadius: kit.phoneRadius(.sm) - Self.inset, style: .continuous)
+                                    .fill(atum.color(.ground, scheme: scheme))
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier(identifier(item))
+            }
+        }
+        .padding(Self.inset)
+        .background(atum.color(.cell, scheme: scheme),
+                    in: RoundedRectangle(cornerRadius: kit.phoneRadius(.sm), style: .continuous))
+        .motion(.quick, value: selection)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: label))
+    }
+}
+
 /// Board · List and Mine over the Board page (desktop `company-board.tsx` header:
 /// `ak-seg` with Board and List, then the Mine toggle once the viewer's member is
 /// known). Drawn whether or not the board could be read, as the desktop draws it.
@@ -240,49 +297,30 @@ struct CompanyBoardControls: View {
     private var copy: TeamSpaceCopy { TeamSpaceCopy(design: design) }
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
+    private var kit: AtumKit { design.kit }
+
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { views; mine }
+            HStack(spacing: kit.space(.s3)) { views; mine }
                 .fixedSize(horizontal: true, vertical: false)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: kit.space(.s2)) {
                 views
                 mine
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, kit.space(.s4))
         .padding(.vertical, 6)
+        .sensoryFeedback(.selection, trigger: preference.view)
     }
 
     private var views: some View {
-        HStack(spacing: 2) {
-            ForEach(CompanyBoardView.allCases, id: \.self) { view in
-                let selected = preference.view == view
-                Button {
-                    preference = preference.selecting(view)
-                } label: {
-                    Text(verbatim: copy.boardView(view))
-                        .font(.subheadline.weight(selected ? .semibold : .regular))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .background {
-                            if selected {
-                                RoundedRectangle(cornerRadius: 8).fill(atum.color(.ground, scheme: scheme))
-                            }
-                        }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .accessibilityIdentifier("company.board.view." + view.rawValue)
-            }
-        }
-        .padding(2)
-        .background(atum.color(.cell, scheme: scheme), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(verbatim: copy.boardViews))
+        TeamSpaceSegments(design: design, items: Array(CompanyBoardView.allCases),
+                          selection: Binding(get: { preference.view },
+                                             set: { preference = preference.selecting($0) }),
+                          title: { copy.boardView($0) },
+                          identifier: { "company.board.view." + $0.rawValue },
+                          label: copy.boardViews)
     }
 
     @ViewBuilder private var mine: some View {

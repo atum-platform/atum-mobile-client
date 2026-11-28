@@ -161,6 +161,14 @@ class TranscriptUITestCase: AtumUITestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    /// The chat panel's scrolling list (`ChatInfoHome`, a system inset-grouped
+    /// `List` since UX polish P2): a collection view inside `info.sheet`. A list
+    /// builds only the rows on screen, so a row below the fold exists only once
+    /// it has been scrolled to (`revealByScrolling`).
+    @MainActor func panelList(_ app: XCUIApplication) -> XCUIElement {
+        element(app, "info.sheet").collectionViews.firstMatch
+    }
+
     /// Reveal a control inside its own scroll container before tapping it.
     /// XCTest's implicit scroll during tap can consume the tap or dismiss a
     /// sheet. Existence alone also includes controls outside the viewport.

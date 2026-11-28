@@ -125,6 +125,10 @@ All locked runs used the audit's iPhone 17 (iOS 27.0), derived data in `/Volumes
 
 Device checks still useful: the send entrance and the drag-from-a-bubble behaviour on hardware with a real finger (XCUITest synthesises touches), and the photo zoom with Reduce Motion on.
 
+## Fix round r3
+
+Merged `origin/main` at `f923168`, including P2's list and header polish. The merge combined P2's chat panel list test helper with P4's existing transcript helpers.
+
 ## Follow-up: scaling measurement plan
 
 Recorded from review r1; not done in this change.

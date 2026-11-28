@@ -52,7 +52,9 @@ final class ChatPanelUITests: TranscriptUITestCase {
         keepScreenshot("m1-person-medium-\(appearanceTag)-vi", of: app)
 
         app.swipeUp()
-        XCTAssertTrue(element(app, "info.exit.deleteChat").waitForExistence(timeout: 3))
+        // The list builds the last group once it is scrolled to.
+        XCTAssertTrue(revealByScrolling(element(app, "info.exit.deleteChat"), in: panelList(app)),
+                      boundedHierarchy(app))
         keepScreenshot("m1-person-large-\(appearanceTag)-vi", of: app)
 
         element(app, "info.close").tap()
@@ -77,7 +79,7 @@ final class ChatPanelUITests: TranscriptUITestCase {
         app.swipeUp()
 
         let low = element(app, "info.low-priority")
-        XCTAssertTrue(low.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(low, in: panelList(app)), boundedHierarchy(app))
         XCTAssertEqual(low.value as? String, "0")
         // The swipe can leave the panel still decelerating, and a tap then
         // only stops the scroll: tap again once it has settled.
@@ -89,7 +91,7 @@ final class ChatPanelUITests: TranscriptUITestCase {
         XCTAssertTrue(waitFor(3) { low.value as? String == "1" }, "low priority did not turn on")
 
         let block = element(app, "info.block")
-        let scroll = panel(app).scrollViews.firstMatch
+        let scroll = panelList(app)
         XCTAssertTrue(revealByScrolling(block, in: scroll), boundedHierarchy(app))
         block.tap()
         // iOS 26 no longer presents the dialog as a sheet element.
@@ -154,7 +156,12 @@ final class ChatPanelUITests: TranscriptUITestCase {
                     let app = launchPanelChat(scenario, language: language, size: size)
                     element(app, "chat.title").tap()
                     XCTAssertTrue(panel(app).waitForExistence(timeout: 3))
-                    XCTAssertTrue(element(app, "info.encryption").waitForExistence(timeout: 3))
+                    // At AX3 the row can sit under the medium fold, and the
+                    // panel's list builds it only once it is on screen.
+                    let encryption = element(app, "info.encryption")
+                    if !encryption.waitForExistence(timeout: 3) {
+                        XCTAssertTrue(revealByScrolling(encryption, in: panelList(app)), boundedHierarchy(app))
+                    }
                     let kind = scenario == .chatPeople ? "person" : "group"
                     keepScreenshot("m2-\(kind)-\(size.tag)-\(appearanceTag)-\(language)", of: app)
                     app.terminate()

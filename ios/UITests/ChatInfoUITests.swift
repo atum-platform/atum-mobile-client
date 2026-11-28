@@ -87,6 +87,29 @@ final class ChatInfoUITests: TranscriptUITestCase {
         return app
     }
 
+    /// Scroll the card's list up by dragging its own side margin. The card is
+    /// a system list (UX polish P2) whose persona fields scroll their own long
+    /// text; a swipe from the screen's centre can start on such a field and
+    /// scroll only its text, never the list (AX5, a long persona). The margin
+    /// beside the groups belongs to the list alone.
+    ///
+    /// Going back the drag is short. Once the list reaches its top, the rest of
+    /// a drag pulls the sheet itself down, and a long one (0.4 of the list,
+    /// about 320 pt on a 390 x 844 phone) leaves it at its medium detent: the
+    /// rows under the header are then off screen and the next drags start
+    /// above the sheet, until one closes it (hosted iPhone 16e, PR #110, 26
+    /// Nov). A short overshoot settles back at the large detent.
+    @MainActor
+    private func scrollCardList(_ app: XCUIApplication, back: Bool = false) {
+        let list = panelList(app)
+        guard list.exists else { if back { app.swipeDown() } else { app.swipeUp() }; return }
+        let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: back ? 0.2 : 0.6))
+            .withOffset(CGVector(dx: 6, dy: 0))
+        let travel = list.frame.height * (back ? 0.18 : -0.4)
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: travel)),
+                    withVelocity: .slow, thenHoldForDuration: 0.1)
+    }
+
     @MainActor
     private func leaveField(_ app: XCUIApplication) {
         let done = app.buttons.matching(identifier: "assistant.card.keyboard.done").firstMatch
@@ -125,13 +148,13 @@ final class ChatInfoUITests: TranscriptUITestCase {
                                   size: "UICTContentSizeCategoryAccessibilityXXXL", dark: true,
                                   extra: ["-AtumScriptedPersonaElsewhere", "-AtumScriptedPersonaLong"])
         let personality = app.buttons.matching(identifier: "assistant.card.personality").firstMatch
-        for _ in 0..<10 where !(personality.exists && personality.isHittable) { app.swipeUp() }
+        for _ in 0..<10 where !(personality.exists && personality.isHittable) { scrollCardList(app) }
         XCTAssertTrue(personality.waitForExistence(timeout: 5)); personality.tap()
         let field = element(app, "assistant.card.personality.field")
         XCTAssertTrue(field.waitForExistence(timeout: 3))
         // At AX5 the opened field can sit under the keyboard's edge: bring it
         // into view and tap until it takes keyboard focus.
-        for _ in 0..<4 where !field.isHittable { app.swipeUp() }
+        for _ in 0..<4 where !field.isHittable { scrollCardList(app) }
         for _ in 0..<3 where !app.keyboards.firstMatch.exists {
             field.tap()
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
@@ -139,7 +162,19 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists, "the personality field never took focus")
         field.typeText(" Vui vẻ.")
         leaveField(app)
-        XCTAssertTrue(element(app, "assistant.card.saved").waitForExistence(timeout: 5))
+        // "Saved" (in the header) and the conflict band (the group under it,
+        // above the handle row) head the card. The list builds rows only once
+        // they are on screen, so scroll back until the header and the handle
+        // row are both built: the band between them would then be built too.
+        let saved = element(app, "assistant.card.saved")
+        let handle = element(app, "assistant.card.handle")
+        // Back-drags are short (see scrollCardList), so allow more of them.
+        for _ in 0..<16 where !(saved.exists && saved.isHittable && handle.exists) {
+            scrollCardList(app, back: true)
+        }
+        XCTAssertTrue(saved.waitForExistence(timeout: 5),
+                      "Saved is not in the card header; card list at \(panelList(app).frame)")
+        XCTAssertTrue(handle.exists, "the handle row under the band is not on screen")
         XCTAssertFalse(element(app, "assistant.card.persona-conflict").exists)
         let saves = probeLines("persona-save.txt").map(\.text)
         XCTAssertEqual(saves.count, 1)
@@ -150,7 +185,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(saves.first?.contains("Writes the weekly report.") == true, "the other field was reverted")
         XCTAssertFalse(saves.first?.contains("Plans and writes.") == true, "the other field was reverted")
         let hint = element(app, "assistant.card.long-persona")
-        for _ in 0..<12 where !(hint.exists && hint.isHittable) { app.swipeUp() }
+        for _ in 0..<12 where !(hint.exists && hint.isHittable) { scrollCardList(app) }
         XCTAssertTrue(hint.exists && hint.isHittable, "the length hint is not reachable at AX5")
         XCTAssertTrue(app.staticTexts["Trợ lý có thể chỉ đọc một phần hướng dẫn này."].exists)
         keepScreenshot("w4-e4-persona-long-dark-ax5", of: app)
@@ -352,7 +387,7 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 3), "Info sheet did not appear")
         XCTAssertTrue(app.staticTexts["Nhóm thử"].exists)
         XCTAssertTrue(app.staticTexts["4 thành viên"].exists)
-        let scroll = sheet.scrollViews.firstMatch
+        let scroll = panelList(app)
         XCTAssertTrue(scroll.waitForExistence(timeout: 10))
         // Give the medium sheet enough travel to expand. The drag starts
         // inside its scroll view and can end above the medium detent.
@@ -361,7 +396,8 @@ final class ChatInfoUITests: TranscriptUITestCase {
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
         let assistantAccess = scroll.descendants(matching: .any)
             .matching(identifier: "info.assistant-access").firstMatch
-        XCTAssertTrue(assistantAccess.waitForExistence(timeout: 3))
+        // The list builds a row once it is scrolled to.
+        XCTAssertTrue(revealByScrolling(assistantAccess, in: scroll), boundedHierarchy(app))
         XCTAssertTrue(assistantAccess.label.contains("Trợ lý của bạn có thể đọc"))
         XCTAssertTrue(assistantAccess.label.contains("tin nhắn của người khác trong nhóm"))
         XCTAssertTrue(assistantAccess.label.localizedCaseInsensitiveContains("nhà cung cấp mô hình"))
@@ -404,7 +440,9 @@ final class ChatInfoUITests: TranscriptUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 15))
         title.tap()
         let delete = app.descendants(matching: .any).matching(identifier: "info.delete").firstMatch
-        XCTAssertTrue(delete.waitForExistence(timeout: 3))
+        // Below the fold at medium; the list builds the row once it is scrolled to.
+        XCTAssertTrue(panelList(app).waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(delete, in: panelList(app)), boundedHierarchy(app))
         delete.tap()
 
         XCTAssertTrue(app.staticTexts["Xóa cuộc trò chuyện này?"].waitForExistence(timeout: 2))

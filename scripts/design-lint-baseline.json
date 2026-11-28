@@ -36,10 +36,7 @@
       "animation": 1
     },
     "ios/App/Chat/Views/AgentDeskPage.swift": {
-      "padding": 13,
-      "spacing": 15,
-      "radius": 1,
-      "animation": 1
+      "spacing": 8
     },
     "ios/App/Chat/Views/AnswerActionsRow.swift": {
       "padding": 1,
@@ -50,10 +47,8 @@
       "spacing": 3
     },
     "ios/App/Chat/Views/AssistantCard.swift": {
-      "padding": 27,
-      "spacing": 16,
-      "radius": 7,
-      "animation": 2
+      "padding": 4,
+      "spacing": 1
     },
     "ios/App/Chat/Views/AssistantHandleEditor.swift": {
       "padding": 9,
@@ -78,11 +73,6 @@
     "ios/App/Chat/Views/ChatGPTTrainingConfirm.swift": {
       "padding": 3,
       "spacing": 3
-    },
-    "ios/App/Chat/Views/ChatInfoSheet.swift": {
-      "padding": 41,
-      "spacing": 16,
-      "radius": 7
     },
     "ios/App/Chat/Views/ChatPanelHost.swift": {
       "padding": 5,
@@ -178,9 +168,8 @@
       "padding": 1
     },
     "ios/App/Company/CompanySpaceViews.swift": {
-      "padding": 8,
-      "spacing": 13,
-      "font-size": 1
+      "padding": 7,
+      "spacing": 13
     },
     "ios/App/Company/CompanyThreadsViews.swift": {
       "padding": 4,
@@ -189,8 +178,7 @@
     "ios/App/Company/CompanyWorkspaceViews.swift": {
       "padding": 40,
       "spacing": 16,
-      "radius": 1,
-      "font-size": 2
+      "radius": 1
     },
     "ios/App/Company/ConversationViews.swift": {
       "padding": 25,
@@ -199,17 +187,14 @@
       "animation": 1
     },
     "ios/App/Company/TeamSpaceRevampViews.swift": {
-      "padding": 6,
-      "spacing": 6,
-      "radius": 2,
-      "font-size": 1
+      "padding": 2,
+      "spacing": 3
     },
     "ios/App/Home/HomeScreen.swift": {
-      "padding": 53,
+      "padding": 51,
       "spacing": 36,
       "radius": 2,
-      "font-size": 4,
-      "animation": 2
+      "animation": 1
     },
     "ios/App/NativeRichText.swift": {
       "padding": 1,
