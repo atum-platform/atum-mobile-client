@@ -579,7 +579,8 @@ final class MatrixLiveRuntime {
 
     func securitySnapshot() async throws -> MatrixSecuritySnapshot {
         try requireSecurityCurrent()
-        let keyID = try await currentRecoveryStorageKeyID()
+        let keyID = try? await currentRecoveryStorageKeyID()
+        try requireSecurityCurrent()
         let receipt = try? MatrixRecoverySaveStore(ticket: ticket).read()
         let encryption = client.encryption()
         return MatrixSecuritySnapshot(
@@ -587,8 +588,15 @@ final class MatrixLiveRuntime {
             recoveryEnabled: encryption.recoveryState() == .enabled,
             backupEnabled: encryption.backupState() == .enabled,
             recoveryKeyConfirmed: keyID != nil && receipt?.storageKeyID == keyID && receipt?.pendingKey == nil,
-            pendingSaveID: receipt?.pendingKey != nil ? receipt?.id : nil
+            pendingSaveID: receipt?.pendingSaveID
         )
+    }
+
+    /// The existing sign-out confirmation can inspect the local receipt even
+    /// when the SDK has not loaded recovery account data yet.
+    func pendingRecoverySaveID() throws -> UUID? {
+        try requireCurrent()
+        return try MatrixRecoverySaveStore(ticket: ticket).read()?.pendingSaveID
     }
 
     /// Explicit Security setup for an already cross-signed phone. The pinned
@@ -598,7 +606,7 @@ final class MatrixLiveRuntime {
         try beginRecoveryOperation()
         defer { recoveryOperationInFlight = false }
         let store = MatrixRecoverySaveStore(ticket: ticket)
-        if let pending = try store.read(), pending.pendingKey != nil { return pending.id }
+        if let id = try store.read()?.pendingSaveID { return id }
         let encryption = client.encryption()
         await encryption.waitForE2eeInitializationTasks()
         try requireSecurityCurrent()
@@ -872,6 +880,9 @@ final class MatrixLiveRuntime {
             .disableWellKnownLookup(disableWellKnownLookup: true)
             .sqliteStore(config: sqlite)
             .disableAutomaticTokenRefresh()
+            // The pinned signing initializer cannot retry a rejected cached
+            // identity. The backup flag can create a backup without a user
+            // recovery key even when signing failed or an identity already exists.
             .autoEnableCrossSigning(autoEnableCrossSigning: false)
             .autoEnableBackups(autoEnableBackups: false)
             .slidingSyncVersionBuilder(versionBuilder: .native)

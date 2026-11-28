@@ -217,7 +217,8 @@ final class MatrixSecurityTests: XCTestCase {
             waitForBackupsToUpload: false, passphrase: nil, progressListener: MatrixRecoverySetupProgress()
         )
         let original = try server.recoveryFingerprint()
-        let second = try await fixtureClient(endpoint, device: "SECOND", autoCrossSigning: true, oauth: true)
+        let second = try await fixtureClient(endpoint, device: "SECOND", autoCrossSigning: true,
+                                             autoBackups: true, oauth: true)
         let otherSDK = second.encryption()
         await otherSDK.waitForE2eeInitializationTasks()
         let existing = try await otherSDK.userIdentity(userId: "@me:example.org", fallbackToServer: false)
@@ -237,6 +238,52 @@ final class MatrixSecurityTests: XCTestCase {
         try await owner.pause()
     }
 
+    func testPinnedBinaryAutomaticBackupCreatesNoSecretStorageOnFreshAccount() async throws {
+        let server = try SecurityFixtureHomeserver()
+        defer { server.stop() }
+        let endpoint = try await server.start()
+        let phone = try await fixtureClient(endpoint, device: "PHONE", autoCrossSigning: true,
+                                            autoBackups: true, oauth: true)
+        let sdk = phone.encryption()
+        await sdk.waitForE2eeInitializationTasks()
+
+        XCTAssertEqual(server.signingUploads, [200])
+        XCTAssertTrue(server.hasServerBackup)
+        XCTAssertFalse(server.hasDefaultStorageKey)
+        XCTAssertEqual(sdk.backupState(), .enabled)
+        XCTAssertEqual(sdk.recoveryState(), .disabled)
+        try await phone.pause()
+    }
+
+    func testPinnedBinaryAutomaticBackupAlsoRunsForExistingIdentityOrRejectedUpload() async throws {
+        let server = try SecurityFixtureHomeserver()
+        defer { server.stop() }
+        let endpoint = try await server.start()
+        let owner = try await fixtureClient(endpoint, device: "OWNER", autoCrossSigning: true, oauth: true)
+        await owner.encryption().waitForE2eeInitializationTasks()
+        XCTAssertFalse(server.hasServerBackup)
+        let second = try await fixtureClient(endpoint, device: "SECOND", autoCrossSigning: true,
+                                             autoBackups: true, oauth: true)
+        await second.encryption().waitForE2eeInitializationTasks()
+        XCTAssertEqual(server.signingUploads, [200])
+        XCTAssertTrue(server.hasServerBackup, "The backup flag does not observe the identity precondition")
+        XCTAssertFalse(server.hasDefaultStorageKey)
+        try await second.pause()
+        try await owner.pause()
+
+        let rejectingServer = try SecurityFixtureHomeserver(requireSigningApproval: true)
+        defer { rejectingServer.stop() }
+        let rejectingEndpoint = try await rejectingServer.start()
+        let phone = try await fixtureClient(rejectingEndpoint, device: "PHONE", autoCrossSigning: true,
+                                            autoBackups: true, oauth: true)
+        await phone.encryption().waitForE2eeInitializationTasks()
+        XCTAssertEqual(rejectingServer.signingUploads, [401])
+        XCTAssertFalse(rejectingServer.hasServerIdentity)
+        XCTAssertTrue(rejectingServer.hasServerBackup)
+        XCTAssertFalse(rejectingServer.hasDefaultStorageKey)
+        try await phone.pause()
+    }
+
     func testPinnedBinaryAutoBootstrapDoesNotSurfaceOAuthChallenge() async throws {
         let server = try SecurityFixtureHomeserver(requireSigningApproval: true)
         defer { server.stop() }
@@ -250,6 +297,10 @@ final class MatrixSecurityTests: XCTestCase {
             let client = try await fixtureClient(
                 endpoint, device: "PHONE", autoCrossSigning: true, oauth: true, storeDirectory: directory
             )
+            let room = try await client.joinRoomById(roomId: "!plain:example.org")
+            let eventID = try await room.sendRaw(eventType: "m.room.message",
+                                                  content: #"{"msgtype":"m.text","body":"fixture"}"#)
+            XCTAssertEqual(eventID, "$plain-message")
             let sdk = client.encryption()
             await sdk.waitForE2eeInitializationTasks()
             let localIdentity = try await sdk.userIdentity(userId: "@me:example.org", fallbackToServer: true)
@@ -260,9 +311,11 @@ final class MatrixSecurityTests: XCTestCase {
             try await client.pause()
         }
         XCTAssertEqual(server.signingUploads, [401])
+        XCTAssertEqual(server.plainMessages, ["fixture"])
 
         // Restore the exact same device store. The rejected identity is still
         // cached, so a second enable-on-restore does not send an upload.
+        server.allowSigningUpload()
         let retry = try await fixtureClient(
             endpoint, device: "PHONE", autoCrossSigning: true, oauth: true, storeDirectory: directory
         )
@@ -334,7 +387,7 @@ final class MatrixSecurityTests: XCTestCase {
     }
 
     private func fixtureClient(
-        _ endpoint: String, device: String, autoCrossSigning: Bool, oauth: Bool = false,
+        _ endpoint: String, device: String, autoCrossSigning: Bool, autoBackups: Bool = false, oauth: Bool = false,
         storeDirectory: URL? = nil
     ) async throws -> Client {
         var builder = ClientBuilder()
@@ -342,7 +395,7 @@ final class MatrixSecurityTests: XCTestCase {
             .disableWellKnownLookup(disableWellKnownLookup: true)
             .disableAutomaticTokenRefresh()
             .autoEnableCrossSigning(autoEnableCrossSigning: autoCrossSigning)
-            .autoEnableBackups(autoEnableBackups: false)
+            .autoEnableBackups(autoEnableBackups: autoBackups)
             .requestConfig(config: RequestConfig(retryLimit: 0, timeout: 3_000,
                                                   maxConcurrentRequests: 4, maxRetryTime: 3_000))
         if let storeDirectory {
@@ -448,7 +501,7 @@ private final class NativeSAS: SessionVerificationControllerProtocol, @unchecked
 private final class SecurityFixtureHomeserver: @unchecked Sendable {
     private enum Failure: Error { case unreachable }
     private let listener: NWListener
-    private let requireSigningApproval: Bool
+    private var requireSigningApproval: Bool
     private let insertCompetingBackupBeforeCreate: Bool
     private let queue = DispatchQueue(label: "MatrixSecurityTests.fixture")
     private var accountData: [String: [String: Any]] = [:]
@@ -457,6 +510,7 @@ private final class SecurityFixtureHomeserver: @unchecked Sendable {
     private var backup: [String: Any]?
     private var roomEvents: [String?] = []
     private var signingStatuses: [Int] = []
+    private var messages: [String] = []
     private var writes: [String] = []
 
     init(requireSigningApproval: Bool = false, insertCompetingBackupBeforeCreate: Bool = false) throws {
@@ -473,6 +527,10 @@ private final class SecurityFixtureHomeserver: @unchecked Sendable {
     var hasServerBackup: Bool { queue.sync { backup != nil } }
     var activeBackupVersion: String? { queue.sync { backup?["version"] as? String } }
     var hasServerIdentity: Bool { queue.sync { !identity.isEmpty } }
+    var hasDefaultStorageKey: Bool { queue.sync { accountData["m.secret_storage.default_key"]?["key"] != nil } }
+    var plainMessages: [String] { queue.sync { messages } }
+
+    func allowSigningUpload() { queue.sync { requireSigningApproval = false } }
 
     func recoveryFingerprint() throws -> SHA256.Digest {
         try queue.sync {
@@ -619,6 +677,13 @@ private final class SecurityFixtureHomeserver: @unchecked Sendable {
         }
         if path.hasSuffix("/room_keys/keys") { return (ok, ["rooms": [:], "etag": "fixture", "count": 0]) }
         if path.contains("/sendToDevice/") { return (ok, [:]) }
+        if method == "POST", path.removingPercentEncoding?.hasSuffix("/rooms/!plain:example.org/join") == true {
+            return (ok, ["room_id": "!plain:example.org"])
+        }
+        if method == "PUT", path.contains("/send/m.room.message/"), let body = payload["body"] as? String {
+            messages.append(body)
+            return (ok, ["event_id": "$plain-message"])
+        }
         if path.hasSuffix("/createRoom") {
             let events = payload["initial_state"] as? [[String: Any]] ?? []
             let encryption = events.first { $0["type"] as? String == "m.room.encryption" }

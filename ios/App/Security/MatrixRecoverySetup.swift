@@ -44,6 +44,8 @@ struct MatrixRecoverySaveStore {
         let storageKeyID: String?
         let pendingKey: String?
 
+        var pendingSaveID: UUID? { pendingKey == nil ? nil : id }
+
         var debugDescription: String { "MatrixRecoverySaveStore.Record(<redacted>)" }
     }
 
