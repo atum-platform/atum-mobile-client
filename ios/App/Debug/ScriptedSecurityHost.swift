@@ -46,6 +46,7 @@ struct ScriptedSecurityHost: View {
     ]
 
     @State private var makePrivate = false
+    @State private var privateShown = false
     @State private var groupName = ""
 
     var body: some View {
@@ -76,8 +77,9 @@ struct ScriptedSecurityHost: View {
                 NavigationStack {
                     Form {
                         Section { TextField("", text: $groupName) }
-                        PrivateChatOptionSection(design: design, actions: privateActions, isOn: $makePrivate)
+                        PrivateChatOptionSection(design: design, shown: privateShown, isOn: $makePrivate)
                     }
+                    .privateChatReadiness(privateActions, shown: $privateShown, isOn: $makePrivate)
                     .navigationBarTitleDisplayMode(.inline)
                 }
                 .onAppear { makePrivate = scenario == .privateOn }

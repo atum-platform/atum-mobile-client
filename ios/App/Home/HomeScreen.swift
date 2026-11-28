@@ -1776,6 +1776,7 @@ private struct HomeAddFriendView: View {
     }
 
     @State private var makePrivate = false
+    @State private var privateShown = false
 
     @State private var matches = [HomeGroupCandidate]()
     @State private var directoryFailed = false
@@ -1820,7 +1821,7 @@ private struct HomeAddFriendView: View {
                 .accessibilityIdentifier("home.addFriend.find")
             }
 
-            PrivateChatOptionSection(design: design, actions: privateChat, isOn: $makePrivate,
+            PrivateChatOptionSection(design: design, shown: privateShown, isOn: $makePrivate,
                                      disabled: presentation == .searching)
 
             // A private chat starts only from an exact handle lookup, so the
@@ -1858,6 +1859,7 @@ private struct HomeAddFriendView: View {
                 }
             }
         }
+        .privateChatReadiness(privateChat, shown: $privateShown, isOn: $makePrivate)
         .scrollContentBackground(.hidden)
         .background(atum.color(.ground, scheme: scheme))
         .navigationTitle(copy(.addFriendTitle))
@@ -2072,6 +2074,7 @@ private struct HomeNewGroupView: View {
 
     /// S9: off by default; the request UUID survives retries of one intent.
     @State private var makePrivate = false
+    @State private var privateShown = false
     @State private var privateIntent: PhoneTrustPrivateGroupIntent?
     @State private var privateNotice: String?
 
@@ -2148,7 +2151,7 @@ private struct HomeNewGroupView: View {
                 }
             }
 
-            PrivateChatOptionSection(design: design, actions: privateChat, isOn: $makePrivate,
+            PrivateChatOptionSection(design: design, shown: privateShown, isOn: $makePrivate,
                                      disabled: creating)
 
             Section {
@@ -2174,6 +2177,7 @@ private struct HomeNewGroupView: View {
                 }
             }
         }
+        .privateChatReadiness(privateChat, shown: $privateShown, isOn: $makePrivate)
         .scrollContentBackground(.hidden)
         .background(atum.color(.ground, scheme: scheme))
         .navigationTitle(copy(.groupCreateTitle))

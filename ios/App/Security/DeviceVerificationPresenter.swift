@@ -108,6 +108,7 @@ private struct IncomingVerificationBanner: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(copy.exported("src.matrix.security-copy.copies.emoji"), action: compare)
+                .fixedSize()
                 .buttonStyle(AtumCompactButtonStyle(atum: atum, scheme: scheme, size: .small))
                 .accessibilityIdentifier("security.incoming.compare")
             Button(action: decline) {

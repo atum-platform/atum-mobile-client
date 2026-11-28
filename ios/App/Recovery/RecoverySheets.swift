@@ -368,7 +368,6 @@ struct SecuritySheet: View {
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
                         .fixedSize(horizontal: false, vertical: true)
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets())
                 }
                 Section {
                     if let snapshot {
