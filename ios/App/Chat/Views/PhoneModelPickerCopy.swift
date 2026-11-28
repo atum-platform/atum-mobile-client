@@ -57,6 +57,8 @@ enum PhonePickerCopyKey: String, CaseIterable {
 enum PhoneModelPickerStateCopyKey: String, CaseIterable {
     case title = "src.matrix.mobile-device-copy.mobileDeviceCopy.modelPickerTitle"
     case saveFailed = "src.matrix.mobile-device-copy.mobileDeviceCopy.modelPickerStatesSaveFailedText"
+    /// "Saving your choice…": a Work pick in flight (W4-Y2).
+    case saving = "src.matrix.mobile-device-copy.mobileDeviceCopy.modelPickerStatesSavingText"
 }
 
 /// Every picker word the phone shows. A key the pin carries resolves from the

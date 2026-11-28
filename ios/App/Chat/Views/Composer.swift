@@ -620,12 +620,21 @@ private struct ComposerModelChoiceButton: View {
     /// The account's subscription status, last read here or by the picker:
     /// the catalog that names a subscription model as the list names it.
     @State private var accountState = PhoneModelPickerAccount()
+    /// W4-Y2: the assistant's Work selection, read (never written) so the
+    /// chip names the plan model that answers, as desktop #143 does.
+    @State private var work: PhoneModelPickerWorkSelection?
+    /// A Work pick the picker saved in this session, until a fresh read.
+    @State private var workPick: WorkModelSelection?
+    /// A cloud pick the picker saved in this session: the server cleared the
+    /// Work choice with it, so the last Work read no longer names the model.
+    @State private var cloudPicked = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     var body: some View {
-        let warning = face?.planUnavailable.map { PhoneModelPickerCopy(design: design).planWarning($0) }
+        let warning = workFace == nil
+            ? face?.planUnavailable.map { PhoneModelPickerCopy(design: design).planWarning($0) } : nil
         // The desktop's chip (model-picker-spec.json `trigger`, #119): a plain
         // capsule, the answering model's mark before its name, weight 500,
         // no chevron. The name is `.subheadline` ink-2.
@@ -634,6 +643,8 @@ private struct ComposerModelChoiceButton: View {
                 if warning != nil {
                     ProviderMark(design: design, art: .template(asset: atum.symbol(.alertCircle),
                                                                 color: atum.color(.danger, scheme: scheme)))
+                } else if let workFace {
+                    AccountPlanMark(design: design, plan: workFace.plan, size: 16)
                 } else if let markArt {
                     ProviderMark(design: design, art: markArt, size: 16)
                 }
@@ -659,10 +670,18 @@ private struct ComposerModelChoiceButton: View {
                     onDestination: { adopt(destination: $0) },
                     accountState: accountState,
                     onPick: { row in
+                        // A cloud pick the owner made: it replaced any Work choice.
+                        workPick = nil
+                        cloudPicked = true
                         picked = row.map {
                             .init(row: $0, destinationRevision: destination?.revision,
                                   offerRevision: snapshot?.revision)
                         }
+                    },
+                    onWorkPick: { choice in
+                        picked = nil
+                        cloudPicked = false
+                        workPick = choice
                     }
                 )
                 // KitPhone › Sheet: a trailing close circle, not a text button.
@@ -688,13 +707,40 @@ private struct ComposerModelChoiceButton: View {
     private func read() async {
         if let actions, case let .value(value) = await actions.read() { adopt(offer: value) }
         if let destinations, case let .value(value) = await destinations.read() { adopt(destination: value) }
-        // A saved subscription is named by the account's catalog, as the list
-        // names it (desktop `relayCurrentName`). An Atum choice needs no read.
+        // The Work selection answers ahead of the cloud choice (desktop #143).
+        // A read only: the chip never writes a Work or cloud choice.
+        if work?.value == nil { work = destinations?.makeWorkSelection?() }
+        if !Task.isCancelled, !presented, let work {
+            await work.reload()
+            if work.value?.readState == .ready {
+                workPick = nil
+                cloudPicked = false
+                // The server clears the Work choice on every cloud write, so a
+                // fresh read naming one is newer than any cloud pick held here.
+                if work.value?.snapshot?.selection != nil { picked = nil }
+            }
+        }
+        // A saved subscription or Work model is named by the account's
+        // catalog, as the list names it (desktop `relayCurrentName`). An Atum
+        // choice needs no read.
         if !Task.isCancelled, !presented,
-           destination?.choice(for: Self.cloud)?.source.isSubscription == true,
+           destination?.choice(for: Self.cloud)?.source.isSubscription == true || answeringWork != nil,
            let readAccount = destinations?.subscriptions?.read {
             await accountState.reload(readAccount)
         }
+    }
+
+    /// The Work model that answers: a pick just saved, else (unless a cloud
+    /// pick was made since) the last Work read.
+    private var answeringWork: WorkModelSelection? {
+        if let workPick { return workPick }
+        if cloudPicked { return nil }
+        return PhoneModelPickerProjection.answeringWork(work?.value)
+    }
+
+    private var workFace: PhoneModelPickerProjection.WorkFace? {
+        PhoneModelPickerProjection.workFace(answeringWork, reported: accountState.value?.workPlanHandoffs ?? [],
+                                            state: work?.value)
     }
 
     private func adopt(offer: ManagedModelSnapshot) {
@@ -718,7 +764,7 @@ private struct ComposerModelChoiceButton: View {
                                         offer: snapshot, account: accountState.value)
     }
 
-    private var label: String { face?.name ?? design.text("desktop.atum.settings.model") }
+    private var label: String { workFace?.name ?? face?.name ?? design.text("desktop.atum.settings.model") }
 
     /// The same mark the picker row draws, its connection label included.
     /// Nil (no mark) only while nothing names the choice yet.

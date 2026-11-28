@@ -291,7 +291,9 @@ enum AssistantModelSaveResult {
 struct AssistantModelActions {
     let matrixAccountID: String
     let read: () async -> AssistantModelLoadResult
-    let save: (ManagedModelSnapshot, String, ManagedModelEffort, NativeID) async -> AssistantModelSaveResult
+    /// Effort-only changes supply the ready Work read whose revision must still match.
+    let save: @MainActor (ManagedModelSnapshot, String, ManagedModelEffort, NativeID,
+                          WorkModelSelectionSnapshot?, @escaping NativeDispatchGate) async -> AssistantModelSaveResult
 }
 
 typealias AssistantModelDestinationLoadResult = PhoneModelPickerReadResult<ManagedModelDestinationSnapshot>
@@ -317,6 +319,8 @@ struct AssistantModelDestinationActions {
         -> AssistantModelDestinationSaveResult
     /// The cloud's subscription models (`PhoneModelPicker.swift`). Nil where the host has none.
     var subscriptions: AssistantSubscriptionActions?
+    /// Binds the assistant's Work reads and writes to this owner's picker scope.
+    var makeWorkSelection: (@MainActor () -> PhoneModelPickerWorkSelection?)?
 }
 
 enum AssistantAvatarSaveResult { case saved, failed }

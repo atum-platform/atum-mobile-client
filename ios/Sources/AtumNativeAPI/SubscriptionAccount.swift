@@ -129,7 +129,7 @@ public struct PhoneModelPickerRead: Sendable {
         return result
     }
 
-    @MainActor fileprivate func withinSource<Value: Sendable>(
+    @MainActor func withinSource<Value: Sendable>(
         _ read: @escaping @MainActor () async -> Value
     ) async -> Value? {
         await bounded(until: sourceDeadline, read)
