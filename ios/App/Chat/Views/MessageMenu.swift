@@ -1068,7 +1068,9 @@ private struct MessageActionSheets: ViewModifier {
                     }
             }
             .sheet(item: $presenter.selectText, onDismiss: {
-                presenter.selectTextDismissed(links.open)
+                // Let the hosting view finish processing the dismissal before
+                // requesting the next presentation.
+                Task { @MainActor in presenter.selectTextDismissed(links.open) }
             }) { request in
                 SelectTextSheet(request: request, design: design) { url in
                     presenter.openLinkFromSelectText(url)
