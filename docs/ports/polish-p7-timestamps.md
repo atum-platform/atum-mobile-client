@@ -104,3 +104,16 @@ See the session log at the end of this file.
 - 2026-11-28: self-review fix. `BubbleStack` is a custom `Layout` and reports
   no text baseline. When the content reports none, the inline meta's bottom
   now meets the last line's box instead of the bubble's bottom edge.
+- 2026-11-28 verification:
+  - Design lint OK.
+  - `swiftc -parse` of every changed Swift file OK.
+  - `public_guard.py --base origin/main --head HEAD` exit 0.
+  - `git diff --check` clean.
+- The one locked run (`/Volumes/AtumTestFlight/polish-p7/locked-run.sh`:
+  AtumChatTests, Debug simulator build, `S6PresentationTests`, and light/dark/
+  AX-L screenshots of `chat.people`, `chat.bubbles-group` and `chat.actions`)
+  was queued at 15:18 +07. At 16:44 +07 it was still waiting on the heavy-build
+  lock. Its results will land in `/Volumes/AtumTestFlight/polish-p7/logs/`
+  (`run.log` ends with an `EXIT swift=… build=… apptests=… shots=…/9` line) and
+  `/Volumes/AtumTestFlight/polish-p7/screens/`. Not run yet: compile, unit
+  tests, screenshots. UI tests are left to the hosted shards.
