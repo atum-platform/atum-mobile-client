@@ -256,6 +256,11 @@ final class LiveConversationStore: ConversationStore {
         mentionPicks.registerRoomMention(in: inserted.draft, offset: inserted.offset)
     }
 
+    #if DEBUG
+    /// `-AtumScriptedChatActions mention` only: a scripted room has no power levels.
+    func scriptRoomMentionPermission(_ allowed: Bool) { canMentionRoom = allowed }
+    #endif
+
     /// Puts the pick into the draft (an edit by the person) and remembers who
     /// the inserted text stands for.
     func pickMention(_ candidate: MentionCandidate) {

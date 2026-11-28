@@ -272,7 +272,7 @@ actor SDKTimelineSource: ChatTimelineSource {
     /// body and `m.mentions.user_ids` (Matrix 1.7), so the mentioned people
     /// are notified even when their client ignores the HTML.
     func send(text: String, replyTo eventID: String?, mentions: OutgoingMentions) async throws {
-        let content = try Self.message(text, mentions: mentions)
+        let content = try await RoomMentionMatrix.message(text, mentions: mentions, in: room)
         if let eventID {
             _ = try await timeline.sendReply(msg: content, eventId: eventID)
         } else {
@@ -395,15 +395,6 @@ actor SDKTimelineSource: ChatTimelineSource {
 
     private static func plainText(_ text: String) throws -> RoomMessageEventContentWithoutRelation {
         try messageEventContentNew(msgtype: .text(content: TextMessageContent(body: text, formatted: nil)))
-    }
-
-    private static func message(_ text: String,
-                                mentions: OutgoingMentions) throws -> RoomMessageEventContentWithoutRelation {
-        guard !mentions.isEmpty else { return try plainText(text) }
-        let formatted = mentions.formattedHTML.map { FormattedBody(format: .html, body: $0) }
-        let content = try messageEventContentNew(msgtype: .text(
-            content: TextMessageContent(body: text, formatted: formatted)))
-        return content.withMentions(mentions: Mentions(userIds: mentions.userIDs, room: false))
     }
 }
 

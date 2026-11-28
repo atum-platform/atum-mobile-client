@@ -146,4 +146,52 @@ final class ChatCopyContractTests: XCTestCase {
         XCTAssertEqual(try copy.text("src.matrix.thread-copy.copy.replies", locale: "en", arguments: [.number(3)]),
                        "3 replies")
     }
+
+    /// Chat parity ML6 UI (`ChatActionsCopy`): the forward picker and the
+    /// link card read exported desktop `chat-copy` keys in every pinned
+    /// locale, with desktop's English.
+    func testChatActionKeysResolveInEveryPinnedLocale() throws {
+        let copy = try AtumCopy()
+        let chat = "src.matrix.chat-copy.copies."
+        let keys: [(String, [AtumCopy.Argument], String)] = [
+            ("forward", [], "Forward"),
+            ("forwardTitle", [], "Forward message"),
+            ("forwardSearch", [], "Search chats"),
+            ("forwardSend", [], "Send"),
+            ("forwardSendTo", [.text("Lan")], "Send to Lan"),
+            ("forwardEmpty", [], "No chats found"),
+            ("forwardTeamOnly", [.text("Acme")], "Only Acme chats and your assistants"),
+            ("forwardEncryptedOnly", [], "This file can go only to encrypted chats"),
+            ("sent", [], "Sent"),
+            ("retry", [], "Retry"),
+            ("errorGeneric", [], "That didn’t work. Try again."),
+            ("hideLinkPreview", [], "Hide preview"),
+        ]
+        for locale in ["en", "vi", "ja", "zh", "zh-Hant"] {
+            for (key, arguments, _) in keys {
+                XCTAssertNoThrow(try copy.text(chat + key, locale: locale, arguments: arguments), "\(locale) \(key)")
+            }
+        }
+        for (key, arguments, english) in keys {
+            XCTAssertEqual(try copy.text(chat + key, locale: "en", arguments: arguments), english, key)
+        }
+    }
+
+    /// S15: desktop #160's band words postdate the pin. The pending table is
+    /// desktop's verbatim text; once a repin carries a key, the app reads the
+    /// export and this test asks for the table to be retired.
+    func testRoomUpgradeWordsArePendingDesktopCopy() throws {
+        let copy = try AtumCopy()
+        for key in RoomUpgradePendingCopy.Key.allCases {
+            XCTAssertFalse(copy.contains(key.exportKey), "Pinned now; retire RoomUpgradePendingCopy.\(key)")
+            for locale in RoomUpgradePendingCopy.locales {
+                XCTAssertFalse(RoomUpgradePendingCopy.text(key, locale: locale).isEmpty, "\(locale) \(key)")
+            }
+        }
+        XCTAssertEqual(RoomUpgradePendingCopy.text(.moved, locale: "en"), "This chat moved to a new room.")
+        XCTAssertEqual(RoomUpgradePendingCopy.text(.join, locale: "en"), "Join new room")
+        XCTAssertEqual(RoomUpgradePendingCopy.text(.earlier, locale: "vi"), "Xem tin nhắn trước đó")
+        XCTAssertEqual(RoomUpgradePendingCopy.text(.unavailable, locale: "fr"),
+                       "The new room isn’t available. Earlier messages stay here.")
+    }
 }

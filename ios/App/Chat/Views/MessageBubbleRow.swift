@@ -88,10 +88,13 @@ struct MessageBubbleRow: View {
                                        avatarSize: Self.avatarSize, gap: Self.avatarGap) {
                     bubble(theme)
                         .chatRowMenu(row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody)
+                        .modifier(LinkPreviewLoading(item: row.item))
                     if showsAvatar, let face {
                         ChatFaceView(face: face, size: Self.avatarSize)
                     }
                 }
+                // Chat parity S11: a plain room's link card, on the message's side.
+                LinkPreviewAttachment(row: row, leading: avatarSlot, trailing: trailing)
                 if !row.item.reactions.isEmpty {
                     ReactionChips(row: row, trailing: trailing)
                         .padding(.leading, avatarSlot)
@@ -139,6 +142,8 @@ struct MessageBubbleRow: View {
                 }
                 flatContent(theme)
                     .chatRowMenu(row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody)
+                    .modifier(LinkPreviewLoading(item: row.item))
+                LinkPreviewAttachment(row: row)
                 if !row.item.reactions.isEmpty {
                     ReactionChips(row: row, trailing: false)
                 }

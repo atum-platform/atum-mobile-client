@@ -202,6 +202,8 @@ struct MessageOverlayRequest: Identifiable {
     /// The chat's shared pins when the menu opened (S5): what Pin and Unpin
     /// do, and whether they may run now. Nil where the chat has none.
     var pins: ChatPinMenu? = nil
+    /// The chat's Forward route when the menu opened (S10). Nil where it has none.
+    var forward: ChatForwardMenu? = nil
     /// The row's frame on screen when it was pressed.
     let sourceFrame: CGRect
     var id: String { row.id }
@@ -218,6 +220,7 @@ private struct MessageMenuModifier: ViewModifier {
     let presenter: MessageActionsPresenter
 
     @Environment(\.chatPinMenu) private var pinMenu
+    @Environment(\.chatForwardMenu) private var forwardMenu
     @State private var frame: CGRect = .zero
     /// The finger is down on the row and the press has not reached the menu yet.
     /// Set by `MenuPressSink` (UIKit), not a SwiftUI `@GestureState`: a long
@@ -239,7 +242,7 @@ private struct MessageMenuModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let items = MessageMenuRules.items(for: row.item, in: kind, threads: presenter.openThread != nil,
-                                           pins: pinMenu?.context)
+                                           pins: pinMenu?.context, forward: forwardMenu?.context)
         if items.isEmpty {
             content
         } else {
@@ -278,12 +281,13 @@ private struct MessageMenuModifier: ViewModifier {
                 .sensoryFeedback(.impact(weight: .medium), trigger: source) { _, opened in opened }
                 // VoiceOver: every item is an action on the message itself.
                 .accessibilityActions {
-                    ForEach(items.filter { $0 != .react && MessageMenuRules.isEnabled($0, pins: pinMenu?.context) },
+                    ForEach(items.filter { $0 != .react && MessageMenuRules.isEnabled($0, pins: pinMenu?.context,
+                                                                                    forward: forwardMenu?.context) },
                             id: \.self) { item in
                         Button(MessageMenuActions.title(item, design: design)) {
                             MessageMenuActions.perform(item, row: row, kind: kind, roomTitle: roomTitle,
                                                        parsedBody: parsedBody, actions: actions,
-                                                       presenter: presenter, pins: pinMenu)
+                                                       presenter: presenter, pins: pinMenu, forward: forwardMenu)
                         }
                     }
                     if items.contains(.react) {
@@ -345,7 +349,8 @@ private struct MessageMenuModifier: ViewModifier {
         withTransaction(transaction) {
             presenter.actionsOverlay = MessageOverlayRequest(row: row, kind: kind, roomTitle: roomTitle,
                                                              ownUserID: ownUserID, parsedBody: parsedBody,
-                                                             items: items, pins: pinMenu, sourceFrame: frame)
+                                                             items: items, pins: pinMenu, forward: forwardMenu,
+                                                             sourceFrame: frame)
         }
     }
 }
@@ -515,10 +520,16 @@ enum MessageMenuActions {
 
     static func perform(_ item: MessageMenuItem, row: ChatRow, kind: RoomKind, roomTitle: String,
                         parsedBody: AttributedString?, actions: ChatActions,
-                        presenter: MessageActionsPresenter, pins: ChatPinMenu? = nil) {
+                        presenter: MessageActionsPresenter, pins: ChatPinMenu? = nil,
+                        forward: ChatForwardMenu? = nil) {
         switch item {
         case .react: break
-        case .forward: break // The per-chat picker route is attached in the UI pass.
+        case .forward:
+            // Re-derived once the cover has gone; the SDK adapter checks the
+            // original event and its displayed revision again.
+            guard let forward, MessageMenuRules.isEnabled(item, pins: nil, forward: forward.context),
+                  let eventID = MessageMenuRules.forwardEventID(for: row.item) else { return }
+            forward.open(eventID, row, roomTitle)
         case .reply: actions.reply(row.id)
         case .replyInThread:
             if let rootID = MessageMenuRules.threadRootID(for: row.item) { presenter.openThread?(rootID) }
@@ -683,7 +694,8 @@ struct MessageActionsOverlay: View {
             let run = {
                 MessageMenuActions.perform(item, row: request.row, kind: request.kind,
                                            roomTitle: request.roomTitle, parsedBody: request.parsedBody,
-                                           actions: actions, presenter: presenter, pins: request.pins)
+                                           actions: actions, presenter: presenter, pins: request.pins,
+                                           forward: request.forward)
             }
             if MessageMenuActions.waitsForCover(item) {
                 close(then: run)
@@ -754,7 +766,8 @@ struct MessageActionsOverlay: View {
                         .frame(height: 0.5)
                         .padding(.leading, kit.space(.s4))
                 }
-                let enabled = MessageMenuRules.isEnabled(item, pins: request.pins?.context)
+                let enabled = MessageMenuRules.isEnabled(item, pins: request.pins?.context,
+                                                         forward: request.forward?.context)
                 Button {
                     perform(.item(item))
                 } label: {

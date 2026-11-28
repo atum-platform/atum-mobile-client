@@ -819,9 +819,10 @@ struct AppRoot: View {
                 $0[$1.roomID] = $1.memberUserIDs[0]
             }
         }
-        return HomePresentation(
+        let listed = rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) }
+        var home = HomePresentation(
             state: state,
-            rows: HomeRow.applyingLive(rows.filter { !model.isPrivateCosHomeRow($0.snapshotRow) },
+            rows: HomeRow.applyingLive(listed,
                                        workingRoomIDs: assistantActivity.workingRoomIDs,
                                        memberCounts: memberCounts,
                                        partners: partners,
@@ -832,6 +833,11 @@ struct AppRoot: View {
             actionFailureToken: model.roomActionFailure.token,
             pinnedRoomCount: model.joinedPinnedRoomCount,
             companyAppIconRows: model.companyWorkspace.appIconRows(signals: companySignals))
+        // S15 (desktop #160): after the access checks above, so a listed
+        // predecessor never disappears behind a successor this list hides.
+        home.hiddenUpgradePredecessors = model.liveMatrix?.hiddenUpgradePredecessors(
+            visibleRoomIDs: Set(listed.map(\.roomID))) ?? []
+        return home
     }
 
     static func rosterSnapshot(from rooms: [LiveProductRoom],
@@ -991,6 +997,9 @@ struct AppRoot: View {
             .modifier(CompanyThreadPanelHost(model: model, design: design, coordinator: companyThreads,
                                              roomID: roomID))
             .modifier(GroupThreadsHost(model: model, design: design, coordinator: groupThreads, roomID: roomID))
+            // Chat parity ML6: Forward, link cards and the room-upgrade band.
+            .modifier(ChatActionsHost(model: model, design: design, roomID: roomID,
+                                      openRoom: { await openRoomAndRoute($0) }))
             .task(id: model.privateCosTurnKey(roomID: roomID)) {
                 await model.refreshPrivateCosTurnPresentation(roomID: roomID)
             }

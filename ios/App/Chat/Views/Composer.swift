@@ -250,7 +250,7 @@ struct ChatComposer: View {
 
     private var lineState: LineState {
         LineState(refusal: store.mediaComposer.refusal, dictation: dictationRefusalLine, turn: turnLine,
-                  mentions: !store.mentionSuggestions.isEmpty)
+                  mentions: !store.mentionSuggestions.isEmpty || store.offersRoomMention)
     }
 
     /// §3.4's circle at this text size: 36 pt at the default size, at most
@@ -945,7 +945,10 @@ struct ComposerMentionPicker: View {
 
     var body: some View {
         let suggestions = store.mentionSuggestions
-        if !suggestions.isEmpty {
+        // Chat parity S14: the room row only with notify power (rechecked on
+        // the pick and again at send), after the people, as desktop orders it.
+        let offersRoom = store.offersRoomMention
+        if !suggestions.isEmpty || offersRoom {
             VStack(spacing: 0) {
                 ForEach(suggestions) { candidate in
                     Button { store.pickMention(candidate) } label: {
@@ -973,6 +976,9 @@ struct ComposerMentionPicker: View {
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("composer.mention." + candidate.userID)
+                }
+                if offersRoom {
+                    RoomMentionSuggestionRow(design: design) { Task { await store.pickRoomMention() } }
                 }
             }
             .modifier(LiveGlass(design: design, radius: 20))
