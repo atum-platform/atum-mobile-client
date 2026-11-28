@@ -195,6 +195,7 @@ struct PhoneModelPickerList: View {
                                     makePoll: request.handoff ? nil : makeConnectionsPoll,
                                     onLanded: { landing in
                                         if let registry = landing.registry { onConnectionsChanged(registry) }
+                                        return true
                                     })
         }
     }

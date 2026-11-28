@@ -30,13 +30,23 @@ labels, and sign-in facts. Settings schedules a re-projection at the next
 unexpired deadline, and the projection also checks the deadline every time
 it runs.
 
-The connect sheet used by Settings and the picker polls readiness every
-three seconds while active and completes only on an unexpired `ready` for the
-requested plan. Once ready, it makes an optional no-refresh registry read
-to update Mac details. Both reads are fenced by account and client identity,
-and Settings drops superseded responses. An unavailable poll leaves the
-sheet waiting. The picker still uses the registry for its model catalogs
-and Connect entries.
+Settings reads the registry first, letting its foreground authorization
+renew the bearer before readiness asks for the stored token. The registry
+publishes independently. If the initial registry read fails, the retry
+stays visible beside any readiness rows. OpenCode Go shows the existing
+read-failure text until its status is known. Home hubs come from the registry
+when it answers, and a later failed refresh keeps the last successful registry.
+
+The connect sheet used by Settings and the picker polls every three seconds
+while active. An unexpired `ready` confirms cloud readiness and publishes
+before the optional registry read for Mac details. When readiness is
+unavailable, including HTTP 400 on servers without the operation, a fresh
+Mac sign-in in the registry completes the existing sheet flow and updates
+the picker. Cloud readiness remains unknown in that case. Both poll reads
+use the stored bearer without rotation and are fenced by account and client.
+Settings compares the response's `checkedAt` within that scope and checks
+that the confirmation still matches before accepting the landing and
+announcing success.
 
 The engineering handoff uses the existing sheet and copy, including the
 Mac handoff instruction for `.needsRenew`. Layout and copy updates belong
@@ -64,6 +74,9 @@ package sources, tests, or fixtures.
 
 Focused coverage lives in `WorkPlanReadinessTests`,
 `AccountConnectionsTransportTests`, and `AccountConnectionsStateTests`.
+The app regressions cover legacy HTTP 400 followed by Mac sign-in, readiness
+after a suspended authorization, a superseded poll with its registry reply
+held, and registry failure and recovery alongside readiness.
 The locked run uses Swift Package Manager and the `AtumMobileStateTests`
 Debug scheme. The public boundary is checked against the committed branch
 with `python3 scripts/public_guard.py --base origin/main --head HEAD`.
