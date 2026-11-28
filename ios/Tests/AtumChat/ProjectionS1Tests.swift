@@ -49,7 +49,7 @@ final class ProjectionS1Tests: XCTestCase {
         XCTAssertEqual(rows.map(\.showsSender), rows.map(\.grouping.showsSender))
         XCTAssertEqual(rows.map(\.showsSender), [true, false, true])
         XCTAssertEqual(rows.map(\.grouping.position), [.first, .last, .single])
-        XCTAssertEqual(rows.map(\.grouping.showsTime), [false, true, true], "under each run's last bubble")
+        XCTAssertEqual(rows.map(\.grouping.showsTime), [true, true, true], "in every settled bubble's corner")
     }
 
     // MARK: TimelineProjector

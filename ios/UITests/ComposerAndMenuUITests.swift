@@ -11,7 +11,7 @@ import XCTest
 /// Queries use the frozen accessibility IDs, the composer's control IDs
 /// (`composer.pill`, `composer.reply`, `composer.edit`, `composer.typing`),
 /// `chat.connection`, `selectText.*`, the rows' `send.failed`, `quote`,
-/// `reaction.<key>` and `answer.copy`, or exported words. A bubble is one
+/// and `reaction.<key>`, or exported words. A bubble is one
 /// element read as sender, time, content and delivery (B16), so a row's
 /// words are matched with CONTAINS on its label.
 class WS3UITestCase: AtumUITestCase {
@@ -108,11 +108,11 @@ class WS3UITestCase: AtumUITestCase {
         return value == field.placeholderValue ? "" : value
     }
 
-    /// A menu item by its exported label; never the newest answer's own
-    /// "Sao chép" row in the transcript (`answer.copy`).
+    /// A menu item by its exported label (the menu's "Sao chép" is the only
+    /// Copy since Polish P7 removed the inline row under the newest answer).
     @MainActor
     func menuButton(_ app: XCUIApplication, _ label: String) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", label, "answer.copy")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
     }
 
     /// A palette button: its exported label ("Thả 😂"), or the emoji alone if

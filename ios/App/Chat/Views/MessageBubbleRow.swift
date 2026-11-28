@@ -17,10 +17,10 @@ import SwiftUI
 /// the last one, aligned to its bottom; the run's other bubbles keep an empty
 /// face-wide gutter so the run lines up (`RowGrouping.showsFace`).
 ///
-/// In the bubble's trailing corner: the run's time and "đã sửa"
-/// (`BubbleMeta`, Polish P7). Under the bubble: reaction chips (B22) and my
-/// delivery mark while it sends, when it failed or once it is seen (B7, B8,
-/// `DeliveryLine`). A long press on the bubble opens the menu (B20), whose
+/// In the bubble's trailing corner: "đã sửa", the time and, while my
+/// message sends, the sending clock (`BubbleMeta`, Polish P7). Under the
+/// bubble: reaction chips (B22), and my failed mark or the readers' faces
+/// (B7, B8, `DeliveryLine`). A long press on the bubble opens the menu (B20), whose
 /// Copy is the only one.
 ///
 /// VoiceOver reads the bubble as one element: sender, time, content and
@@ -206,9 +206,11 @@ struct MessageBubbleRow: View {
                         }
                     if !row.item.body.isEmpty {
                         // The caption spans the card, so the meta sits in
-                        // the card's corner, not after a short caption.
-                        withMeta(theme, inline: true, trailingPad: 12, bottomPad: 10) {
-                            mediaCaption(theme)
+                        // the card's corner, over the room the caption's
+                        // last line ends in.
+                        let corner = cornerPlacement(endsInText: true, text: row.item.body)
+                        withMeta(theme, placement: corner, bottomPad: 10) {
+                            mediaCaption(theme, room: room(theme, corner))
                                 .accessibilityHidden(true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12)
@@ -233,17 +235,17 @@ struct MessageBubbleRow: View {
             // side, a 40 pt `fill-quiet` tile; never the ink bubble.
             let card = kit.color(.surface, scheme: scheme)
             if row.item.media != nil {
-                // The card's own fill moves out to the meta's layout, so the
-                // time sits inside the card, under its name.
-                withMeta(theme, inline: false, trailingPad: 12, bottomPad: 12) {
-                    MediaFileContent(row: row, fill: .clear,
-                                     tileFill: kit.color(.fillQuiet, scheme: scheme),
-                                     shape: AnyShape(shape), roomTitle: roomTitle, roomKind: kind)
-                }
+                // Desktop `MatrixFileCard`: the time sits at the far end of
+                // the card's second (kind or size) line, as Telegram draws a
+                // file.
+                MediaFileContent(row: row, fill: .clear,
+                                 tileFill: kit.color(.fillQuiet, scheme: scheme),
+                                 shape: AnyShape(shape), roomTitle: roomTitle, roomKind: kind,
+                                 meta: showsMeta ? AnyView(BubbleMeta(row: row)) : nil)
                 .background(card, in: shape)
                 .atumKitElevation(.one, in: shape)
             } else {
-                withMeta(theme, inline: false, trailingPad: 14, bottomPad: 10) {
+                withMeta(theme, placement: cornerPlacement(endsInText: false, text: ""), bottomPad: 10) {
                     FileCard(name: name)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -255,8 +257,10 @@ struct MessageBubbleRow: View {
         case let .placeholder(reason):
             // Never cut short: at the largest text sizes the line wraps and
             // keeps its meaning (B19).
-            withMeta(theme, inline: true, trailingPad: 14, bottomPad: 9) {
-                Text(ChatRowText.placeholder(reason, copy: theme.copy))
+            let placeholder = ChatRowText.placeholder(reason, copy: theme.copy)
+            let corner = cornerPlacement(endsInText: true, text: placeholder)
+            withMeta(theme, placement: corner, bottomPad: 9) {
+                Text(AttributedString(placeholder).endingIn(room(theme, corner)))
                     .font(.body.italic())
                     .foregroundStyle(theme.quiet(scheme))
                     .fixedSize(horizontal: false, vertical: true)
@@ -270,11 +274,12 @@ struct MessageBubbleRow: View {
                 // The quote and the message are two elements in one bubble;
                 // the message is read first (B16), then the quote (B21).
                 let fold = foldState()
-                withMeta(theme, inline: textInline(fold), trailingPad: 14, bottomPad: textBottom(fold)) {
+                let corner = textPlacement(fold)
+                withMeta(theme, placement: corner, bottomPad: textBottom(fold)) {
                     BubbleStack(tightens: true) {
                         VStack(alignment: .leading, spacing: 6) {
                             QuoteView(row: row, roomTitle: roomTitle)
-                            messageText(theme)
+                            messageText(theme, room: room(theme, corner))
                                 .messageFold(fold.folded, lineHeight: foldLineHeight)
                                 .spokenMessage(speech, links: links, actions: actions)
                                 .accessibilityIdentifier("message.body.\(row.id)")
@@ -295,9 +300,10 @@ struct MessageBubbleRow: View {
                 .accessibilityElement(children: .contain)
             } else {
                 let fold = foldState()
-                withMeta(theme, inline: textInline(fold), trailingPad: 14, bottomPad: textBottom(fold)) {
+                let corner = textPlacement(fold)
+                withMeta(theme, placement: corner, bottomPad: textBottom(fold)) {
                     BubbleStack(tightens: true) {
-                        messageText(theme)
+                        messageText(theme, room: room(theme, corner))
                             .messageFold(fold.folded, lineHeight: foldLineHeight)
                             .padding(.horizontal, 14)
                             .padding(.top, 9)
@@ -323,10 +329,26 @@ struct MessageBubbleRow: View {
     /// keep theirs in the run's header and the line under it.
     private var showsMeta: Bool { !flat && BubbleMeta.shows(row) }
 
-    /// Plain text with nothing under it may share its last line with the
-    /// meta; a fold toggle or Bot API buttons put it on its own row.
-    private func textInline(_ fold: FoldState) -> Bool {
-        !fold.showsToggle && !hasKeyboard
+    /// Desktop `data-matrix-meta-flow`: text that ends in a paragraph, a
+    /// heading or a list item ends in the corner's room; a code block, a
+    /// table, a quote or a rule last, a fold toggle or Bot API buttons put
+    /// the corner on its own row.
+    private func textPlacement(_ fold: FoldState) -> BubbleCornerPlacement {
+        let endsInText = !fold.showsToggle && !hasKeyboard
+            && (row.item.isOwn || NativeRichText.endsInText(parsedBody ?? MessageMarkup.parse(row.item.markdownBody)))
+        return cornerPlacement(endsInText: endsInText, text: row.item.body)
+    }
+
+    private func cornerPlacement(endsInText: Bool, text: String) -> BubbleCornerPlacement {
+        guard showsMeta else { return .hidden }
+        return endsInText ? .inline(rightToLeft: BubbleMeta.endsRightToLeft(text)) : .row
+    }
+
+    /// The room the corner keeps at the end of the last line, when it sits
+    /// there.
+    private func room(_ theme: ChatTheme, _ placement: BubbleCornerPlacement) -> AttributedString? {
+        guard case .inline = placement else { return nil }
+        return BubbleMeta.room(row, theme: theme)
     }
 
     /// What sits under the bubble's last part, for the meta's own row:
@@ -337,17 +359,16 @@ struct MessageBubbleRow: View {
 
     private var hasKeyboard: Bool { !(row.item.botAPI?.keyboard?.isEmpty ?? true) }
 
-    /// The content with the meta in its trailing corner. The layout is always
-    /// there, so the content keeps its identity when the clock moves on.
-    private func withMeta<Content: View>(_ theme: ChatTheme, inline: Bool, trailingPad: CGFloat,
+    /// The content with the meta in its corner. The layout is always there,
+    /// so the content keeps its identity when the corner changes.
+    private func withMeta<Content: View>(_ theme: ChatTheme, placement: BubbleCornerPlacement,
                                          bottomPad: CGFloat,
                                          @ViewBuilder content: () -> Content) -> some View {
         let kit = theme.design.kit
-        return BubbleMetaLayout(showsMeta: showsMeta, allowsInline: inline,
-                                contentTrailing: trailingPad, contentBottom: bottomPad,
-                                gap: kit.space(.s2), edge: kit.space(.s3), bottom: kit.space(.s2)) {
+        return BubbleCornerLayout(placement: placement, contentBottom: bottomPad,
+                                  edge: kit.space(.s3), bottom: kit.space(.s2)) {
             content()
-            if showsMeta {
+            if placement != .hidden {
                 BubbleMeta(row: row, onOwnBubble: trailing)
             }
         }
@@ -420,38 +441,40 @@ struct MessageBubbleRow: View {
         }
     }
 
-    @ViewBuilder private func mediaCaption(_ theme: ChatTheme) -> some View {
+    @ViewBuilder private func mediaCaption(_ theme: ChatTheme, room: AttributedString?) -> some View {
         if trailing {
-            Text(verbatim: row.item.body)
+            Text(AttributedString(row.item.body).endingIn(room))
                 .font(.body)
                 .foregroundStyle(theme.design.kit.color(.onBubbleOwn, scheme: scheme))
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            NativeRichText(bodyText: row.item.markdownBody, parsed: parsedBody)
+            NativeRichText(bodyText: row.item.markdownBody, parsed: parsedBody, metaRoom: room)
         }
     }
 
-    /// The text. Its "đã sửa" is in the bubble's corner (TL-5, `BubbleMeta`).
-    private func messageText(_ theme: ChatTheme) -> some View {
+    /// The text. Its time and "đã sửa" are in the bubble's corner
+    /// (`BubbleMeta`); `room` ends its last line with the corner's room.
+    private func messageText(_ theme: ChatTheme, room: AttributedString? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if row.item.isOwn {
                 // B6: what I type is sent and shown as plain text.
                 if let searchHighlight {
-                    Text(searchPainted(AttributedString(row.item.body), searchHighlight, theme))
+                    Text(searchPainted(AttributedString(row.item.body), searchHighlight, theme).endingIn(room))
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text(verbatim: row.item.body)
+                    Text(AttributedString(row.item.body).endingIn(room))
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else if let searchHighlight {
                 NativeRichText(bodyText: row.item.markdownBody,
                                parsed: searchPainted(parsedBody ?? MessageMarkup.parse(row.item.markdownBody),
-                                                     searchHighlight, theme))
+                                                     searchHighlight, theme),
+                               metaRoom: room)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                NativeRichText(bodyText: row.item.markdownBody, parsed: parsedBody)
+                NativeRichText(bodyText: row.item.markdownBody, parsed: parsedBody, metaRoom: room)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

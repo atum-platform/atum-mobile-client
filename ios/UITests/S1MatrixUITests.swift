@@ -200,8 +200,7 @@ final class S1MatrixUITests: TranscriptUITestCase {
             drag(app, by: 300)
             wait(0.5)
         }
-        let reply = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@",
-                                                     word("Trả lời", "Reply"), "answer.copy")).firstMatch
+        let reply = app.buttons.matching(NSPredicate(format: "label == %@", word("Trả lời", "Reply"))).firstMatch
         for _ in 0..<3 where !reply.waitForExistence(timeout: 5) {
             let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
             origin.withOffset(CGVector(dx: text.frame.midX, dy: text.frame.midY)).press(forDuration: 1.2)

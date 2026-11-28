@@ -34,14 +34,15 @@ public struct RowGrouping: Equatable, Hashable, Sendable {
     /// The other bubbles of the run keep an empty face-wide gutter, so the
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
     public var showsFace: Bool
-    /// TL-4, desktop's run time (`src/matrix/app.tsx`, `runEnd`): the clock
-    /// for this bubble. Polish P7 (UX audit issue 4, owner 2026-11-28) puts
-    /// it inside the bubble's trailing corner on the phone, and only on the
-    /// last bubble of each run, so it shows once per sender after a change of
-    /// sender or a gap of more than 5 minutes (`runGap`). Answers of my agent
-    /// follow the same rule (the phone has no answer toolbar). Never on a
-    /// message still sending, failed, or undecryptable, never on notices.
-    /// Every bubble's accessibility label still carries its time.
+    /// The clock in this bubble's trailing corner (Polish P7, UX audit issue
+    /// 4, owner 2026-11-28). Desktop draws it on every settled bubble since
+    /// 1b035c601 (2026-11-18, `timeEligible` in `src/matrix/app.tsx`), so the
+    /// phone does too: every bubble of a run carries its own time, mine and
+    /// my agent's answers included. Never on a message still sending (its
+    /// corner draws the time with the sending clock instead, `BubbleMeta`),
+    /// failed, or undecryptable, never on notices. A team space's flat runs
+    /// ignore it and keep the run header's time. Every bubble's
+    /// accessibility label carries its time either way.
     public var showsTime: Bool
     /// TL-5: "đã sửa" sits beside that clock in the bubble (desktop
     /// `personEdited`), on every edited bubble: people's edits, mine
@@ -77,9 +78,10 @@ public struct RowGrouping: Equatable, Hashable, Sendable {
 /// - Notices are quiet centred lines, not bubbles: they are not in a run and,
 ///   as in S0, they do not break one either (a working line between two
 ///   answers does not repeat the agent's name).
-/// - The clock sits in the corner of the last bubble of each run (TL-4,
-///   2026-11-11; Polish P7, 2026-11-28). It replaced the centred label the
-///   phone drew after a 60-minute gap.
+/// - Every settled bubble carries its clock in its corner (desktop
+///   `timeEligible`, Polish P7, 2026-11-28). It replaced the run-end time
+///   under the bubble (TL-4, 2026-11-11), which replaced the centred label
+///   the phone drew after a 60-minute gap.
 /// - In a group, the sender's name opens a run and the sender's face closes
 ///   it (beside the last bubble, as in Messages and WhatsApp). A 1:1 chat
 // Preserve user-visible identity, state and recovery behavior across connection changes.
@@ -145,11 +147,11 @@ public enum Grouping {
             }
         }
 
-        // Run times (TL-4) and edits (TL-5), on bubbles only.
+        // Corner times (Polish P7) and edits (TL-5), on bubbles only.
         for (index, row) in rows.enumerated() {
-            guard let position = result[index].position else { continue }
+            guard result[index].position != nil else { continue }
             let item = row.item
-            if showsTime(item) { result[index].showsTime = position.endsRun }
+            result[index].showsTime = showsTime(item)
             result[index].showsEdited = showsEdited(item, context: context)
         }
         return result
@@ -183,12 +185,11 @@ public enum Grouping {
     }
 
     /// Desktop `timeEligible`: settled (not sending, not failed, not
-    /// undecryptable). My deleted message has no line (desktop draws no
-    /// send state for it).
+    /// undecryptable). A deleted message keeps its time, mine included
+    /// (desktop draws the corner after `MatrixDeletedMessage`).
     static func showsTime(_ item: ChatItem) -> Bool {
         switch item.kind {
         case .placeholder(.undecryptable), .placeholder(.undecryptableOldHistory): return false
-        case .placeholder(.redacted) where item.isOwn: return false
         default: break
         }
         switch item.delivery {

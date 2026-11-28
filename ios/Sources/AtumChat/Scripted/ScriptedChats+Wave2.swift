@@ -27,6 +27,40 @@ extension ScriptedChats {
                               initial: writer.items, names: Cast.names)
     }
 
+    /// `chat.corners` (Polish P7 r2): a 1:1 chat with Huy whose bubbles show
+    /// the corner (time, "đã sửa", the sending clock) on every kind: a photo
+    /// without and with a caption, a file card (the time on its second
+    /// line), a deleted message, wrapped Vietnamese, right-to-left Arabic
+    /// and CJK text, my edited message, a failed one (no corner time) and,
+    /// last, one still sending.
+    static func chatCorners(_ env: ScriptedEnvironment) -> ScriptedScript {
+        let name = ScriptedScenario.chatCorners.rawValue
+        let context = RoomContext(kind: .person, ownUserID: Cast.me)
+        var writer = ScriptedWriter(scenario: name, context: context, calendar: env.calendar)
+        writer.add(.image(width: 1600, height: 900), from: Cast.huy, at: env.ago(minutes: 40),
+                   media: scriptedMedia(name + ".photo", mimetype: "image/jpeg", filename: "photo.jpg"))
+        writer.add(.image(width: 1200, height: 900), from: Cast.me, at: env.ago(minutes: 39),
+                   body: "Con đường nhỏ sau cơn mưa, nhìn từ cửa sổ quán.",
+                   media: scriptedMedia(name + ".caption", mimetype: "image/jpeg", filename: "caption.jpg"))
+        writer.add(.file(name: "bao-cao-quy-3.pdf"), from: Cast.huy, at: env.ago(minutes: 38),
+                   media: scriptedMedia(name + ".file", mimetype: "application/pdf", filename: "bao-cao-quy-3.pdf"))
+        writer.add(.placeholder(.redacted), from: Cast.huy, at: env.ago(minutes: 37))
+        writer.add(from: Cast.huy, at: env.ago(minutes: 30), body: "Ok")
+        writer.add(from: Cast.huy, at: env.ago(minutes: 29),
+                   body: "Mình gửi bản báo cáo rồi, bạn xem phần ngân sách giúp mình trước buổi họp nhé.")
+        writer.add(from: Cast.huy, at: env.ago(minutes: 28),
+                   body: "مرحبا! نلتقي غدًا في المقهى الساعة العاشرة صباحًا، ولا تنس التقرير.")
+        writer.add(from: Cast.huy, at: env.ago(minutes: 27), body: "明天上午十点在咖啡馆见面，好吗？请带上季度报告。")
+        writer.add(from: Cast.me, at: env.ago(minutes: 20), body: "Mình đổi giờ họp sang 4 giờ rồi nhé.", isEdited: true)
+        writer.add(from: Cast.me, at: env.ago(minutes: 19), body: "שלום, נתראה מחר")
+        writer.add(from: Cast.me, at: env.ago(minutes: 5), body: "Tin này chưa gửi được.",
+                   delivery: .failed(isRecoverable: true))
+        writer.add(from: Cast.me, at: env.ago(minutes: 1), body: "Đang gửi tin này, chờ một chút.",
+                   delivery: .sending())
+        return ScriptedScript(name: name, title: "Huy", context: context,
+                              initial: writer.items, names: Cast.names)
+    }
+
     static func chatMediaFiles(_ env: ScriptedEnvironment) -> ScriptedScript {
         let name = ScriptedScenario.chatMediaFiles.rawValue
         let context = RoomContext(kind: .person, ownUserID: Cast.me)

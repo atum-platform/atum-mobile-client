@@ -20,11 +20,13 @@ struct ScriptedSendReceipt {
         XCTAssertFalse(unread.label.contains(sent), "the settled bubble has a Sent mark")
 
         let displayID = String(unread.identifier.dropFirst(prefix.count))
+        // Polish P7: a settled message nobody has read draws no line under
+        // it at all (the time is in the bubble's corner), so no failed mark
+        // and no reader's face either. The face is looked up again once the
+        // receipt lands and the line appears.
         let line = transcript.descendants(matching: .any)["delivery.line.\(displayID)"].firstMatch
         let face = line.descendants(matching: .any)["delivery.seen"].firstMatch
-        XCTAssertFalse(line.descendants(matching: .any)["send.failed"].firstMatch.exists,
-                       "the settled bubble has a failed mark")
-        XCTAssertFalse(face.exists, "the reader's face appeared before the receipt")
+        XCTAssertFalse(line.exists, "the settled unread bubble still draws a line (a mark or a face) under it")
         let bubble = transcript.descendants(matching: .any).matching(identifier: prefix + displayID).firstMatch
         return (bubble, face)
     }

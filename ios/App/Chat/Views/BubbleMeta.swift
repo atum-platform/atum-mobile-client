@@ -1,23 +1,25 @@
 import AtumChat
 import SwiftUI
 
-/// Polish P7 (UX audit issue 4, owner 2026-11-28): the time and "đã sửa"
-/// sit inside the bubble's trailing corner, Telegram-style, instead of in a
-/// caption row under every bubble. Only the meaning's placement changes:
-/// - The clock shows on the last bubble of each sender run only
-///   (`RowGrouping.showsTime`, decided by `Grouping.layout`'s runs:
-///   a change of sender or a gap of more than 5 minutes ends a run).
-/// - "đã sửa" shows on every edited bubble (`RowGrouping.showsEdited`).
-/// - While my message sends, its clock's place is kept, empty, so the bubble
-///   does not grow when it settles; the sending glyph stays in the
-///   `DeliveryLine` under it.
+/// Polish P7 (UX audit issue 4, owner 2026-11-28): the time, "đã sửa" and,
+/// while my message sends, the sending clock sit inside the bubble's
+/// trailing corner, Telegram-style, as desktop draws them (`bubbleMeta` in
+/// `src/matrix/app.tsx`, `.matrix-bubble-meta` in `styles.css`):
+/// - The time shows on every settled bubble (`RowGrouping.showsTime`,
+///   desktop `timeEligible`), not only at the end of a run.
+/// - "đã sửa" comes before it on every edited bubble
+///   (`RowGrouping.showsEdited`, desktop `personEdited`); no separator.
+/// - While my message sends, the corner draws its time and a clock glyph
+///   after it, so the corner (and the bubble) never jumps when it settles:
+///   the clock simply goes. `DeliveryLine` under the bubble keeps only the
+///   failed mark and the readers' faces.
 ///
 /// Drawing only: each bubble's accessibility label already carries its
-/// sender, time and edit (`ChatRowText.speech`), on every bubble.
+/// sender, time, edit and delivery (`ChatRowText.speech`).
 struct BubbleMeta: View {
     let row: ChatRow
-    /// On my own bubble: `on-bubble-own`, softened; elsewhere the chat's
-    /// quiet `soft`.
+    /// On my own bubble: `on-bubble-own`, quietened; elsewhere desktop's
+    /// faint ink.
     var onOwnBubble = false
     /// On a photo: ink on a glass capsule, so it reads over any picture.
     var onMedia = false
@@ -25,40 +27,50 @@ struct BubbleMeta: View {
     @Environment(\.chatTheme) private var theme
     @Environment(\.colorScheme) private var scheme
 
-    /// Whether the bubble has a corner to draw (or keep) at all.
+    /// Whether the bubble has a corner to draw at all.
     static func shows(_ row: ChatRow) -> Bool {
-        row.grouping.showsTime || row.grouping.showsEdited || keepsTimeSlot(row)
+        showsClock(row) || row.grouping.showsEdited
     }
 
-    /// My newest message while it sends: the clock it will show once it is
-    /// sent keeps its place, invisible.
-    static func keepsTimeSlot(_ row: ChatRow) -> Bool {
-        row.item.isOwn && row.delivery == .sending && row.grouping.position?.endsRun == true
+    /// The time shows once settled, and on my message while it sends.
+    static func showsClock(_ row: ChatRow) -> Bool {
+        row.grouping.showsTime || isSending(row)
     }
 
-    /// `on-bubble-own` at this opacity keeps 8.8:1 (light) and 5.7:1 (dark)
-    /// against `bubble-own` (Kit tokens), above the audit's 4.5:1.
-    static let ownOpacity = 0.7
+    /// My message on its way: the time with the sending clock after it.
+    static func isSending(_ row: ChatRow) -> Bool {
+        row.item.isOwn && row.delivery == .sending
+    }
+
+    /// Desktop's own-bubble corner: the bubble's ink at 0.66
+    /// (`.composer-human-message .matrix-bubble-meta`). On `bubble-own` that
+    /// keeps about 7.9:1 (light) and 5.2:1 (dark); desktop's own-bubble inks
+    /// are being reworked on its `feat/dark-own-bubble` branch, so recheck
+    /// these when that lands.
+    static let ownOpacity = 0.66
+
+    /// The corner's type: desktop's 11 px with tabular digits.
+    static let font = Font.caption2.monospacedDigit()
 
     var body: some View {
         if let theme {
             let kit = theme.design.kit
-            let showsTime = row.grouping.showsTime
-            let slot = !showsTime && Self.keepsTimeSlot(row)
-            let label = HStack(spacing: kit.space(.s1)) {
+            let label = HStack(spacing: Self.innerGap) {
                 if row.grouping.showsEdited {
                     Text(theme.copy.text(.edited))
-                    if showsTime || slot { Text(verbatim: "·") }
                 }
-                if showsTime || slot {
+                if Self.showsClock(row) {
                     Text(verbatim: theme.time(row.item.timestamp))
-                        .monospacedDigit()
-                        .opacity(slot ? 0 : 1)
+                }
+                if Self.isSending(row) {
+                    Image(theme.design.symbol("Clock"))
+                        .transition(.opacity)
                 }
             }
-            .font(.caption2)
+            .font(Self.font)
             .foregroundStyle(color(theme))
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(1)
+            .fixedSize()
             Group {
                 if onMedia {
                     label
@@ -67,57 +79,147 @@ struct BubbleMeta: View {
                         .background(.ultraThinMaterial, in: Capsule())
                         .background(kit.color(.glass, scheme: scheme), in: Capsule())
                         .padding(kit.space(.s2))
-                        .opacity(slot && !row.grouping.showsEdited ? 0 : 1)
                 } else {
                     label
                 }
             }
-            // The clock fades in as my message settles, instead of popping.
-            .chatMotion(.quick, value: showsTime)
+            // The sending clock fades out as my message settles.
+            .chatMotion(.quick, value: Self.isSending(row))
             .accessibilityHidden(true)
         }
     }
 
+    /// Desktop's `gap: 0.1875rem` between "đã sửa", the time and the clock.
+    static let innerGap: CGFloat = 3
+
     private func color(_ theme: ChatTheme) -> Color {
-        if onMedia { return theme.design.kit.color(.ink, scheme: scheme) }
-        return onOwnBubble ? theme.design.kit.color(.onBubbleOwn, scheme: scheme).opacity(Self.ownOpacity)
-                           : theme.quiet(scheme)
+        let kit = theme.design.kit
+        if onMedia { return kit.color(.ink, scheme: scheme) }
+        // Desktop `--atum-ink-faint` (#9096A0 light, #666B74 dark) is closest
+        // to the Kit's `ink-4` (#8A8F98, #6E737C) on people's bubbles:
+        // about 3.2:1 on `surface` in light and 3.4:1 in dark, a touch above
+        // desktop's own 3.0:1. Like desktop, it is quiet secondary type that
+        // VoiceOver never reads (the bubble's label carries the time).
+        return onOwnBubble ? kit.color(.onBubbleOwn, scheme: scheme).opacity(Self.ownOpacity)
+                           : kit.color(.ink4, scheme: scheme)
+    }
+
+    // MARK: The room on the last line (desktop `--matrix-meta-room`)
+
+    /// The invisible run that ends the last line of a bubble's text, as wide
+    /// as its corner: desktop's `::after` spacer. A last line that has the
+    /// room keeps the corner beside its last word; one that does not wraps
+    /// the spacer, and with it the corner, to a line of its own. The text
+    /// never runs under the corner, at any text size, in any script, and
+    /// every other line keeps the bubble's full width.
+    ///
+    /// It is the corner's own characters, in the corner's type, cleared:
+    /// one breakable space, a figure space of air, then the corner glued
+    /// together with no-break spaces, and three figure spaces for the
+    /// sending clock. It never needs to be exact, only never narrower than
+    /// the corner (it sits 2 pt into the text's own trailing padding).
+    static func room(_ row: ChatRow, theme: ChatTheme) -> AttributedString? {
+        guard shows(row) else { return nil }
+        var parts: [String] = []
+        if row.grouping.showsEdited { parts.append(theme.copy.text(.edited)) }
+        if showsClock(row) { parts.append(theme.time(row.item.timestamp)) }
+        var glued = "\u{2007}" + parts.joined(separator: "\u{00A0}").replacingOccurrences(of: " ", with: "\u{00A0}")
+        if isSending(row) { glued += "\u{2007}\u{2007}\u{2007}" }
+        var room = AttributedString(" " + glued)
+        let corner: Font = font
+        room.font = corner
+        room.foregroundColor = Color.clear
+        return room
+    }
+
+    /// Whether `text`'s last paragraph runs right to left (its first strong
+    /// letter is Hebrew or Arabic script), so its last line ends on the left
+    /// and the corner goes there, over its room.
+    static func endsRightToLeft(_ text: String) -> Bool {
+        let last = text.split(whereSeparator: \.isNewline).last(where: { !$0.allSatisfy(\.isWhitespace) }) ?? ""
+        for scalar in last.unicodeScalars where scalar.properties.isAlphabetic {
+            switch scalar.value {
+            case 0x0590...0x08FF, 0xFB1D...0xFDFF, 0xFE70...0xFEFF, 0x10800...0x10FFF, 0x1E800...0x1EFFF:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 }
 
-/// A bubble's content with its `BubbleMeta` in the trailing corner.
+extension AttributedString {
+    /// The text with `room` at its end, if any.
+    func endingIn(_ room: AttributedString?) -> AttributedString {
+        guard let room else { return self }
+        var result = self
+        result.append(room)
+        return result
+    }
+}
+
+/// Where a bubble's corner goes.
+enum BubbleCornerPlacement: Equatable {
+    /// Nothing to draw: the content passes through.
+    case hidden
+    /// Over the room at the end of the content's last line
+    /// (`BubbleMeta.room`), baseline to baseline with it; on the left when
+    /// that line runs right to left.
+    case inline(rightToLeft: Bool)
+    /// A line of its own under the content, at the trailing edge (desktop
+    /// `data-matrix-meta-flow='row'`: a code block, a table, a quote, a fold
+    /// toggle or Bot API buttons last, or a file without a size line).
+    case row
+}
+
+/// A bubble's content with its `BubbleMeta` in its corner.
 ///
-/// Telegram's placement, without measuring glyphs: when the content keeps
-/// its line count with the meta's width taken off the right (`allowsInline`,
-/// plain text with nothing under it), the meta sits on the last line,
-/// baseline to baseline, and the bubble widens by the meta. Otherwise it
-/// takes its own row under the content, at the trailing edge. Either way it
-/// never covers a word, at any text size: the content is measured with the
-/// meta's room taken out, never overlapped. With nothing to show the content
-/// passes through untouched (the content keeps its place and identity, so a
-/// file's download state survives the clock moving to a newer bubble).
-struct BubbleMetaLayout: Layout {
-    var showsMeta: Bool
-    var allowsInline: Bool
-    /// The content's own padding on the trailing side and at the bottom.
-    var contentTrailing: CGFloat
+/// The content is never narrowed for the corner: with `.inline` the text
+/// already ends in the corner's room, so the content is laid out once, at
+/// the offered width, and the corner is placed over that room. Each answer
+/// is cached by the offered width and by the resulting width (SwiftUI offers
+/// the bubble its own width again before placing it), and placement uses the
+/// frame worked out while sizing, never a fresh measure. With nothing to
+/// show the content passes through (it keeps its place and identity either
+/// way, so a file's download state survives the corner changing).
+struct BubbleCornerLayout: Layout {
+    var placement: BubbleCornerPlacement
+    /// The content's own padding at the bottom, which a corner on its own
+    /// row sits inside.
     var contentBottom: CGFloat
-    /// Between the last word and the meta on a shared line.
-    var gap: CGFloat
-    /// The meta's inset from the bubble's trailing edge and, on its own row,
+    /// The corner's inset from the bubble's side edge and, on its own row,
     /// from the bottom.
     var edge: CGFloat
     var bottom: CGFloat
 
     struct Frame {
         var size: CGSize
-        var contentProposal: ProposedViewSize
+        var contentSize: CGSize
         var metaFrame: CGRect
     }
 
     struct Cache {
-        var limit: CGFloat?
-        var frame: Frame?
+        var entries: [(width: CGFloat?, frame: Frame)] = []
+
+        func frame(for width: CGFloat?) -> Frame? {
+            entries.first { BubbleCornerLayout.same($0.width, width) }?.frame
+        }
+
+        mutating func store(_ frame: Frame, for width: CGFloat?) {
+            entries.removeAll { BubbleCornerLayout.same($0.width, width) || BubbleCornerLayout.same($0.width, frame.size.width) }
+            entries.append((width, frame))
+            entries.append((frame.size.width, frame))
+            if entries.count > 8 { entries.removeFirst(entries.count - 8) }
+        }
+    }
+
+    static func same(_ a: CGFloat?, _ b: CGFloat?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): true
+        case let (a?, b?): abs(a - b) < 0.5
+        default: false
+        }
     }
 
     func makeCache(subviews: Subviews) -> Cache { Cache() }
@@ -125,69 +227,62 @@ struct BubbleMetaLayout: Layout {
     func updateCache(_ cache: inout Cache, subviews: Subviews) { cache = Cache() }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
-        frame(limit: proposal.width, subviews: subviews, cache: &cache).size
+        frame(proposal.width, subviews: subviews, cache: &cache).size
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
-        let frame = frame(limit: bounds.width, subviews: subviews, cache: &cache)
+        // The bubble is placed at the size it asked for: look its frame up by
+        // that width (stored with the offered one while sizing).
+        let frame = cache.frame(for: bounds.width) ?? frame(proposal.width, subviews: subviews, cache: &cache)
         guard let content = subviews.first else { return }
-        content.place(at: bounds.origin, proposal: frame.contentProposal)
+        content.place(at: bounds.origin, proposal: ProposedViewSize(frame.contentSize))
         for meta in subviews.dropFirst() {
             meta.place(at: CGPoint(x: bounds.minX + frame.metaFrame.minX, y: bounds.minY + frame.metaFrame.minY),
                        proposal: ProposedViewSize(frame.metaFrame.size))
         }
     }
 
-    private func frame(limit: CGFloat?, subviews: Subviews, cache: inout Cache) -> Frame {
-        if let frame = cache.frame, cache.limit == limit { return frame }
-        let frame = measure(limit: limit, subviews: subviews)
-        cache = Cache(limit: limit, frame: frame)
+    private func frame(_ width: CGFloat?, subviews: Subviews, cache: inout Cache) -> Frame {
+        if let frame = cache.frame(for: width) { return frame }
+        let frame = measure(width, subviews: subviews)
+        cache.store(frame, for: width)
         return frame
     }
 
-    private func measure(limit: CGFloat?, subviews: Subviews) -> Frame {
-        let full = ProposedViewSize(width: limit, height: nil)
-        guard let content = subviews.first else { return Frame(size: .zero, contentProposal: full, metaFrame: .zero) }
-        let whole = content.sizeThatFits(full)
-        guard showsMeta, subviews.count > 1 else {
-            return Frame(size: whole, contentProposal: full, metaFrame: .zero)
+    private func measure(_ limit: CGFloat?, subviews: Subviews) -> Frame {
+        let proposal = ProposedViewSize(width: limit, height: nil)
+        guard let content = subviews.first else { return Frame(size: .zero, contentSize: .zero, metaFrame: .zero) }
+        let whole = content.sizeThatFits(proposal)
+        guard placement != .hidden, subviews.count > 1 else {
+            return Frame(size: whole, contentSize: whole, metaFrame: .zero)
         }
         let meta = subviews[1]
-        let finite = limit.flatMap { $0.isFinite ? $0 : nil }
-        let metaSize = meta.sizeThatFits(ProposedViewSize(width: finite.map { max($0 - 2 * edge, 0) }, height: nil))
+        let metaSize = meta.sizeThatFits(.unspecified)
 
-        // On the last line: the content laid out with the meta's room taken
-        // off, if that keeps its line count.
-        if allowsInline {
-            let extra = max(gap + metaSize.width + edge - contentTrailing, 0)
-            let narrow = finite.map { $0 - extra }
-            if narrow.map({ $0 > 0 }) ?? true {
-                let proposal = ProposedViewSize(width: narrow, height: nil)
-                let fitted = narrow == nil ? whole : content.sizeThatFits(proposal)
-                if abs(fitted.height - whole.height) < 0.5 {
-                    let width = fitted.width + extra
-                    // Baseline to baseline where the content reports its
-                    // last line; a custom layout (`BubbleStack`) reports only
-                    // its bottom edge, so then the meta's bottom meets the
-                    // last line's box, above the content's bottom padding.
-                    let lastLine = content.dimensions(in: proposal)[VerticalAlignment.lastTextBaseline]
-                    let metaLine = meta.dimensions(in: ProposedViewSize(metaSize))[VerticalAlignment.lastTextBaseline]
-                    let reportsLine = lastLine < fitted.height - contentBottom / 2
-                    let y = max(reportsLine ? lastLine - metaLine
-                                            : fitted.height - contentBottom - metaSize.height, 0)
-                    let height = max(fitted.height, y + metaSize.height)
-                    return Frame(size: CGSize(width: width, height: height), contentProposal: proposal,
-                                 metaFrame: CGRect(x: width - edge - metaSize.width, y: y,
-                                                   width: metaSize.width, height: metaSize.height))
-                }
-            }
+        switch placement {
+        case let .inline(rightToLeft):
+            // Baseline to baseline with the content's last line, which ends
+            // in the corner's room.
+            let dimensions = content.dimensions(in: ProposedViewSize(whole))
+            let lastLine = dimensions[VerticalAlignment.lastTextBaseline]
+            let metaLine = meta.dimensions(in: ProposedViewSize(metaSize))[VerticalAlignment.lastTextBaseline]
+            // Content that reports no text baseline (it reads as its bottom
+            // edge) puts the corner's bottom on its bottom padding instead.
+            let reportsLine = lastLine < whole.height - 0.5
+            let y = reportsLine ? min(max(lastLine - metaLine, 0), max(whole.height - metaSize.height, 0))
+                                : max(whole.height - contentBottom - metaSize.height, 0)
+            let x = rightToLeft ? edge : max(whole.width - edge - metaSize.width, 0)
+            return Frame(size: whole, contentSize: whole,
+                         metaFrame: CGRect(x: x, y: y, width: metaSize.width, height: metaSize.height))
+        default:
+            // Its own row under the content, at the trailing edge.
+            let finite = limit.flatMap { $0.isFinite ? $0 : nil }
+            let width = min(max(whole.width, metaSize.width + 2 * edge), finite ?? .infinity)
+            let y = max(whole.height - contentBottom, 0)
+            return Frame(size: CGSize(width: width, height: y + metaSize.height + bottom),
+                         contentSize: CGSize(width: width, height: whole.height),
+                         metaFrame: CGRect(x: max(width - edge - metaSize.width, 0), y: y,
+                                           width: metaSize.width, height: metaSize.height))
         }
-
-        // Its own row under the content, at the trailing edge.
-        let width = min(max(whole.width, metaSize.width + 2 * edge), finite ?? .infinity)
-        let y = max(whole.height - contentBottom, 0)
-        return Frame(size: CGSize(width: width, height: y + metaSize.height + bottom), contentProposal: full,
-                     metaFrame: CGRect(x: max(width - edge - metaSize.width, 0), y: y,
-                                       width: metaSize.width, height: metaSize.height))
     }
 }

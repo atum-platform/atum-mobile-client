@@ -21,8 +21,7 @@ final class ChatKindsUITests: TranscriptUITestCase {
         let target = labelled(app, "mình là Moon").firstMatch
         XCTAssertTrue(target.waitForExistence(timeout: 5), "the menu target did not appear")
         target.press(forDuration: 1.2)
-        let copy = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@",
-                                                    "Sao chép", "answer.copy")).firstMatch
+        let copy = app.buttons.matching(NSPredicate(format: "label == %@", "Sao chép")).firstMatch
         if !copy.waitForExistence(timeout: 5) {
             // Xcode 27 occasionally drops the first synthetic long press.
             // One bounded retry distinguishes that from a missing menu.

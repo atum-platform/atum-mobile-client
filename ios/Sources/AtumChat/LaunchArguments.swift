@@ -105,6 +105,10 @@ public enum ScriptedScenario: String, CaseIterable, Sendable {
     /// W4-E3: my assistant's chat for the agent's desk: a file it sent, then
     /// a live working line with its checklist (the panel opens on the desk).
     case chatAgentDesk = "chat.agent-desk"
+    /// Polish P7 r2: the bubble corner on every kind it sits on: a photo
+    /// with and without a caption, a file card, a deleted message, my edited,
+    /// failed and sending messages, right-to-left and CJK text.
+    case chatCorners = "chat.corners"
 }
 
 #endif

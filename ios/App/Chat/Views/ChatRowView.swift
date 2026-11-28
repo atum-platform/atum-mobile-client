@@ -311,28 +311,49 @@ struct BubbleStack: Layout {
     var spacing: CGFloat = 0
     var tightens = false
 
-    /// The width worked out for the last offered width: the transcript lays
-    /// every row out eagerly, so each part is measured once per width, not on
-    /// every pass. SwiftUI drops the cache when the parts change.
+    /// The width and the parts' heights worked out for an offered width,
+    /// kept under that width and under the resulting one: SwiftUI offers a
+    /// bubble its own width again (and places it at that width) after
+    /// sizing it at the row's, and a single-width cache measured every part
+    /// twice per pass, alternating. A few entries cover the widths a row
+    /// meets (its own, the row's, an ideal-size probe); SwiftUI drops the
+    /// cache when the parts change.
+    struct Frame {
+        var width: CGFloat
+        var sizes: [CGSize]
+        var heights: [CGFloat] { sizes.map(\.height) }
+    }
+
     struct Cache {
-        var limit: CGFloat?
-        var width: CGFloat?
+        var entries: [(limit: CGFloat?, frame: Frame)] = []
+
+        func frame(for limit: CGFloat?) -> Frame? {
+            entries.first { BubbleCornerLayout.same($0.limit, limit) }?.frame
+        }
+
+        mutating func store(_ frame: Frame, for limit: CGFloat?) {
+            entries.removeAll { BubbleCornerLayout.same($0.limit, limit) || BubbleCornerLayout.same($0.limit, frame.width) }
+            entries.append((limit, frame))
+            entries.append((frame.width, frame))
+            if entries.count > 8 { entries.removeFirst(entries.count - 8) }
+        }
     }
 
     func makeCache(subviews: Subviews) -> Cache { Cache() }
 
+    func updateCache(_ cache: inout Cache, subviews: Subviews) { cache = Cache() }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
-        let width = contentWidth(limit: proposal.width, subviews: subviews, cache: &cache)
-        let heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
-        let gaps = spacing * CGFloat(max(0, heights.count - 1))
-        return CGSize(width: width, height: heights.reduce(0, +) + gaps)
+        let frame = frame(limit: proposal.width, subviews: subviews, cache: &cache)
+        let gaps = spacing * CGFloat(max(0, frame.heights.count - 1))
+        return CGSize(width: frame.width, height: frame.heights.reduce(0, +) + gaps)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         let width = bounds.width
+        let frame = frame(limit: width, subviews: subviews, cache: &cache)
         var y = bounds.minY
-        for subview in subviews {
-            let size = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        for (subview, size) in zip(subviews, frame.sizes) {
             let x: CGFloat
             switch alignment {
             case .center: x = bounds.minX + (width - size.width) / 2
@@ -345,20 +366,41 @@ struct BubbleStack: Layout {
         }
     }
 
-    private func contentWidth(limit: CGFloat?, subviews: Subviews, cache: inout Cache) -> CGFloat {
-        if let width = cache.width, cache.limit == limit { return width }
+    /// The first part's first text baseline and the last part's last one,
+    /// so a bubble's corner (`BubbleCornerLayout`) meets the last line of
+    /// text inside it.
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout Cache) -> CGFloat? {
+        guard !subviews.isEmpty, guide == .firstTextBaseline || guide == .lastTextBaseline else { return nil }
+        let width = bounds.width
+        let frame = frame(limit: width, subviews: subviews, cache: &cache)
+        let child = ProposedViewSize(width: width, height: nil)
+        if guide == .firstTextBaseline, let first = subviews.first {
+            return bounds.minY + first.dimensions(in: child)[VerticalAlignment.firstTextBaseline]
+        }
+        let last = subviews[subviews.count - 1]
+        let above = frame.heights.dropLast().reduce(0, +) + spacing * CGFloat(max(0, frame.heights.count - 1))
+        return bounds.minY + above + last.dimensions(in: child)[VerticalAlignment.lastTextBaseline]
+    }
+
+    private func frame(limit: CGFloat?, subviews: Subviews, cache: inout Cache) -> Frame {
+        if let frame = cache.frame(for: limit) { return frame }
+        let width = contentWidth(limit: limit, subviews: subviews)
+        let frame = Frame(width: width,
+                          sizes: subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)) })
+        cache.store(frame, for: limit)
+        return frame
+    }
+
+    private func contentWidth(limit: CGFloat?, subviews: Subviews) -> CGFloat {
         let natural = subviews.map { Double($0.sizeThatFits(.unspecified).width) }
-        let width: CGFloat
         if let limit, limit.isFinite {
             let fitted = subviews.map { Double($0.sizeThatFits(ProposedViewSize(width: limit, height: nil)).width) }
             let hug = BubbleGeometry.hugWidth(fitted: fitted, natural: natural, limit: Double(limit))
             let wrapped = zip(fitted, natural).contains { $0 + 0.5 < $1 }
-            width = CGFloat(tightens && wrapped ? tight(hug, subviews: subviews) : hug)
-        } else {
-            width = CGFloat(natural.max() ?? 0)
+            return CGFloat(tightens && wrapped ? tight(hug, subviews: subviews) : hug)
         }
-        cache = Cache(limit: limit, width: width)
-        return width
+        return CGFloat(natural.max() ?? 0)
     }
 
     /// The narrowest width, at most one space below `width`, at which every

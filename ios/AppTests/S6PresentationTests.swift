@@ -49,9 +49,10 @@ final class S6PresentationTests: XCTestCase {
                                       options: .s1)
         XCTAssertEqual(settled.first { $0.id == "q" }?.delivery, DeliveryMark.none,
                        "my newest settled message carries no mark")
-        // Polish P7: the line holds only the delivery mark (and, in a flat
-        // run, "đã sửa"), so a settled unread message draws no line at all,
-        // not an empty one or a lone separator; its time is in the bubble.
+        // Polish P7: the line holds only the failed mark and the faces (and,
+        // in a flat run, "đã sửa" and the sending clock), so a message that
+        // sends and settles unread draws no line at all; its time and its
+        // sending clock are in the bubble's corner.
         XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item), flat: true))
         XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item, grouping: RowGrouping(showsTime: true)), flat: false),
                        "the run's time sits in the bubble's corner, not in a line under it")
@@ -62,14 +63,25 @@ final class S6PresentationTests: XCTestCase {
                       "a flat run has no bubble: đã sửa stays in its line")
         XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .seen(readerCount: 1)), flat: true),
                       "the faces still show")
-        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .sending), flat: false))
+        XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item, delivery: .sending), flat: false),
+                       "a bubble's sending clock is in its corner (desktop app.tsx bubbleMeta)")
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .sending), flat: true),
+                      "a flat run has no corner: its clock stays under it")
         XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .failed), flat: false))
-        // My newest message keeps its clock's place while it sends, so the
-        // bubble does not grow when it settles.
-        let sending = ChatRow(item: item, delivery: .sending, grouping: RowGrouping(position: .single))
-        XCTAssertTrue(BubbleMeta.keepsTimeSlot(sending))
-        XCTAssertFalse(BubbleMeta.keepsTimeSlot(ChatRow(item: item, delivery: .sending,
-                                                        grouping: RowGrouping(position: .first))), "not inside a run")
+        // Sending, the corner draws the time with the clock after it, so it
+        // keeps its size when the message settles (only the clock goes).
+        let sending = ChatRow(item: item, delivery: .sending, grouping: RowGrouping(position: .first))
+        XCTAssertTrue(BubbleMeta.shows(sending), "inside a run too")
+        XCTAssertTrue(BubbleMeta.showsClock(sending))
+        XCTAssertTrue(BubbleMeta.isSending(sending))
+        XCTAssertFalse(BubbleMeta.shows(ChatRow(item: item, delivery: .failed, grouping: RowGrouping(position: .single))),
+                       "a failed message has no corner time (desktop timeEligible)")
+        // The room at the end of the last line is the corner's characters,
+        // glued, in the corner's type and cleared.
+        XCTAssertTrue(BubbleMeta.endsRightToLeft("שלום עולם"))
+        XCTAssertTrue(BubbleMeta.endsRightToLeft("hello\nمرحبا بالعالم"))
+        XCTAssertFalse(BubbleMeta.endsRightToLeft("مرحبا\nhello"))
+        XCTAssertFalse(BubbleMeta.endsRightToLeft("你好，世界"))
     }
 
     func testRecoveryKeyGroupsOnlyWhileActiveAndRedactsEveryCharacterOtherwise() {

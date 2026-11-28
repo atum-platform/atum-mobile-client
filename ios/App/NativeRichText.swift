@@ -30,6 +30,10 @@ struct NativeRichText: View {
     let bodyText: String
     var parsed: AttributedString?
     var font: Font = .body
+    /// The bubble corner's room (`BubbleMeta.room`), ending the last block
+    /// when it is text (`endsInText`), as desktop's `::after` spacer ends
+    /// markdown's last paragraph, heading or list item.
+    var metaRoom: AttributedString? = nil
 
     @Environment(\.chatActions) private var actions
     @Environment(\.chatTheme) private var theme
@@ -42,9 +46,10 @@ struct NativeRichText: View {
         // would stretch a VStack (and its bubble) to the widest bubble even
         // under one short line; here they take the text's width, or their
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
+        let lastID = blocks.last?.id
         BubbleStack(alignment: horizontalAlignment, spacing: 8) {
             ForEach(blocks) { block in
-                view(for: block)
+                view(for: block, room: block.id == lastID && Self.isText(block.kind) ? metaRoom : nil)
             }
         }
         .font(font)
@@ -64,6 +69,22 @@ struct NativeRichText: View {
         return result
     }
 
+    /// Whether the markup's last block is text a bubble's corner can share
+    /// a line with: a paragraph, a heading or a list item (desktop
+    /// `data-matrix-meta-flow='markdown'`). A code block, a table, a quote or
+    /// a rule gives the corner its own row.
+    static func endsInText(_ parsed: AttributedString) -> Bool {
+        guard let last = MarkdownBlocks.blocks(parsed).last else { return false }
+        return isText(last.kind)
+    }
+
+    private static func isText(_ kind: MarkdownBlocks.Block.Kind) -> Bool {
+        switch kind {
+        case .paragraph, .heading, .listItem, .continuation: true
+        default: false
+        }
+    }
+
     private var horizontalAlignment: HorizontalAlignment {
         switch alignment {
         case .center: .center
@@ -72,14 +93,14 @@ struct NativeRichText: View {
         }
     }
 
-    @ViewBuilder private func view(for block: MarkdownBlocks.Block) -> some View {
+    @ViewBuilder private func view(for block: MarkdownBlocks.Block, room: AttributedString?) -> some View {
         switch block.kind {
         case .paragraph:
-            Text(Self.linked(block.text))
+            Text(Self.linked(block.text).endingIn(room))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("rich-text.paragraph")
         case let .heading(level):
-            Text(Self.linked(block.text))
+            Text(Self.linked(block.text).endingIn(room))
                 .font(level <= 2 ? .title3.weight(.semibold) : .headline)
                 .fixedSize(horizontal: false, vertical: true)
         case let .listItem(marker):
@@ -87,12 +108,12 @@ struct NativeRichText: View {
                 Text(verbatim: marker)
                     .monospacedDigit()
                     .frame(minWidth: 14, alignment: .trailing)
-                Text(Self.linked(block.text))
+                Text(Self.linked(block.text).endingIn(room))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.leading, CGFloat(block.depth) * 16)
         case .continuation:
-            Text(Self.linked(block.text))
+            Text(Self.linked(block.text).endingIn(room))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, CGFloat(block.depth) * 16 + 20)
         case .code:

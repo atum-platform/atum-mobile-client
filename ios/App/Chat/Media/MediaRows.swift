@@ -206,6 +206,9 @@ struct MediaFileContent: View {
     let roomTitle: String
     let roomKind: RoomKind
     var answerStyle = false
+    /// The bubble's corner (`BubbleMeta`), at the far end of the card's
+    /// second line, as desktop's `MatrixFileCard` puts it on the size line.
+    var meta: AnyView? = nil
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.chatMediaAccess) private var access
@@ -260,10 +263,16 @@ struct MediaFileContent: View {
                     .font(.body)
                     .lineLimit(3)
                     .truncationMode(.middle)
-                Text(presentationState == .failed ? copy(.mediaLoadFailed) : copy(mediaKind.copyKey))
-                    .font(.footnote)
-                    .foregroundStyle(theme?.color("soft", scheme) ?? .secondary)
-                    .lineLimit(presentationState == .failed ? 2 : 1)
+                HStack(alignment: .lastTextBaseline, spacing: theme?.design.kit.space(.s2) ?? 8) {
+                    Text(presentationState == .failed ? copy(.mediaLoadFailed) : copy(mediaKind.copyKey))
+                        .font(.footnote)
+                        .foregroundStyle(theme?.color("soft", scheme) ?? .secondary)
+                        .lineLimit(presentationState == .failed ? 2 : 1)
+                    if let meta {
+                        Spacer(minLength: 0)
+                        meta
+                    }
+                }
             }
             Spacer(minLength: 0)
         }

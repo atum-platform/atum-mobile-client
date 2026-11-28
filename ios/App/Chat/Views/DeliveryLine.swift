@@ -1,17 +1,18 @@
 import AtumChat
 import SwiftUI
 
-/// The quiet line under a bubble, now for my delivery mark only (Polish P7,
-/// UX audit issue 4, owner 2026-11-28): the run's time and "đã sửa" moved
-/// into the bubble's trailing corner (`BubbleMeta`), so a settled message
-/// nobody has read draws no line at all.
-/// - A clock while it sends, "Chưa gửi được" with a warning glyph when it
-///   failed (tapping it offers "Thử lại" and "Xóa"), and the readers' faces
-///   under the message each receipt names (B7, B8). One read signal
-///   (desktop #89, owner 2026-11-19): no check and no "Đã gửi"; the faces
-///   are the only receipt.
+/// The quiet line under a bubble, now for the failed mark and the readers
+/// only (Polish P7, UX audit issue 4, owner 2026-11-28): the time, "đã sửa"
+/// and the sending clock are in the bubble's trailing corner (`BubbleMeta`,
+/// desktop `bubbleMeta`), so a message that sends and settles unread draws
+/// no line at all and the row never changes height for it.
+/// - "Chưa gửi được" with a warning glyph when it failed (tapping it offers
+///   "Thử lại" and "Xóa"), and the readers' faces under the message each
+///   receipt names (B7, B8). One read signal (desktop #89, owner
+///   2026-11-19): no check and no "Đã gửi"; the faces are the only receipt.
 /// - In a team space's flat runs (no bubble, the header carries the time),
-///   "đã sửa" stays here, before the mark (TL-5, `RowGrouping.showsEdited`).
+///   "đã sửa" and the sending clock stay here (TL-5, desktop's under-message
+///   clock when there is no corner).
 /// Copy lives only in the long-press menu (B20); the inline copy under the
 /// newest answer is gone, so the menu's "Sao chép" is the one.
 ///
@@ -34,14 +35,23 @@ struct DeliveryLine: View {
     /// Whether the line has anything to show; the bubble row draws it only
     /// then.
     static func shows(_ row: ChatRow, flat: Bool) -> Bool {
-        row.delivery != .none || (flat && row.grouping.showsEdited)
+        hasMark(row, flat: flat) || (flat && row.grouping.showsEdited)
+    }
+
+    /// A bubble's sending clock is in its corner; a flat run's is here.
+    static func hasMark(_ row: ChatRow, flat: Bool) -> Bool {
+        switch row.delivery {
+        case .none: false
+        case .sending: flat
+        case .failed, .seen: true
+        }
     }
 
     var body: some View {
         if let theme {
             let quiet = theme.quiet(scheme)
             let showsEdited = flat && row.grouping.showsEdited
-            let hasMark = row.delivery != .none
+            let hasMark = Self.hasMark(row, flat: flat)
             HStack(spacing: 4) {
                 if showsEdited {
                     Text(theme.copy.text(.edited))
@@ -75,6 +85,8 @@ struct DeliveryLine: View {
         let muted = theme.color("muted", scheme)
         switch row.delivery {
         case .none:
+            EmptyView()
+        case .sending where !flat:
             EmptyView()
         case .sending:
             Image(theme.design.symbol("Clock"))

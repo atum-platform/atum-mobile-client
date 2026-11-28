@@ -119,35 +119,43 @@ final class GroupingTests: XCTestCase {
 
     // MARK: Time labels
 
-    // MARK: TL-4 run times, TL-5 edits (desktop parity, 2026-11-11)
+    // MARK: Corner times (Polish P7, desktop timeEligible), TL-5 edits
 
     private func times(_ items: [ChatItem], _ context: RoomContext) -> [Bool] {
         Grouping.layout(rows(items), context: context, calendar: utc).map(\.showsTime)
     }
 
-    func testTheClockSitsUnderTheLastBubbleOfEachRunMineIncluded() {
+    func testEverySettledBubbleCarriesItsOwnClockMineIncluded() {
+        // Desktop 1b035c601 (2026-11-18): `timeEligible`, not `runEnd`.
         let items = [text("a", from: F.friend, minute: 0), text("b", from: F.friend, minute: 2),
                      text("c", from: F.me, minute: 3), text("d", from: F.me, minute: 4),
                      text("e", from: F.friend, minute: 30)]
-        XCTAssertEqual(times(items, F.personRoom()), [false, true, false, true, true],
-                       "desktop runEnd: a sender change or a 5-minute gap ends a run")
-        XCTAssertEqual(times([text("a", from: F.friend, minute: 0), text("b", from: F.friend, minute: 6)],
-                             F.personRoom()), [true, true], "more than 5 minutes apart: two runs")
+        XCTAssertEqual(times(items, F.personRoom()), [true, true, true, true, true],
+                       "inside a run too, not only at its end")
+        let group = RoomContext(kind: .group, ownUserID: F.me)
+        XCTAssertEqual(times([text("a", from: F.friend, minute: 0), text("b", from: F.friend, minute: 1)], group),
+                       [true, true], "a group's run")
     }
 
-    func testMyAgentsAnswersCarryTheirTimeOnlyAtRunEndLikeAnyone() {
-        // Polish P7 (owner 2026-11-28): the clock sits in the corner of each
-        // run's last bubble only; an answer is not an exception on the phone.
+    func testMyAgentsAnswersAndAnAppsMessagesCarryTheirTimeLikeAnyone() {
         let answers = [text("q", from: F.me, minute: 0), text("a1", from: F.agent, minute: 1),
                        text("a2", from: F.agent, minute: 2)]
-        XCTAssertEqual(times(answers, F.assistantRoom()), [true, false, true], "one clock per run")
-        XCTAssertEqual(times([text("a1", from: F.agent, minute: 1), text("a2", from: F.agent, minute: 7)],
-                             F.assistantRoom()), [true, true], "a gap of more than 5 minutes shows it again")
+        XCTAssertEqual(times(answers, F.assistantRoom()), [true, true, true])
         let app = [text("m1", from: F.bot, minute: 1), text("m2", from: F.bot, minute: 2)]
-        XCTAssertEqual(times(app, F.botRoom()), [false, true], "an app's messages are not answers")
+        XCTAssertEqual(times(app, F.botRoom()), [true, true])
         var interim = text("i", from: F.agent, minute: 1)
         interim.interim = true
-        XCTAssertEqual(times([interim, text("a", from: F.agent, minute: 2)], F.assistantRoom()), [false, true])
+        XCTAssertEqual(times([interim, text("a", from: F.agent, minute: 2)], F.assistantRoom()), [true, true],
+                       "a mid-turn remark is a real message (desktop's `progress` lines are notices here)")
+    }
+
+    func testADeletedMessageKeepsItsTimeMineIncluded() {
+        var mine = text("m", from: F.me, minute: 0)
+        mine.kind = .placeholder(.redacted)
+        var theirs = text("t", from: F.friend, minute: 1)
+        theirs.kind = .placeholder(.redacted)
+        XCTAssertEqual(times([mine, theirs], F.personRoom()), [true, true],
+                       "desktop draws the corner after MatrixDeletedMessage")
     }
 
     func testNoClockWhileSendingFailedOrUndecryptableAndNeverOnNotices() {
