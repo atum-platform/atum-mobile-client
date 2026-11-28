@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import XCTest
 @testable import AtumNativeAPI
 
@@ -82,12 +83,11 @@ import XCTest
     }
 
     func testSaveReadsMissingRevisionAndRetriesAnAdvancedConflictOnce() async {
-        let state = picker([
+        let state = await picker([
             .init(200, #"{"revision":0,"selection":null}"#), .conflict,
             .init(200, #"{"revision":2,"selection":null}"#),
             .init(200, #"{"revision":3,"provider":"atum-work","plan":"codex","model":"gpt-5.4"}"#)
-        ])
-        state.setEligibility(.known([pick]))
+        ], plans: [pick])
         await state.save(pick)
         XCTAssertEqual(operations, ["work_selection_read", "work_selection_set", "work_selection_read", "work_selection_set"])
         XCTAssertEqual(writeRevisions, [0, 2])
@@ -101,8 +101,7 @@ import XCTest
         let winner = WorkSelectionFixture.Reply(200, """
             {"revision":4,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}
             """)
-        let state = picker([winner, .conflict, winner])
-        state.setEligibility(.known([pick]))
+        let state = await picker([winner, .conflict, winner], plans: [pick])
         await state.reload()
         await state.save(pick)
         XCTAssertEqual(writeRevisions, [4])
@@ -112,12 +111,11 @@ import XCTest
     }
 
     func testSecondConflictReadsTheWinnerWithoutAThirdWrite() async {
-        let state = picker([
+        let state = await picker([
             .init(200, #"{"revision":1,"selection":null}"#), .conflict,
             .init(200, #"{"revision":2,"selection":null}"#), .conflict,
             .init(200, #"{"revision":3,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}"#)
-        ])
-        state.setEligibility(.known([pick]))
+        ], plans: [pick])
         await state.save(pick)
         XCTAssertEqual(writeRevisions, [1, 2])
         XCTAssertEqual(operations.last, "work_selection_read")
@@ -128,13 +126,12 @@ import XCTest
 
     func testNewPickDropsAStaleConflictReadAndRetry() async {
         let pending = HeldWorkReply(arrived: expectation(description: "old pick's conflict reread"))
-        let state = picker([
+        let state = await picker([
             .init(200, #"{"revision":4,"selection":null}"#), .conflict,
             .init(200, #"{"revision":5,"selection":null}"#, held: pending),
             .init(200, #"{"revision":6,"selection":null}"#),
             .init(200, #"{"revision":7,"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}"#)
-        ])
-        state.setEligibility(.known([pick, otherPick]))
+        ], plans: [pick, otherPick])
         let old = Task { await state.save(pick) }
         await fulfillment(of: [pending.arrived], timeout: 2)
         XCTAssertEqual(state.value?.readState, .loading)
@@ -151,14 +148,17 @@ import XCTest
     func testAccountSwitchDiscardsAnInFlightConflictReadAndPreventsRetry() async {
         let pending = HeldWorkReply(arrived: expectation(description: "old account's conflict reread"))
         var accountGeneration = 1
-        let state = picker([
+        let state = await picker([
             .init(200, #"{"revision":2,"selection":null}"#), .conflict,
             .init(200, #"{"revision":3,"selection":null}"#, held: pending)
-        ], isCurrent: { accountGeneration == 1 })
-        state.setEligibility(.known([pick]))
+        ], plans: [pick], isCurrent: { accountGeneration == 1 })
         let save = Task { await state.save(pick) }
         await fulfillment(of: [pending.arrived], timeout: 2)
+        let accountChanged = expectation(description: "account switch invalidates the observed value")
+        withObservationTracking { _ = state.value } onChange: { accountChanged.fulfill() }
         accountGeneration += 1
+        state.retire()
+        await fulfillment(of: [accountChanged], timeout: 2)
         XCTAssertNil(state.value)
         pending.deliver()
         await save.value
@@ -174,12 +174,15 @@ import XCTest
             .init(200, #"{"revision":2,"selection":null}"#, held: pending),
             .init(200, #"{"revision":9,"selection":null}"#)
         ])
+        let account = PhoneModelPickerAccount()
         let first = PhoneModelPickerWorkSelection(agentPrincipal: agent, client: client,
+                                                   account: account,
                                                    isCurrent: { activeAgent == self.agent })
         let read = Task { await first.reload() }
         await fulfillment(of: [pending.arrived], timeout: 2)
         activeAgent = otherAgent
         let second = PhoneModelPickerWorkSelection(agentPrincipal: otherAgent, client: client,
+                                                    account: account,
                                                     isCurrent: { activeAgent == self.otherAgent })
         await second.reload()
         pending.deliver()
@@ -190,26 +193,40 @@ import XCTest
                        [agent.rawValue, otherAgent.rawValue])
     }
 
-    func testReportedAndCurrentModelsStayReadOnlyUntilKnownEligible() async {
-        let state = picker([
-            .init(200, #"{"revision":6,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}"#)
+    func testPickerUsesTheSharedCatalogAndAllowsTheLastConnectedMacPlan() async {
+        let account = PhoneModelPickerAccount()
+        let client = client([
+            .init(200, #"{"revision":6,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}"#),
+            .init(200, #"{"revision":7,"provider":"atum-work","plan":"codex","model":"gpt-5.4"}"#)
         ])
-        let reported: [PhoneModelPickerProjection.WorkPlanHandoff] = [
-            .init(plan: .codex, models: [.init(id: pick.model, displayName: "GPT")]),
-            .init(plan: .claude, models: [.init(id: pick.model, displayName: "Other plan")])
-        ]
+        let state = PhoneModelPickerWorkSelection(agentPrincipal: agent, client: client,
+                                                  account: account, isCurrent: { true })
         await state.save(pick) // No preread either.
         XCTAssertTrue(operations.isEmpty)
         await state.reload()
-        let readOnly = PhoneModelPickerProjection.workRows(reported: reported, state: state.value)
-        XCTAssertEqual(readOnly.map(\.id.plan), [.codex, .claude, .claude])
-        XCTAssertEqual(readOnly.filter(\.selected).map(\.id), [otherPick])
-        XCTAssertTrue(readOnly.filter(\.selectable).isEmpty)
-        state.setEligibility(.known([pick]))
+
+        let registry = catalog([pick], stale: true)
+        await account.reload(.init(chatGPT: { nil }, openCodeGo: { nil }, accountConnections: { registry }))
+        XCTAssertEqual(state.rows.filter(\.selectable).map(\.id), [pick])
+        let saved = state.rows.filter(\.selected)
+        XCTAssertEqual(saved.map(\.id), [otherPick])
+        XCTAssertEqual(saved.first?.displayName,
+                       "Claude · \(ModelDisplayName.destinationLabel(model: otherPick.model))")
         await state.save(otherPick)
-        let eligible = PhoneModelPickerProjection.workRows(reported: reported, state: state.value)
-        XCTAssertEqual(eligible.filter(\.selectable).map(\.id), [pick])
         XCTAssertEqual(operations, ["work_selection_read"])
+        await state.save(pick)
+        XCTAssertEqual(writeRevisions, [6])
+        XCTAssertEqual(state.rows.filter(\.selected).map(\.id), [pick])
+
+        let sameModelOtherPlan = WorkModelSelection(plan: .claude, model: pick.model)!
+        account.landed(catalog([pick, sameModelOtherPlan]))
+        XCTAssertEqual(state.rows.filter(\.selectable).map(\.id), [pick, sameModelOtherPlan])
+        XCTAssertEqual(state.rows.filter(\.selected).map(\.id), [pick])
+
+        account.landed(AccountConnections(connections: []))
+        XCTAssertTrue(state.rows.filter(\.selectable).isEmpty)
+        await state.save(pick)
+        XCTAssertEqual(writeRevisions, [6])
     }
 
     func testEligibilityIsRecheckedBeforeAnAuthorizationReplay() async {
@@ -221,35 +238,44 @@ import XCTest
             if refresh { onRefresh?() }
             return "owner-fixture"
         })
-        let state = PhoneModelPickerWorkSelection(agentPrincipal: agent, client: client, isCurrent: { true })
-        onRefresh = { [weak state] in state?.setEligibility(.unknown) }
-        state.setEligibility(.known([pick]))
+        let account = await pickerAccount(plans: [pick])
+        let state = PhoneModelPickerWorkSelection(agentPrincipal: agent, client: client,
+                                                  account: account, isCurrent: { true })
+        onRefresh = { account.landed(AccountConnections(connections: [])) }
         await state.save(pick)
         XCTAssertEqual(operations, ["work_selection_read", "work_selection_set"])
-        XCTAssertEqual(state.value?.eligibility, .unknown)
+        XCTAssertEqual(state.value?.eligibility, .known([]))
         XCTAssertEqual(state.value?.saveState, .idle)
     }
 
-    func testOtherSaveFailuresRemainDistinctFromConflicts() async {
-        let state = picker([
-            .init(200, #"{"revision":0,"selection":null}"#),
-            .init(503, #"{"error":"matrix_503"}"#)
-        ])
-        state.setEligibility(.known([pick]))
+    func testAmbiguousWriteFailureKeepsTheNameAndRequiresAFreshRevision() async {
+        let state = await picker([
+            .init(200, #"{"revision":6,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}"#),
+            .init(503, "unavailable"),
+            .init(200, #"{"revision":7,"selection":{"provider":"atum-work","plan":"codex","model":"gpt-5.4"}}"#),
+            .init(200, #"{"revision":8,"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}"#)
+        ], plans: [pick, otherPick])
         await state.save(pick)
-        XCTAssertEqual(writeRevisions, [0])
+        XCTAssertEqual(writeRevisions, [6])
         XCTAssertEqual(state.value?.saveState, .failed(.other))
-        XCTAssertEqual(state.value?.readState, .ready)
-        XCTAssertNil(state.value?.snapshot?.selection)
+        XCTAssertEqual(state.value?.readState, .failed)
+        XCTAssertEqual(state.value?.snapshot?.selection, otherPick)
+        XCTAssertTrue(state.rows.contains { $0.id == otherPick && !$0.selected })
+
+        await state.save(otherPick)
+        XCTAssertEqual(operations, ["work_selection_read", "work_selection_set", "work_selection_read", "work_selection_set"])
+        XCTAssertEqual(writeRevisions, [6, 7])
+        XCTAssertEqual(state.value?.readySnapshot?.revision, 8)
+        XCTAssertEqual(state.value?.readySnapshot?.selection, otherPick)
     }
 
     func testFailedReloadKeepsTheNameButRequiresAFreshRevisionForSaving() async {
-        let state = picker([
+        let state = await picker([
             .init(200, #"{"revision":6,"selection":{"provider":"atum-work","plan":"claude","model":"claude-opus-5-5"}}"#),
             .init(503, #"{"error":"matrix_503"}"#),
             .init(200, #"{"revision":7,"selection":null}"#),
             .init(200, #"{"revision":8,"provider":"atum-work","plan":"codex","model":"gpt-5.4"}"#)
-        ])
+        ], plans: [pick])
         await state.reload()
         await state.reload()
         XCTAssertEqual(state.value?.readState, .failed)
@@ -257,7 +283,6 @@ import XCTest
         let cached = PhoneModelPickerProjection.workRows(reported: [], state: state.value)
         XCTAssertEqual(cached.map(\.id), [otherPick])
         XCTAssertFalse(cached.contains(where: \.selected))
-        state.setEligibility(.known([pick]))
         await state.save(pick)
         XCTAssertEqual(writeRevisions, [7])
         XCTAssertEqual(state.value?.readySnapshot?.selection, pick)
@@ -274,9 +299,26 @@ import XCTest
         return NativeDomainClient(testAuthorization: { authorization($0) }, protocolClasses: [WorkSelectionFixture.self])
     }
 
-    private func picker(_ replies: [WorkSelectionFixture.Reply], isCurrent: @escaping NativeDispatchGate = { true })
-        -> PhoneModelPickerWorkSelection {
-        PhoneModelPickerWorkSelection(agentPrincipal: agent, client: client(replies), isCurrent: isCurrent)
+    private func picker(_ replies: [WorkSelectionFixture.Reply], plans: [WorkModelSelection],
+                        isCurrent: @escaping NativeDispatchGate = { true }) async -> PhoneModelPickerWorkSelection {
+        let account = await pickerAccount(plans: plans)
+        return PhoneModelPickerWorkSelection(agentPrincipal: agent, client: client(replies),
+                                             account: account, isCurrent: isCurrent)
+    }
+
+    private func pickerAccount(plans: [WorkModelSelection]) async -> PhoneModelPickerAccount {
+        let account = PhoneModelPickerAccount()
+        let registry = catalog(plans)
+        await account.reload(.init(chatGPT: { nil }, openCodeGo: { nil }, accountConnections: { registry }))
+        return account
+    }
+
+    private func catalog(_ choices: [WorkModelSelection], stale: Bool = false) -> AccountConnections {
+        let mac = AccountConnectionDevice(deviceServiceID: "mac", displayName: "Mac", stale: stale, observedAt: 1)
+        return AccountConnections(connections: Dictionary(grouping: choices, by: \.plan).map { plan, choices in
+            AccountConnection(id: plan.rawValue, kind: .plan, status: .connected, devices: [mac],
+                              models: choices.map { .init(id: $0.model, displayName: $0.model) })
+        })
     }
 
     private var operations: [String] {

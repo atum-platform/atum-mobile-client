@@ -39,7 +39,8 @@ public enum PhoneModelPickerProjection {
             }
         }
         if let saved = state?.snapshot?.selection, seen.insert(saved).inserted {
-            rows.append(.init(id: saved, displayName: ModelDisplayName.destinationLabel(model: saved.model),
+            let modelName = ModelDisplayName.destinationLabel(model: saved.model)
+            rows.append(.init(id: saved, displayName: "\(saved.plan.productName) · \(modelName)",
                               selected: saved == current, selectable: state?.eligibility.allows(saved) == true))
         }
         return rows

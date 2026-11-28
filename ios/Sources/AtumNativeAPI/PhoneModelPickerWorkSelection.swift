@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// Eligibility is a fact about this assistant and plan. Reported account
-/// catalogs and saved selections do not grant write eligibility.
+/// Which picks the account's connected-plan catalog offers on the phone.
+/// The owner write checks assistant and plan authorization on the server.
 public enum WorkModelEligibility: Equatable, Sendable {
     case unknown
     case known(Set<WorkModelSelection>)
@@ -38,9 +38,20 @@ public struct PhoneModelPickerWorkSelectionState: Equatable, Sendable {
 @MainActor @Observable
 public final class PhoneModelPickerWorkSelection {
     public let agentPrincipal: NativeID
-    public var value: PhoneModelPickerWorkSelectionState? { scopeIsCurrent ? state : nil }
+    public var value: PhoneModelPickerWorkSelectionState? {
+        guard scopeIsCurrent else { return nil }
+        var value = state
+        value.eligibility = eligibility
+        return value
+    }
+
+    public var rows: [PhoneModelPickerProjection.WorkRow] {
+        guard let value else { return [] }
+        return PhoneModelPickerProjection.workRows(reported: account.value?.workPlanHandoffs ?? [], state: value)
+    }
 
     private let client: NativeDomainClient
+    private let account: PhoneModelPickerAccount
     private let isCurrent: NativeDispatchGate
     private var state = PhoneModelPickerWorkSelectionState()
     private var retired = false
@@ -48,16 +59,19 @@ public final class PhoneModelPickerWorkSelection {
 
     private var scopeIsCurrent: Bool { !retired && isCurrent() }
 
-    public init(agentPrincipal: NativeID, client: NativeDomainClient,
-                isCurrent: @escaping NativeDispatchGate) {
-        self.agentPrincipal = agentPrincipal
-        self.client = client
-        self.isCurrent = isCurrent
+    private var eligibility: WorkModelEligibility {
+        guard let snapshot = account.value, snapshot.accountConnectionsState == .ready else { return .unknown }
+        return .known(Set(snapshot.workPlanHandoffs.flatMap { handoff in
+            handoff.models.compactMap { WorkModelSelection(plan: handoff.plan, model: $0.id) }
+        }))
     }
 
-    public func setEligibility(_ eligibility: WorkModelEligibility) {
-        guard scopeIsCurrent else { return }
-        state.eligibility = eligibility
+    public init(agentPrincipal: NativeID, client: NativeDomainClient,
+                account: PhoneModelPickerAccount, isCurrent: @escaping NativeDispatchGate) {
+        self.agentPrincipal = agentPrincipal
+        self.client = client
+        self.account = account
+        self.isCurrent = isCurrent
     }
 
     public func reload(within budget: PhoneModelPickerRead = .init()) async {
@@ -68,7 +82,7 @@ public final class PhoneModelPickerWorkSelection {
     }
 
     public func save(_ choice: WorkModelSelection) async {
-        guard scopeIsCurrent, !Task.isCancelled, state.eligibility.allows(choice) else { return }
+        guard scopeIsCurrent, !Task.isCancelled, eligibility.allows(choice) else { return }
         generation &+= 1
         let mine = generation
         state.saveState = .saving(choice)
@@ -88,7 +102,7 @@ public final class PhoneModelPickerWorkSelection {
         }
 
         let canWrite: NativeDispatchGate = {
-            self.owns(mine) && self.state.eligibility.allows(choice)
+            self.owns(mine) && self.eligibility.allows(choice)
         }
         for attempt in 0...1 {
             guard canWrite(), !Task.isCancelled else { return }
@@ -99,10 +113,18 @@ public final class PhoneModelPickerWorkSelection {
                     isCurrent: canWrite
                 )
             } catch {
+                // The write might have landed before its reply was lost. Keep
+                // the name but require readback before another write.
+                guard owns(mine) else { return }
+                state.readState = .failed
                 if canWrite(), !Task.isCancelled { state.saveState = .failed(.other) }
                 return
             }
-            guard owns(mine), !Task.isCancelled else { return }
+            guard owns(mine) else { return }
+            guard !Task.isCancelled else {
+                state.readState = .failed
+                return
+            }
             if case let .saved(saved) = result {
                 state.snapshot = saved
                 state.readState = .ready

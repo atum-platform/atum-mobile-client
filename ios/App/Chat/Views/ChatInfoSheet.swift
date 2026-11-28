@@ -317,7 +317,8 @@ struct AssistantModelDestinationActions {
         -> AssistantModelDestinationSaveResult
     /// The cloud's subscription models (`PhoneModelPicker.swift`). Nil where the host has none.
     var subscriptions: AssistantSubscriptionActions?
-    var makeWorkSelection: (@MainActor () -> PhoneModelPickerWorkSelection)?
+    /// Binds Work selection to the same account catalog the picker reloads.
+    var makeWorkSelection: (@MainActor (PhoneModelPickerAccount) -> PhoneModelPickerWorkSelection?)?
 }
 
 enum AssistantAvatarSaveResult { case saved, failed }

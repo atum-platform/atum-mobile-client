@@ -373,6 +373,7 @@ final class LiveAppModel {
             default: replaced = true
             }
             guard replaced else { return }
+            retireWorkModelPickers()
             configureHandleDirectory()
             rebindPhoneApprovals()
             applePurchases.bind(accountID: context?.runtime.ticket.session.userID, api: domainClient)
@@ -391,6 +392,12 @@ final class LiveAppModel {
     }
     @ObservationIgnored private var modelOffers = [NativeID: ManagedModelPickerState<ManagedModelSnapshot>]()
     @ObservationIgnored private var modelDestinations = [NativeID: ManagedModelPickerState<ManagedModelDestinationSnapshot>]()
+    @ObservationIgnored private let workModelPickers = NSHashTable<PhoneModelPickerWorkSelection>.weakObjects()
+
+    private func retireWorkModelPickers() {
+        for picker in workModelPickers.allObjects { picker.retire() }
+        workModelPickers.removeAllObjects()
+    }
 
     private func modelOfferState(for principal: NativeID) -> ManagedModelPickerState<ManagedModelSnapshot> {
         if let state = modelOffers[principal] { return state }
@@ -2137,8 +2144,12 @@ final class LiveAppModel {
                 ),
                 makeConnectionsPoll: { [weak self] in self?.accountConnectionsPoller() ?? { nil } }
             ),
-            makeWorkSelection: {
-                PhoneModelPickerWorkSelection(agentPrincipal: agent.principal, client: client, isCurrent: current)
+            makeWorkSelection: { [weak self] account in
+                guard let self, current() else { return nil }
+                let picker = PhoneModelPickerWorkSelection(agentPrincipal: agent.principal, client: client,
+                                                           account: account, isCurrent: current)
+                self.workModelPickers.add(picker)
+                return picker
             }
         )
     }
@@ -4435,6 +4446,7 @@ final class LiveAppModel {
         // belong to the account; another account's are dropped here.
         AtumAvatarArtMemo.shared.beginAccountScope(accountID)
         guard companyAccountID != accountID else { return }
+        retireWorkModelPickers()
         companyWorkspace.beginAccountScope(accountID)
         companyAccountID = accountID
         companyLeftRooms.removeAll()
@@ -4443,6 +4455,7 @@ final class LiveAppModel {
     }
 
     private func clearCompanyAccountScope() {
+        retireWorkModelPickers()
         // Retire both avatar caches together on every account-ending route.
         MatrixAvatarThumbnailCache.shared.endAccountScope()
         AtumAvatarArtMemo.shared.endAccountScope()
