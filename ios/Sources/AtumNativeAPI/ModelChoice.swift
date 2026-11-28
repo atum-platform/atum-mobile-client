@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// A model write rejected before applying the choice because its fence moved.
 enum ManagedModelFenceConflict: String, Decodable, Error {
@@ -35,7 +36,7 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
 /// One agent's offer or destination snapshot in the current account session.
 /// The write generation fences reads even when the revision alone cannot tell
 /// which response observed the current policy.
-@MainActor public final class ManagedModelPickerState<Snapshot: Equatable & Sendable> {
+@MainActor @Observable public final class ManagedModelPickerState<Snapshot: Equatable & Sendable> {
     public enum SaveResult {
         case saved(Snapshot)
         case refused(Snapshot?)
@@ -49,10 +50,12 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
     }
 
     private let revision: KeyPath<Snapshot, Int64>
-    private var held: Snapshot?
-    private var adoptedWrites = 0
-    private var latestIntent = 0
-    private var pending: (choice: ManagedModelPickerChoice, fence: Snapshot, id: NativeID)?
+    public private(set) var snapshot: Snapshot?
+    /// A submitted choice is shared by the pickers for this agent until it settles.
+    public private(set) var submittedChoice: ManagedModelPickerChoice?
+    @ObservationIgnored private var adoptedWrites = 0
+    @ObservationIgnored private var latestIntent = 0
+    @ObservationIgnored private var pending: (choice: ManagedModelPickerChoice, fence: Snapshot, id: NativeID)?
 
     public init(revision: KeyPath<Snapshot, Int64>) {
         self.revision = revision
@@ -65,10 +68,10 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
         do { result = .success(try await fetch()) }
         catch { result = .failure(error) }
         guard isCurrent(), !Task.isCancelled else { throw NativeDomainClientFailure.cancelled }
-        if adoptedWrites != writesAtStart, let held { return held }
+        if adoptedWrites != writesAtStart, let snapshot { return snapshot }
         let snapshot = try result.get()
-        if let held, snapshot[keyPath: revision] < held[keyPath: revision] { return held }
-        held = snapshot
+        if let held = self.snapshot, snapshot[keyPath: revision] < held[keyPath: revision] { return held }
+        self.snapshot = snapshot
         return snapshot
     }
 
@@ -78,18 +81,21 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
     public func save(from snapshot: Snapshot, choice: ManagedModelPickerChoice, requestID: NativeID,
                      refreshAfterSecondConflict: Bool, isCurrent: () -> Bool, fetch: () async throws -> Snapshot,
                      isSelectionCurrent: () -> Bool = { true }, revalidate: (() async -> Bool)? = nil,
+                     refreshAfterTransportFailure: Bool = false,
                      write: @MainActor (Snapshot, NativeID) async throws -> Snapshot) async -> SaveResult {
         guard isSelectionCurrent() else { return .cancelled }
         guard isCurrent(), !Task.isCancelled else { return .failed }
         latestIntent += 1
         let intent = latestIntent
+        submittedChoice = choice
+        defer { if latestIntent == intent { submittedChoice = nil } }
         func current() -> Bool {
             isSelectionCurrent() && isCurrent() && !Task.isCancelled && latestIntent == intent
         }
         func inactiveResult() -> SaveResult { isSelectionCurrent() ? .failed : .cancelled }
 
         let retry = pending.flatMap { $0.choice == choice ? $0 : nil }
-        var fence = retry?.fence ?? held ?? snapshot
+        var fence = retry?.fence ?? self.snapshot ?? snapshot
         var id = retry?.id ?? (fence == snapshot && pending == nil
             ? requestID : ModelWriteRequests<NativeID>.freshID())
         pending = nil
@@ -114,9 +120,9 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
                 let saved = try await write(fence, id)
                 guard current() else { return inactiveResult() }
                 pending = nil
-                if let held, saved[keyPath: revision] < held[keyPath: revision] { return .saved(held) }
+                if let held = self.snapshot, saved[keyPath: revision] < held[keyPath: revision] { return .saved(held) }
                 adoptedWrites += 1
-                held = saved
+                self.snapshot = saved
                 return .saved(saved)
             } catch is ManagedModelFenceConflict {
                 guard current() else { return inactiveResult() }
@@ -139,7 +145,13 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
                 guard current() else { return inactiveResult() }
                 let refusal: Bool
                 if case NativeDomainClientFailure.http = error { refusal = true } else { refusal = error is ContractViolation }
-                guard refusal else { return .failed }
+                guard refusal else {
+                    if refreshAfterTransportFailure {
+                        // The provider may have applied the write. Keep the replay key and adopt only its readback.
+                        _ = try? await read(isCurrent: current, fetch: fetch)
+                    }
+                    return .failed
+                }
                 pending = nil
                 return await refuse()
             }

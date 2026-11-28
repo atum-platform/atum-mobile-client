@@ -1135,11 +1135,12 @@ public struct AgentsRead: Sendable {
     /// Writes exactly one destination choice under the provider's revision
     /// and policy fences. Only the decoded response may be shown as saved.
     public func writeManagedModelDestination(agentPrincipal: NativeID,
-                                             value: ManagedModelDestinationWrite) async throws
+                                             value: ManagedModelDestinationWrite,
+                                             isCurrent: @MainActor () -> Bool = { true }) async throws
         -> ManagedModelDestinationSnapshot {
         let snapshot = try await putModelChoice(
             ManagedModelDestinationSnapshot.self,
-            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value
+            url: agentURL(agentPrincipal, suffix: "model-destinations"), value: value, isCurrent: isCurrent
         )
         guard snapshot.agentPrincipal == agentPrincipal else {
             throw NativeDomainClientFailure.invalidResponse

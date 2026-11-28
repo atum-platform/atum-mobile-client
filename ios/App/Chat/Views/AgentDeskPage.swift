@@ -31,7 +31,8 @@ struct AgentDeskChat {
 
 /// The desk's words, all from the pinned export (`shared/matrix-agent-desk-copy.ts`).
 enum AgentDeskCopy {
-    static let refresh = "desktop.common.refresh"
+    // TODO(W4-C9): use the desk-local `tryAgain` key after the export lands.
+    static let retry = "src.matrix.mobile-copy.mobilePhoneCopy.retry"
 
     static func key(_ name: String) -> String { "shared.matrix-agent-desk-copy.matrixAgentDeskCopy." + name }
 
@@ -104,8 +105,8 @@ struct AgentDeskPage: View {
             if !sent.isEmpty {
                 sentSection(sent)
             }
-            if let view = model.shownOwnView {
-                ownSection(view, sentIsEmpty: sent.isEmpty)
+            if model.filesState != .unsupported {
+                ownSection(sentIsEmpty: sent.isEmpty)
             }
             controlsSection
             if moreOpen {
@@ -167,9 +168,25 @@ struct AgentDeskPage: View {
     /// The agent's own files on its computer, when the host shares them. With
     /// nothing sent here, this group heads the files as "Files" and says
     /// where they are in its footer.
-    private func ownSection(_ view: HostAgentDesk.Files, sentIsEmpty: Bool) -> some View {
+    private func ownSection(sentIsEmpty: Bool) -> some View {
         Section {
-            ownFiles(view)
+            if let view = model.ownView { ownFiles(view) }
+            switch model.filesState {
+            case .empty:
+                if sentIsEmpty || model.ownPath != nil {
+                    // TODO(W4-C9): replace with pinned `noFiles` copy.
+                    Text(verbatim: "No files yet.")
+                }
+            case .failed:
+                // TODO(W4-C9): replace with pinned `filesUnavailable` copy.
+                Text(verbatim: "Couldn’t load its files.")
+                Button(design.text(AgentDeskCopy.retry)) { model.retryFiles() }
+                    .accessibilityIdentifier("desk.files.retry")
+            case .loading, .retrying:
+                ProgressView()
+            case .ready, .unsupported:
+                EmptyView()
+            }
         } header: {
             Text(copy(sentIsEmpty ? "files" : "onItsComputer"))
                 .accessibilityIdentifier("desk.files.own")
@@ -236,11 +253,10 @@ struct AgentDeskPage: View {
 
     // MARK: Controls
 
-    /// Pause, this chat's notifications and More. A failed control and the
-    /// schedule's Refresh sit under the group, in its footer.
+    /// Pause, this chat's notifications and More. Schedule status and retry sit in the footer.
     private var controlsSection: some View {
         Section {
-            if model.canControl {
+            if model.showsPause {
                 toggleRow(glyph: .clock, title: copy("pause"), id: "desk.pause",
                           isOn: Binding(get: { HostAgentDesk.isPaused(model.jobs) },
                                         set: { on in model.run(on ? .pause : .resume) }))
@@ -264,18 +280,28 @@ struct AgentDeskPage: View {
             Text(copy("controls"))
                 .accessibilityIdentifier("desk.controls")
         } footer: {
-            if model.problem != nil || model.canRefreshSchedule {
+            if model.showsPause, model.problem != nil || [.empty, .failed, .retrying].contains(model.scheduleState) {
                 VStack(alignment: .leading, spacing: kit.space(.s2)) {
                     if let problem = model.problem {
                         Text(copy(problem == .stopped ? "computerOff" : "controlFailed"))
                             .accessibilityIdentifier("desk.problem")
                             .accessibilityAddTraits(.updatesFrequently)
                     }
-                    if model.canRefreshSchedule {
-                        Button(design.text(AgentDeskCopy.refresh)) { model.refreshSchedule() }
+                    switch model.scheduleState {
+                    case .empty:
+                        // TODO(W4-C9): replace with pinned `nothingScheduled` copy.
+                        Text(verbatim: "Nothing scheduled yet.")
+                    case .failed:
+                        // TODO(W4-C9): replace with pinned `scheduleUnavailable` copy.
+                        Text(verbatim: "Couldn’t check its schedule.")
+                        Button(design.text(AgentDeskCopy.retry)) { model.retrySchedule() }
                             .buttonStyle(.atumSecondary)
                             .controlSize(.small)
-                            .accessibilityIdentifier("desk.schedule.refresh")
+                            .accessibilityIdentifier("desk.schedule.retry")
+                    case .retrying:
+                        ProgressView()
+                    case .loading, .ready, .unsupported:
+                        EmptyView()
                     }
                 }
             }

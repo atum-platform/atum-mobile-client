@@ -22,18 +22,18 @@ import Observation
 @Observable
 final class AgentDeskModel {
     enum Problem: Equatable { case failed, stopped }
-    private enum ScheduleState { case confirmed, unconfirmed, refreshAvailable }
+    enum SectionState: Equatable { case unsupported, loading, empty, ready, failed, retrying }
 
     private(set) var jobs: [HostAgentDesk.Job]?
     private(set) var problem: Problem?
-    /// Nothing is confirmed until a host read lands, so a failed entry read also offers Refresh.
-    private var scheduleState: ScheduleState = .unconfirmed
+    private(set) var scheduleState: SectionState
+    private(set) var filesState: SectionState
     /// A control is on its way to the host: every schedule switch waits.
     private(set) var controlPending = false
     /// The folder whose listing is shown (nil: the agent's home).
     private(set) var ownPath: String?
     private(set) var ownView: HostAgentDesk.Files?
-    /// The folder asked for, shown once its listing arrives.
+    /// The folder asked for, including the target of a failed read until it is retried or replaced.
     private(set) var ownTarget: String?
 
     private let actions: AgentDeskActions
@@ -51,17 +51,12 @@ final class AgentDeskModel {
         self.actions = actions
         self.readRetryDelay = readRetryDelay
         self.controlRetryDelay = controlRetryDelay
+        scheduleState = actions.schedule == nil ? .unsupported : .loading
+        filesState = actions.files == nil ? .unsupported : .loading
     }
 
-    var canControl: Bool { actions.control != nil && !(jobs ?? []).isEmpty }
-    var controlsDisabled: Bool { controlPending || scheduleState != .confirmed }
-    var canRefreshSchedule: Bool { scheduleState == .refreshAvailable && actions.schedule != nil }
-
-    /// Desktop shows its own files only while the folder has rows or is a subfolder.
-    var shownOwnView: HostAgentDesk.Files? {
-        guard let ownView, !ownView.rows.isEmpty || ownPath != nil else { return nil }
-        return ownView
-    }
+    var showsPause: Bool { actions.schedule != nil && actions.control != nil }
+    var controlsDisabled: Bool { controlPending || !showsPause || scheduleState != .ready }
 
     // MARK: Lifecycle
 
@@ -77,6 +72,7 @@ final class AgentDeskModel {
     func disappear() {
         started = false
         scheduleTask?.cancel()
+        scheduleTask = nil
         ownTask?.cancel()
         ownTask = nil
         ownTarget = ownPath
@@ -84,7 +80,7 @@ final class AgentDeskModel {
             controlTask.cancel()
             self.controlTask = nil
             controlPending = false
-            scheduleState = .unconfirmed
+            scheduleState = .loading
         }
     }
 
@@ -97,6 +93,7 @@ final class AgentDeskModel {
     }
 
     func back() {
+        guard started else { return }
         let path = HostAgentDesk.parent(of: ownPath)
         if let cached = ownCache[Self.key(path)] {
             ownTask?.cancel()
@@ -104,14 +101,22 @@ final class AgentDeskModel {
             ownTarget = path
             ownPath = path
             ownView = cached
+            filesState = cached.rows.isEmpty ? .empty : .ready
         } else {
             open(path)
         }
     }
 
-    private func load(_ path: String?) {
+    func retryFiles() {
+        guard started, filesState == .failed else { return }
+        load(ownTarget, retrying: true)
+    }
+
+    private func load(_ path: String?, retrying: Bool = false) {
+        guard started, actions.files != nil else { return }
         ownTask?.cancel()
         ownTarget = path
+        filesState = retrying ? .retrying : .loading
         ownTask = Task { [weak self] in await self?.listFolder(path) }
     }
 
@@ -125,14 +130,18 @@ final class AgentDeskModel {
                 ownCache[Self.key(path)] = files
                 ownPath = path
                 ownView = files
+                filesState = files.rows.isEmpty ? .empty : .ready
                 ownTask = nil
                 return
             case .busy:
                 do { try await Task.sleep(for: readRetryDelay) } catch { return }
-            case .cancelled, .failed:
-                // A refused home reads as none; a cancelled read keeps the shown listing.
-                if outcome == .failed, path == nil, ownPath == nil { ownView = nil }
-                ownTarget = ownPath
+            case .failed:
+                // A failed navigation keeps the confirmed folder and retries the requested one.
+                if path == nil, ownPath == nil { ownView = nil }
+                filesState = .failed
+                ownTask = nil
+                return
+            case .cancelled:
                 ownTask = nil
                 return
             }
@@ -143,36 +152,34 @@ final class AgentDeskModel {
 
     // MARK: Schedule
 
-    func refreshSchedule() {
-        guard started, canRefreshSchedule else { return }
-        startScheduleRead(manual: true)
+    func retrySchedule() {
+        guard started, scheduleState == .failed, !controlPending else { return }
+        startScheduleRead(retrying: true)
     }
 
-    private func startScheduleRead(manual: Bool = false) {
-        if scheduleState == .refreshAvailable { scheduleState = .unconfirmed }
-        scheduleTask = Task { [weak self] in await self?.readSchedule(clearingProblem: manual) }
+    private func startScheduleRead(retrying: Bool = false) {
+        guard actions.schedule != nil else { return }
+        scheduleTask?.cancel()
+        scheduleState = retrying ? .retrying : .loading
+        scheduleTask = Task { [weak self] in await self?.readSchedule(clearingProblem: retrying) }
     }
 
     /// An entry or reconciliation read can land inside the host's cooldown.
-    /// A manual Refresh shows the host's schedule as the answer, so it clears the earlier failure.
+    /// A successful manual retry clears the earlier control failure.
     private func readSchedule(clearingProblem: Bool = false) async {
         guard let read = actions.schedule else { return }
-        defer {
-            if !Task.isCancelled, scheduleState == .unconfirmed {
-                scheduleState = .refreshAvailable
-            }
-        }
         for attempt in 0...1 {
             guard !Task.isCancelled else { return }
             do {
                 guard let schedule = try await read(), !Task.isCancelled else { return }
                 jobs = schedule.jobs
-                scheduleState = .confirmed
+                scheduleState = schedule.jobs.isEmpty ? .empty : .ready
                 if clearingProblem { problem = nil }
                 return
             } catch is HostAgentDesk.ReadBusy where attempt == 0 {
                 do { try await Task.sleep(for: readRetryDelay) } catch { return }
             } catch {
+                if !Task.isCancelled { scheduleState = .failed }
                 return
             }
         }
@@ -181,7 +188,7 @@ final class AgentDeskModel {
     /// Optimistic: the switch moves at once and rolls back if the host refuses
     /// or changes nothing; a busy reply (the shared cooldown) is retried once.
     func run(_ control: HostAgentDesk.Control) {
-        guard !controlsDisabled, let send = actions.control, let before = jobs else { return }
+        guard started, !controlsDisabled, let send = actions.control, let before = jobs else { return }
         // An entry read from a previous schedule must not overwrite this control.
         scheduleTask?.cancel()
         problem = nil
@@ -205,7 +212,7 @@ final class AgentDeskModel {
                     self.problem = .failed
                     // It may have reached the host: the host's schedule decides.
                     if outcome == .failed {
-                        self.scheduleState = .unconfirmed
+                        self.scheduleState = .loading
                         await self.readSchedule()
                     } else {
                         self.undo(control, before)

@@ -708,9 +708,8 @@ struct ScriptedChatHost: View {
             ),
             save: { (_: ManagedModelDestinationSnapshot, source: ManagedModelDestinationSource, model: String,
                      effort: ManagedModelEffort, _: NativeID,
-                     _: ChatGPTTrainingConsent?, isSelectionCurrent: @escaping @MainActor () -> Bool)
+                     _: ChatGPTTrainingConsent?)
                 -> AssistantModelDestinationSaveResult in
-                guard isSelectionCurrent() else { return .cancelled }
                 let next = Self.subscriptionDestinations(
                     source: source == .opencodeGo ? "opencode_go" : "chatgpt_plan",
                     model: model, effort: effort.rawValue,

@@ -400,6 +400,36 @@ public enum PhoneModelPickerProjection {
         return row.selecting(true)
     }
 
+    /// The row that is waiting for the account's shared store to settle its write.
+    public static func submittedRow(_ choice: ManagedModelPickerChoice?, in rows: [Row]) -> Row? {
+        guard let (source, model) = cloudSelection(choice) else { return nil }
+        return rows.first { $0.source == source && $0.model == model }
+    }
+
+    /// The composer keeps naming a submitted pick while the sheet is closed.
+    public static func submittedChip(_ choice: ManagedModelPickerChoice?,
+                                     destination: ManagedModelDestinationSnapshot?,
+                                     account: PhoneSubscriptionAccount?) -> ChipFace? {
+        guard let (source, model) = cloudSelection(choice) else { return nil }
+        if source == .atum, let name = ManagedModelLineup.productName(for: model) {
+            return ChipFace(name: name, source: source)
+        }
+        if let row = listedSubscription(source, model: model, destination: destination, account: account) {
+            return ChipFace(subscription: row)
+        }
+        return ChipFace(name: ModelDisplayName.name(model: model), source: source)
+    }
+
+    private static func cloudSelection(_ choice: ManagedModelPickerChoice?)
+        -> (ManagedModelDestinationSource, String)? {
+        switch choice {
+        case let .offer(model, _): (.atum, model)
+        case let .destination(id, model) where id == cloudID: (.atum, model)
+        case let .subscription(source, model, _): (source, model)
+        case .destination, nil: nil
+        }
+    }
+
     /// A row a pick wrote, with the readbacks it was made over. The chip names
     /// it at once, before the server's next read, and only until a newer
     /// authoritative read says something else is saved.

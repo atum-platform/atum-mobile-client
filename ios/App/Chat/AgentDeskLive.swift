@@ -12,12 +12,14 @@ extension LiveAppModel {
         guard let context = agentDeskContext(roomID: roomID) else { return nil }
         let client = context.client
         let principal = context.agent.principal
+        let generation = accountScopeGeneration
         var actions = AgentDeskActions(agentUserID: context.agent.matrixUser?.rawValue,
                                        steers: context.agent.runsOnHermes)
         guard context.agent.runsOnHermes else { return actions }
         // The client checks this at transport start, including its 401 retry.
         let current: NativeDomainClient.DeskSendCheck = { [weak self] in
-            guard let now = self?.agentDeskContext(roomID: roomID) else { return false }
+            guard let self, accountScopeGeneration == generation,
+                  let now = agentDeskContext(roomID: roomID) else { return false }
             return now.client === client && now.agent.principal == principal && now.agent.runsOnHermes
         }
         actions.schedule = AgentDeskActions.liveSchedule(client: client, agent: principal, current: current)

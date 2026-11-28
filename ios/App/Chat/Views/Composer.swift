@@ -654,14 +654,14 @@ private struct ComposerModelChoiceButton: View {
             NavigationStack {
                 PhoneConversationModelPicker(
                     design: design, actions: actions, destinations: destinations,
-                    initialSnapshot: snapshot, initialDestination: destination,
+                    initialSnapshot: latestOffer, initialDestination: latestDestination,
                     onSnapshot: { adopt(offer: $0) },
                     onDestination: { adopt(destination: $0) },
                     accountState: accountState,
                     onPick: { row in
                         picked = row.map {
-                            .init(row: $0, destinationRevision: destination?.revision,
-                                  offerRevision: snapshot?.revision)
+                            .init(row: $0, destinationRevision: latestDestination?.revision,
+                                  offerRevision: latestOffer?.revision)
                         }
                     }
                 )
@@ -710,12 +710,19 @@ private struct ComposerModelChoiceButton: View {
     }
 
     private static var cloud: ManagedModelDestinationID { try! ManagedModelDestinationID("cloud") }
+    private var latestOffer: ManagedModelSnapshot? { actions?.store?.snapshot ?? snapshot }
+    private var latestDestination: ManagedModelDestinationSnapshot? { destinations?.store?.snapshot ?? destination }
 
     /// The chip's name and mark facts (`PhoneModelPickerProjection.chip`):
     /// a pick still current, else the saved choice's, never a raw id.
     private var face: PhoneModelPickerProjection.ChipFace? {
-        PhoneModelPickerProjection.chip(pick: picked, destination: destination,
-                                        offer: snapshot, account: accountState.value)
+        let submitted = destinations?.store?.submittedChoice ?? actions?.store?.submittedChoice
+        if let pending = PhoneModelPickerProjection.submittedChip(submitted, destination: latestDestination,
+                                                                  account: accountState.value) {
+            return pending
+        }
+        return PhoneModelPickerProjection.chip(pick: picked, destination: latestDestination,
+                                               offer: latestOffer, account: accountState.value)
     }
 
     private var label: String { face?.name ?? design.text("desktop.atum.settings.model") }

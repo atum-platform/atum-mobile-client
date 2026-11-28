@@ -209,12 +209,11 @@ public enum ChatGPTTrainingPress {
     }
 }
 
-/// The picker's selection lifetime, ported from the desktop picker's
-/// `beginSelection` (`model-picker.tsx`): every pick takes a token, a newer
-/// pick or the picker's dismissal retires it, and a continuation whose token
-/// is stale does nothing (no consent read result, no POST follow-up, no
-/// write). Loads take their own token so an interrupted read never leaves the
-/// picker stuck "loading".
+/// The sheet's lifetime for reads, consent and selection presentation. A
+/// newer pick or dismissal retires its token, so a late consent result cannot
+/// confirm or submit a choice. A choice already submitted to the model store
+/// settles there. Loads take their own token so an interrupted read never
+/// leaves the sheet stuck loading.
 public struct ModelPickerLifetime: Equatable, Sendable {
     public struct Token: Equatable, Hashable, Sendable {
         fileprivate let generation: UInt64
@@ -252,7 +251,7 @@ public struct ModelPickerLifetime: Equatable, Sendable {
         if loadingToken == token.generation { loadingToken = nil }
     }
 
-    /// The picker closed: every pending selection and load is stale.
+    /// The picker closed: its selection presentation and loads are stale.
     public mutating func retire() {
         selection &+= 1
         load &+= 1

@@ -8,8 +8,8 @@ import XCTest
 @testable import AtumMobile
 @testable import AtumNativeAPI
 
-/// W4-E3: the agent's desk (desktop #51) and Home's bell (desktop #48) take
-/// every word from the pinned export, in every locale, with no pending table.
+/// Covers pinned copy for the desk and Home's bell in every locale, plus the
+/// desk's host reads and controls. W4-C9 will supply the desk status keys.
 final class AgentDeskBellTests: XCTestCase {
     private let deskKeys = ["desk", "working", "waiting", "minutes", "steerHint", "queueHint", "files", "sentHere",
                             "save", "saveShort", "more", "less", "onItsComputer", "back", "controls",
@@ -26,7 +26,7 @@ final class AgentDeskBellTests: XCTestCase {
 
     func testEveryDeskWordIsInThePinForEveryLocale() throws {
         let pin = try AtumCopy()
-        let keys = deskKeys.map { (AgentDeskCopy.key($0), arguments($0)) } + [(AgentDeskCopy.refresh, [])]
+        let keys = deskKeys.map { (AgentDeskCopy.key($0), arguments($0)) } + [(AgentDeskCopy.retry, [])]
         for (key, arguments) in keys {
             XCTAssertTrue(pin.contains(key), key)
             for locale in pin.locales {
@@ -208,7 +208,7 @@ final class AgentDeskBellTests: XCTestCase {
     }
 
     @MainActor
-    func testARefusedFolderCanBeOpenedAgain() async {
+    func testRetryTargetsTheFailedFolderAndKeepsTheConfirmedListingUntilItArrives() async {
         let host = Host()
         host.files = ["": [.listed(Self.listing("home", ["reports"]))],
                       "home/reports": [.failed, .listed(Self.listing("home/reports", ["q3"]))]]
@@ -216,10 +216,14 @@ final class AgentDeskBellTests: XCTestCase {
         model.appear()
         await until({ model.ownView != nil }, "home never listed")
         model.open("home/reports")
-        await until({ host.fileReads.count == 2 && model.ownTarget == nil }, "the refusal did not settle")
+        await until({ model.filesState == .failed }, "the refusal did not settle")
         XCTAssertEqual(model.ownView?.deskPath, "home", "a refused folder keeps the shown one")
-        model.open("home/reports")
-        await until({ model.ownPath == "home/reports" }, "the same folder never opened again")
+        XCTAssertNil(model.ownPath)
+        model.retryFiles()
+        model.retryFiles()
+        XCTAssertEqual(model.filesState, .retrying)
+        await until({ model.filesState == .ready && model.ownPath == "home/reports" }, "the folder was never retried")
+        XCTAssertEqual(host.fileReads, [nil, "home/reports", "home/reports"])
     }
 
     @MainActor
@@ -287,13 +291,13 @@ final class AgentDeskBellTests: XCTestCase {
     }
 
     @MainActor
-    func testFailedPauseKeepsControlsDisabledUntilAManualRefreshConfirmsTheSchedule() async {
+    func testFailedPauseKeepsControlsDisabledUntilARetryConfirmsTheSchedule() async {
         let host = Host()
         host.outcomes = [.failed]
         let model = AgentDeskModel(actions: host.actions(), readRetryDelay: .milliseconds(200))
         model.appear()
         defer { model.disappear() }
-        await until({ model.canControl }, "the initial schedule did not load")
+        await until({ model.scheduleState == .ready }, "the initial schedule did not load")
 
         host.schedule = HostAgentDesk.Schedule(jobs: [
             .init(id: "a", name: "A", state: .paused, pausedReason: "owner_pause"),
@@ -304,39 +308,104 @@ final class AgentDeskBellTests: XCTestCase {
         XCTAssertTrue(model.controlsDisabled)
         XCTAssertTrue(HostAgentDesk.isPaused(model.jobs), "the busy read must not restore the pre-Pause values")
 
-        await until({ model.canRefreshSchedule }, "refresh was not offered after the retry")
+        await until({ model.scheduleState == .failed }, "schedule did not settle as failed")
         XCTAssertEqual(host.scheduleReads, 3)
         XCTAssertFalse(model.controlPending)
         XCTAssertTrue(model.controlsDisabled)
         model.run(.resume)
-        model.refreshSchedule()
-        model.refreshSchedule()
+        model.retrySchedule()
+        model.retrySchedule()
         XCTAssertTrue(model.controlsDisabled)
-        XCTAssertFalse(model.canRefreshSchedule)
+        XCTAssertEqual(model.scheduleState, .retrying)
 
         await until({ !model.controlsDisabled }, "the confirmed schedule did not restore the switches")
         XCTAssertEqual(model.jobs, host.schedule.jobs)
-        XCTAssertFalse(model.canRefreshSchedule)
+        XCTAssertEqual(model.scheduleState, .ready)
         XCTAssertEqual(host.scheduleReads, 4)
         XCTAssertEqual(host.controls, [.pause])
         XCTAssertNil(model.problem, "the confirmed schedule replaces the earlier failure")
     }
 
     @MainActor
-    func testFailedEntryReadOffersRefresh() async {
+    func testFailedEntryReadsAreIndependentAndRetryToEmpty() async {
         let host = Host()
         host.busyScheduleReads = 2
+        host.schedule = HostAgentDesk.Schedule(jobs: [])
+        host.files = ["": [.failed, .listed(Self.listing("home", []))]]
         let model = AgentDeskModel(actions: host.actions(), readRetryDelay: .milliseconds(50))
+        XCTAssertTrue(model.showsPause)
+        XCTAssertEqual(model.scheduleState, .loading)
+        XCTAssertEqual(model.filesState, .loading)
         model.appear()
         defer { model.disappear() }
-        await until({ model.canRefreshSchedule }, "refresh was not offered after the entry read failed")
-        XCTAssertFalse(model.canControl)
+        await until({ model.scheduleState == .failed && model.filesState == .failed }, "entry reads did not fail")
+        XCTAssertTrue(model.showsPause)
+        XCTAssertTrue(model.controlsDisabled)
         XCTAssertEqual(host.scheduleReads, 2)
 
-        model.refreshSchedule()
-        await until({ model.canControl && !model.controlsDisabled }, "refresh did not load the schedule")
-        XCTAssertEqual(model.jobs, host.schedule.jobs)
-        XCTAssertFalse(model.canRefreshSchedule)
+        model.retrySchedule()
+        XCTAssertEqual(model.scheduleState, .retrying)
+        XCTAssertEqual(model.filesState, .failed)
+        await until({ model.scheduleState == .empty }, "empty schedule did not settle")
+        XCTAssertEqual(model.jobs, [])
+        XCTAssertTrue(model.controlsDisabled)
+        XCTAssertTrue(model.showsPause)
+        model.run(.pause)
+        XCTAssertEqual(host.fileReads, [nil])
+
+        model.retryFiles()
+        XCTAssertEqual(model.filesState, .retrying)
+        XCTAssertEqual(model.scheduleState, .empty)
+        await until({ model.filesState == .empty }, "empty listing did not settle")
+        XCTAssertEqual(model.ownView?.rows, [])
+        XCTAssertEqual(host.fileReads, [nil, nil])
+        XCTAssertEqual(host.scheduleReads, 3)
+        XCTAssertEqual(host.controls, [])
+    }
+
+    @MainActor
+    func testUnsupportedDeskDoesNotExposeHostSections() {
+        let model = AgentDeskModel(actions: AgentDeskActions(agentUserID: nil, steers: false))
+        model.appear()
+        XCTAssertFalse(model.showsPause)
+        XCTAssertEqual(model.scheduleState, .unsupported)
+        XCTAssertEqual(model.filesState, .unsupported)
+    }
+
+    @MainActor
+    func testLateRetryRepliesCannotSettleForAnOldAgentOrSession() async {
+        var current = true
+        var scheduleReply: CheckedContinuation<HostAgentDesk.Schedule?, Error>?
+        var filesReply: CheckedContinuation<HostAgentDesk.FilesOutcome, Never>?
+        var initialReads = true
+        var rejectedReplies = 0
+        struct ReadFailed: Error {}
+        let actions = AgentDeskActions(agentUserID: nil, steers: true, schedule: {
+            if initialReads { throw ReadFailed() }
+            return try await withCheckedThrowingContinuation { scheduleReply = $0 }
+        }, files: { _ in
+            if initialReads { return .failed }
+            return await withCheckedContinuation { filesReply = $0 }
+        }).fenced(by: {
+            if !current { rejectedReplies += 1 }
+            return current
+        })
+        let model = AgentDeskModel(actions: actions)
+        model.appear()
+        defer { model.disappear() }
+        await until({ model.scheduleState == .failed && model.filesState == .failed }, "entry reads did not fail")
+        initialReads = false
+        model.retrySchedule()
+        model.retryFiles()
+        await until({ scheduleReply != nil && filesReply != nil }, "retry reads did not start")
+        current = false
+        scheduleReply?.resume(returning: HostAgentDesk.Schedule(jobs: []))
+        filesReply?.resume(returning: .listed(Self.listing("home", ["old"])))
+        await until({ rejectedReplies == 2 }, "both retry replies should hit the scope fence")
+        XCTAssertNil(model.jobs)
+        XCTAssertNil(model.ownView)
+        XCTAssertEqual(model.scheduleState, .retrying)
+        XCTAssertEqual(model.filesState, .retrying)
     }
 
     @MainActor
@@ -363,7 +432,7 @@ final class AgentDeskBellTests: XCTestCase {
 
         let desk = AgentDeskModel(actions: actions, readRetryDelay: .seconds(1))
         desk.appear()
-        await until({ desk.canControl }, "the initial schedule did not load")
+        await until({ desk.scheduleState == .ready }, "the initial schedule did not load")
         desk.run(.routineOff(job: "a"))
         await until({ completedReads == 2 && desk.controlPending }, "the failed control never reached a busy read")
         desk.disappear()
@@ -371,7 +440,7 @@ final class AgentDeskBellTests: XCTestCase {
         let reopened = AgentDeskModel(actions: actions, readRetryDelay: .milliseconds(30))
         reopened.appear()
         defer { reopened.disappear() }
-        await until({ reopened.canControl }, "the reopened desk did not recover from its busy read")
+        await until({ reopened.scheduleState == .ready }, "the reopened desk did not recover from its busy read")
         XCTAssertEqual(reopened.jobs?.map(\.state), [.paused])
         XCTAssertFalse(reopened.controlsDisabled)
         try await Task.sleep(for: .milliseconds(1100))

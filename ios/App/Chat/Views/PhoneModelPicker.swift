@@ -11,9 +11,9 @@ struct AssistantSubscriptionActions {
     let read: PhoneSubscriptionAccountReads
     /// The consent decision is what a ChatGPT write is made
     /// under (nil for any other plan); the save re-checks it before an
-    /// automatic retry and after a refusal. The selection must remain live for each send.
+    /// automatic retry and after a refusal. The account and agent must remain current for each send.
     let save: @MainActor (ManagedModelDestinationSnapshot, ManagedModelDestinationSource, String, ManagedModelEffort,
-                          NativeID, ChatGPTTrainingConsent?, @escaping @MainActor () -> Bool) async
+                          NativeID, ChatGPTTrainingConsent?) async
         -> AssistantModelDestinationSaveResult
     /// The one-time training-off confirmation a ChatGPT pick needs first.
     /// Without it a ChatGPT pick is never written (`ChatGPTTrainingGate`).
@@ -55,8 +55,8 @@ struct PhoneConversationModelPicker: View {
     @State private var destinationRead: PhoneModelPickerDestinationRead
     private var destination: ManagedModelDestinationSnapshot? { destinationRead.snapshot }
     private var destinationReadState: PhoneModelPickerReadState { destinationRead.state }
-    /// Selection and load lifetime (desktop `beginSelection`): closing the
-    /// picker retires every pending pick and load.
+    /// Closing retires loads and picks still waiting for consent. Once submitted,
+    /// the shared model store owns the write through settlement.
     @State private var lifetime = ModelPickerLifetime()
     @State private var unavailable = false
     @State private var loadFailed = false
@@ -79,6 +79,9 @@ struct PhoneConversationModelPicker: View {
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
     /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
     @State private var confirming: PendingChatGPTTraining?
+    private var submittedChoice: ManagedModelPickerChoice? {
+        destinations?.store?.submittedChoice ?? actions?.store?.submittedChoice
+    }
 
     private struct ConversationModelWrite: Hashable, Sendable {
         let model: String
@@ -150,6 +153,15 @@ struct PhoneConversationModelPicker: View {
         ZStack { content }
             .task { await load() }
             .onDisappear(perform: retire)
+            .onChange(of: destinations?.store?.snapshot) { _, value in
+                guard let value, destinationReadState == .ready, destinations?.isCurrent() == true,
+                      value != destination else { return }
+                applyDestination(value)
+            }
+            .onChange(of: actions?.store?.snapshot) { _, value in
+                guard let value, let snapshot, value != snapshot, value.revision >= snapshot.revision else { return }
+                apply(value)
+            }
     }
 
     private var content: some View {
@@ -168,7 +180,7 @@ struct PhoneConversationModelPicker: View {
                     destinationID: cloudDestination.rawValue,
                     rows: rows,
                     context: .conversation,
-                    savingRowID: savingRowID,
+                    savingRowID: savingRowID ?? PhoneModelPickerProjection.submittedRow(submittedChoice, in: rows)?.stableID,
                     saveFailed: saveFailed,
                     thinking: thinking,
                     savingEffort: savingEffort,
@@ -236,7 +248,10 @@ struct PhoneConversationModelPicker: View {
             await actions.read()
         }
         guard isCurrent() else { return nil }
-        if case let .value(value) = result, value.revision >= snapshot?.revision ?? .min { apply(value) }
+        if case let .value(value) = result {
+            let latest = actions.store?.snapshot ?? value
+            if latest.revision >= snapshot?.revision ?? .min { apply(latest) }
+        }
         return result
     }
 
@@ -253,7 +268,7 @@ struct PhoneConversationModelPicker: View {
             unavailable = true
             return .unavailable
         }
-        if case let .value(value) = result { applyDestination(value) }
+        if case let .value(value) = result { applyDestination(destinations.store?.snapshot ?? value) }
         else { destinationRead.settle(result) }
         return result
     }
@@ -261,7 +276,7 @@ struct PhoneConversationModelPicker: View {
     private func choose(_ row: PhoneModelPickerProjection.Row) {
         if row.isSubscription { return chooseSubscription(row) }
         let model = row.model
-        guard savingRowID == nil, savingEffort == nil, atumWritable, row.source == .atum,
+        guard savingRowID == nil, savingEffort == nil, submittedChoice == nil, atumWritable, row.source == .atum,
               row.selectable, !row.selected else { return }
         if let snapshot, let offer = snapshot.models.first(where: { $0.alias == model }) {
             guard offer.eligibility == .ready, let effort = offer.selectionEffort else { return }
@@ -277,7 +292,7 @@ struct PhoneConversationModelPicker: View {
     /// A thinking-level change writes the model that answers now with the new
     /// level: the same fenced save a model pick makes.
     private func chooseEffort(_ level: ManagedModelEffort, shownModel: String) {
-        guard savingRowID == nil, savingEffort == nil, atumWritable, let snapshot,
+        guard savingRowID == nil, savingEffort == nil, submittedChoice == nil, atumWritable, let snapshot,
               let thinking = thinking(in: rows), thinking.model == shownModel,
               thinking.canChange(to: level) else { return }
         savingEffort = level
@@ -323,7 +338,14 @@ struct PhoneConversationModelPicker: View {
         ))
         Task { @MainActor in
             let result = await destinations.save(snapshot, cloudDestination, model, operation)
-            guard !Task.isCancelled, lifetime.isCurrent(selection) else { return }
+            guard !Task.isCancelled, destinations.isCurrent() else { return }
+            guard lifetime.isCurrent(selection) else {
+                if case let .saved(value) = result {
+                    onDestination(value)
+                    onPick(nil)
+                }
+                return
+            }
             savingRowID = nil
             switch result {
             case let .saved(value):
@@ -347,7 +369,8 @@ struct PhoneConversationModelPicker: View {
     /// desktop's cloud picker does. Only the server's answer moves the check.
     /// A ChatGPT pick first passes the training-off gate.
     private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
-        guard savingRowID == nil, savingEffort == nil, let destination = destinationRead.readySnapshot,
+        guard savingRowID == nil, savingEffort == nil, submittedChoice == nil,
+              let destination = destinationRead.readySnapshot,
               destinations?.subscriptions?.save != nil,
               PhoneModelPickerProjection.canSelectSubscription(
                   row, snapshot: destination, account: account) != nil else { return }
@@ -387,22 +410,23 @@ struct PhoneConversationModelPicker: View {
         writeSubscription(pending.row, consent: consent, selection: pending.selection)
     }
 
-    /// The picker closed: no pending pick may start a read result, a POST
-    /// follow-up or a write after this.
+    /// Close only the sheet's reads and any consent work that precedes submission.
     private func retire() {
         lifetime.retire()
         if destinationReadState == .loading { destinationRead.settle(.unavailable) }
         accountState.retire(keepingSettled: true)
         confirming = nil
         savingRowID = nil
+        savingEffort = nil
     }
 
     /// The write itself, against the snapshot the picker holds now, under the
     /// consent decision the gate or card read (ChatGPT only).
     private func writeSubscription(_ row: PhoneModelPickerProjection.Row, consent: ChatGPTTrainingConsent?,
                                    selection: ModelPickerLifetime.Token) {
-        guard lifetime.isCurrent(selection), let destination = destinationRead.readySnapshot,
-              let save = destinations?.subscriptions?.save,
+        guard lifetime.isCurrent(selection), submittedChoice == nil,
+              let destination = destinationRead.readySnapshot, let destinations,
+              let save = destinations.subscriptions?.save,
               row.source != .chatGPTPlan || consent != nil,
               let effort = PhoneModelPickerProjection.canSelectSubscription(
                   row, snapshot: destination, account: account) else {
@@ -415,10 +439,15 @@ struct PhoneConversationModelPicker: View {
         let operation = subscriptionWrites.begin(SubscriptionWrite(
             connection: row.connectionID, model: row.model, revision: destination.revision))
         Task { @MainActor in
-            let result = await save(destination, row.source, row.model, effort, operation, consent) {
-                lifetime.isCurrent(selection)
+            let result = await save(destination, row.source, row.model, effort, operation, consent)
+            guard !Task.isCancelled, destinations.isCurrent() else { return }
+            guard lifetime.isCurrent(selection) else {
+                if case let .saved(value) = result {
+                    onDestination(value)
+                    onPick(PhoneModelPickerProjection.settledDestinationPick(row, destination: value))
+                }
+                return
             }
-            guard !Task.isCancelled, lifetime.isCurrent(selection) else { return }
             savingRowID = nil
             switch result {
             case let .saved(value):
@@ -440,7 +469,7 @@ struct PhoneConversationModelPicker: View {
                 }
                 saveFailed = true
                 // A relay that went down or a disconnected plan shows as such now.
-                if let read = destinations?.subscriptions?.read { await accountState.reload(read) }
+                if let read = destinations.subscriptions?.read { await accountState.reload(read) }
             }
         }
     }
@@ -508,8 +537,9 @@ struct PhoneModelDestinationsPicker: View {
     @State private var subscriptionWrites = ModelWriteRequests<SubscriptionWrite>()
     /// A ChatGPT pick held on the training-off card; nothing is written meanwhile.
     @State private var confirming: PendingChatGPTTraining?
-    /// Selection lifetime (desktop `beginSelection`): closing retires every pending pick.
+    /// The sheet owns consent and read presentation. The store owns a submitted write.
     @State private var lifetime = ModelPickerLifetime()
+    private var submittedChoice: ManagedModelPickerChoice? { actions.store?.submittedChoice }
 
     private struct DestinationModelWrite: Hashable, Sendable {
         let destination: String
@@ -524,6 +554,10 @@ struct PhoneModelDestinationsPicker: View {
             .navigationTitle(design.text("desktop.atum.settings.model"))
             .navigationBarTitleDisplayMode(.inline)
             .task { await load() }
+            .onChange(of: actions.store?.snapshot) { _, value in
+                guard let value, destinationReadState == .ready, actions.isCurrent() else { return }
+                snapshot = value
+            }
     }
 
     private var content: some View {
@@ -540,7 +574,7 @@ struct PhoneModelDestinationsPicker: View {
                     destinationID: destination.rawValue,
                     rows: rows,
                     context: .cloudAssistant,
-                    savingRowID: savingRowID,
+                    savingRowID: savingRowID ?? PhoneModelPickerProjection.submittedRow(submittedChoice, in: rows)?.stableID,
                     saveFailed: saveFailed,
                     planConnects: PhoneModelPickerList.planConnects(account),
                     makeConnectionsPoll: actions.subscriptions?.makeConnectionsPoll,
@@ -579,7 +613,7 @@ struct PhoneModelDestinationsPicker: View {
         if lifetime.isCurrentLoad(token) {
             if actions.isCurrent() {
                 destinationReadState = result.state
-                if case let .value(next) = result { snapshot = next }
+                if case let .value(next) = result { snapshot = actions.store?.snapshot ?? next }
             } else {
                 destinationReadState = .unavailable
                 snapshot = nil
@@ -618,7 +652,7 @@ struct PhoneModelDestinationsPicker: View {
 
     private func choose(_ row: PhoneModelPickerProjection.Row) {
         if row.isSubscription { return chooseSubscription(row) }
-        guard savingRowID == nil, destinationReadState == .ready, let snapshot,
+        guard savingRowID == nil, submittedChoice == nil, destinationReadState == .ready, let snapshot,
               PhoneModelPickerProjection.canSelectAtumModel(
                   row.model,
                   snapshot: snapshot,
@@ -627,11 +661,12 @@ struct PhoneModelDestinationsPicker: View {
               ) else { return }
         savingRowID = row.stableID
         saveFailed = false
+        let selection = lifetime.beginSelection()
         let operation = writes.begin(DestinationModelWrite(destination: destination.rawValue,
                                                            model: row.model))
         Task { @MainActor in
             let result = await actions.save(snapshot, destination, row.model, operation)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, lifetime.isCurrent(selection), actions.isCurrent() else { return }
             savingRowID = nil
             switch result {
             case let .saved(snapshot):
@@ -654,7 +689,8 @@ struct PhoneModelDestinationsPicker: View {
     /// The same 1.4 / 1.5 cloud write as the composer's picker, behind the
     /// same training-off gate for a ChatGPT pick.
     private func chooseSubscription(_ row: PhoneModelPickerProjection.Row) {
-        guard savingRowID == nil, destinationReadState == .ready, let snapshot, actions.subscriptions?.save != nil,
+        guard savingRowID == nil, submittedChoice == nil, destinationReadState == .ready,
+              let snapshot, actions.subscriptions?.save != nil,
               PhoneModelPickerProjection.canSelectSubscription(
                   row, snapshot: snapshot, account: account) != nil else { return }
         let selection = lifetime.beginSelection()
@@ -701,7 +737,7 @@ struct PhoneModelDestinationsPicker: View {
 
     private func writeSubscription(_ row: PhoneModelPickerProjection.Row, consent: ChatGPTTrainingConsent?,
                                    selection: ModelPickerLifetime.Token) {
-        guard lifetime.isCurrent(selection), destinationReadState == .ready,
+        guard lifetime.isCurrent(selection), submittedChoice == nil, destinationReadState == .ready,
               let snapshot, let save = actions.subscriptions?.save,
               row.source != .chatGPTPlan || consent != nil,
               let effort = PhoneModelPickerProjection.canSelectSubscription(
@@ -715,10 +751,8 @@ struct PhoneModelDestinationsPicker: View {
         let operation = subscriptionWrites.begin(SubscriptionWrite(
             connection: row.connectionID, model: row.model, revision: snapshot.revision))
         Task { @MainActor in
-            let result = await save(snapshot, row.source, row.model, effort, operation, consent) {
-                lifetime.isCurrent(selection)
-            }
-            guard !Task.isCancelled, lifetime.isCurrent(selection) else { return }
+            let result = await save(snapshot, row.source, row.model, effort, operation, consent)
+            guard !Task.isCancelled, lifetime.isCurrent(selection), actions.isCurrent() else { return }
             savingRowID = nil
             switch result {
             case let .saved(snapshot):

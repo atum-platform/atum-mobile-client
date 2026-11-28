@@ -2078,7 +2078,8 @@ final class LiveAppModel {
                 return await self.saveAssistantModel(roomID: roomID, snapshot: snapshot,
                                                      model: model, effort: effort,
                                                      requestID: requestID)
-            }
+            },
+            store: modelOfferState(for: agent.principal)
         )
     }
 
@@ -2111,13 +2112,11 @@ final class LiveAppModel {
                     accountConnections: { try await client.accountConnections() },
                     isCurrent: current
                 ),
-                save: { [weak self] snapshot, source, model, effort, requestID, consent, isSelectionCurrent in
-                    guard isSelectionCurrent() else { return .cancelled }
-                    guard let self, current() else { return .refused(nil) }
+                save: { [weak self] snapshot, source, model, effort, requestID, consent in
+                    guard let self, current() else { return .cancelled }
                     return await self.saveAssistantModelSubscription(
                         roomID: roomID, snapshot: snapshot, source: source,
-                        model: model, effort: effort, requestID: requestID, consent: consent,
-                        isSelectionCurrent: isSelectionCurrent
+                        model: model, effort: effort, requestID: requestID, consent: consent
                     )
                 },
                 // Bound to the client and scope this picker opened with: a
@@ -2136,7 +2135,8 @@ final class LiveAppModel {
                     }
                 ),
                 makeConnectionsPoll: { [weak self] in self?.accountConnectionsPoller() ?? { nil } }
-            )
+            ),
+            store: modelDestinationState(for: agent.principal)
         )
     }
 
@@ -2622,11 +2622,12 @@ final class LiveAppModel {
         let result = await saveAssistantDestinationChoice(roomID: roomID, snapshot: snapshot,
                                                           choice: .destination(destination, model: model),
                                                           requestID: requestID) {
-            client, principal, fence, id, _ in
+            client, principal, fence, id, isCurrent in
             let write = try ManagedModelDestinationWrite(
                 requestId: id, snapshot: fence, destination: destination, model: model
             )
-            return try await client.writeManagedModelDestination(agentPrincipal: principal, value: write)
+            return try await client.writeManagedModelDestination(agentPrincipal: principal, value: write,
+                                                                 isCurrent: isCurrent)
         }
         switch result {
         case let .saved(value): return .saved(value)
@@ -2697,8 +2698,7 @@ final class LiveAppModel {
                                                 model: String,
                                                 effort: ManagedModelEffort,
                                                 requestID: NativeID,
-                                                consent: ChatGPTTrainingConsent?,
-                                                isSelectionCurrent: @escaping @MainActor () -> Bool) async
+                                                consent: ChatGPTTrainingConsent?) async
         -> AssistantModelDestinationSaveResult {
         var recheck: ChatGPTTrainingRecheck?
         if source == .chatGPTPlan {
@@ -2714,7 +2714,7 @@ final class LiveAppModel {
         let revalidate: (() async -> Bool)? = recheck.map { check in { await check.stillCurrent() } }
         let result = await saveAssistantDestinationChoice(
             roomID: roomID, snapshot: snapshot, choice: .subscription(source, model: model, effort: effort),
-            requestID: requestID, isSelectionCurrent: isSelectionCurrent, revalidate: revalidate
+            requestID: requestID, revalidate: revalidate
         ) { client, principal, fence, id, isCurrent in
             let write = try ManagedModelSubscriptionWrite(
                 requestId: id, snapshot: fence, source: source, model: model, effort: effort
@@ -2738,7 +2738,7 @@ final class LiveAppModel {
 
     private func saveAssistantDestinationChoice(
         roomID: String, snapshot: ManagedModelDestinationSnapshot, choice: ManagedModelPickerChoice,
-        requestID: NativeID, isSelectionCurrent: @escaping @MainActor () -> Bool = { true },
+        requestID: NativeID,
         revalidate: (() async -> Bool)? = nil,
         write: @MainActor (NativeDomainClient, NativeID, ManagedModelDestinationSnapshot, NativeID,
                            @MainActor () -> Bool) async throws -> ManagedModelDestinationSnapshot
@@ -2749,11 +2749,9 @@ final class LiveAppModel {
         let result = await modelDestinationState(for: agent.principal).save(
             from: snapshot, choice: choice, requestID: requestID, refreshAfterSecondConflict: true,
             isCurrent: current, fetch: { try await client.managedModelDestinations(agentPrincipal: agent.principal) },
-            isSelectionCurrent: isSelectionCurrent, revalidate: revalidate
+            revalidate: revalidate, refreshAfterTransportFailure: true
         ) { fence, id in
-            try await write(client, agent.principal, fence, id) {
-                current() && isSelectionCurrent()
-            }
+            try await write(client, agent.principal, fence, id, current)
         }
         return result
     }

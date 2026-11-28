@@ -525,6 +525,75 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
     }
 
     @MainActor
+    func testClosingThePickerKeepsItsSubmittedPlanUntilTheServerSettlesIt() async throws {
+        let before = try destinationSnapshot()
+        let server = try destinationSnapshot(cloudSource: "atum", model: ManagedModelLineup.hardAlias, revision: 4)
+        let saved = try destinationSnapshot(cloudSource: "chatgpt_plan", model: "gpt-6.1", revision: 5)
+        let store = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        let choice = ManagedModelPickerChoice.subscription(.chatGPTPlan, model: "gpt-6.1", effort: .high)
+        var picker = ModelPickerLifetime()
+        let selection = picker.beginSelection()
+        let (started, notice) = AsyncStream<Void>.makeStream()
+        var firstReply: CheckedContinuation<Void, Never>?
+        var sent: [Int64] = []
+        var consentChecks = 0
+        let write = Task {
+            await store.save(from: before, choice: choice, requestID: ModelWriteRequests<NativeID>.freshID(),
+                             refreshAfterSecondConflict: true, isCurrent: { true }, fetch: { server },
+                             revalidate: { consentChecks += 1; return true }) { fence, _ in
+                sent.append(fence.revision)
+                if fence == before {
+                    await withCheckedContinuation {
+                        firstReply = $0
+                        notice.yield(())
+                        notice.finish()
+                    }
+                    throw ManagedModelFenceConflict.revision
+                }
+                return saved
+            }
+        }
+        _ = await started.first(where: { _ in true })
+
+        picker.retire()
+        XCTAssertFalse(picker.isCurrent(selection), "consent presentation still belongs to the open picker")
+        let reopened = try await store.read(isCurrent: { true }) { before }
+        XCTAssertEqual(reopened, before)
+        XCTAssertEqual(store.submittedChoice, choice)
+        XCTAssertEqual(PhoneModelPickerProjection.submittedChip(store.submittedChoice, destination: reopened,
+                                                                account: nil)?.source, .chatGPTPlan)
+
+        firstReply?.resume()
+        guard case let .saved(settled) = await write.value else { return XCTFail("The submitted write did not settle") }
+        XCTAssertEqual(sent, [before.revision, server.revision])
+        XCTAssertEqual(consentChecks, 1)
+        XCTAssertNil(store.submittedChoice)
+        XCTAssertEqual(settled, saved)
+        let readback = try await store.read(isCurrent: { true }) { before }
+        XCTAssertEqual(readback, saved)
+    }
+
+    @MainActor
+    func testAWriteWithALostReplyClearsThePendingChipAgainstServerReadback() async throws {
+        let before = try destinationSnapshot()
+        let server = try destinationSnapshot(cloudSource: "atum", model: ManagedModelLineup.hardAlias, revision: 4)
+        let store = ManagedModelPickerState<ManagedModelDestinationSnapshot>(revision: \.revision)
+        let choice = ManagedModelPickerChoice.subscription(.chatGPTPlan, model: "gpt-6.1", effort: .high)
+        let result = await store.save(
+            from: before, choice: choice, requestID: ModelWriteRequests<NativeID>.freshID(),
+            refreshAfterSecondConflict: true, isCurrent: { true }, fetch: {
+                XCTAssertEqual(store.submittedChoice, choice)
+                return server
+            }, refreshAfterTransportFailure: true
+        ) { _, _ in throw NativeDomainClientFailure.transportUnavailable }
+
+        guard case .failed = result else { return XCTFail("A lost reply is still a failed write response") }
+        XCTAssertNil(store.submittedChoice)
+        XCTAssertEqual(store.snapshot, server)
+        XCTAssertEqual(PhoneModelPickerProjection.chip(pick: nil, destination: store.snapshot, offer: nil)?.source, .atum)
+    }
+
+    @MainActor
     func testReplayedSubscriptionReceiptSettlesTheChipFromTheNewerHeldChoice() async throws {
         let before = try destinationSnapshot()
         let receipt = try destinationSnapshot(cloudSource: "chatgpt_plan", model: "gpt-6.1", revision: 4)

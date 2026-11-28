@@ -292,6 +292,7 @@ struct AssistantModelActions {
     let matrixAccountID: String
     let read: () async -> AssistantModelLoadResult
     let save: (ManagedModelSnapshot, String, ManagedModelEffort, NativeID) async -> AssistantModelSaveResult
+    var store: ManagedModelPickerState<ManagedModelSnapshot>?
 }
 
 typealias AssistantModelDestinationLoadResult = PhoneModelPickerReadResult<ManagedModelDestinationSnapshot>
@@ -317,6 +318,7 @@ struct AssistantModelDestinationActions {
         -> AssistantModelDestinationSaveResult
     /// The cloud's subscription models (`PhoneModelPicker.swift`). Nil where the host has none.
     var subscriptions: AssistantSubscriptionActions?
+    var store: ManagedModelPickerState<ManagedModelDestinationSnapshot>?
 }
 
 enum AssistantAvatarSaveResult { case saved, failed }
