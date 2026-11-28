@@ -47,9 +47,15 @@ public struct WorkModelSelectionSnapshot: Equatable, Sendable, Decodable {
     public let revision: Int64
     public let selection: WorkModelSelection?
 
-    init(revision: Int64, selection: WorkModelSelection?) {
+    public init(revision: Int64, selection: WorkModelSelection?) {
         self.revision = revision
         self.selection = selection
+    }
+
+    public func permitsCloudEffortWrite(at managedRevision: Int64) -> Bool {
+        // Revision zero has no row to lock. The two server writers use
+        // different advisory locks, and the managed insert can upsert over Work.
+        selection == nil && revision > 0 && revision == managedRevision
     }
 
     public init(from decoder: Decoder) throws {

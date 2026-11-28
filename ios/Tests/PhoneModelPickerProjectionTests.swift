@@ -233,7 +233,10 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
             XCTAssertEqual(rows.map(\.selected), [false, false, false])
             XCTAssertEqual(rows.map(\.selectable), [false, false, false])
             XCTAssertEqual(rows.map(\.badges), [[], [], []])
-            XCTAssertNil(PhoneModelPickerProjection.conversationThinking(offer: try cloudSnapshot(), rows: rows))
+            let offer = try cloudSnapshot()
+            XCTAssertNil(PhoneModelPickerProjection.conversationThinking(
+                offer: offer, rows: rows, work: .init(revision: offer.revision, selection: nil)
+            ))
         }
     }
 
@@ -417,12 +420,16 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
             offer: late, destination: savedDefault, destinationID: cloud
         )
         XCTAssertEqual(withLateOffer.filter(\.selected).map(\.model), [ManagedModelLineup.defaultAlias])
-        XCTAssertNil(PhoneModelPickerProjection.conversationThinking(offer: late, rows: withLateOffer))
+        XCTAssertNil(PhoneModelPickerProjection.conversationThinking(
+            offer: late, rows: withLateOffer, work: .init(revision: late.revision, selection: nil)
+        ))
 
         // The post-write offer read restores thinking with its own revision fence.
         let current = try readySnapshot(revision: 2)
         let rows = PhoneModelPickerProjection.conversation(offer: current, destination: savedDefault, destinationID: cloud)
-        let thinking = try XCTUnwrap(PhoneModelPickerProjection.conversationThinking(offer: current, rows: rows))
+        let thinking = try XCTUnwrap(PhoneModelPickerProjection.conversationThinking(
+            offer: current, rows: rows, work: .init(revision: current.revision, selection: nil)
+        ))
         XCTAssertEqual([thinking.model], rows.filter(\.selected).map(\.model))
         XCTAssertTrue(thinking.canChange(to: .high))
         let requestID = try NativeID("00000000-0000-4000-8000-303617b97304")
@@ -431,6 +438,25 @@ final class PhoneModelPickerProjectionTests: XCTestCase {
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? [String: Any])
         XCTAssertEqual((body["choice"] as? [String: Any])?["model"] as? String, ManagedModelLineup.defaultAlias)
         XCTAssertEqual(body["expectedRevision"] as? Int, 2)
+    }
+
+    func testCloudThinkingRequiresAKnownClearedWorkChoiceAtTheSamePersistedRevision() throws {
+        let offer = try readySnapshot(revision: 4)
+        let rows = PhoneModelPickerProjection.conversation(
+            offer: offer, destination: nil, destinationID: try .init("cloud")
+        )
+        let work = try XCTUnwrap(WorkModelSelection(plan: .codex, model: "gpt-5.4"))
+        let unavailableWork: [WorkModelSelectionSnapshot?] = [
+            nil, .init(revision: 4, selection: work), .init(revision: 5, selection: nil)
+        ]
+        for unavailable in unavailableWork {
+            XCTAssertNil(PhoneModelPickerProjection.conversationThinking(offer: offer, rows: rows, work: unavailable))
+        }
+        XCTAssertNotNil(PhoneModelPickerProjection.conversationThinking(
+            offer: offer, rows: rows, work: .init(revision: 4, selection: nil)
+        ))
+        let missing = WorkModelSelectionSnapshot(revision: 0, selection: nil)
+        XCTAssertFalse(missing.permitsCloudEffortWrite(at: 0))
     }
 
     func testSwitchBackNamesTheRecommendationForAMacOnAConnection() throws {

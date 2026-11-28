@@ -2080,11 +2080,11 @@ final class LiveAppModel {
                 guard let self, current() else { return .failed }
                 return await self.readAssistantModels(roomID: roomID)
             },
-            save: { [weak self] snapshot, model, effort, requestID in
+            save: { [weak self] snapshot, model, effort, requestID, work, selectionIsCurrent in
                 guard let self, current() else { return .failed }
                 return await self.saveAssistantModel(roomID: roomID, snapshot: snapshot,
-                                                     model: model, effort: effort,
-                                                     requestID: requestID)
+                                                     model: model, effort: effort, requestID: requestID,
+                                                     work: work, selectionIsCurrent: selectionIsCurrent)
             }
         )
     }
@@ -2144,10 +2144,10 @@ final class LiveAppModel {
                 ),
                 makeConnectionsPoll: { [weak self] in self?.accountConnectionsPoller() ?? { nil } }
             ),
-            makeWorkSelection: { [weak self] account in
+            makeWorkSelection: { [weak self] in
                 guard let self, current() else { return nil }
                 let picker = PhoneModelPickerWorkSelection(agentPrincipal: agent.principal, client: client,
-                                                           account: account, isCurrent: current)
+                                                           isCurrent: current)
                 self.workModelPickers.add(picker)
                 return picker
             }
@@ -2459,16 +2459,24 @@ final class LiveAppModel {
                                     snapshot: ManagedModelSnapshot,
                                     model: String,
                                     effort: ManagedModelEffort,
-                                    requestID: NativeID) async -> AssistantModelSaveResult {
+                                    requestID: NativeID, work: WorkModelSelectionSnapshot?,
+                                    selectionIsCurrent: @escaping NativeDispatchGate) async -> AssistantModelSaveResult {
         guard let client = domainClient, let agent = agentForRoom(roomID),
               snapshot.agentPrincipal == agent.principal else { return .failed }
         let current = modelPickerScope(client: client, roomID: roomID, principal: agent.principal)
         let result = await modelOfferState(for: agent.principal).save(
             from: snapshot, choice: .offer(model: model, effort: effort), requestID: requestID,
             refreshAfterSecondConflict: false,
-            isCurrent: current, fetch: { try await client.managedModels(agentPrincipal: agent.principal) }
+            isCurrent: current, fetch: { try await client.managedModels(agentPrincipal: agent.principal) },
+            isSelectionCurrent: selectionIsCurrent
         ) { fence, id in
             let write = try ManagedModelWrite(requestId: id, snapshot: fence, model: model, effort: effort)
+            if let work {
+                return try await client.writeManagedModelEffort(
+                    agentPrincipal: agent.principal, value: write, work: work,
+                    isCurrent: { current() && selectionIsCurrent() }
+                )
+            }
             return try await client.writeManagedModel(agentPrincipal: agent.principal, value: write)
         }
         switch result {

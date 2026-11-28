@@ -244,7 +244,8 @@ struct ScriptedChatHost: View {
                                     ? AssistantModelActions(
                                         matrixAccountID: script.context.ownUserID,
                                         read: { .value(scriptedModels) },
-                                        save: { _, model, effort, _ in
+                                        save: { _, model, effort, _, _, isCurrent in
+                                            guard isCurrent() else { return .failed }
                                             scriptedModels = Self.models(model: model, effort: effort,
                                                                           revision: Int(scriptedModels.revision + 1))
                                             UITestProbe.append(
@@ -271,7 +272,8 @@ struct ScriptedChatHost: View {
                                             )
                                             return .saved(scriptedModelDestinations)
                                         },
-                                        subscriptions: scriptedSubscriptions
+                                        subscriptions: scriptedSubscriptions,
+                                        makeWorkSelection: makeScriptedWorkSelection
                                     ) : nil,
                                 assistantPresentation: script.context.kind == .assistant
                                     ? AssistantPresentationActions(
@@ -601,6 +603,16 @@ struct ScriptedChatHost: View {
         ]
         let data = try! JSONSerialization.data(withJSONObject: value)
         return try! NativeAPI.decode(AgentDefinitionSnapshot.self, from: data)
+    }
+
+    @MainActor private func makeScriptedWorkSelection() -> PhoneModelPickerWorkSelection {
+        PhoneModelPickerWorkSelection(
+            agentPrincipal: scriptedModels.agentPrincipal,
+            readSelection: { _ in .init(revision: scriptedModels.revision, selection: nil) },
+            readEligibility: { _ in throw NativeDomainClientFailure.transportUnavailable },
+            writeSelection: { _, _, _ in throw NativeDomainClientFailure.invalidRequest },
+            isCurrent: { true }
+        )
     }
 
     private static func models(model: String = ManagedModelLineup.defaultAlias,

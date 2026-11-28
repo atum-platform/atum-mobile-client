@@ -26,22 +26,16 @@ public enum PhoneModelPickerProjection {
 
     /// The Work identity includes the plan even when two catalogs report the
     /// same model ID. A saved model stays visible if its catalog omits it.
-    public static func workRows(reported: [WorkPlanHandoff], state: PhoneModelPickerWorkSelectionState?) -> [WorkRow] {
-        let current = state?.readySnapshot?.selection
-        var seen = Set<WorkModelSelection>()
-        var rows: [WorkRow] = []
-        for handoff in reported {
-            for model in handoff.models {
-                guard let choice = WorkModelSelection(plan: handoff.plan, model: model.id),
-                      seen.insert(choice).inserted else { continue }
-                rows.append(.init(id: choice, displayName: model.displayName, selected: choice == current,
-                                  selectable: state?.eligibility.allows(choice) == true))
-            }
+    public static func workRows(state: PhoneModelPickerWorkSelectionState?) -> [WorkRow] {
+        guard let state else { return [] }
+        let current = state.readySnapshot?.selection
+        var rows = state.selectableModels.map { model in
+            WorkRow(id: model.choice, displayName: model.name, selected: model.choice == current, selectable: true)
         }
-        if let saved = state?.snapshot?.selection, seen.insert(saved).inserted {
+        if let saved = state.snapshot?.selection, !rows.contains(where: { $0.id == saved }) {
             let modelName = ModelDisplayName.destinationLabel(model: saved.model)
             rows.append(.init(id: saved, displayName: "\(saved.plan.productName) · \(modelName)",
-                              selected: saved == current, selectable: state?.eligibility.allows(saved) == true))
+                              selected: saved == current, selectable: false))
         }
         return rows
     }
@@ -561,8 +555,9 @@ public enum PhoneModelPickerProjection {
     /// The offer can drive thinking only when its choice agrees with the
     /// selected Atum row. The offer and destination have separate revisions.
     public static func conversationThinking(offer: ManagedModelSnapshot,
-                                            rows: [Row]) -> Thinking? {
-        guard rows.contains(where: { $0.selected && $0.source == .atum && $0.model == offer.choice.model })
+                                            rows: [Row], work: WorkModelSelectionSnapshot?) -> Thinking? {
+        guard work?.permitsCloudEffortWrite(at: offer.revision) == true,
+              rows.contains(where: { $0.selected && $0.source == .atum && $0.model == offer.choice.model })
         else { return nil }
         return thinking(offer)
     }
