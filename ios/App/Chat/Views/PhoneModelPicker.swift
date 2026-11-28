@@ -18,10 +18,10 @@ struct AssistantSubscriptionActions {
     /// The one-time training-off confirmation a ChatGPT pick needs first.
     /// Without it a ChatGPT pick is never written (`ChatGPTTrainingGate`).
     var training: ChatGPTTrainingActions?
-    /// The connect sheet's registry poll, made when the sheet opens and bound
+    /// The connect sheet's readiness poll, made when the sheet opens and bound
     /// to that account session; it never rotates the grant. Nil: the sheet
     /// does not follow the read.
-    var makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
+    var makeConnectionsPoll: AccountPlanPollFactory?
 }
 
 /// One subscription pick, for an idempotent retry of the same write.

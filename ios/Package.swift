@@ -32,7 +32,7 @@ let package = Package(
                                 .copy("Fixtures/company-workspace-v1.3-capabilities"),
                                 .copy("Fixtures/mobile-drive-v1"),
                                 .copy("Fixtures/opencloud-drive-graph"),
-                                .copy("Fixtures/store-v1.1")]),
+                                .copy("Fixtures/store-v1.1"), .copy("Fixtures/plan-readiness")]),
         .testTarget(name: "AtumChatTests", dependencies: ["AtumChat"], path: "Tests/AtumChat"),
         .testTarget(name: "AtumDriveTests", dependencies: ["AtumDrive", "AtumNativeAPI"],
                     path: "Tests/AtumDrive"),

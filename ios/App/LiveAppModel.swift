@@ -2135,7 +2135,7 @@ final class LiveAppModel {
                         }
                     }
                 ),
-                makeConnectionsPoll: { [weak self] in self?.accountConnectionsPoller() ?? { nil } }
+                makeConnectionsPoll: { Self.accountPlanPoll(client: client, isCurrent: current) }
             )
         )
     }
@@ -2636,29 +2636,27 @@ final class LiveAppModel {
         }
     }
 
-    /// The connect sheet's follow-up read, bound to the account session that
-    /// is current when the sheet opens: once that client is replaced (sign-out,
-    /// account switch) it answers nothing. Each read is a `.poll`: it never
-    /// refreshes the grant or replays a 401, so a poll still running as the
-    /// app suspends can never start the one-time token spend.
-    func accountConnectionsPoller() -> @MainActor () async -> AccountConnections? {
-        guard let client = domainClient else { return { nil } }
-        return { [weak self] in
-            guard let self, self.domainClient === client else { return nil }
-            let value = try? await client.accountConnections(.poll)
-            guard self.domainClient === client else { return nil }
-            return value
-        }
+    private static func accountPlanPoll(client: NativeDomainClient?, isCurrent: @escaping @MainActor () -> Bool)
+        -> AccountPlanPoll {
+        AccountPlanPoll(isCurrent: isCurrent,
+                        readReadiness: { await client?.workPlanReadiness() ?? .unavailable },
+                        readRegistry: { try? await client?.accountConnections(.poll) })
     }
 
-    /// The account's connections (`atum.account-connections/1`) for Settings ›
-    /// Connections and the picker's first read. nil is "could not read"; an
-    /// answer that arrives after a sign-out or account switch is dropped.
-    func accountConnections() async -> AccountConnections? {
-        guard let client = domainClient else { return nil }
-        let value = try? await client.accountConnections()
-        guard domainClient === client else { return nil }
-        return value
+    /// Settings reads and sheet polls are bound to this account and client.
+    func accountConnectionsActions() -> AccountConnectionsActions {
+        let client = domainClient
+        let generation = accountScopeGeneration
+        let current: @MainActor () -> Bool = { [weak self] in
+            self?.accountScopeGeneration == generation && self?.domainClient === client
+        }
+        return AccountConnectionsActions(
+            scope: .init(generation: generation, client: client.map { ObjectIdentifier($0) }),
+            isCurrent: current,
+            read: { try? await client?.accountConnections() },
+            readReadiness: { await client?.workPlanReadiness() ?? .unavailable },
+            makePoll: { Self.accountPlanPoll(client: client, isCurrent: current) }
+        )
     }
 
     /// The account's ChatGPT-with-Google training-off confirmation, read from

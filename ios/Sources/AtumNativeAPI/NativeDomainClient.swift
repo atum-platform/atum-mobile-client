@@ -1215,6 +1215,15 @@ public struct AgentsRead: Sendable {
         return try decode(AccountConnections.self, data: body)
     }
 
+    /// Optional owner read. Use the current bearer without rotation or replay,
+    /// including when the operation is unavailable on an older server.
+    public func workPlanReadiness() async -> WorkPlanReadinessRead {
+        guard let body = try? await phoneDeviceServices(request: WorkPlanReadinessContract.requestBody, rotation: false),
+              body.count <= AccountConnectionsContract.maximumResponseBytes,
+              let snapshot = try? decode(WorkPlanReadiness.self, data: body) else { return .unavailable }
+        return .available(snapshot)
+    }
+
     // MARK: ChatGPT with Google data (Shell training-confirmation r3)
 
     /// The account's one-time training-off confirmation. Any answer other than

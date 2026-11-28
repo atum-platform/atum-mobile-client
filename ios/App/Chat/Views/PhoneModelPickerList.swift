@@ -36,7 +36,7 @@ struct PhoneModelPickerList: View {
     let planConnects: [AccountPlan]
     /// Makes the connect sheet's registry poll when it opens (bound to that
     /// account session; it never rotates the grant).
-    let makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
+    let makeConnectionsPoll: AccountPlanPollFactory?
     /// The sheet saw a plan land: the picker takes that registry, so the
     /// plan's Connect entry goes away.
     let onConnectionsChanged: @MainActor (AccountConnections) -> Void
@@ -80,7 +80,7 @@ struct PhoneModelPickerList: View {
          selectEffort: @escaping (ManagedModelEffort) -> Void = { _ in },
          switchBack: (() -> Void)? = nil,
          planConnects: [AccountPlan] = [],
-         makeConnectionsPoll: (@MainActor () -> @MainActor () async -> AccountConnections?)? = nil,
+         makeConnectionsPoll: AccountPlanPollFactory? = nil,
          onConnectionsChanged: @escaping @MainActor (AccountConnections) -> Void = { _ in },
          destinationStatus: PhoneModelPickerStatus? = nil,
          providerStatuses: [PhoneModelPickerStatus] = [],
@@ -193,7 +193,9 @@ struct PhoneModelPickerList: View {
         .sheet(item: $connecting) { request in
             AccountPlanConnectSheet(design: design, plan: request.plan,
                                     makePoll: request.handoff ? nil : makeConnectionsPoll,
-                                    onLanded: onConnectionsChanged)
+                                    onLanded: { landing in
+                                        if let registry = landing.registry { onConnectionsChanged(registry) }
+                                    })
         }
     }
 

@@ -23,6 +23,27 @@ final class AccountConnectionsStateTests: XCTestCase {
         PhoneSubscriptionAccountReads(chatGPT: { nil }, openCodeGo: { openCodeGo }, accountConnections: registry)
     }
 
+    private func actions(scope: UInt64 = 0, isCurrent: @escaping @MainActor () -> Bool = { true },
+                         readiness: @escaping @MainActor () async -> WorkPlanReadinessRead = { .unavailable },
+                         registry: @escaping @MainActor () async -> AccountConnections?) -> AccountConnectionsActions {
+        AccountConnectionsActions(scope: .init(generation: scope, client: nil),
+                                  isCurrent: isCurrent, read: registry, readReadiness: readiness,
+                                  makePoll: {
+                                      AccountPlanPoll(isCurrent: isCurrent, readReadiness: readiness,
+                                                      readRegistry: registry)
+                                  })
+    }
+
+    private func readiness(_ state: String = "ready") throws -> WorkPlanReadiness {
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        let validity = state == "ready" ? ",\"validUntil\":\(now + 60_000)" : ""
+        return try NativeAPI.decode(WorkPlanReadiness.self, from: Data("""
+            {"profile":"atum.work-plan-readiness/1","checkedAt":\(now),"plans":{
+                "codex":{"state":"not_connected"},"claude":{"state":"not_connected"},
+                "antigravity":{"state":"\(state)"\(validity)}}}
+            """.utf8))
+    }
+
     func testThePickerOffersConnectOnlyOnceTheRegistryHasAnswered() {
         XCTAssertEqual(PhoneModelPickerList.planConnects(nil), [])
         XCTAssertEqual(PhoneModelPickerList.planConnects(PhoneSubscriptionAccount(chatGPT: nil, openCodeGo: nil)), [],
@@ -74,25 +95,99 @@ final class AccountConnectionsStateTests: XCTestCase {
 
     /// Settings: a foreground refresh that read "Not connected" and finishes
     /// after the sheet saw the plan land must not undo the landing.
-    func testALateRefreshNeverUndoesALanding() async {
+    func testALateRefreshNeverUndoesALanding() async throws {
         let model = AccountConnectionsModel()
         let old = registry([.antigravity: false])
         let newer = registry([.antigravity: true])
+        let ready = try readiness()
+        let currentActions = actions(readiness: { .available(ready) }) { newer }
+        let landing = AccountPlanLanding(readiness: ready, registry: newer)
         // The sheet lands while the refresh is still reading.
-        await model.reload { model.landed(newer); return old }
-        XCTAssertEqual(model.load, .loaded(newer))
-        // Nor does a failed refresh that was in flight.
-        await model.reload { model.landed(newer); return nil }
-        XCTAssertEqual(model.load, .loaded(newer))
-        // Of two overlapping refreshes, the one that started last wins.
-        await model.reload {
-            await model.reload { newer }
+        await model.reload(actions {
+            model.landed(landing, actions: currentActions)
             return old
-        }
+        })
         XCTAssertEqual(model.load, .loaded(newer))
+        XCTAssertEqual(model.readiness, ready)
+        // Nor does a failed refresh that was in flight.
+        await model.reload(actions {
+            model.landed(landing, actions: currentActions)
+            return nil
+        })
+        XCTAssertEqual(model.load, .loaded(newer))
+        XCTAssertEqual(model.readiness, ready)
+        // Of two overlapping refreshes, the one that started last wins.
+        await model.reload(actions {
+            await model.reload(currentActions)
+            return old
+        })
+        XCTAssertEqual(model.load, .loaded(newer))
+        XCTAssertEqual(model.readiness, ready)
         // A refresh that starts after the landing applies as usual.
-        await model.reload { old }
+        await model.reload(actions { old })
         XCTAssertEqual(model.load, .loaded(old))
+        XCTAssertNil(model.readiness)
+    }
+
+    func testLateReadinessAndLandingFromAnOldAccountAreDropped() async throws {
+        let model = AccountConnectionsModel()
+        let ready = try readiness()
+        let oldRegistry = registry([.antigravity: true])
+        let newRegistry = registry([.antigravity: false])
+        let newActions = actions(scope: 2) { newRegistry }
+        var oldAccountIsCurrent = true
+        let oldActions = actions(scope: 1, isCurrent: { oldAccountIsCurrent }, readiness: {
+            oldAccountIsCurrent = false
+            await model.reload(newActions)
+            return .available(ready)
+        }) { oldRegistry }
+
+        await model.reload(oldActions)
+        XCTAssertEqual(model.scope, newActions.scope)
+        XCTAssertEqual(model.load, .loaded(newRegistry))
+        XCTAssertNil(model.readiness)
+        model.landed(AccountPlanLanding(readiness: ready, registry: oldRegistry), actions: oldActions)
+        XCTAssertEqual(model.load, .loaded(newRegistry))
+        XCTAssertNil(model.readiness)
+    }
+
+    func testPollingRequiresReadyAndFencesBothReplies() async throws {
+        let ready = try readiness()
+        let missing = try readiness("grant_missing")
+        var current = true
+        var registryReads = 0
+        let signIn = registry([.antigravity: true])
+        let readRegistry: @MainActor () async -> AccountConnections? = { registryReads += 1; return signIn }
+
+        for result: WorkPlanReadinessRead in [.unavailable, .available(missing)] {
+            let poll = AccountPlanPoll(isCurrent: { current }, readReadiness: { result }, readRegistry: readRegistry)
+            let landing = await poll.landing(for: .antigravity)
+            XCTAssertNil(landing)
+        }
+        XCTAssertEqual(registryReads, 0)
+        let lateReadiness = AccountPlanPoll(isCurrent: { current }, readReadiness: {
+            current = false
+            return .available(ready)
+        }, readRegistry: readRegistry)
+        let retired = await lateReadiness.landing(for: .antigravity)
+        XCTAssertNil(retired)
+        XCTAssertEqual(registryReads, 0)
+
+        current = true
+        let lateRegistry = AccountPlanPoll(isCurrent: { current }, readReadiness: { .available(ready) }, readRegistry: {
+            current = false
+            return await readRegistry()
+        })
+        let retiredDuringRegistry = await lateRegistry.landing(for: .antigravity)
+        XCTAssertNil(retiredDuringRegistry)
+        XCTAssertEqual(registryReads, 1)
+
+        current = true
+        let registryUnavailable = AccountPlanPoll(isCurrent: { current }, readReadiness: { .available(ready) },
+                                                  readRegistry: { nil })
+        let landing = await registryUnavailable.landing(for: .antigravity)
+        XCTAssertEqual(landing?.readiness, ready)
+        XCTAssertNil(landing?.registry)
     }
 
     func testTheConnectSheetFollowsAtTheDesktopsPace() {

@@ -731,7 +731,7 @@ struct ScriptedChatHost: View {
                     return .confirmed(ChatGPTTrainingStatus(current: true, connectionID: connectionID,
                                                             confirmedAt: Self.trainingConfirmedAt, revision: 1))
                 }),
-            makeConnectionsPoll: { { Self.scriptedAccountConnections } })
+                makeConnectionsPoll: nil)
     }
 
     /// `-AtumScriptedPickerReads chatgpt-failed,destination-failed` (W4-X2):

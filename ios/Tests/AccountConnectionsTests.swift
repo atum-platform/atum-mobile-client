@@ -106,9 +106,9 @@ final class AccountConnectionsTests: XCTestCase {
 
     // MARK: Rows (desktop view.test.ts)
 
-    func testItAlwaysListsTheThreePlansConnectedFirstThenLastSeenThenTheRest() throws {
+    func testTheSignInFallbackListsSignedInFirstThenLastSeenThenTheRest() throws {
         XCTAssertEqual(AccountConnectionsView.planRows(try registry()).map { [$0.plan.rawValue, $0.state.rawValue] },
-                       [["codex", "connected"], ["claude", "stale"], ["antigravity", "notConnected"]])
+                       [["codex", "signedIn"], ["claude", "stale"], ["antigravity", "notConnected"]])
         XCTAssertEqual(AccountConnectionsView.planRows(nil).map(\.state), [.notConnected, .notConnected, .notConnected])
         XCTAssertEqual(AccountConnectionsView.planRows(nil).map(\.plan), [.codex, .claude, .antigravity])
     }
@@ -175,14 +175,6 @@ final class AccountConnectionsTests: XCTestCase {
         // A last-seen plan keeps its models: an asleep Mac never greys a plan.
         XCTAssertEqual(AccountConnectionsView.pickerConnectPlans(try registry()), [.antigravity])
         XCTAssertEqual(AccountConnectionsView.planRow(try registry(), .claude).models.map(\.id), ["claude-sonnet-5-5"])
-    }
-
-    func testTheConnectSheetLandsOnlyOnAFreshMac() throws {
-        let value = try registry()
-        XCTAssertTrue(AccountConnectionsView.connectLanded(value, plan: .codex))
-        XCTAssertFalse(AccountConnectionsView.connectLanded(value, plan: .claude))
-        XCTAssertFalse(AccountConnectionsView.connectLanded(value, plan: .antigravity))
-        XCTAssertFalse(AccountConnectionsView.connectLanded(nil, plan: .codex))
     }
 
     // MARK: Words, from the pin
@@ -314,6 +306,44 @@ final class AccountConnectionsTests: XCTestCase {
 /// The read is the desktop's own request on the existing device-services
 /// transport: a POST of exactly `{"operation":"account_connections_read"}`.
 @MainActor final class AccountConnectionsTransportTests: XCTestCase {
+    func testReadinessPostsExactOperationWithStoredBearerAndTreatsFailuresAsUnavailable() async throws {
+        let probe = PollProbe()
+        let client = NativeDomainClient(
+            testAuthorization: { forceRefresh in
+                probe.refreshes.append(forceRefresh)
+                return "rotating-token"
+            },
+            protocolClasses: [AccountConnectionsProtocol.self],
+            testStoredAuthorization: { probe.stored },
+            onAuthenticationFailure: { _ in probe.failures += 1 })
+        let response = try WorkPlanReadinessTests.fixture("response")
+        AccountConnectionsProtocol.reset(answers: [(200, response)])
+        let answer = await client.workPlanReadiness()
+        XCTAssertEqual(answer, .available(try NativeAPI.decode(WorkPlanReadiness.self, from: response)))
+        let seen = try XCTUnwrap(AccountConnectionsProtocol.seen)
+        XCTAssertEqual(seen.method, "POST")
+        XCTAssertEqual(seen.path, "/api/matrix/v1/device-services")
+        XCTAssertEqual(seen.authorization, "Bearer stored-token")
+        XCTAssertEqual(seen.body, try WorkPlanReadinessTests.fixture("request", trim: true))
+        XCTAssertNil(seen.version)
+
+        for status in [400, 404, 401, 503, 200] {
+            // Older servers reject the unknown operation with invalid input.
+            let error = status == 400 ? #"{"error":"invalid"}"# : "{}"
+            AccountConnectionsProtocol.reset(answers: [(status, Data(error.utf8)), (200, response)])
+            let refused = await client.workPlanReadiness()
+            XCTAssertEqual(refused, .unavailable, "HTTP \(status)")
+            XCTAssertEqual(AccountConnectionsProtocol.requests, 1, "HTTP \(status) must not replay")
+        }
+        probe.stored = nil
+        AccountConnectionsProtocol.reset(answers: [(200, response)])
+        let noBearer = await client.workPlanReadiness()
+        XCTAssertEqual(noBearer, .unavailable)
+        XCTAssertEqual(AccountConnectionsProtocol.requests, 0)
+        XCTAssertEqual(probe.refreshes, [])
+        XCTAssertEqual(probe.failures, 0)
+    }
+
     func testTheReadPostsTheDesktopsOperationAndDecodesTheRegistry() async throws {
         let client = NativeDomainClient(testAuthorization: { _ in "native-token" },
                                         protocolClasses: [AccountConnectionsProtocol.self])

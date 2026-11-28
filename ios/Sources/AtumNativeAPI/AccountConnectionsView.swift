@@ -1,13 +1,11 @@
 import Foundation
 
-/// Account connections as the phone draws them: a port of the desktop's pure
-/// view (`apps/desktop/src/app/connections/view.ts`, #106 `f1d10cf0`) from the
-/// one registry read to rows, lines and the picker's Connect entries. The
-/// phone is never a Mac, so no Mac here is "this Mac" and nothing is "here":
-/// every Mac is named by its own name, and Manage (which opens the plan's
-/// screen in Work on the Mac that holds it) is never offered.
+/// Plan connection states for Settings, including the registry's sign-in
+/// facts when cloud readiness is unknown.
 public enum AccountPlanState: String, Equatable, Sendable {
-    case connected, stale, notConnected, needsAttention
+    case connected, needsRenew, notConnected
+    /// Sign-in states used when readiness is unknown.
+    case signedIn, stale, needsAttention
 }
 
 public struct AccountPlanMac: Equatable, Sendable {
@@ -21,10 +19,12 @@ public struct AccountPlanRow: Equatable, Sendable {
     public let state: AccountPlanState
     public let macs: [AccountPlanMac]
     public let models: [AccountConnectionModel]
+    public let readinessUnknown: Bool
 
-    /// Only a plan connected nowhere, or one that must sign in again, has an
-    /// action on the phone: Connect, which opens the connect sheet.
-    public var offersConnect: Bool { state == .notConnected || state == .needsAttention }
+    /// The action on the phone hands off to Atum on a Mac.
+    public var offersConnect: Bool {
+        state == .notConnected || state == .needsAttention || state == .needsRenew
+    }
 }
 
 /// A plan row's one line (desktop `accountPlanLine`).
@@ -33,6 +33,8 @@ public enum AccountPlanLine: Equatable, Sendable {
     case onMacs(String)
     /// "Last seen on {Macs}": every Mac it was on is stale.
     case lastSeen(String)
+    case inCloud
+    case needsRenew
     case needsAttention
     case notConnected
 }
@@ -53,45 +55,61 @@ public enum AccountConnectionsLoad: Equatable, Sendable {
 }
 
 public enum AccountConnectionsView {
-    /// Every plan, always, in the order the picker and Settings share:
-    /// connected, then needs attention, then last seen, then the rest. The sort
-    /// is stable, so plans of one state keep the desktop's plan order.
-    public static func planRows(_ registry: AccountConnections?) -> [AccountPlanRow] {
-        let rank: [AccountPlanState: Int] = [.connected: 0, .needsAttention: 1, .stale: 2, .notConnected: 3]
+    /// Every plan, with ready plans and plans signed in first, then plans needing
+    /// action, last-seen plans and disconnected plans. Ties keep the plan order.
+    public static func planRows(_ registry: AccountConnections?, readiness: WorkPlanReadiness? = nil,
+                                now: Date = .now) -> [AccountPlanRow] {
+        let rank: [AccountPlanState: Int] = [
+            .connected: 0, .signedIn: 0, .needsRenew: 1, .needsAttention: 1, .stale: 2, .notConnected: 3
+        ]
         return AccountPlan.allCases
-            .map { planRow(registry, $0) }
+            .map { planRow(registry, $0, readiness: readiness, now: now) }
             .enumerated()
             .sorted { (rank[$0.element.state]!, $0.offset) < (rank[$1.element.state]!, $1.offset) }
             .map(\.element)
     }
 
-    public static func planRow(_ registry: AccountConnections?, _ plan: AccountPlan) -> AccountPlanRow {
-        guard let connection = registry?.connections.first(where: { $0.kind == .plan && $0.plan == plan }) else {
-            return AccountPlanRow(plan: plan, state: .notConnected, macs: [], models: [])
-        }
+    public static func planRow(_ registry: AccountConnections?, _ plan: AccountPlan,
+                               readiness: WorkPlanReadiness? = nil, now: Date = .now) -> AccountPlanRow {
+        let connection = registry?.connections.first { $0.kind == .plan && $0.plan == plan }
         // Fresh Macs first, then stale ones; otherwise the registry's order.
-        let macs = connection.devices
+        let macs = (connection?.devices ?? [])
             .map { AccountPlanMac(id: $0.deviceServiceID, name: $0.displayName, stale: $0.stale) }
             .enumerated()
             .sorted { ($0.element.stale ? 1 : 0, $0.offset) < ($1.element.stale ? 1 : 0, $1.offset) }
             .map(\.element)
-        let state: AccountPlanState =
-            connection.status == .needsAttention ? .needsAttention
-            : connection.status == .notConnected || macs.isEmpty ? .notConnected
-            : macs.allSatisfy(\.stale) ? .stale
-            : .connected
-        return AccountPlanRow(plan: plan, state: state, macs: macs,
-                              models: state == .notConnected ? [] : connection.models)
+        let state: AccountPlanState
+        switch readiness?.entry(for: plan, at: now) {
+        case .ready: state = .connected
+        case .grantMissing, .grantExpired: state = .needsRenew
+        case .notConnected: state = .notConnected
+        case nil:
+            if connection?.status == .needsAttention {
+                state = .needsAttention
+            } else if connection?.status == .notConnected || macs.isEmpty {
+                state = .notConnected
+            } else {
+                state = macs.allSatisfy(\.stale) ? .stale : .signedIn
+            }
+        }
+        let models = state == .notConnected ? [] : (connection?.models ?? [])
+        return AccountPlanRow(plan: plan, state: state, macs: macs, models: models,
+                              readinessUnknown: readiness == nil)
     }
 
     /// Where the plan runs, when it was last seen, or that it is not connected.
     /// Mac names are joined with ", " exactly as the desktop joins them.
     public static func line(_ row: AccountPlanRow) -> AccountPlanLine {
         switch row.state {
-        case .connected: .onMacs(row.macs.filter { !$0.stale }.map(\.name).joined(separator: ", "))
-        case .stale: .lastSeen(row.macs.map(\.name).joined(separator: ", "))
-        case .needsAttention: .needsAttention
-        case .notConnected: .notConnected
+        case .connected, .signedIn:
+            let fresh = row.macs.filter { !$0.stale }
+            if !fresh.isEmpty { return .onMacs(fresh.map(\.name).joined(separator: ", ")) }
+            if !row.macs.isEmpty { return .lastSeen(row.macs.map(\.name).joined(separator: ", ")) }
+            return .inCloud
+        case .stale: return .lastSeen(row.macs.map(\.name).joined(separator: ", "))
+        case .needsAttention: return .needsAttention
+        case .needsRenew: return .needsRenew
+        case .notConnected: return .notConnected
         }
     }
 
@@ -127,11 +145,10 @@ public enum AccountConnectionsView {
         planRows(registry).filter(\.offersConnect).map(\.plan)
     }
 
-    /// The connect sheet's watch: a plan has landed once any Mac reports it
-    /// connected (fresh). The phone never signs in itself, so this is the
-    /// owner finishing on a Mac while the sheet is open.
-    public static func connectLanded(_ registry: AccountConnections?, plan: AccountPlan) -> Bool {
-        planRow(registry, plan).state == .connected
+    /// The sheet completes only on an unexpired readiness result.
+    public static func connectLanded(_ readiness: WorkPlanReadiness?, plan: AccountPlan, now: Date = .now) -> Bool {
+        if case .ready = readiness?.entry(for: plan, at: now) { return true }
+        return false
     }
 }
 
@@ -172,6 +189,8 @@ public enum AccountConnectionsCopy {
         switch line {
         case let .onMacs(names): Phrase("src.matrix.mobile-copy.mobileScreensCopy.connections.onMacs", [names])
         case let .lastSeen(names): Phrase("src.matrix.mobile-copy.mobileScreensCopy.connections.lastSeen", [names])
+        case .inCloud: inCloud
+        case .needsRenew: needsMac
         case .needsAttention: Phrase("src.matrix.mobile-copy.mobileScreensCopy.connections.needsAttention")
         case .notConnected: notConnected
         }

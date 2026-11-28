@@ -1,0 +1,9 @@
+{
+  "profile": "atum.work-plan-readiness/1",
+  "checkedAt": 1795824000000,
+  "plans": {
+    "codex": { "state": "ready", "validUntil": 1795824600000 },
+    "claude": { "state": "grant_expired" },
+    "antigravity": { "state": "grant_missing" }
+  }
+}

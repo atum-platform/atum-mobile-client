@@ -4,15 +4,43 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// The account connections read Settings › Connections and the model picker
-/// share: `account_connections_read`, the desktop's one read for every
-/// feature. A nil answer is a failed read; the phone has no Mac facts of its
-/// own to fall back on, so it never guesses "Not connected".
 struct AccountConnectionsActions {
+    struct Scope: Equatable, Hashable {
+        let generation: UInt64
+        let client: ObjectIdentifier?
+    }
+
+    var scope = Scope(generation: 0, client: nil)
+    var isCurrent: @MainActor () -> Bool = { true }
     let read: @MainActor () async -> AccountConnections?
-    /// Makes the connect sheet's poll when the sheet opens: bound to that
-    /// account session, and never rotating the grant (`AccountConnectionsReadMode.poll`).
-    let makePoll: @MainActor () -> @MainActor () async -> AccountConnections?
+    let readReadiness: @MainActor () async -> WorkPlanReadinessRead
+    let makePoll: AccountPlanPollFactory
+}
+
+typealias AccountPlanPollFactory = @MainActor () -> AccountPlanPoll
+
+struct AccountPlanLanding {
+    let readiness: WorkPlanReadiness
+    let registry: AccountConnections?
+}
+
+/// Both reads use the session the sheet opened with and never rotate the grant.
+@MainActor
+struct AccountPlanPoll {
+    let isCurrent: @MainActor () -> Bool
+    let readReadiness: @MainActor () async -> WorkPlanReadinessRead
+    let readRegistry: @MainActor () async -> AccountConnections?
+
+    func landing(for plan: AccountPlan) async -> AccountPlanLanding? {
+        guard isCurrent(), !Task.isCancelled,
+              let readiness = await readReadiness().snapshot,
+              isCurrent(), !Task.isCancelled,
+              AccountConnectionsView.connectLanded(readiness, plan: plan) else { return nil }
+        let registry = await readRegistry()
+        guard isCurrent(), !Task.isCancelled,
+              AccountConnectionsView.connectLanded(readiness, plan: plan) else { return nil }
+        return AccountPlanLanding(readiness: readiness, registry: registry)
+    }
 }
 
 /// The words of a connections phrase, from the pinned export.
@@ -42,41 +70,52 @@ struct AccountPlanMark: View {
 @MainActor @Observable
 final class AccountConnectionsModel {
     var load = AccountConnectionsLoad.loading
+    private(set) var readiness: WorkPlanReadiness?
+    private(set) var scope: AccountConnectionsActions.Scope?
     var connecting: AccountPlanConnectRequest?
     /// Every read and every landing takes a new generation; a read applies
     /// only if nothing newer started or landed while it was in flight.
     @ObservationIgnored private var generation = 0
 
-    func reload(_ read: @MainActor () async -> AccountConnections?) async {
+    func reload(_ actions: AccountConnectionsActions) async {
+        guard actions.isCurrent(), !Task.isCancelled else { return }
+        if scope != actions.scope {
+            scope = actions.scope
+            load = .loading
+            connecting = nil
+        }
         generation += 1
         let mine = generation
-        let registry = await read()
+        readiness = nil
+        let readReadiness = actions.readReadiness
+        async let readinessRead = readReadiness()
+        let registry = await actions.read()
         // A refresh that read "Not connected" before the sheet saw the plan
         // land must not undo that newer answer.
-        guard mine == generation else { return }
-        guard let registry else {
-            // A failed refresh keeps the last good read, as the desktop does.
-            if case .loaded = load { return }
+        guard mine == generation, actions.isCurrent(), !Task.isCancelled else { return }
+        if let registry {
+            load = .loaded(registry)
+        } else if case .loading = load {
             load = .failed
-            return
         }
-        load = .loaded(registry)
+        let result = await readinessRead
+        guard mine == generation, actions.isCurrent(), !Task.isCancelled else { return }
+        readiness = result.snapshot
     }
 
-    /// The connect sheet saw the plan land: the rows take that read, and any
-    /// older read still in flight is dropped.
-    func landed(_ registry: AccountConnections) {
+    /// The sheet confirmed readiness. An older read still in flight is dropped.
+    func landed(_ landing: AccountPlanLanding, actions: AccountConnectionsActions) {
+        guard scope == actions.scope, actions.isCurrent() else { return }
         generation += 1
-        load = .loaded(registry)
+        readiness = landing.readiness
+        if let registry = landing.registry { load = .loaded(registry) }
     }
 }
 
 /// Settings › Connections, Subscriptions and Data and tools (desktop
 /// `AccountSubscriptionsSection` and `AccountToolsSection`, #106): every plan
 /// the account can use, one row each (its mark, where it runs, at most one
-/// action), the OpenCode Go key, then your chats and the home hubs. Connected
-/// means every assistant and every feature can use it; nothing is listed per
-/// assistant. Two sections straight in the page's list.
+/// action), the OpenCode Go key, then your chats and the home hubs.
 struct AccountConnectionsSections: View {
     let design: LiveDesign
     let actions: AccountConnectionsActions
@@ -84,26 +123,43 @@ struct AccountConnectionsSections: View {
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var expiryTick = Date.distantPast
 
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var load: AccountConnectionsLoad { model.scope == actions.scope ? model.load : .loading }
+    private var readiness: WorkPlanReadiness? { model.scope == actions.scope ? model.readiness : nil }
+    private var registry: AccountConnections? {
+        guard case let .loaded(registry) = load else { return nil }
+        return registry
+    }
 
     var body: some View {
+        let now = max(Date.now, expiryTick)
+        let expiry = readiness?.nextExpiry(after: now)
         Section {
-            switch model.load {
+            switch load {
             case .loading:
                 ProgressView()
                     .frame(maxWidth: .infinity, minHeight: 52)
                     .accessibilityIdentifier("account.settings.connections.loading")
-            case .failed:
+            case .failed where readiness == nil:
                 failedRow
-            case let .loaded(registry):
-                ForEach(AccountConnectionsView.planRows(registry), id: \.plan) { row in
+            case .loaded, .failed:
+                ForEach(AccountConnectionsView.planRows(registry, readiness: readiness, now: now), id: \.plan) { row in
                     planRow(row)
                 }
-                openCodeGoRow(AccountConnectionsView.openCodeGoConnected(registry))
+                if let registry { openCodeGoRow(AccountConnectionsView.openCodeGoConnected(registry)) }
             }
         } header: {
             Text(words(AccountConnectionsCopy.subscriptions))
+        }
+        .task(id: expiry) {
+            guard let expiry else { return }
+            while expiry > .now {
+                do { try await Task.sleep(for: .seconds(max(0, expiry.timeIntervalSinceNow))) } catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            expiryTick = expiry
         }
         Section {
             ForEach(toolRows, id: \.self) { row in toolRow(row) }
@@ -115,7 +171,6 @@ struct AccountConnectionsSections: View {
     // Data and tools is account-wide: your chats are always there, so the
     // section draws before (and without) the read; hubs join once it answers.
     private var toolRows: [AccountToolRow] {
-        guard case let .loaded(registry) = model.load else { return [.ownerChats] }
         return AccountConnectionsView.toolRows(registry)
     }
 
@@ -175,7 +230,7 @@ struct AccountConnectionsSections: View {
                 .accessibilityIdentifier("account.settings.connections.failed")
             Button(words(AccountConnectionsCopy.tryAgain)) {
                 model.load = .loading
-                Task { await model.reload(actions.read) }
+                Task { await model.reload(actions) }
             }
             .buttonStyle(.atumSecondary)
             .accessibilityIdentifier("account.settings.connections.retry")
@@ -246,8 +301,7 @@ struct AccountConnectionsSections: View {
 struct AccountPlanConnectRequest: Identifiable, Equatable {
     let plan: AccountPlan
     /// A Work plan that is already connected on a Mac: the sheet only hands
-    /// off to Atum on the Mac (desktop's Allow sheet on a device without Work)
-    /// and does not follow the registry, which would read it as just landed.
+    /// off to Atum on the Mac (desktop's Allow sheet on a device without Work).
     var handoff = false
     var id: String { plan.rawValue }
 }
@@ -260,7 +314,7 @@ struct AccountPlanConnectRequest: Identifiable, Equatable {
 ///
 /// While the sheet is open the phone follows the account read (every 3 s, for
 /// at most 10 minutes, the desktop's `ACCOUNT_CONNECT_POLL_MS` and
-/// `ACCOUNT_CONNECT_WAIT_MS`). When a Mac reports the plan connected, the
+/// `ACCOUNT_CONNECT_WAIT_MS`). When the account reports the plan ready, the
 /// sheet says "{Plan} is connected" with a check and leaves after a beat
 /// (`ACCOUNT_CONNECT_DONE_MS`), as the desktop's title band does.
 struct AccountPlanConnectSheet: View {
@@ -271,12 +325,12 @@ struct AccountPlanConnectSheet: View {
     let design: LiveDesign
     let plan: AccountPlan
     /// Makes the poll once, when the sheet first follows; nil: no follow.
-    let makePoll: (@MainActor () -> @MainActor () async -> AccountConnections?)?
-    let onLanded: @MainActor (AccountConnections) -> Void
+    let makePoll: AccountPlanPollFactory?
+    let onLanded: @MainActor (AccountPlanLanding) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @State private var poll: (@MainActor () async -> AccountConnections?)?
+    @State private var poll: AccountPlanPoll?
     @State private var started: ContinuousClock.Instant?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -345,15 +399,15 @@ struct AccountPlanConnectSheet: View {
         while clock.now - started < Self.waitLimit {
             do { try await Task.sleep(for: Self.pollInterval) } catch { return }
             guard scenePhase == .active else { return }
-            guard let registry = await poll(), !Task.isCancelled else { continue }
-            if AccountConnectionsView.connectLanded(registry, plan: plan) {
-                onLanded(registry)
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { landed = true }
-                UIAccessibility.post(notification: .announcement, argument: words(AccountConnectionsCopy.done(plan)))
-                do { try await Task.sleep(for: Self.doneBeat) } catch { return }
-                dismiss()
-                return
-            }
+            guard poll.isCurrent() else { return }
+            guard let landing = await poll.landing(for: plan), poll.isCurrent(), !Task.isCancelled,
+                  AccountConnectionsView.connectLanded(landing.readiness, plan: plan) else { continue }
+            onLanded(landing)
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { landed = true }
+            UIAccessibility.post(notification: .announcement, argument: words(AccountConnectionsCopy.done(plan)))
+            do { try await Task.sleep(for: Self.doneBeat) } catch { return }
+            dismiss()
+            return
         }
     }
 

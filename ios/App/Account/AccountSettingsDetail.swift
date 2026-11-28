@@ -107,6 +107,8 @@ struct AccountSettingsDetail: View {
         }
         .task(id: section.page) {
             if section.page == .account { await reloadDevices() }
+        }
+        .task(id: section.page == .connections ? actions.accountConnections?.scope : nil) {
             if section.page == .connections { await reloadConnections() }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -118,7 +120,7 @@ struct AccountSettingsDetail: View {
         .sheet(item: $connectionsModel.connecting) { request in
             if let connections = actions.accountConnections {
                 AccountPlanConnectSheet(design: design, plan: request.plan, makePoll: connections.makePoll,
-                                        onLanded: connectionsModel.landed)
+                                        onLanded: { connectionsModel.landed($0, actions: connections) })
             }
         }
         .accessibilityIdentifier("account.settings." + section.page.rawValue)
@@ -567,7 +569,7 @@ struct AccountSettingsDetail: View {
 
     private func reloadConnections() async {
         guard let connections = actions.accountConnections else { return }
-        await connectionsModel.reload(connections.read)
+        await connectionsModel.reload(connections)
     }
 
     /// Desktop's Connections (#106): every plan and the OpenCode Go key, the

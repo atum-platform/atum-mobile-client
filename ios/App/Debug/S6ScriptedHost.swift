@@ -135,8 +135,8 @@ struct S6ScriptedHost: View {
     }
 
     /// A synthetic account registry; no real Mac or account. `lands`: the
-    /// page reads first (once or twice, as the scene settles), then the open
-    /// sheet follows; from the fourth read Antigravity is on a Mac.
+    /// page reads first, then the sheet polls readiness; from the fourth
+    /// combined read Antigravity is ready and the registry names its Mac.
     private func scriptedConnections() -> AccountConnections? {
         connectionReads.count += 1
         if scenario == .connectionsFailed && connectionReads.count == 1 { return nil }
@@ -159,6 +159,19 @@ struct S6ScriptedHost: View {
             AccountConnection(id: "owner_chats", kind: .tools, status: .connected),
             AccountConnection(id: "home_hub:strap-hub", kind: .tools, status: .notConnected),
         ])
+    }
+
+    private func scriptedReadiness() -> WorkPlanReadinessRead {
+        guard scenario == .connectionsLands, connectionReads.count >= 4 else { return .unavailable }
+        // The scripted grants stay live for the duration of the test.
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        let ready = """
+            {"profile":"atum.work-plan-readiness/1","checkedAt":\(now),"plans":{
+                "codex":{"state":"ready","validUntil":\(now + 600_000)},
+                "claude":{"state":"ready","validUntil":\(now + 600_000)},
+                "antigravity":{"state":"ready","validUntil":\(now + 600_000)}}}
+            """
+        return .available(try! NativeAPI.decode(WorkPlanReadiness.self, from: Data(ready.utf8)))
     }
 
     private var storePresentation: LiveProductStoreRead {
@@ -247,8 +260,18 @@ struct S6ScriptedHost: View {
         )
         actions.phoneApprovals = phoneApprovals
         if scenario.isConnections {
-            actions.accountConnections = AccountConnectionsActions(read: { scriptedConnections() },
-                                                                   makePoll: { { scriptedConnections() } })
+            actions.accountConnections = AccountConnectionsActions(
+                read: { scriptedConnections() },
+                readReadiness: { scriptedReadiness() },
+                makePoll: {
+                    AccountPlanPoll(isCurrent: { !signedOut },
+                                    readReadiness: {
+                                        connectionReads.count += 1
+                                        return scriptedReadiness()
+                                    },
+                                    readRegistry: { scriptedConnections() })
+                }
+            )
         }
         if scriptedDevices {
             actions.loadDevices = { scriptedDeviceList() }
