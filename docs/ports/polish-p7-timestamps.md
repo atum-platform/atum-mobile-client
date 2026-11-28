@@ -101,3 +101,6 @@ See the session log at the end of this file.
   row took one padding and one font size with it).
 - 2026-11-28: self-review fix. An image caption now spans the card, so its
   corner time sits in the card's corner and not right after a short caption.
+- 2026-11-28: self-review fix. `BubbleStack` is a custom `Layout` and reports
+  no text baseline. When the content reports none, the inline meta's bottom
+  now meets the last line's box instead of the bubble's bottom edge.

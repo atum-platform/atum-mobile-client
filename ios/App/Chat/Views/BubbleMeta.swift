@@ -166,9 +166,15 @@ struct BubbleMetaLayout: Layout {
                 let fitted = narrow == nil ? whole : content.sizeThatFits(proposal)
                 if abs(fitted.height - whole.height) < 0.5 {
                     let width = fitted.width + extra
+                    // Baseline to baseline where the content reports its
+                    // last line; a custom layout (`BubbleStack`) reports only
+                    // its bottom edge, so then the meta's bottom meets the
+                    // last line's box, above the content's bottom padding.
                     let lastLine = content.dimensions(in: proposal)[VerticalAlignment.lastTextBaseline]
                     let metaLine = meta.dimensions(in: ProposedViewSize(metaSize))[VerticalAlignment.lastTextBaseline]
-                    let y = max(lastLine - metaLine, 0)
+                    let reportsLine = lastLine < fitted.height - contentBottom / 2
+                    let y = max(reportsLine ? lastLine - metaLine
+                                            : fitted.height - contentBottom - metaSize.height, 0)
                     let height = max(fitted.height, y + metaSize.height)
                     return Frame(size: CGSize(width: width, height: height), contentProposal: proposal,
                                  metaFrame: CGRect(x: width - edge - metaSize.width, y: y,
