@@ -43,14 +43,16 @@ public struct MentionRosterEntry: Equatable, Sendable {
 public struct OutgoingMentions: Equatable, Sendable {
     public let userIDs: [String]
     public let formattedHTML: String?
+    public let room: Bool
 
     public static let none = OutgoingMentions(userIDs: [], formattedHTML: nil)
 
-    public var isEmpty: Bool { userIDs.isEmpty }
+    public var isEmpty: Bool { userIDs.isEmpty && !room }
 
-    public init(userIDs: [String], formattedHTML: String?) {
+    public init(userIDs: [String], formattedHTML: String?, room: Bool = false) {
         self.userIDs = userIDs
         self.formattedHTML = formattedHTML
+        self.room = room
     }
 }
 
@@ -84,12 +86,21 @@ public struct MentionLedger: Equatable, Sendable {
     private struct Staged: Equatable, Sendable {
         let text: String
         let picks: MentionDraft
+        var roomOffset: Int?
     }
 
     public private(set) var current = MentionDraft()
     private var staged = [Staged]()
+    private var roomOffset: Int?
+    private var roomPickText = ""
 
     public init() {}
+
+    public mutating func registerRoomMention(in text: String, offset: Int) {
+        guard RoomMentionRules.containsPickedToken(in: text, at: offset) else { return }
+        roomPickText = text
+        roomOffset = offset
+    }
 
     public mutating func register(token: String, userID: String) {
         current.register(token: token, userID: userID)
@@ -99,6 +110,10 @@ public struct MentionLedger: Equatable, Sendable {
     /// forgotten at once, so deleting a mention and typing the name again
     /// is a new, unpicked `@word`.
     public mutating func draftChanged(to text: String) {
+        if let offset = roomOffset, text != roomPickText {
+            roomOffset = RoomMentionRules.retainedOffset(offset, from: roomPickText, to: text)
+            roomPickText = roomOffset == nil ? "" : text
+        }
         guard !current.isEmpty else { return }
         guard text.contains("@") else {
             current.removeAll()
@@ -114,22 +129,42 @@ public struct MentionLedger: Equatable, Sendable {
     /// A message with this text leaves the composer: it takes the picks of
     /// the draft, and the next draft starts with none.
     public mutating func stage(text: String) {
+        if let offset = roomOffset,
+           text == roomPickText.trimmingCharacters(in: .whitespacesAndNewlines) {
+            let leading = roomPickText.prefix(while: \.isWhitespace).count
+            roomOffset = RoomMentionRules.containsPickedToken(in: text, at: offset - leading) ? offset - leading : nil
+            roomPickText = text
+        }
         draftChanged(to: text)
-        staged.append(Staged(text: text, picks: current))
+        // The held-send pipeline keys staged mentions by body. Two identical
+        // unsettled sends with different room intent cannot share that intent.
+        if staged.contains(where: { $0.text == text && ($0.roomOffset != nil) != (roomOffset != nil) }) {
+            discardRoomMentions(for: text)
+            roomOffset = nil
+        }
+        staged.append(Staged(text: text, picks: current, roomOffset: roomOffset))
         current.removeAll()
+        roomOffset = nil
+        roomPickText = ""
     }
 
     /// The mentions of the oldest staged message with this text. Held sends
     /// that go out later, or again after a session renewal, ask again.
     public func mentions(for text: String) -> OutgoingMentions {
         guard let message = staged.first(where: { $0.text == text }) else { return .none }
-        return MentionRules.resolve(text: text, draft: message.picks)
+        let people = MentionRules.resolve(text: text, draft: message.picks)
+        return OutgoingMentions(userIDs: people.userIDs, formattedHTML: people.formattedHTML,
+                                room: message.roomOffset != nil)
     }
 
     /// The SDK took the message: its snapshot is not needed any more.
     public mutating func delivered(text: String) {
         guard let index = staged.firstIndex(where: { $0.text == text }) else { return }
         staged.remove(at: index)
+    }
+
+    public mutating func discardRoomMentions(for text: String) {
+        for index in staged.indices where staged[index].text == text { staged[index].roomOffset = nil }
     }
 
     /// The message came back to the composer (refused, or held and returned):
@@ -141,6 +176,10 @@ public struct MentionLedger: Equatable, Sendable {
             current.register(token: token, userID: userID)
         }
         draftChanged(to: draft)
+        if roomOffset == nil, let offset = message.roomOffset,
+           draft == text || draft.hasSuffix("\n" + text) {
+            registerRoomMention(in: draft, offset: draft.count - text.count + offset)
+        }
     }
 
     /// Every snapshot whose text is in the draft goes back to the composer.

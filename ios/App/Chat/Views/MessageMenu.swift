@@ -477,6 +477,7 @@ enum MessageMenuActions {
         case .selectText: ChatCopy.text(design, ChatCopy.Key.selectText)
         case .pin: ChatCopy.text(design, ChatCopy.Key.pin)
         case .unpin: ChatCopy.text(design, ChatCopy.Key.unpin)
+        case .forward: design.text("src.matrix.chat-copy.copies.forward")
         case .edit: ChatCopy.text(design, ChatCopy.Key.edit)
         case .report: ChatCopy.text(design, ChatCopy.Key.report)
         case .delete: ChatCopy.text(design, ChatCopy.Key.delete)
@@ -493,6 +494,7 @@ enum MessageMenuActions {
         case .selectText: .fileText
         case .pin: .pin
         case .unpin: .pinOff
+        case .forward: .arrowUpRight
         case .edit: .pencil
         // The vendored Phosphor subset has no flag (desktop's Flag); the
         // warning circle is the Kit's nearest mark.
@@ -507,7 +509,7 @@ enum MessageMenuActions {
     static func waitsForCover(_ item: MessageMenuItem) -> Bool {
         switch item {
         case .copy, .react, .pin, .unpin: false
-        case .reply, .replyInThread, .selectText, .edit, .report, .delete: true
+        case .reply, .replyInThread, .selectText, .forward, .edit, .report, .delete: true
         }
     }
 
@@ -516,6 +518,7 @@ enum MessageMenuActions {
                         presenter: MessageActionsPresenter, pins: ChatPinMenu? = nil) {
         switch item {
         case .react: break
+        case .forward: break // The per-chat picker route is attached in the UI pass.
         case .reply: actions.reply(row.id)
         case .replyInThread:
             if let rootID = MessageMenuRules.threadRootID(for: row.item) { presenter.openThread?(rootID) }

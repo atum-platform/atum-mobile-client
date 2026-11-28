@@ -192,6 +192,8 @@ final class LiveConversationStore: ConversationStore {
     /// the members are known; empty until then and in rooms that offer no
     /// mention picker.
     private(set) var mentionCandidates = [MentionCandidate]()
+    private(set) var canMentionRoom = false
+    @ObservationIgnored private var roomMentionPowerTask: Task<Void, Never>?
     /// The picks of the draft being typed, and of each message on its way.
     /// A pick lives only while its text is in the draft; a sent message takes
     /// its picks with it (a refused send gives them back), so a name typed by
@@ -208,6 +210,50 @@ final class LiveConversationStore: ConversationStore {
         guard editTarget == nil, ComposerRules.offersMentions(kind: kind),
               let query = MentionRules.activeQuery(in: draftValue) else { return [] }
         return MentionRules.suggestions(for: query, in: mentionCandidates)
+    }
+
+    var offersRoomMention: Bool {
+        guard editTarget == nil, ComposerRules.offersMentions(kind: kind),
+              let query = MentionRules.activeQuery(in: draftValue) else { return false }
+        return RoomMentionRules.offersSuggestion(for: query, canNotifyRoom: canMentionRoom)
+    }
+
+    private func observeRoomMentionPermission(in room: Room, generation: UInt64) {
+        guard ComposerRules.offersMentions(kind: kind) else { return }
+        let (updates, handle) = RoomMentionMatrix.permissionUpdates(in: room)
+        roomMentionPowerTask = Task { [weak self] in
+            defer { handle.cancel() }
+            for await _ in updates {
+                guard let self, self.generation == generation, !self.isClosed, !Task.isCancelled else { break }
+                await self.refreshRoomMentionPermission()
+            }
+        }
+    }
+
+    /// Refresh on open and on room power or membership updates.
+    private func refreshRoomMentionPermission() async {
+        let opened = generation
+        let available: Bool
+        if core.isAttached, let room, ComposerRules.offersMentions(kind: kind) {
+            available = await RoomMentionMatrix.canNotify(in: room)
+        } else {
+            available = false
+        }
+        guard generation == opened, !isClosed, !Task.isCancelled else { return }
+        canMentionRoom = available
+    }
+
+    /// Recheck power on selection as well as on send, because a sheet can
+    /// outlive the permission snapshot it opened with.
+    func pickRoomMention() async {
+        let original = draftValue
+        let opened = generation
+        await refreshRoomMentionPermission()
+        guard generation == opened, !isClosed, !Task.isCancelled, draftValue == original, offersRoomMention,
+              let inserted = RoomMentionRules.insert(into: original, canNotifyRoom: canMentionRoom)
+        else { return }
+        draft = inserted.draft
+        mentionPicks.registerRoomMention(in: inserted.draft, offset: inserted.offset)
     }
 
     /// Puts the pick into the draft (an edit by the person) and remembers who
@@ -475,14 +521,22 @@ final class LiveConversationStore: ConversationStore {
 
     /// B8 "Xóa" on a failed send, or on a held one.
     func deleteSend(_ itemID: String) {
+        discardHeldRoomMention(itemID)
         run(core.abort(itemID))
         sync()
     }
 
     /// B20 "Xóa" on my message.
     func delete(_ itemID: String) {
+        discardHeldRoomMention(itemID)
         run(core.delete(itemID))
         sync()
+    }
+
+    private func discardHeldRoomMention(_ itemID: String) {
+        if let send = core.pendingSends.first(where: { $0.id == itemID }) {
+            mentionPicks.discardRoomMentions(for: send.text)
+        }
     }
 
     /// B22.
@@ -640,6 +694,8 @@ final class LiveConversationStore: ConversationStore {
             }
             startTyping(on: room)
             await install(controller, generation: generation)
+            guard generation == self.generation, !isClosed else { return }
+            observeRoomMentionPermission(in: room, generation: generation)
         } catch {
             guard generation == self.generation, !isClosed else { return }
             attachFailed(outcome: "open_failed")
@@ -707,6 +763,9 @@ final class LiveConversationStore: ConversationStore {
     /// than linger on a signal nobody is listening to (never faked, B10).
     func detach() {
         generation &+= 1
+        canMentionRoom = false
+        roomMentionPowerTask?.cancel()
+        roomMentionPowerTask = nil
         closeTimeline()
         stopTyping()
         core.detached()
@@ -731,6 +790,8 @@ final class LiveConversationStore: ConversationStore {
         guard !isClosed else { return }
         let leaving = core.leaving()
         isClosed = true
+        roomMentionPowerTask?.cancel()
+        roomMentionPowerTask = nil
         turnStop.onScheduleSettled = nil
         turnStop.announce = nil
         searchPage?.cancel()
@@ -908,7 +969,6 @@ final class LiveConversationStore: ConversationStore {
     /// the next timeline; one the SDK refused puts its text back in the
     /// composer (the hotfix rule), or in the room's draft after Back.
     private func enqueueSend(text: String, replyToEventID: String?) {
-        let mentions = mentionPicks.mentions(for: text)
         let previous = sendTail
         let roomID = roomID
         let roomKind = info.context.kind.rawValue
@@ -918,6 +978,7 @@ final class LiveConversationStore: ConversationStore {
                 sendLostTimeline(text, replyToEventID: replyToEventID, roomKind: roomKind)
                 return
             }
+            let mentions = mentionPicks.mentions(for: text)
             do {
                 try await controller.send(text: text, replyToEventID: replyToEventID, mentions: mentions)
                 mentionPicks.delivered(text: text)
