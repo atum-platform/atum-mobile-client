@@ -68,6 +68,43 @@ final class RoomThreadList {
         }
     }
 
+    /// Per-root unread state from the same synced receipt store the SDK
+    /// uses. A main-only receipt does not mark replies read.
+    func transcriptUnread(_ roots: [String: CompanyThread]) async -> [String: Bool] {
+        guard isCurrent, roots.values.contains(where: { $0.latest != nil }) else { return [:] }
+        let unthreaded = try? await userReceipts(in: .unthreaded)
+        var unread = [String: Bool]()
+        for (rootID, thread) in roots {
+            guard isCurrent else { return [:] }
+            guard let latest = thread.latest else { continue }
+            if latest.isOwn {
+                unread[rootID] = false
+            } else if let unthreaded,
+                      let scoped = try? await userReceipts(in: .thread(threadRootEventId: rootID)) {
+                unread[rootID] = Self.isUnread(latest: latest, scoped: scoped, unthreaded: unthreaded)
+            }
+        }
+        return unread
+    }
+
+    private func userReceipts(in scope: ReceiptThread) async throws -> [UserReceipt] {
+        let own = room.ownUserId()
+        async let publicReceipt = room.loadUserReceipt(receiptType: .read, thread: scope, userId: own)
+        async let privateReceipt = room.loadUserReceipt(receiptType: .readPrivate, thread: scope, userId: own)
+        return try await [publicReceipt, privateReceipt].compactMap { $0 }
+    }
+
+    static func isUnread(latest: CompanyThreadMessage, scoped: [UserReceipt], unthreaded: [UserReceipt]) -> Bool {
+        guard !latest.isOwn else { return false }
+        let readInThread = scoped.contains { $0.eventId == latest.eventID }
+        // A receipt from a legacy unthreaded client may target a later
+        // event elsewhere in the room. Use its timestamp when the IDs differ.
+        let readUnthreaded = unthreaded.contains {
+            $0.eventId == latest.eventID || $0.receipt.timestamp.map { Int64(clamping: $0) > latest.sentAt } == true
+        }
+        return !readInThread && !readUnthreaded
+    }
+
     /// Atum list rows with attention and unread highlights. Use on list open
     /// and refresh. Summary consumers can use `roots()` on each SDK update.
     func threads() async -> [CompanyThread]? {

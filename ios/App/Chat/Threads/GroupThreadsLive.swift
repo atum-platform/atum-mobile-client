@@ -39,7 +39,7 @@ struct PinWriteNotice: Identifiable, Equatable {
 @MainActor
 @Observable
 final class GroupRoomLive {
-    struct Key: Equatable {
+    struct Key: Equatable, Sendable {
         let roomID: String
         let session: ObjectIdentifier
         let scope: MessageMenuRules.SharedChatActions
@@ -70,6 +70,9 @@ final class GroupRoomLive {
     @ObservationIgnored private let pinReader: RoomPins?
     @ObservationIgnored nonisolated(unsafe) private var runners: [Task<Void, Never>] = []
     @ObservationIgnored private var fullReadGeneration = 0
+    @ObservationIgnored private var receiptReadGeneration = 0
+    private var transcriptRoots = [String: CompanyThread]()
+    private var transcriptUnread = [String: Bool]()
 
     init(key: Key, list: RoomThreadList?, pins: RoomPins?) {
         self.key = key
@@ -108,10 +111,61 @@ final class GroupRoomLive {
 
     // MARK: Threads
 
-    /// Root summaries for the main transcript, by root event ID.
+    /// Root summaries keyed by event ID. The transcript can supply roots
+    /// that the separate paged list has never fetched.
     var summaries: [String: CompanyThread] {
-        guard offersThreads, let threads else { return [:] }
-        return Dictionary(threads.map { ($0.root.eventID, $0) }, uniquingKeysWith: { first, _ in first })
+        guard offersThreads else { return [:] }
+        var result = Dictionary((threads ?? []).map { ($0.root.eventID, $0) },
+                                uniquingKeysWith: { first, _ in first })
+        for (id, root) in transcriptRoots {
+            let listEntry = result[id]
+            let listed = listEntry.flatMap { listed -> CompanyThread? in
+                if let latest = root.latest { return listed.latest?.eventID == latest.eventID ? listed : nil }
+                return listed.replyCount == root.replyCount ? listed : nil
+            }
+            result[id] = CompanyThread(roomID: roomID, root: root.root,
+                                       latest: root.latest ?? listed?.latest,
+                                       replyCount: root.replyCount,
+                                       unread: transcriptUnread[id] ?? listed?.unread ?? false,
+                                       highlights: listed?.highlights ?? 0,
+                                       followed: listEntry?.followed ?? false)
+        }
+        return result
+    }
+
+    static func transcriptRoots(in rows: [ChatRow], roomID: String, ownUserID: String) -> [String: CompanyThread] {
+        var roots = [String: CompanyThread]()
+        for row in rows {
+            let item = row.item
+            guard let summary = item.threadSummary, let id = item.eventID, item.threadRoot == nil else { continue }
+            let root = CompanyThreadMessage(eventID: id, senderID: item.sender, senderName: item.senderName,
+                                            senderAvatarURI: item.senderAvatarURI, isOwn: item.isOwn,
+                                            body: item.body, sentAt: Int64(item.timestamp.timeIntervalSince1970 * 1000))
+            let latest = summary.latest.map {
+                CompanyThreadMessage(eventID: $0.eventID, senderID: $0.senderID, senderName: $0.senderName,
+                                     senderAvatarURI: $0.senderAvatarURI, isOwn: $0.senderID == ownUserID,
+                                     body: "", sentAt: Int64(clamping: $0.timestamp))
+            }
+            roots[id] = CompanyThread(roomID: roomID, root: root, latest: latest, replyCount: summary.replyCount)
+        }
+        return roots
+    }
+
+    func updateTranscriptRoots(_ roots: [String: CompanyThread]) async {
+        transcriptUnread = transcriptUnread.filter { id, _ in
+            transcriptRoots[id]?.latest?.eventID == roots[id]?.latest?.eventID && roots[id] != nil
+        }
+        transcriptRoots = roots
+        await refreshTranscriptUnread()
+    }
+
+    private func refreshTranscriptUnread() async {
+        guard let list else { return }
+        receiptReadGeneration &+= 1
+        let generation = receiptReadGeneration
+        let unread = await list.transcriptUnread(transcriptRoots)
+        guard !Task.isCancelled, generation == receiptReadGeneration else { return }
+        transcriptUnread = unread
     }
 
     /// M2 details: the three newest, then All threads.
@@ -128,6 +182,7 @@ final class GroupRoomLive {
         for await _ in list.updates() {
             guard !Task.isCancelled else { return }
             applyRoots(from: list)
+            await refreshTranscriptUnread()
         }
     }
 
@@ -158,6 +213,7 @@ final class GroupRoomLive {
         guard let list else { return }
         fullReadGeneration &+= 1
         let generation = fullReadGeneration
+        await refreshTranscriptUnread()
         let read = await list.threads()
         guard !Task.isCancelled, generation == fullReadGeneration else { return }
         if let read {
@@ -425,8 +481,20 @@ struct GroupThreadsHost: ViewModifier {
                 ready: model.liveMatrix?.isReady == true, scope: scope)
     }
 
+    private struct TranscriptRead: Equatable, Sendable {
+        let key: GroupRoomLive.Key
+        let roots: [String: CompanyThread]
+    }
+
+    private func transcriptRead(for live: GroupRoomLive?) -> TranscriptRead? {
+        guard let live, live.offersThreads, let store = model.conversation, store.roomID == roomID else { return nil }
+        return TranscriptRead(key: live.key, roots: GroupRoomLive.transcriptRoots(
+            in: store.snapshot.rows, roomID: roomID, ownUserID: store.ownUserID))
+    }
+
     func body(content: Content) -> some View {
         let live = coordinator.live(for: roomID)
+        let transcriptRead = transcriptRead(for: live)
         content
             .environment(\.chatThreadSummaries, live.flatMap { live in
                 live.offersThreads ? ChatThreadSummaries(mode: .transcript, threads: live.summaries) { rootID in
@@ -448,6 +516,9 @@ struct GroupThreadsHost: ViewModifier {
                 Button(GroupThreadsCopy(design: design).dismiss, role: .cancel) {}
             }
             .task(id: taskKey) { attach(taskKey) }
+            .task(id: transcriptRead) {
+                if let transcriptRead { await live?.updateTranscriptRoots(transcriptRead.roots) }
+            }
             // Covered by its own pushed thread or list: keep reading.
             .onDisappear { coordinator.closeIfLeft(roomID: roomID) }
     }

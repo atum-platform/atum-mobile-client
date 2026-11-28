@@ -47,6 +47,7 @@ public enum ConversationEffect: Equatable, Sendable {
     /// the SDK source also clears a marked-unread flag). The store reports
     /// the result with `receiptFinished(succeeded:now:)`.
     case markReadPrivate
+    case markMainRead(eventID: String)
     /// B15: `ChatReceipt.fullyRead(eventID:)` on leaving, for the last event
     /// a private receipt acknowledged on this visit (`ReadPolicy.leave()`).
     case markFullyRead(eventID: String)
@@ -746,7 +747,8 @@ public struct ConversationCore: Sendable {
     private mutating func readStep(now: Date) -> [ConversationEffect] {
         let seconds = Self.seconds(now)
         read.setBottomVisible(bottomVisible && isAttached, now: seconds)
-        read.latestEventChanged(ReadPolicy.latestSettledEventID(in: displayRows.map(\.item)), now: seconds)
+        read.latestEventChanged(ReadPolicy.latestSettledEventID(in: displayRows.map(\.item),
+                                                                mainOnly: context.showsGroupThreads), now: seconds)
         return readDue(now: now)
     }
 
@@ -756,8 +758,8 @@ public struct ConversationCore: Sendable {
         guard let deadline = read.nextDeadline else { return [] }
         let seconds = Self.seconds(now)
         guard seconds >= deadline else { return [.wakeReadGate(at: Date(timeIntervalSinceReferenceDate: deadline))] }
-        guard case .privateReceipt? = read.tick(now: seconds) else { return [] }
-        return [.markReadPrivate]
+        guard case let .privateReceipt(eventID, _)? = read.tick(now: seconds) else { return [] }
+        return [context.showsGroupThreads ? .markMainRead(eventID: eventID) : .markReadPrivate]
     }
 
     private static func joined(_ parts: [String]) -> String {

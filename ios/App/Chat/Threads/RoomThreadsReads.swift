@@ -11,15 +11,20 @@ extension LiveAppModel {
         guard let liveMatrix, liveMatrix.isReady,
               let row = liveMatrix.rooms.first(where: { $0.roomID == roomID }) else { return .unavailable }
         if offersCompanyThreads(roomID: roomID) { return .teamSpace }
-        switch companyWorkspace.roomClassification(roomID) {
+        guard let own = try? liveMatrix.companyOwnUserID(),
+              let info = conversationInfo(roomID: roomID, title: row.displayName, ownUserID: own)
+        else { return .unavailable }
+        return peopleChatActions(in: row, kind: info.context.kind)
+    }
+
+    /// Shared by the live main transcript and the group thread/pin host.
+    func peopleChatActions(in row: LiveMatrixRoomRow, kind: RoomKind) -> MessageMenuRules.SharedChatActions {
+        guard row.legacyAppBotMove == nil else { return .unavailable }
+        switch companyWorkspace.roomClassification(row.roomID) {
         case .personal, .unknown: break
         case .company, .conversation, .privateCos, .notesSelf, .quarantined: return .unavailable
         }
-        guard let own = try? liveMatrix.companyOwnUserID(),
-              row.legacyAppBotMove == nil,
-              let info = conversationInfo(roomID: roomID, title: row.displayName, ownUserID: own)
-        else { return .unavailable }
-        return .init(kind: info.context.kind, isDirect: row.isDirect, activeMemberCount: row.memberCount,
+        return .init(kind: kind, isDirect: row.isDirect, activeMemberCount: row.memberCount,
                      isOrdinaryRoom: row.hasCreateState && row.roomType == nil)
     }
 
@@ -118,6 +123,7 @@ extension LiveAppModel {
         guard let own = try? session.companyOwnUserID(),
               var info = conversationInfo(roomID: roomID, title: title, ownUserID: own) else { return nil }
         info.threadRootID = rootID
+        info.context.showsGroupThreads = false
         if isPeopleGroup { info.context.kind = .group }
         if case .channel = info.context.companyTurnScope {
             info.context.companyTurnScope = .channel(threadRoot: rootID, binding: nil)

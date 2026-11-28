@@ -79,7 +79,7 @@ public struct TimelineBuffer: Equatable, Sendable {
     /// Applies one SDK batch atomically and reports what kind of change it
     /// was. On an out-of-range index nothing is applied.
     @discardableResult
-    public mutating func apply(_ diffs: [ChatDiff]) throws -> SnapshotChange {
+    public mutating func apply(_ diffs: [ChatDiff], hidesGroupThreadReplies: Bool = false) throws -> SnapshotChange {
         var working = items
         // Parallel to `working`: true for an item this batch inserted. A `set`
         // keeps the flag, so an edited old item stays old.
@@ -93,7 +93,10 @@ public struct TimelineBuffer: Equatable, Sendable {
         }
 
         func remove(at index: Int) {
-            if !inserted[index], working[index].kind.isEventContent { removedOldEvent = true }
+            let item = working[index]
+            if !inserted[index], item.kind.isEventContent, !(hidesGroupThreadReplies && item.isGroupThreadReply) {
+                removedOldEvent = true
+            }
             working.remove(at: index)
             inserted.remove(at: index)
         }
@@ -147,12 +150,13 @@ public struct TimelineBuffer: Equatable, Sendable {
         let previous = items
         items = working
         if sawReset { return .reset }
-        return Self.classify(working, inserted: inserted, previous: previous, removedOldEvent: removedOldEvent)
+        return Self.classify(working, inserted: inserted, previous: previous, removedOldEvent: removedOldEvent,
+                             hidesGroupThreadReplies: hidesGroupThreadReplies)
     }
 
     /// The anchor rules of `SnapshotChange`, on the buffer after the batch.
     private static func classify(_ items: [ChatItem], inserted: [Bool], previous: [ChatItem],
-                                 removedOldEvent: Bool) -> SnapshotChange {
+                                 removedOldEvent: Bool, hidesGroupThreadReplies: Bool) -> SnapshotChange {
         guard inserted.contains(true) else {
             return removedOldEvent ? .mixed(appendedAtEnd: 0, localEcho: false) : .inPlace
         }
@@ -161,6 +165,7 @@ public struct TimelineBuffer: Equatable, Sendable {
         for index in items.indices where !inserted[index] {
             let item = items[index]
             guard item.kind.isEventContent, !item.isLocalEcho else { continue }
+            if hidesGroupThreadReplies, item.isGroupThreadReply { continue }
             if firstAnchor == nil { firstAnchor = index }
             lastAnchor = index
         }
@@ -174,6 +179,7 @@ public struct TimelineBuffer: Equatable, Sendable {
         var prepended = 0
         for index in items.indices where inserted[index] {
             let item = items[index]
+            if hidesGroupThreadReplies, item.isGroupThreadReply { continue }
             let side: Side
             if let firstAnchor, let lastAnchor {
                 side = index < firstAnchor ? .start : (index > lastAnchor ? .end : .middle)

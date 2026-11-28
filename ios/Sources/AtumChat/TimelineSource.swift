@@ -129,6 +129,8 @@ public enum ChatReceipt: Equatable, Hashable, Sendable {
     /// (`Room.setUnreadFlag(newValue: false)`), which `markAsRead` leaves
     /// alone.
     case readPrivate
+    /// A group main receipt never advances a thread's read position.
+    case readMain(eventID: String, isPrivate: Bool)
     /// B15: `Timeline.sendReadReceipt(receiptType: .fullyRead, eventId:)` on
     /// leaving, for the newest event the person read. Never
     /// `markAsRead(receiptType: .fullyRead)`: that marks the latest event,

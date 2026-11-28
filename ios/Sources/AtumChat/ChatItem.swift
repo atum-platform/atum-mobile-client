@@ -96,6 +96,11 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
     /// Thread root event ID. Thread messages always show their quote (B21,
     /// desktop `message.thread`); added to the rule-6 list for that rule.
     public var threadRoot: String?
+    /// Historical Atum results used a thread relation for a top-level answer.
+    public var isLegacyThreadResult = false
+    /// The SDK's thread aggregate for this root, independent of list pages.
+    public var threadSummary: ChatThreadSummary? = nil
+    var isGroupThreadReply: Bool { threadRoot != nil && !isLegacyThreadResult }
     public var reactions: [ChatReaction]
     /// Users whose read receipt sits on this item, sorted.
     public var receiptUserIDs: [String]
@@ -290,6 +295,33 @@ public struct ChatItem: Identifiable, Equatable, Hashable, Sendable {
     public static func isLocalEcho(originIsLocal: Bool, hasLocalSendState: Bool,
                                    hasTransactionID: Bool) -> Bool {
         originIsLocal || hasLocalSendState || hasTransactionID
+    }
+}
+
+public struct ChatThreadSummary: Equatable, Hashable, Sendable {
+    public struct Reply: Equatable, Hashable, Sendable {
+        public let eventID: String
+        public let senderID: String
+        public let senderName: String?
+        public let senderAvatarURI: String?
+        public let timestamp: UInt64
+
+        public init(eventID: String, senderID: String, senderName: String?, senderAvatarURI: String?,
+                    timestamp: UInt64) {
+            self.eventID = eventID
+            self.senderID = senderID
+            self.senderName = senderName
+            self.senderAvatarURI = senderAvatarURI
+            self.timestamp = timestamp
+        }
+    }
+
+    public let replyCount: Int
+    public let latest: Reply?
+
+    public init(replyCount: Int, latest: Reply?) {
+        self.replyCount = replyCount
+        self.latest = latest
     }
 }
 

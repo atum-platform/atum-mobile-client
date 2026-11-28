@@ -149,8 +149,8 @@ public struct ReadPolicy: Equatable, Sendable {
     /// send once the server accepted it). Local echoes never count: a receipt
     /// must name an event the server knows. Virtual and synthetic rows never
     /// count.
-    public static func latestSettledEventID(in items: [ChatItem]) -> String? {
-        for item in items.reversed() where item.kind.isEventContent {
+    public static func latestSettledEventID(in items: [ChatItem], mainOnly: Bool = false) -> String? {
+        for item in items.reversed() where item.kind.isEventContent && (!mainOnly || item.threadRoot == nil) {
             switch item.delivery {
             case .remote, .sent:
                 if let eventID = item.eventID { return eventID }

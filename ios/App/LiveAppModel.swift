@@ -4044,6 +4044,8 @@ final class LiveAppModel {
             }
             context.companyTurnScope = .privateCos(binding: binding)
         }
+        context.showsGroupThreads = liveMatrix?.isReady == true
+            && peopleChatActions(in: room, kind: context.kind) == .peopleGroup
         return ConversationRoomInfo(roomID: roomID, title: title, context: context,
                                     knownNames: knownAgentAndBotNames,
                                     catalogBotUserIDs: catalogBotUserIDs,

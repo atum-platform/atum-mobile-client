@@ -140,11 +140,36 @@ final class ItemMapper {
                 json: event.lazyProvider.debugInfo().originalJson, originalSender: sender)
         )
         markers.apply(to: &item)
+        if room.context.showsGroupThreads, !hiddenPlaintext,
+           case let .msgLike(message) = event.content, case .message = message.kind {
+            if message.threadRoot == nil {
+                item.threadSummary = threadSummary(message.threadSummary)
+            } else {
+                let original = content.isEdited ? event.lazyProvider.debugInfo().originalJson : nil
+                item.isLegacyThreadResult = AtumTurnMarkers.isLegacyThreadResult(
+                    json: original ?? event.lazyProvider.latestJson())
+            }
+        }
         return MappedItem(item: item, uniqueID: uniqueID,
                           replyDetails: hiddenPlaintext ? nil : replyDetails(event.content),
                           isTokenParked: Self.isTokenParked(event.localSendState),
                           isHiddenPlaintext: hiddenPlaintext,
                           sendFailureClass: event.isOwn ? Self.sendFailureClass(event.localSendState) : nil)
+    }
+
+    private func threadSummary(_ native: ThreadSummary?) -> ChatThreadSummary? {
+        guard let native else { return nil }
+        let count = native.numReplies()
+        guard count > 0 else { return nil }
+        let latest: ChatThreadSummary.Reply?
+        if case let .ready(_, sender, profile, timestamp, .eventId(id)) = native.latestEvent() {
+            latest = .init(eventID: id, senderID: sender,
+                           senderName: MatrixPersonName.name(ChatItem.senderName(profile), userID: sender),
+                           senderAvatarURI: ChatItem.senderAvatarURI(profile), timestamp: timestamp)
+        } else {
+            latest = nil
+        }
+        return ChatThreadSummary(replyCount: Int(clamping: count), latest: latest)
     }
 
     /// SVGs travel as Matrix `m.image` but must be a file row: homeservers do

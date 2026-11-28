@@ -41,6 +41,10 @@ public enum RoomKind: String, Equatable, Hashable, Sendable, CaseIterable {
 
 /// Who is who in one room, for the projection's rules.
 public struct RoomContext: Equatable, Sendable {
+    /// The main transcript of an ordinary human group with thread actions.
+    /// A focused thread and Team Space both use their existing projection.
+    public var showsGroupThreads = false
+
     public var kind: RoomKind
     /// This account's Matrix user ID.
     public var ownUserID: String

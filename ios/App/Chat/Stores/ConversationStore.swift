@@ -885,6 +885,8 @@ final class LiveConversationStore: ConversationStore {
             }
         case .markReadPrivate:
             receipt()
+        case let .markMainRead(eventID):
+            receipt(mainEventID: eventID)
         case let .markFullyRead(eventID):
             act("fully_read") { try await $0.sendReceipt(.fullyRead(eventID: eventID)) }
         case let .wakeReadGate(at):
@@ -1017,14 +1019,15 @@ final class LiveConversationStore: ConversationStore {
     /// B13: the owner's receipt (public by default, private when sharing is
     /// off); `ReadPolicy` hears how it went (a failure is retried after 1 s,
     /// 4 s and 15 s).
-    private func receipt() {
+    private func receipt(mainEventID: String? = nil) {
         guard let controller else {
             run(core.receiptFinished(succeeded: false, now: clock()))
             return
         }
         let roomID = roomID
         let roomKind = info.context.kind.rawValue
-        let receipt = ShareActivityPreference.receipt(sharing: shareActivity)
+        let receipt = mainEventID.map { ChatReceipt.readMain(eventID: $0, isPrivate: !shareActivity) }
+            ?? ShareActivityPreference.receipt(sharing: shareActivity)
         Task { @MainActor [weak self] in
             var succeeded = true
             do {

@@ -21,6 +21,13 @@ public struct AtumTurnMarkers: Equatable, Sendable {
         item.companyTurn = company
     }
 
+    /// Legacy result routing belongs to the original message. An edit can
+    /// omit the extension without moving that answer out of the transcript.
+    public static func isLegacyThreadResult(json: String?) -> Bool {
+        guard let fields = object(json).flatMap(content) else { return false }
+        return fields["io.atum.result"] is [String: Any]
+    }
+
     public static func parse(json: String?, originalJSON: String? = nil) -> AtumTurnMarkers {
         guard let envelope = object(json), let outer = content(envelope) else { return AtumTurnMarkers() }
         let replacement = outer["m.new_content"] as? [String: Any]

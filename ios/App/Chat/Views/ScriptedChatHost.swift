@@ -1116,6 +1116,7 @@ actor ScriptedSourceProbe: ChatTimelineSource {
         switch receipt {
         case .readPublic: UITestProbe.append("receipt readPublic", to: "receipts.txt")
         case .readPrivate: UITestProbe.append("receipt readPrivate", to: "receipts.txt")
+        case .readMain: UITestProbe.append("receipt readMain", to: "receipts.txt")
         case .fullyRead: UITestProbe.append("receipt fullyRead", to: "receipts.txt")
         }
         try await inner.sendReceipt(receipt)

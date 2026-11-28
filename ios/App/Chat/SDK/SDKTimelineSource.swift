@@ -29,6 +29,9 @@ actor SDKTimelineSource: ChatTimelineSource {
     /// before the SDK builds its list (so they never take an index), daily
     /// date dividers, read receipts on message-like events.
     static let configuration = TimelineConfiguration(
+        // Native hiding drops every m.thread reply, including historical Atum
+        // results. Keep the SDK indices intact and let Projection make the
+        // one compatibility exception for group main transcripts.
         focus: .live(hideThreadedEvents: false),
         filter: .eventFilter(filter: .exclude([.membershipChange(.any), .profileChange])),
         internalIdPrefix: nil,
@@ -378,15 +381,19 @@ actor SDKTimelineSource: ChatTimelineSource {
         switch receipt {
         case .readPublic:
             try await timeline.markAsRead(receiptType: .read)
-            guard let info = try? await room.roomInfo(), info.isMarkedUnread else { return }
-            try? await room.setUnreadFlag(newValue: false)
         case .readPrivate:
             try await timeline.markAsRead(receiptType: .readPrivate)
-            guard let info = try? await room.roomInfo(), info.isMarkedUnread else { return }
-            try? await room.setUnreadFlag(newValue: false)
+        case let .readMain(eventID, isPrivate):
+            // A flat SDK focus would send an unthreaded receipt and clear
+            // unread replies that the group transcript never showed.
+            try await room.sendSingleReceipt(receiptType: isPrivate ? .readPrivate : .read,
+                                             thread: .main, eventId: eventID)
         case let .fullyRead(eventID):
             try await timeline.sendReadReceipt(receiptType: .fullyRead, eventId: eventID)
+            return
         }
+        guard let info = try? await room.roomInfo(), info.isMarkedUnread else { return }
+        try? await room.setUnreadFlag(newValue: false)
     }
 
     func fetchReplyDetails(eventID: String) async {

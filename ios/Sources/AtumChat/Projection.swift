@@ -180,6 +180,7 @@ public enum Projection {
                 && item.threadRoot == nil
         }
         var visible = shownItems.filter { item in
+            if context.showsGroupThreads, item.isGroupThreadReply { return false }
             // Every transient event leaves the transcript, including older live
             // lines from legacy publishers. Only the selected line feeds the footer.
             guard !TransientLines.isTransientLine(item, agents: agents) else { return false }
@@ -378,7 +379,7 @@ public struct TimelineProjector: Sendable {
     /// Applies one SDK batch. On an out-of-range index the buffer is left as
     /// it was and the error is thrown: the caller rebuilds the timeline.
     public mutating func apply(_ diffs: [ChatDiff], now: Date) throws -> ProjectedTimeline {
-        let change = try buffer.apply(diffs)
+        let change = try buffer.apply(diffs, hidesGroupThreadReplies: context.showsGroupThreads)
         var projected = project(change: change, now: now)
         projected.touchedItemIDs = Set(diffs.lazy.flatMap(\.carriedItems).map(\.id))
         return projected
