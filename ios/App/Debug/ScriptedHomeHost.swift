@@ -646,9 +646,83 @@ struct ScriptedHomeHost: View {
             })
     }
 
+    /// `-AtumScriptedMessageSearch` (ML3, mockup M1 review): personal server
+    /// hits and device-only private hits for "launch" beside the company
+    /// ones above. Every ask and open is written to `home-actions.txt`.
+    private static let scriptedSearchSession = ScriptedSearchSession()
+
+    private static func scriptedHit(_ room: String, _ event: String, _ sender: String, _ body: String,
+                                    minutesAgo: Int) -> GlobalChatSearchHit {
+        GlobalChatSearchHit(target: ChatSearchEventTarget(roomID: room, eventID: event), roomName: nil,
+                            senderID: sender, snippet: body,
+                            timestamp: Int64(Date().addingTimeInterval(-Double(minutesAgo) * 60)
+                                .timeIntervalSince1970 * 1000))
+    }
+
+    private static var scriptedPersonalHits: [GlobalChatSearchHit] {
+        [scriptedHit("!luna-plain:atum.test", "$luna-budget", ScriptedCast.luna,
+                     "Can you check the launch budget before Friday? The total looks high.", minutesAgo: 30),
+         scriptedHit("!atum-plain:atum.test", "$atum-deck", ScriptedCast.atum,
+                     "Filed the launch deck under October in Drive.", minutesAgo: 60 * 26),
+         scriptedHit("!atum-plain:atum.test", "$atum-plan", ScriptedCast.me,
+                     "Remind me about the launch plan on Monday", minutesAgo: 60 * 24 * 6)]
+    }
+
+    private static var scriptedPrivateHits: [GlobalChatSearchHit] {
+        [scriptedHit("!lan:atum.test", "$lan-photos", "@lan:atum.test",
+                     "Sent you the launch photos from the florist", minutesAgo: 60 * 3),
+         scriptedHit("!gia-dinh:atum.test", "$family-dinner", ScriptedCast.minh,
+                     "Dinner after the launch on Saturday?", minutesAgo: 60 * 24 * 12)]
+    }
+
+    private var scriptedHomeMessageSearch: HomeMessageSearchActions? {
+        guard ProcessInfo.processInfo.arguments.contains("-AtumScriptedMessageSearch") else { return nil }
+        let names = [ScriptedCast.luna: "Luna", ScriptedCast.atum: "Atum", ScriptedCast.me: "Bạn", "@lan:atum.test": "Lan", ScriptedCast.minh: "Minh",
+                     "@thao:atum.test": "Thảo"]
+        let companyRooms = Set(Self.scriptedCompanyResults.values.flatMap { $0 }.map(\.roomID))
+        func matching(_ hits: [GlobalChatSearchHit], _ term: String) -> [GlobalChatSearchHit] {
+            hits.filter { ChatSearchText.matches($0.snippet, query: term) }
+        }
+        return HomeMessageSearchActions(
+            session: ObjectIdentifier(Self.scriptedSearchSession),
+            personal: { term, _ in
+                UITestProbe.append("personalSearch \(term)", to: "home-actions.txt")
+                let hits = matching(Self.scriptedPersonalHits, term)
+                return PersonalMessageSearch.Page(results: hits, coverage: .init(
+                    eligibleRooms: 11, searchedRooms: 4, encryptedRooms: 7, truncated: false))
+            },
+            personalRetained: { $0 },
+            companyRooms: { companyRooms.count },
+            companyRetained: { $0 },
+            companyLabel: { room, company in company != nil || companyRooms.contains(room) ? "Atum Studio" : nil },
+            senderName: { _, user in names[user] },
+            makeDevice: {
+                HomeSearchSources.Device(
+                    search: { term, _ in
+                        UITestProbe.append("deviceSearch \(term)", to: "home-actions.txt")
+                        let hits = matching(Self.scriptedPrivateHits, term)
+                        return LocalSearchSource.Page(results: hits, eligibleRooms: 7,
+                                                      roomsWithMatches: Set(hits.map(\.id.roomID)).count,
+                                                      oldestMatchTimestamp: hits.map(\.timestamp).min(),
+                                                      truncated: false)
+                    },
+                    retained: { $0 },
+                    startBackfill: { UITestProbe.append("backfill start", to: "home-actions.txt") },
+                    stopBackfill: { UITestProbe.append("backfill stop", to: "home-actions.txt") },
+                    observeRedactions: { _, _ in },
+                    stopObservingRedactions: {})
+            },
+            open: { hit, scope, _ in
+                UITestProbe.append("openHit \(hit.target.eventID) \(scope)", to: "home-actions.txt")
+                router.open(roomId: hit.target.roomID)
+                return true
+            })
+    }
+
     private func personalMenu(_ base: HomeActions) -> HomeActions {
         var actions = base
         actions.globalSearch = scriptedGlobalSearch
+        actions.messageSearch = scriptedHomeMessageSearch
         actions.handles = ScriptedHandles.lookup
         actions.setLowPriority = { roomID, value in
             update(roomID) { $0.withRosterState(lowPriorityOverride: value) }
@@ -920,4 +994,7 @@ enum ScriptedHandles {
         )
     }
 }
+
+/// The scripted host's one search "session" identity (`HomeSearchKey`).
+private final class ScriptedSearchSession {}
 #endif

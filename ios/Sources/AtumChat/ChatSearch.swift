@@ -54,8 +54,10 @@ public final class GlobalChatSearch<Plain, Device> {
         case device(Device)
     }
 
-    public typealias IsCurrent = @MainActor () -> Bool
-    public typealias Search<Value> = @MainActor (String, IsCurrent) async -> Value
+    /// Sendable and escaping so a source can hand the fence to async
+    /// children and SDK adapters (ML3 Home controller).
+    public typealias IsCurrent = @MainActor @Sendable () -> Bool
+    public typealias Search<Value> = @MainActor (String, @escaping IsCurrent) async -> Value
 
     public private(set) var input = Input(scope: .plain, id: UUID())
     public private(set) var query = ""

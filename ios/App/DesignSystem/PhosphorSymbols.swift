@@ -56,6 +56,7 @@ enum PhosphorSymbols {
         "LayoutGallery": "ph.image",
         "LayoutGroups": "ph.files",
         "Link": "ph.link",
+        "Lock": "ph.lock-simple",
         "LogOut": "ph.sign-out",
         "Mail": "ph.envelope-simple",
         "MailOpened": "ph.envelope-simple-open",

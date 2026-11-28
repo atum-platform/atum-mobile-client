@@ -110,16 +110,6 @@ enum HomeGlobalSearchPolicy {
     }
 }
 
-/// One query's answer from one company tab (Messages or Files). `pending`
-/// covers the debounce and the request, like desktop's `status: 'pending'`.
-struct HomeEventSearchState: Equatable {
-    var key: String?
-    var pending = false
-    var results: [CompanySearchResult] = []
-
-    static let idle = HomeEventSearchState(key: nil)
-}
-
 /// A Channels row: desktop's `Hash` and the room's name.
 struct HomeSearchChannelRow: View {
     let design: LiveDesign

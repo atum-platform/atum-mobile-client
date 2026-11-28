@@ -65,6 +65,7 @@
     "LayoutGallery": "image",
     "LayoutGroups": "files",
     "Link": "link",
+    "Lock": "lock-simple",
     "LogOut": "sign-out",
     "Mail": "envelope-simple",
     "MailOpened": "envelope-simple-open",

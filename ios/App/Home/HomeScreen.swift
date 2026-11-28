@@ -383,6 +383,10 @@ struct HomeActions {
     /// Home search's Channels, Messages and Files (desktop roster global
     /// search). Nil hides all three.
     var globalSearch: HomeGlobalSearchActions?
+    /// ML3 S1/S2: personal messages, measured company coverage, the
+    /// device-only private scope and exact-event opening. Nil (scripted
+    /// hosts, no live session) keeps People, Channels, Messages and Files.
+    var messageSearch: HomeMessageSearchActions?
     /// Verified handles for one-to-one chat rows (desktop `roomHandle`).
     /// Nil shows no handle and asks for none.
     var handles: PersonHandleLookup?
@@ -472,7 +476,14 @@ struct HomeScreen: View {
     var dismissPresentationRequest: UInt64 = 0
     var onPresentationChanged: (Bool) -> Void = { _ in }
 
-    @State private var query = ""
+    /// ML3: Home's one search per live session (`GlobalChatSearch`); it owns
+    /// the field's text, scope, every source query and the shown results.
+    @State private var search: HomeSearchController?
+    /// S16: All / Unread / Favourites over the existing sections.
+    @State private var filterSession = ChatRoomListFilterSession()
+    @State private var filterScroll = HomeFilterScrollRequest()
+    @State private var rowVisibility = HomeRowVisibility()
+    @State private var openingHitID: ChatSearchEventTarget?
     /// While the top search field has focus (or a query), the face and the
     /// pencil step aside for Cancel.
     @FocusState private var searchFocused: Bool
@@ -492,13 +503,8 @@ struct HomeScreen: View {
     @State private var renameRequest: ChatRenameRequest?
     @State private var pendingBlock: HomePendingBlock?
     @State private var blockedUserIDs = Set<String>()
-    /// Home search's People section (desktop roster global search).
-    @State private var peopleSearch = HomePeopleSearchState.idle
+    /// The person or file being opened from Home search.
     @State private var openingPersonID: String?
-    /// Home search's Messages and Files (desktop `searchCompanies`), one
-    /// answer per tab, and the result being opened.
-    @State private var messageSearch = HomeEventSearchState.idle
-    @State private var fileSearch = HomeEventSearchState.idle
     @State private var openingResultID: String?
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -529,9 +535,7 @@ struct HomeScreen: View {
             Group {
                 if presentation.rows.isEmpty {
                     emptyContent
-                } else if HomeGlobalSearchPolicy.showsNoResults(searching: globalSearching,
-                                                                 globalCount: globalSections.count,
-                                                                 rosterCount: filteredRows.count) {
+                } else if showsNoResults {
                     noSearchResults
                 } else {
                     roster
@@ -589,10 +593,23 @@ struct HomeScreen: View {
             guard waitingRow != nil else { return }
             await actions.refresh()
         }
-        .task(id: peopleSearchTerm) { await searchPeople() }
-        .task(id: eventSearchKey) { await searchEvents(.messages) }
-        .task(id: eventSearchKey) { await searchEvents(.files) }
+        // One controller per live session: a new session (or a source that
+        // became available) replaces it, and the old one stops every query.
+        .onChange(of: actions.searchKey, initial: true) { _, _ in
+            search?.close()
+            search = HomeSearchController(sources: actions.searchSources())
+            search?.setForeground(scenePhase == .active)
+        }
+        // A join, leave or local delete: drop hits whose room went away now,
+        // and ask the open query again for rooms that arrived.
+        .onChange(of: presentation.rows.map(\.roomID)) { _, _ in
+            search?.revalidate()
+            if HomePeopleSearchPolicy.term(query) != nil { search?.refresh() }
+        }
+        .onDisappear { search?.setForeground(false) }
+        .onAppear { search?.setForeground(scenePhase == .active) }
         .onChange(of: scenePhase) { old, new in
+            search?.setForeground(new == .active)
             guard old != .active, new == .active, waitingRow != nil else { return }
             Task { await actions.refresh() }
         }
@@ -755,6 +772,16 @@ struct HomeScreen: View {
                     createButton
                 }
             }
+            // S2: the device-only scope is chosen before typing; S16: the
+            // list filter while not searching. One slot, never both.
+            if searching, let search, search.offersDeviceScope {
+                HomeSearchScopeChips(design: design, scope: search.scope) { scope in
+                    search.select(scope)
+                }
+            } else if !searching, !presentation.rows.isEmpty {
+                HomeFilterChips(design: design, selection: filterSession.effective(in: availableFilters),
+                                available: availableFilters, select: selectFilter)
+            }
         }
         .padding(.horizontal, atum.kit.space(.s4))
         .padding(.top, 2)
@@ -763,16 +790,30 @@ struct HomeScreen: View {
         .motion(.quick, value: searching)
     }
 
-    private var searching: Bool { searchFocused || !query.isEmpty }
+    private var searching: Bool { searchFocused || !query.isEmpty || scope == .deviceOnly }
+
+    /// The field's text belongs to the search controller (its input token
+    /// drops a keystroke from a replaced scope).
+    private var query: String { search?.query ?? "" }
+    private var scope: GlobalChatSearchScope { search?.scope ?? .plain }
+
+    /// Local room-name matching uses the plain scope only: a private term
+    /// never filters the roster or Team Space channels.
+    private var rosterQuery: String { scope == .plain ? query : "" }
 
     private var searchField: some View {
-        HomeSearchField(query: $query, prompt: copy(.searchPlaceholder), label: copy(.search), focused: $searchFocused)
+        HomeSearchField(query: search?.text ?? .constant(""),
+                        prompt: scope == .deviceOnly ? searchWords.text(.phonePrivatePlaceholder)
+                            : copy(.searchPlaceholder),
+                        label: copy(.search), focused: $searchFocused)
     }
 
     private func endSearch() {
-        query = ""
+        search?.dismiss()
         searchFocused = false
     }
+
+    private var searchWords: HomeSearchWords { HomeSearchWords(design: design) }
 
     private var accountButton: some View {
         Button { router.presentAccount() } label: {
@@ -833,9 +874,11 @@ struct HomeScreen: View {
         actions.hasCreationActions || presentation.rows.contains { !$0.isInvitation && $0.canOpen }
     }
 
+    /// The roster's own matches. The device-only scope shows no roster.
     private var filteredRows: [HomeRow] {
+        guard scope == .plain else { return [] }
         let locale = Locale(identifier: design.locale)
-        let needle = HomeSearch.normalize(query, locale: locale)
+        let needle = HomeSearch.normalize(rosterQuery, locale: locale)
         guard !needle.isEmpty else { return presentation.rows }
         return presentation.rows.filter {
             HomeSearch.normalize($0.name, locale: locale).contains(needle)
@@ -843,8 +886,33 @@ struct HomeScreen: View {
         }
     }
 
-    private var assistantRows: [HomeRow] { filteredRows.filter { $0.kind.isAssistant } }
-    private var chatRows: [HomeRow] { filteredRows.filter { !$0.kind.isAssistant } }
+    /// The assistant and chat sections, each in its existing order. While
+    /// not searching the S16 filter applies section by section; search
+    /// always looks through every chat (Element X hides its filters too).
+    private var rosterSections: [ChatRoomListSection<HomeRow>] {
+        let sections = [ChatRoomListSection(id: "assistants", rows: filteredRows.filter { $0.kind.isAssistant }),
+                        ChatRoomListSection(id: "chats", rows: filteredRows.filter { !$0.kind.isAssistant })]
+        guard !searching else { return sections }
+        return filterSession.sections(sections, available: availableFilters, row: \.filterRow)
+    }
+
+    private var assistantRows: [HomeRow] { rosterSections[0].rows }
+    private var chatRows: [HomeRow] { rosterSections[1].rows }
+
+    // MARK: S16 list filters
+
+    /// Computed on the unfiltered roster, before any text, so a filter with
+    /// nothing in it is unavailable and a stale choice reads as All.
+    private var availableFilters: [ChatRoomListFilter] {
+        ChatRoomListFilter.available(in: presentation.rows.map(\.filterRow))
+    }
+
+    private func selectFilter(_ filter: ChatRoomListFilter) {
+        let order = presentation.rows.filter(\.kind.isAssistant) + presentation.rows.filter { !$0.kind.isAssistant }
+        let anchor = rowVisibility.first(in: order.map(\.id))
+        let scroll = filterSession.select(filter, available: availableFilters, visibleAnchor: anchor)
+        filterScroll = HomeFilterScrollRequest(token: filterScroll.token &+ 1, scroll: scroll)
+    }
 
     /// An active agent whose room has not arrived yet. Its row appears once,
     /// requests a roster/sync refresh, and asks again on every foreground
@@ -871,7 +939,7 @@ struct HomeScreen: View {
                     // Desktop draws the search's People, Channels, Messages
                     // and Files above the roster's own matches
                     // (`data-matrix-global-search-results`).
-                    globalResults(isTop: !presentation.showsNotificationPrompt)
+                    globalResults(isTop: !presentation.showsNotificationPrompt, now: clock.date)
                     section(copy(.assistants), id: "assistants", rows: assistantRows, now: clock.date,
                             isTop: !presentation.showsNotificationPrompt && !showsGlobalResults)
                     // Desktop parity: the roster labels its second block
@@ -880,6 +948,15 @@ struct HomeScreen: View {
                     section(copy(.chats), id: "chats", rows: chatRows, now: clock.date,
                             isTop: !presentation.showsNotificationPrompt && !showsGlobalResults
                                 && assistantRows.isEmpty)
+                    // M1: one quiet coverage line at the foot of a finished search.
+                    if let coverage = search?.shown.coverage {
+                        HomeSearchCoverageLine(design: design, line: coverage)
+                            .padding(.vertical, atum.kit.space(.s4))
+                            .listRowInsets(EdgeInsets(top: 0, leading: atum.kit.space(.s5), bottom: 0,
+                                                      trailing: atum.kit.space(.s5)))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -893,6 +970,18 @@ struct HomeScreen: View {
                         proxy.scrollTo(topID, anchor: .top)
                     } else {
                         withAnimation { proxy.scrollTo(topID, anchor: .top) }
+                    }
+                }
+                // S16: a filter starts at its top; All returns to the row
+                // that was at the top of the unfiltered list.
+                .onChange(of: filterScroll) { _, request in
+                    // After the filtered rows have been laid out.
+                    DispatchQueue.main.async {
+                        switch request.scroll {
+                        case .none: break
+                        case .top: proxy.scrollTo(topID, anchor: .top)
+                        case let .restore(rowID): proxy.scrollTo(rowID, anchor: .top)
+                        }
                     }
                 }
             }
@@ -965,6 +1054,9 @@ struct HomeScreen: View {
 
     private func decoratedRow<Content: View>(_ content: Content, row: HomeRow) -> some View {
         content
+        // S16's All anchor: which rows are on screen, without redrawing.
+        .onAppear { rowVisibility.visible.insert(row.id) }
+        .onDisappear { rowVisibility.visible.remove(row.id) }
         .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparatorTint(atum.color(.frame, scheme: scheme))
@@ -1045,99 +1137,51 @@ struct HomeScreen: View {
         }
     }
 
-    // MARK: People (desktop roster global search)
+    // MARK: Home search (desktop roster global search; ML3 S1/S2, mockup M1)
 
-    /// The query the People section asks for: two or more characters, and
-    /// only while people can be found (signed in, Matrix ready).
-    private var peopleSearchTerm: String? {
-        actions.peopleDiscovery == nil ? nil : HomePeopleSearchPolicy.term(query)
-    }
+    private var shown: HomeSearchShown { search?.shown ?? .empty }
 
-    /// The answer for the query on screen; an older query's never shows.
-    private var currentPeopleSearch: HomePeopleSearchState? {
-        guard let term = peopleSearchTerm, peopleSearch.term == term else { return nil }
-        return peopleSearch
-    }
-
-    /// Desktop's `globalSearching`: from the first keystroke of a long
-    /// enough query until its answer lands, debounce included.
-    private var peopleSearching: Bool {
-        peopleSearchTerm != nil && (currentPeopleSearch?.pending ?? true)
-    }
-
+    /// Desktop `globalPeople`: nobody you already have a direct chat with.
     private var shownPeople: [HomeGroupCandidate] {
-        guard let current = currentPeopleSearch else { return [] }
         let directRoom = actions.peopleDiscovery?.directRoom
-        return HomePeopleSearchPolicy.shown(current.people) { directRoom?($0) != nil }
+        return HomePeopleSearchPolicy.shown(shown.people) { directRoom?($0) != nil }
     }
 
-    // MARK: Channels, Messages and Files (desktop roster global search)
-
-    /// Desktop `globalChannels`: Team Space rooms whose name holds the query.
+    /// Desktop `globalChannels`: Team Space rooms whose name holds the query
+    /// (plain scope only: local matching never sees a private term).
     private var shownChannels: [HomeSearchChannel] {
-        HomeGlobalSearchPolicy.channels(actions.globalSearch?.channels ?? [], query: query)
+        HomeGlobalSearchPolicy.channels(actions.globalSearch?.channels ?? [], query: rosterQuery)
     }
 
-    /// The query and companies Messages and Files ask; nil when there is no
-    /// company to ask (both complete empty at once, as on desktop).
-    private var eventSearchKey: String? {
-        guard let global = actions.globalSearch else { return nil }
-        return HomeGlobalSearchPolicy.companyKey(term: HomePeopleSearchPolicy.term(query),
-                                                 companyIDs: global.companyIDs)
-    }
-
-    private func currentEvents(_ tab: CompanySearchTab) -> HomeEventSearchState? {
-        let state = tab == .messages ? messageSearch : fileSearch
-        guard let key = eventSearchKey, state.key == key else { return nil }
-        return state
-    }
-
-    private var shownMessages: [CompanySearchResult] { visibleEvents(.messages) }
-    private var shownFiles: [CompanySearchResult] { visibleEvents(.files) }
-
-    /// A completed answer stays only for rooms still eligible now.
-    private func visibleEvents(_ tab: CompanySearchTab) -> [CompanySearchResult] {
-        guard let global = actions.globalSearch, let current = currentEvents(tab) else { return [] }
-        return HomeGlobalSearchPolicy.visible(current.results, eligibility: global.eligibility)
-    }
-
-    /// Desktop `globalSearching`: any source still out, debounce included.
-    private var globalSearching: Bool {
-        peopleSearching || (eventSearchKey != nil
-            && ((currentEvents(.messages)?.pending ?? true) || (currentEvents(.files)?.pending ?? true)))
-    }
+    /// Desktop `globalSearching`: from the first keystroke of a long enough
+    /// query until every source has answered, debounce included.
+    private var globalSearching: Bool { search?.isPending ?? false }
 
     private var globalSections: [HomeGlobalSearchSection] {
         HomeGlobalSearchPolicy.sections(people: shownPeople.count, channels: shownChannels.count,
-                                        messages: shownMessages.count, files: shownFiles.count)
+                                        messages: shown.messages.count, files: shown.files.count)
     }
 
     /// While searching or showing anything found, the list stays instead of
     /// "No results" (desktop: `!externalSearching && totalResultCount === 0`).
     private var showsGlobalResults: Bool { globalSearching || !globalSections.isEmpty }
 
-    private func searchEvents(_ tab: CompanySearchTab) async {
-        guard let key = eventSearchKey, let term = HomePeopleSearchPolicy.term(query),
-              let global = actions.globalSearch else {
-            if tab == .messages { messageSearch = .idle } else { fileSearch = .idle }
-            return
+    /// Plain: desktop's rule, the roster's own matches included. Device: only
+    /// once a private search has finished with nothing (M1 decision 6).
+    private var showsNoResults: Bool {
+        switch scope {
+        case .plain:
+            HomeGlobalSearchPolicy.showsNoResults(searching: globalSearching, globalCount: globalSections.count,
+                                                  rosterCount: filteredRows.count)
+        case .deviceOnly:
+            !globalSearching && shown.coverage != nil && shown.messages.isEmpty
         }
-        setEvents(tab, HomeEventSearchState(key: key, pending: true))
-        do { try await Task.sleep(for: HomePeopleSearchPolicy.debounce) } catch { return }
-        let found = await global.search(term, tab)
-        // A newer query cancelled this one: its late answer is dropped.
-        guard !Task.isCancelled, eventSearchKey == key else { return }
-        setEvents(tab, HomeEventSearchState(key: key, pending: false, results: found))
-    }
-
-    private func setEvents(_ tab: CompanySearchTab, _ state: HomeEventSearchState) {
-        if tab == .messages { messageSearch = state } else { fileSearch = state }
     }
 
     /// The whole global search block, top to bottom: "Searching…", then
     /// People, Channels, Messages and Files. The first thing drawn is the
     /// list's top, so a scroll-to-top lands on it.
-    @ViewBuilder private func globalResults(isTop: Bool) -> some View {
+    @ViewBuilder private func globalResults(isTop: Bool, now: Date) -> some View {
         if globalSearching {
             Text(verbatim: copy(.searching))
                 .font(.footnote)
@@ -1157,8 +1201,8 @@ struct HomeScreen: View {
             switch section {
             case .people: peopleResults(headerIsTop: headerIsTop)
             case .channels: channelResults(headerIsTop: headerIsTop)
-            case .messages: eventResults(.messages, results: shownMessages, headerIsTop: headerIsTop)
-            case .files: eventResults(.files, results: shownFiles, headerIsTop: headerIsTop)
+            case .messages: messageResults(headerIsTop: headerIsTop, now: now)
+            case .files: eventResults(.files, results: shown.files, headerIsTop: headerIsTop)
             }
         }
     }
@@ -1194,6 +1238,56 @@ struct HomeScreen: View {
         }
     }
 
+    /// M1: Messages, one card per chat, newest hit first; personal, company
+    /// and device hits share one shape. The roster's name and face win.
+    @ViewBuilder private func messageResults(headerIsTop: Bool, now: Date) -> some View {
+        searchHeader(copy(.messages), id: "messages", isTop: headerIsTop)
+        ForEach(shown.messages) { group in
+            let row = presentation.rows.first { $0.roomID == group.roomID && !$0.isInvitation }
+            let name = row?.name ?? group.hits.first?.roomName ?? ""
+            HomeMessageGroupCard(design: design, group: group, roomName: name, query: query,
+                                 time: { HomeTimeText.text(date: Date(timeIntervalSince1970: TimeInterval($0) / 1000),
+                                                           now: now, design: design) },
+                                 disabled: openingHitID != nil, open: openHit) {
+                if let row {
+                    HomeAvatar(row: row, size: 24, loadMatrixThumbnail: actions.loadMatrixThumbnail)
+                } else {
+                    AtumAvatar(kind: .group, name: name, size: 24)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: atum.kit.space(.s1), leading: atum.kit.space(.s4),
+                                      bottom: atum.kit.space(.s1), trailing: atum.kit.space(.s4)))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    /// Exact event placement (contract "Exact event placement"): the hit is
+    /// rechecked against the scope it was found in, then its room opens at
+    /// the event (a thread reply in its thread). A newer query or a closed
+    /// search makes a late answer silent; a real failure is the generic error.
+    private func openHit(_ hit: HomeMessageHit) {
+        guard let search, openingHitID == nil else { return }
+        let generation = search.generation
+        let scope = search.scope
+        openingHitID = hit.id
+        Task { @MainActor in
+            let opened: Bool
+            if let messages = actions.messageSearch {
+                opened = await messages.open(hit, scope) { search.isCurrent(generation) }
+            } else if case let .company(result) = hit.origin, let global = actions.globalSearch {
+                opened = await global.open(result)
+            } else {
+                opened = false
+            }
+            openingHitID = nil
+            if !opened, search.isCurrent(generation) {
+                actionFailure &+= 1
+                AccessibilityNotification.Announcement(copy(.errorGeneric)).post()
+            }
+        }
+    }
+
     @ViewBuilder private func eventResults(_ section: HomeGlobalSearchSection, results: [CompanySearchResult],
                                            headerIsTop: Bool) -> some View {
         searchHeader(copy(section == .files ? .files : .messages), id: section.rawValue, isTop: headerIsTop)
@@ -1223,19 +1317,6 @@ struct HomeScreen: View {
                 AccessibilityNotification.Announcement(copy(.errorGeneric)).post()
             }
         }
-    }
-
-    private func searchPeople() async {
-        guard let term = peopleSearchTerm, let discovery = actions.peopleDiscovery else {
-            peopleSearch = .idle
-            return
-        }
-        peopleSearch = HomePeopleSearchState(term: term, pending: true)
-        do { try await Task.sleep(for: HomePeopleSearchPolicy.debounce) } catch { return }
-        let found = await discovery.search(term)
-        // A newer query cancelled this one: its late answer is dropped.
-        guard !Task.isCancelled, peopleSearchTerm == term else { return }
-        peopleSearch = HomePeopleSearchState(term: term, pending: false, people: found ?? [])
     }
 
     @ViewBuilder private func peopleResults(headerIsTop: Bool) -> some View {
@@ -1278,11 +1359,17 @@ struct HomeScreen: View {
         }
     }
 
+    /// M1 decision 6: one line, one hint, and the coverage line again so the
+    /// person knows what was searched.
     private var noSearchResults: some View {
         ContentUnavailableView {
             Label(copy(.emptySearch), image: atum.symbol(.search))
         } description: {
             Text(copy(.emptySearchHint))
+        } actions: {
+            if let coverage = shown.coverage {
+                HomeSearchCoverageLine(design: design, line: coverage)
+            }
         }
         .foregroundStyle(atum.color(.soft, scheme: scheme))
     }
@@ -1322,15 +1409,34 @@ enum HomePeopleSearchPolicy {
     }
 }
 
-/// One query's People answer. `pending` covers the debounce and the request,
-/// like desktop's `status: 'pending'`; a failed request completes empty,
-/// because desktop's global search shows no error row (`.catch(() => [])`).
-struct HomePeopleSearchState: Equatable {
-    var term: String?
-    var pending = false
-    var people: [HomeGroupCandidate] = []
+/// S16: which roster rows are on screen, for the All anchor. A plain
+/// reference so a row appearing during a scroll redraws nothing.
+@MainActor
+final class HomeRowVisibility {
+    var visible = Set<String>()
 
-    static let idle = HomePeopleSearchState(term: nil)
+    /// The first row, in list order, that is on screen now.
+    func first(in order: [String]) -> String? {
+        order.first(where: visible.contains)
+    }
+}
+
+/// One S16 scroll after a filter change; the token makes a repeat distinct.
+struct HomeFilterScrollRequest: Equatable {
+    var token = 0
+    var scroll: ChatRoomListFilterSession.Scroll = .none
+}
+
+extension HomeRow {
+    /// S16's view of a row: a real, openable joined room (no invitation,
+    /// draft, catalog placeholder or waiting agent), its badge input and
+    /// its `m.favourite` tag (`isPinned`).
+    var filterRow: ChatRoomListFilter.Row {
+        ChatRoomListFilter.Row(
+            hasRoom: canOpen && !isInvitation && !isFounderDraft && !isComingSoon && !awaitsStart
+                && !isWaitingForRoom,
+            badge: badgeInput, isFavourite: isPinned)
+    }
 }
 
 enum HomeSearch {

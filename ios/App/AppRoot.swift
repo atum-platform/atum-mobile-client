@@ -1089,11 +1089,22 @@ struct AppRoot: View {
                 eligibility: model.homeSearchEligibility(),
                 search: { await model.homeCompanySearch($0, tab: $1) },
                 open: { result in
+                    // ML3: placed at the exact event, as Team Space search does.
                     await HomeSearchRoute.open(
                         result, workspace: model.companyWorkspace,
                         confirm: { await model.openHomeSearchResult(result) },
-                        route: { await openRoomAndRoute($0, requiringCompany: $1) })
+                        route: { roomID, company in
+                            await routeRoom(roomID, requiringCompany: company,
+                                            message: ChatSearchEventTarget(roomID: roomID, eventID: result.eventID,
+                                                                           threadRootID: result.threadRootID))
+                                == .opened
+                        })
                 })
+        }
+        // ML3 S1/S2 hook (`HomeSearchLive.swift`): personal and device-only
+        // message search, routed to the exact event.
+        actions.messageSearch = model.homeMessageSearchActions { target, company in
+            await routeRoom(target.roomID, requiringCompany: company, message: target) == .opened
         }
         return actions
     }
@@ -1210,7 +1221,9 @@ struct AppRoot: View {
         guard !Task.isCancelled, generation == openRequestGeneration, router.selectedTab == .teamSpace,
               model.companyWorkspace.activeCompanyID == result.companyID else { return .superseded }
         guard confirmed else { return .failed }
-        return await routeRoom(result.roomID, requiringCompany: result.companyID, message: result)
+        return await routeRoom(result.roomID, requiringCompany: result.companyID,
+                               message: ChatSearchEventTarget(roomID: result.roomID, eventID: result.eventID,
+                                                              threadRootID: result.threadRootID))
     }
 
     private func routeFromRootDestination(_ roomID: String) {
@@ -1239,7 +1252,7 @@ struct AppRoot: View {
     /// before staging, during the open and at navigation.
     private func routeRoom(_ roomID: String, stagedCold: Bool = false,
                            requiringCompany: String? = nil,
-                           message: CompanySearchResult? = nil) async -> RoomOpenResult {
+                           message: ChatSearchEventTarget? = nil) async -> RoomOpenResult {
         func fenceHolds() -> Bool {
             guard let requiringCompany else { return true }
             return model.companyWorkspace.isSelected(companyID: requiringCompany, owning: roomID)

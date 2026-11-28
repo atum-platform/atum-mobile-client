@@ -62,6 +62,7 @@ enum AtumGlyph: String, Sendable, CaseIterable {
     /// Home search's Messages rows (desktop `Messages`, Phosphor `chats-circle`).
     case messages = "Messages"
     case link = "Link"
+    case lock = "Lock"
     case logOut = "LogOut"
     case mail = "Mail"
     case mailOpened = "MailOpened"

@@ -23,11 +23,24 @@ public struct PersonalMessageSearch {
         public let searchedRooms: Int
         public let encryptedRooms: Int
         public let truncated: Bool
+
+        /// Public for Home's scripted host and app tests (ML3 UI).
+        public init(eligibleRooms: Int, searchedRooms: Int, encryptedRooms: Int, truncated: Bool) {
+            self.eligibleRooms = eligibleRooms
+            self.searchedRooms = searchedRooms
+            self.encryptedRooms = encryptedRooms
+            self.truncated = truncated
+        }
     }
 
     public struct Page: Equatable, Sendable {
         public let results: [GlobalChatSearchHit]
         public let coverage: Coverage
+
+        public init(results: [GlobalChatSearchHit], coverage: Coverage) {
+            self.results = results
+            self.coverage = coverage
+        }
     }
 
     private static let limit = 30
