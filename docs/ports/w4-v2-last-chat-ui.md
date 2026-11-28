@@ -330,3 +330,18 @@ Added in fix round 3:
 - `python3 scripts/design_lint.py` exited 0.
   `python3 scripts/public_guard.py --base origin/main --head HEAD` exited 0
   on the r3 commit.
+
+### Tab return fix (28 Nov 2026)
+
+- The locked Debug arm64 `build-for-testing` plus `S2StateTests` and 11
+  `HomeShellUITests` methods (the new test and the ones that switch tabs or
+  use the scripted chat destination) did not run. The job waited on the
+  shared heavy-build lock behind three other jobs and was stopped at the
+  2-hour background limit before `lockf` acquired it
+  (`/Volumes/AtumTestFlight/fix-chat-tab/run.log` is empty). The script is
+  ready to rerun as is. Pending: that run, or the hosted shards.
+- No Swift package source or package test changed, so no `swift test` run
+  applied.
+- `python3 scripts/design_lint.py` exited 0.
+  `python3 scripts/public_guard.py --base origin/main --head HEAD` exited 0.
+  `git diff --check` was clean.
