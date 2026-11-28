@@ -3,6 +3,12 @@
 /// The menu view shows exactly these items, in this order; the store still
 /// enforces each action (`ChatItemRules`), so a stale menu can never do more
 /// than the row allows.
+///
+/// Display order (chat parity M2; ML6 extends it, see
+/// `docs/implementation/chat-parity-ml1-threads-pins.md`, "Menu contract"):
+/// react · reply · replyInThread · copy · selectText · pin/unpin ·
+/// [ML6: forward] · edit · report · delete. Navigation and sharing actions
+/// come before the editing and destructive ones.
 public enum MessageMenuItem: Equatable, Hashable, Sendable {
     /// The reaction palette (B22), the desktop set.
     case react
@@ -14,6 +20,11 @@ public enum MessageMenuItem: Equatable, Hashable, Sendable {
     case copy
     /// "Chọn văn bản": answers only; opens the select-text sheet.
     case selectText
+    /// "Pin": adds the message to the room's shared `m.room.pinned_events`
+    /// (S5). Offered only with current write power on an eligible chat.
+    case pin
+    /// "Unpin": the same message is already in the shared list.
+    case unpin
     /// "Sửa": my text messages in people chats only.
     case edit
     /// "Báo cáo": another sender's message, including assistants and app
@@ -32,6 +43,27 @@ public struct ReactionChoice: Equatable, Hashable, Sendable {
     public init(key: String, isSelected: Bool) {
         self.key = key
         self.isSelected = isSelected
+    }
+}
+
+/// What the open chat's shared pins allow, from the latest `RoomPinSnapshot`
+/// (S5). The menu never decides from a list it drew earlier: each change is a
+/// single intent the SDK applies to current room state.
+public struct PinMenuContext: Equatable, Sendable {
+    public var scope: MessageMenuRules.SharedChatActions
+    public var pinnedEventIDs: Set<String>
+    /// Current `m.room.pinned_events` state-event power. False after demotion.
+    public var canChange: Bool
+    /// A local write is in flight or has not reached sync yet: pin and unpin
+    /// show but are disabled until the next snapshot.
+    public var awaitingSync: Bool
+
+    public init(scope: MessageMenuRules.SharedChatActions, pinnedEventIDs: Set<String>,
+                canChange: Bool, awaitingSync: Bool) {
+        self.scope = scope
+        self.pinnedEventIDs = pinnedEventIDs
+        self.canChange = canChange
+        self.awaitingSync = awaitingSync
     }
 }
 
@@ -75,7 +107,7 @@ public enum MessageMenuRules {
     /// Text/media report eligibility is independent of room and sender kind;
     /// app-bot room notices also qualify.
     public static func items(for item: ChatItem, in kind: RoomKind,
-                             threads: Bool = false) -> [MessageMenuItem] {
+                             threads: Bool = false, pins: PinMenuContext? = nil) -> [MessageMenuItem] {
         switch item.kind {
         case .message, .image, .file: break
         case .notice where kind == .appBot && ReportPolicy.mayReportMessage(item, in: kind): break
@@ -90,6 +122,7 @@ public enum MessageMenuRules {
         if threads, !isBotRoom, threadRootID(for: item) != nil { items.append(.replyInThread) }
         if hasText { items.append(.copy) }
         if hasText, isAnswer(item, in: kind) { items.append(.selectText) }
+        if !isBotRoom, let pins, let pinItem = pinItem(for: item, pins: pins) { items.append(pinItem) }
         if ChatItemRules.canEdit(item, in: kind) { items.append(.edit) }
         if ReportPolicy.mayReportMessage(item, in: kind) {
             items.append(.report)
@@ -120,6 +153,22 @@ public enum MessageMenuRules {
         switch item.kind {
         case .message, .notice, .image, .file: return eventID
         default: return nil
+        }
+    }
+
+    /// "Pin" or "Unpin" for a settled message, or nil when the chat has no
+    /// shared pins, the account lacks power, or the row is not a valid target.
+    public static func pinItem(for item: ChatItem, pins: PinMenuContext) -> MessageMenuItem? {
+        guard let eventID = pinEventID(for: item, in: pins.scope, canChange: pins.canChange) else { return nil }
+        return pins.pinnedEventIDs.contains(eventID) ? .unpin : .pin
+    }
+
+    /// Whether a shown item can run now. Pin and unpin wait for the previous
+    /// write to reach sync, so a stale list is never written.
+    public static func isEnabled(_ menuItem: MessageMenuItem, pins: PinMenuContext?) -> Bool {
+        switch menuItem {
+        case .pin, .unpin: pins.map { $0.canChange && !$0.awaitingSync } ?? false
+        default: true
         }
     }
 

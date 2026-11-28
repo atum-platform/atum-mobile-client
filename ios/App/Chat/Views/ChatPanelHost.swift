@@ -64,6 +64,14 @@ struct ChatPanelHost: View {
                             AppPanelPageView(design: design, actions: appPanel, routeID: routeID,
                                              close: close)
                         }
+                    case .pinnedMessages:
+                        if let pins = actions.roomPins {
+                            RoomPinnedMessagesPage(
+                                design: design, actions: pins,
+                                members: Dictionary(info.members.map { ($0.userID, $0) },
+                                                    uniquingKeysWith: { first, _ in first }),
+                                close: close)
+                        }
                     case .agentDesk:
                         if let desk = actions.agentDesk {
                             AgentDeskPage(design: design, info: info, actions: desk, chat: deskChat,

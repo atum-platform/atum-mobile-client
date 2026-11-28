@@ -110,4 +110,40 @@ final class ChatCopyContractTests: XCTestCase {
             []
         }
     }
+
+    /// Chat parity S4/S5 (ML1 UI): the group thread and shared pin words read
+    /// exported keys in every pinned locale. `allThreads` is pending desktop
+    /// #156 copy (`GroupThreadsPendingCopy`) until the export carries it.
+    func testGroupThreadAndPinKeysResolveInEveryPinnedLocale() throws {
+        let copy = try AtumCopy()
+        let pinned = "src.matrix.mobile-copy.mobileScreensCopy.teamSpace.pinned."
+        let keys: [(String, [AtumCopy.Argument])] = [
+            ("src.matrix.thread-copy.copy.replyInThread", []),
+            ("src.matrix.thread-copy.copy.threads", []),
+            ("src.matrix.thread-copy.copy.follow", []),
+            ("src.matrix.thread-copy.copy.unfollow", []),
+            ("src.matrix.thread-copy.copy.unread", []),
+            ("src.matrix.thread-copy.copy.noThreads", []),
+            ("src.matrix.thread-copy.copy.threadUnavailable", []),
+            ("src.matrix.thread-copy.copy.replies", [.number(1)]),
+            ("src.matrix.thread-copy.copy.replies", [.number(3)]),
+            ("src.matrix.chat-copy.copies.pin", []),
+            ("src.matrix.chat-copy.copies.unpin", []),
+            ("src.matrix.chat-copy.copies.errorGeneric", []),
+            ("src.matrix.person-info-copy.copy.tryAgain", []),
+            (pinned + "pinnedMessages", []),
+            (pinned + "noPinnedMessages", []),
+            (pinned + "pinnedMessageUnavailable", []),
+            (pinned + "unpinMessage", []),
+            (pinned + "showPinnedMessage", []),
+            (pinned + "pinnedMessageCount", [.number(2)]),
+        ]
+        for locale in ["en", "vi", "ja", "zh", "zh-Hant"] {
+            for (key, arguments) in keys {
+                XCTAssertNoThrow(try copy.text(key, locale: locale, arguments: arguments), "\(locale) \(key)")
+            }
+        }
+        XCTAssertEqual(try copy.text("src.matrix.thread-copy.copy.replies", locale: "en", arguments: [.number(3)]),
+                       "3 replies")
+    }
 }

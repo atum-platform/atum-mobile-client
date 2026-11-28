@@ -33,6 +33,8 @@ public enum ChatPanelPolicy {
         /// The agent's own page in its 1:1 chat (desktop #51's agent tab): the
         /// panel opens on it, with the agent's card one Back away.
         case agentDesk
+        /// A person or group chat's shared pinned messages (chat parity S5).
+        case pinnedMessages
     }
 
     public enum SharedSection: String, Hashable, Sendable, CaseIterable {

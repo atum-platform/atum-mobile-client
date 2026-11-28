@@ -97,6 +97,8 @@ struct AppRoot: View {
     @State private var appliedAccountScopeID: String?
     /// TS-6b: the one thread panel and the thread drafts.
     @State private var companyThreads = CompanyThreadsCoordinator()
+    /// Chat parity S4/S5: pushed group threads and shared pins (`GroupThreadsHost`).
+    @State private var groupThreads = GroupThreadsCoordinator()
     private let design = try! LiveDesign()
     @Environment(\.colorScheme) private var scheme
 
@@ -932,7 +934,9 @@ struct AppRoot: View {
                                             save: { await model.rename($0, to: $1) }) : nil,
                     // S3: the four-choice room notification menu.
                     notifications: model.chatNotificationActions,
-                    handles: personHandles
+                    handles: personHandles,
+                    groupThreads: groupThreads.panelThreads(roomID: roomID),
+                    roomPins: groupThreads.panelPins(roomID: roomID)
                 ),
                 appBot: model.appBotPresentation(roomID: roomID),
                 appBotCatalog: model.appBotCatalogPresentation(),
@@ -977,11 +981,16 @@ struct AppRoot: View {
                     if router.activeRoomID == roomID { router.presentationChanged(active) }
                 },
                 openThreads: model.offersCompanyThreads(roomID: roomID)
-                    ? { rootID in companyThreads.open(roomID: roomID, rootID: rootID) } : nil,
+                    ? { rootID in companyThreads.open(roomID: roomID, rootID: rootID) }
+                    : groupThreads.panelThreads(roomID: roomID) == nil ? nil : { rootID in
+                        groupThreads.open(rootID.map { .thread(roomID: roomID, rootID: $0, focusEventID: nil) }
+                            ?? .list(roomID: roomID))
+                    },
                 threadPanelPresented: companyThreads.panel?.roomID == roomID
             )
             .modifier(CompanyThreadPanelHost(model: model, design: design, coordinator: companyThreads,
                                              roomID: roomID))
+            .modifier(GroupThreadsHost(model: model, design: design, coordinator: groupThreads, roomID: roomID))
             .task(id: model.privateCosTurnKey(roomID: roomID)) {
                 await model.refreshPrivateCosTurnPresentation(roomID: roomID)
             }

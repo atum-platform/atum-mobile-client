@@ -229,6 +229,12 @@ struct ChatInfoActions {
     /// Members' verified @handles, on the line under each name (desktop
     /// `MatrixMembers`). Nil shows none.
     var handles: PersonHandleLookup?
+    /// Chat parity S4: an eligible group's three newest threads and All
+    /// threads (M2); nil hides the section (DMs, assistants, apps, Notes).
+    var groupThreads: GroupThreadsPanelActions? = nil
+    /// Chat parity S5: a person or group chat's shared pinned messages; nil
+    /// hides the row.
+    var roomPins: RoomPinsPanelActions? = nil
 }
 
 /// S3 notification modes (`docs/ports/chat-parity-notifications.md`, UI contract).
@@ -561,6 +567,14 @@ struct ChatInfoHome: View {
             Section { membersRow(count: memberCount) }
                 .listRowBackground(rowBackground)
         }
+        if let groupThreads = actions.groupThreads {
+            GroupThreadsInfoSection(design: design, actions: groupThreads, members: memberLookup,
+                                    rowBackground: rowBackground, close: close)
+        }
+        if let roomPins = actions.roomPins {
+            Section { RoomPinsInfoRow(design: design, live: roomPins.live) }
+                .listRowBackground(rowBackground)
+        }
         if case .person = info.kind, let spaces = details?.teamSpaces, !spaces.isEmpty {
             teamSpacesSection(spaces)
         }
@@ -605,6 +619,10 @@ struct ChatInfoHome: View {
     }
 
     // MARK: Personal chats (desktop)
+
+    private var memberLookup: [String: ChatInfoMember] {
+        Dictionary(info.members.map { ($0.userID, $0) }, uniquingKeysWith: { first, _ in first })
+    }
 
     /// "N members" opens the group's Members page inside the panel.
     private func membersRow(count: Int) -> some View {

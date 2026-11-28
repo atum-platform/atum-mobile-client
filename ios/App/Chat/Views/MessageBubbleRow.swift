@@ -96,6 +96,9 @@ struct MessageBubbleRow: View {
                     ReactionChips(row: row, trailing: trailing)
                         .padding(.leading, avatarSlot)
                 }
+                // Chat parity S4 (M2): the thread summary under a root in an
+                // eligible group, on the root's side; nothing elsewhere.
+                ThreadSummaryAttachment(row: row, leading: avatarSlot)
                 if DeliveryLine.shows(row, isLatestAnswer: isLatestAnswer && !trailing, flat: false) {
                     DeliveryLine(row: row, kind: kind, isLatestAnswer: isLatestAnswer && !trailing)
                         .padding(.leading, avatarSlot)

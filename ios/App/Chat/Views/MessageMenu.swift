@@ -117,8 +117,9 @@ final class MessageActionsPresenter {
     /// presents the in-app page or the held-link line, and SwiftUI presents
     /// nothing from under a presented sheet.
     @ObservationIgnored var linkAfterSelectText: String?
-    /// "Reply in thread" (TS-6b): opens the room's thread panel on this root.
-    /// Set only in a Team Space channel or conversation; nil offers no item.
+    /// "Reply in thread" (TS-6b, chat parity S4): opens the room's thread on
+    /// this root. Set in a Team Space channel or conversation and in an
+    /// eligible human group, never inside a thread; nil offers no item.
     var openThread: ((String) -> Void)?
 
     /// The select-text sheet's link tap: close the sheet, then route.
@@ -198,6 +199,9 @@ struct MessageOverlayRequest: Identifiable {
     let ownUserID: String?
     let parsedBody: AttributedString?
     let items: [MessageMenuItem]
+    /// The chat's shared pins when the menu opened (S5): what Pin and Unpin
+    /// do, and whether they may run now. Nil where the chat has none.
+    var pins: ChatPinMenu? = nil
     /// The row's frame on screen when it was pressed.
     let sourceFrame: CGRect
     var id: String { row.id }
@@ -213,6 +217,7 @@ private struct MessageMenuModifier: ViewModifier {
     let actions: ChatActions
     let presenter: MessageActionsPresenter
 
+    @Environment(\.chatPinMenu) private var pinMenu
     @State private var frame: CGRect = .zero
     /// The finger is down on the row and the press has not reached the menu yet.
     /// Set by `MenuPressSink` (UIKit), not a SwiftUI `@GestureState`: a long
@@ -233,7 +238,8 @@ private struct MessageMenuModifier: ViewModifier {
     static let liftedOpacity: Double = 0.001
 
     func body(content: Content) -> some View {
-        let items = MessageMenuRules.items(for: row.item, in: kind, threads: presenter.openThread != nil)
+        let items = MessageMenuRules.items(for: row.item, in: kind, threads: presenter.openThread != nil,
+                                           pins: pinMenu?.context)
         if items.isEmpty {
             content
         } else {
@@ -272,11 +278,12 @@ private struct MessageMenuModifier: ViewModifier {
                 .sensoryFeedback(.impact(weight: .medium), trigger: source) { _, opened in opened }
                 // VoiceOver: every item is an action on the message itself.
                 .accessibilityActions {
-                    ForEach(items.filter { $0 != .react }, id: \.self) { item in
+                    ForEach(items.filter { $0 != .react && MessageMenuRules.isEnabled($0, pins: pinMenu?.context) },
+                            id: \.self) { item in
                         Button(MessageMenuActions.title(item, design: design)) {
                             MessageMenuActions.perform(item, row: row, kind: kind, roomTitle: roomTitle,
                                                        parsedBody: parsedBody, actions: actions,
-                                                       presenter: presenter)
+                                                       presenter: presenter, pins: pinMenu)
                         }
                     }
                     if items.contains(.react) {
@@ -338,7 +345,7 @@ private struct MessageMenuModifier: ViewModifier {
         withTransaction(transaction) {
             presenter.actionsOverlay = MessageOverlayRequest(row: row, kind: kind, roomTitle: roomTitle,
                                                              ownUserID: ownUserID, parsedBody: parsedBody,
-                                                             items: items, sourceFrame: frame)
+                                                             items: items, pins: pinMenu, sourceFrame: frame)
         }
     }
 }
@@ -468,6 +475,8 @@ enum MessageMenuActions {
         case .replyInThread: design.text("src.matrix.thread-copy.copy.replyInThread")
         case .copy: ChatCopy.text(design, ChatCopy.Key.copy)
         case .selectText: ChatCopy.text(design, ChatCopy.Key.selectText)
+        case .pin: ChatCopy.text(design, ChatCopy.Key.pin)
+        case .unpin: ChatCopy.text(design, ChatCopy.Key.unpin)
         case .edit: ChatCopy.text(design, ChatCopy.Key.edit)
         case .report: ChatCopy.text(design, ChatCopy.Key.report)
         case .delete: ChatCopy.text(design, ChatCopy.Key.delete)
@@ -482,6 +491,8 @@ enum MessageMenuActions {
         case .replyInThread: .messageCircle
         case .copy: .copy
         case .selectText: .fileText
+        case .pin: .pin
+        case .unpin: .pinOff
         case .edit: .pencil
         // The vendored Phosphor subset has no flag (desktop's Flag); the
         // warning circle is the Kit's nearest mark.
@@ -495,20 +506,27 @@ enum MessageMenuActions {
     /// keyboard on to the composer (Reply, Edit). Copy runs at once.
     static func waitsForCover(_ item: MessageMenuItem) -> Bool {
         switch item {
-        case .copy, .react: false
+        case .copy, .react, .pin, .unpin: false
         case .reply, .replyInThread, .selectText, .edit, .report, .delete: true
         }
     }
 
     static func perform(_ item: MessageMenuItem, row: ChatRow, kind: RoomKind, roomTitle: String,
                         parsedBody: AttributedString?, actions: ChatActions,
-                        presenter: MessageActionsPresenter) {
+                        presenter: MessageActionsPresenter, pins: ChatPinMenu? = nil) {
         switch item {
         case .react: break
         case .reply: actions.reply(row.id)
         case .replyInThread:
             if let rootID = MessageMenuRules.threadRootID(for: row.item) { presenter.openThread?(rootID) }
         case .copy: actions.copy(row.id)
+        case .pin, .unpin:
+            // Re-derived from the row and the snapshot the menu opened with;
+            // the SDK checks power and the current list again before writing.
+            guard let pins, MessageMenuRules.isEnabled(item, pins: pins.context),
+                  let eventID = MessageMenuRules.pinEventID(for: row.item, in: pins.context.scope,
+                                                            canChange: pins.context.canChange) else { return }
+            pins.setPinned(item == .pin, eventID)
         case .selectText:
             presenter.selectText = SelectTextRequest(itemID: row.id, body: row.item.markdownBody,
                                                      parsed: parsedBody)
@@ -662,7 +680,7 @@ struct MessageActionsOverlay: View {
             let run = {
                 MessageMenuActions.perform(item, row: request.row, kind: request.kind,
                                            roomTitle: request.roomTitle, parsedBody: request.parsedBody,
-                                           actions: actions, presenter: presenter)
+                                           actions: actions, presenter: presenter, pins: request.pins)
             }
             if MessageMenuActions.waitsForCover(item) {
                 close(then: run)
@@ -733,6 +751,7 @@ struct MessageActionsOverlay: View {
                         .frame(height: 0.5)
                         .padding(.leading, kit.space(.s4))
                 }
+                let enabled = MessageMenuRules.isEnabled(item, pins: request.pins?.context)
                 Button {
                     perform(.item(item))
                 } label: {
@@ -740,11 +759,17 @@ struct MessageActionsOverlay: View {
                         Text(MessageMenuActions.title(item, design: design))
                             .font(.body)
                         Spacer(minLength: kit.space(.s2))
-                        Image(design.symbol(MessageMenuActions.glyph(item).rawValue))
-                            .font(.body)
-                            .accessibilityHidden(true)
+                        if enabled {
+                            Image(design.symbol(MessageMenuActions.glyph(item).rawValue))
+                                .font(.body)
+                                .accessibilityHidden(true)
+                        } else {
+                            // A pin write is still reaching sync (S5): the
+                            // item waits instead of writing a stale list.
+                            ProgressView().controlSize(.small)
+                        }
                     }
-                    .foregroundStyle(kit.color(item == .delete ? .danger : .ink, scheme: scheme))
+                    .foregroundStyle(kit.color(item == .delete ? .danger : enabled ? .ink : .ink3, scheme: scheme))
                     .padding(.horizontal, kit.space(.s4))
                     .frame(minHeight: 46)
                     // The row under a sliding finger shows the system's
@@ -754,6 +779,7 @@ struct MessageActionsOverlay: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(!enabled)
                 .modifier(TargetFrame(target: .item(item), presenter: presenter))
                 .accessibilityLabel(MessageMenuActions.title(item, design: design))
             }

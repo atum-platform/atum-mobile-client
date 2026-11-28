@@ -81,4 +81,59 @@ final class ThreadMenuTests: XCTestCase {
         let sent = F.echo("s", delivery: .sent(eventID: "$sent"))
         XCTAssertEqual(MessageMenuRules.threadRootID(for: sent), "$sent", "my phone's message once the server has it")
     }
+
+    // MARK: S5 menu contract (ML1 UI; ML6 inserts forward after pin/unpin)
+
+    private func pins(_ ids: Set<String> = [], scope: MessageMenuRules.SharedChatActions = .peopleGroup,
+                      canChange: Bool = true, awaitingSync: Bool = false) -> PinMenuContext {
+        PinMenuContext(scope: scope, pinnedEventIDs: ids, canChange: canChange, awaitingSync: awaitingSync)
+    }
+
+    func testGroupMenuOrderMatchesM2() {
+        let answer = F.text("answer", from: F.agent, "Three that fit")
+        XCTAssertEqual(MessageMenuRules.items(for: answer, in: .group, threads: true, pins: pins()),
+                       [.react, .reply, .replyInThread, .copy, .pin, .report])
+        XCTAssertEqual(MessageMenuRules.items(for: F.mine("m", "Ok"), in: .group, threads: true,
+                                              pins: pins(["$m"])),
+                       [.react, .reply, .replyInThread, .copy, .unpin, .edit, .delete])
+    }
+
+    func testPeopleDMOffersPinsButNoThreads() {
+        let message = F.text("t", from: F.friend, "Chào")
+        XCTAssertEqual(MessageMenuRules.items(for: message, in: .person, pins: pins(scope: .peopleDM)),
+                       [.react, .reply, .copy, .pin, .report])
+    }
+
+    func testDemotedOrIneligibleChatsLoseThePinAction() {
+        let message = F.text("t", from: F.friend, "Chào")
+        XCTAssertFalse(MessageMenuRules.items(for: message, in: .group, threads: true, pins: pins(canChange: false))
+            .contains(.pin), "read-only after demotion")
+        XCTAssertFalse(MessageMenuRules.items(for: message, in: .assistant, pins: pins(scope: .unavailable))
+            .contains(.pin), "assistant DMs stay flat")
+        XCTAssertFalse(MessageMenuRules.items(for: F.text("a", from: F.bot, "Hi"), in: .appBot,
+                                              pins: pins(scope: .peopleGroup)).contains(.pin))
+        XCTAssertFalse(MessageMenuRules.items(for: F.echo("local"), in: .group, pins: pins()).contains(.pin),
+                       "an unsent row has no event to pin")
+        XCTAssertFalse(MessageMenuRules.items(for: message, in: .group).contains(.pin), "no snapshot yet")
+    }
+
+    func testPendingPinWriteDisablesOnlyPinActions() {
+        let pending = pins(awaitingSync: true)
+        let message = F.text("t", from: F.friend, "Chào")
+        XCTAssertTrue(MessageMenuRules.items(for: message, in: .group, pins: pending).contains(.pin),
+                      "still shown, so the menu does not jump")
+        XCTAssertFalse(MessageMenuRules.isEnabled(.pin, pins: pending))
+        XCTAssertFalse(MessageMenuRules.isEnabled(.unpin, pins: pending))
+        XCTAssertTrue(MessageMenuRules.isEnabled(.pin, pins: pins()))
+        XCTAssertFalse(MessageMenuRules.isEnabled(.pin, pins: nil))
+        XCTAssertTrue(MessageMenuRules.isEnabled(.reply, pins: pending))
+    }
+
+    func testThreadReplyPinsTheReplyNotItsRoot() {
+        let reply = F.text("reply", from: F.agent, "Proof promised", threadRoot: "$root")
+        XCTAssertEqual(MessageMenuRules.pinItem(for: reply, pins: pins(["$root"])), .pin)
+        XCTAssertEqual(MessageMenuRules.pinItem(for: reply, pins: pins(["$reply"])), .unpin)
+        XCTAssertFalse(MessageMenuRules.items(for: reply, in: .group, threads: true, pins: pins())
+            .contains(.replyInThread))
+    }
 }

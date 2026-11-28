@@ -383,6 +383,9 @@ struct ScriptedChatHost: View {
                             mediaAccess: ScriptedMediaAccess.access,
                             loadMatrixThumbnail: Self.photoLoader
                         )
+                        // Chat parity S4/S5 captures (`-AtumScriptedGroupThreads`).
+                        .modifier(ScriptedGroupThreadsCapture(store: store, design: design,
+                                                              title: scriptedTitle ?? script.title))
                     }
                 }
         }

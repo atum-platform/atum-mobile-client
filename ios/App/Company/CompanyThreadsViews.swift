@@ -82,63 +82,8 @@ struct CompanyThreadPanelHost: ViewModifier {
     }
 }
 
-// MARK: Chat header for a thread
-
-/// What `ChatScreen` draws for a thread: "Thread" with its place under it,
-/// the Follow capsule, and the composer's "Reply".
-struct ChatThreadChrome {
-    let title: String
-    let place: String
-    let composerPlaceholder: String
-    let followed: Bool
-    let followPending: Bool
-    /// The capsule's word: "Following" or "Follow" (desktop `data-matrix-thread-follow`).
-    let followText: String
-    /// What a tap does: "Unfollow" or "Follow" (the desktop's tooltip).
-    let followHint: String
-    let toggleFollow: () -> Void
-}
-
-struct ChatThreadTitle: View {
-    let design: LiveDesign
-    let chrome: ChatThreadChrome
-
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Text(verbatim: chrome.title)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-            Text(verbatim: chrome.place)
-                .font(.caption)
-                .foregroundStyle(AtumVisualSystem(design: design).color(.muted, scheme: scheme))
-                .lineLimit(1)
-                .accessibilityIdentifier("chat.thread.place")
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("chat.thread.title")
-        .accessibilityShowsLargeContentViewer {
-            Text(verbatim: chrome.title + "\n" + chrome.place)
-        }
-    }
-}
-
-struct ChatThreadFollowButton: View {
-    let chrome: ChatThreadChrome
-
-    var body: some View {
-        Button(action: chrome.toggleFollow) {
-            Text(verbatim: chrome.followText)
-                .font(.subheadline.weight(chrome.followed ? .semibold : .regular))
-                .lineLimit(1)
-        }
-        .disabled(chrome.followPending)
-        .accessibilityHint(Text(verbatim: chrome.followHint))
-        .accessibilityIdentifier(chrome.followed ? "chat.thread.following" : "chat.thread.follow")
-    }
-}
+// The thread header (`ChatThreadChrome`, `ChatThreadTitle`, follow control)
+// is room-agnostic and lives in `App/Chat/Threads/ChatThreadChrome.swift`.
 
 // MARK: The room's thread panel (desktop `MatrixThreadPanel`)
 

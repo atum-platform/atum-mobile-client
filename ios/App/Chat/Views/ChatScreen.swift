@@ -72,7 +72,8 @@ struct ChatScreen: View {
     /// TS-6b: this screen shows one thread (its own header, Follow, "Reply").
     var thread: ChatThreadChrome? = nil
     /// TS-6b: opens the room's thread panel (nil root: its list). Set on a Team
-    /// Space channel or conversation; never inside a thread (no nested threads).
+    /// Space channel or conversation, and (chat parity S4) on an eligible
+    /// human group, where it pushes the thread; never inside a thread.
     var openThreads: ((String?) -> Void)? = nil
     /// The thread panel covers this chat, so nothing here is read meanwhile (B13).
     var threadPanelPresented = false
@@ -234,7 +235,7 @@ struct ChatScreen: View {
                 // own header (lane 2).
                 if let thread {
                     ToolbarItem(placement: .topBarTrailing) {
-                        ChatThreadFollowButton(chrome: thread)
+                        ChatThreadFollowButton(design: design, chrome: thread)
                     }
                 }
                 if thread == nil, Self.offersSearch(info: info, conversation: conversationChat), !search.isOpen {
@@ -304,7 +305,7 @@ struct ChatScreen: View {
             .environment(\.chatToday, today)
             .environment(\.chatReducesMotion, reduceMotion || ChatMotion.disabledForUITests)
             .environment(\.chatFlatRuns, info?.company != nil || conversationChat != nil || teamSpaceChat
-                         || thread != nil)
+                         || thread?.flatRuns == true)
             .messageActionSheets(presenter, design: design, actions: actions)
             .sheet(isPresented: $addPeoplePresented) {
                 if let conversation = conversationChat {
@@ -366,9 +367,11 @@ struct ChatScreen: View {
                 appBotPresenter.openRoute = onOpenAppBotRoute
                 appBotPresenter.openTerms = onOpenAppBotTerms
                 // "Reply in thread" only where the room has threads, and never in one.
-                presenter.openThread = thread == nil
-                    ? openThreads.map { open in { (rootID: String) -> Void in open(rootID) } } : nil
+                updateThreadAction()
             }
+            // A group's thread reads attach after the chat opens (S4), and
+            // leave with eligibility: the menu follows.
+            .onChange(of: openThreads != nil) { _, _ in updateThreadAction() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshToday() }
             }
@@ -508,6 +511,11 @@ struct ChatScreen: View {
     /// conversation has its own header (lane 2).
     static func offersSearch(info: ChatInfoPresentation?, conversation: ConversationChatPresentation?) -> Bool {
         info?.company == nil && conversation == nil
+    }
+
+    private func updateThreadAction() {
+        presenter.openThread = thread == nil
+            ? openThreads.map { open in { (rootID: String) -> Void in open(rootID) } } : nil
     }
 
     private func openSearch() {
