@@ -1,5 +1,7 @@
 import Foundation
+#if os(iOS)
 import Observation
+#endif
 
 /// A model write rejected before applying the choice because its fence moved.
 enum ManagedModelFenceConflict: String, Decodable, Error {
@@ -36,7 +38,10 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
 /// One agent's offer or destination snapshot in the current account session.
 /// The write generation fences reads even when the revision alone cannot tell
 /// which response observed the current policy.
-@MainActor @Observable public final class ManagedModelPickerState<Snapshot: Equatable & Sendable> {
+#if os(iOS)
+@Observable
+#endif
+@MainActor public final class ManagedModelPickerState<Snapshot: Equatable & Sendable> {
     public enum SaveResult {
         case saved(Snapshot)
         case refused(Snapshot?)
@@ -53,9 +58,9 @@ public enum ManagedModelPickerChoice: Equatable, Sendable {
     public private(set) var snapshot: Snapshot?
     /// A submitted choice is shared by the pickers for this agent until it settles.
     public private(set) var submittedChoice: ManagedModelPickerChoice?
-    @ObservationIgnored private var adoptedWrites = 0
-    @ObservationIgnored private var latestIntent = 0
-    @ObservationIgnored private var pending: (choice: ManagedModelPickerChoice, fence: Snapshot, id: NativeID)?
+    private var adoptedWrites = 0
+    private var latestIntent = 0
+    private var pending: (choice: ManagedModelPickerChoice, fence: Snapshot, id: NativeID)?
 
     public init(revision: KeyPath<Snapshot, Int64>) {
         self.revision = revision
