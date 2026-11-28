@@ -440,6 +440,43 @@ final class HomeShellUITests: TranscriptUITestCase {
         XCTAssertTrue(restored.waitForExistence(timeout: 2), "Home re-tap did not restore the roster top")
     }
 
+    /// Owner report (28 Nov 2026): a tab return keeps Chats' own stack. The
+    /// roster left showing is the roster on return; a chat left open is the
+    /// same chat on return (a chat hides the tab bar, so it leaves through
+    /// its Store link, as an assistant card's shelf link does).
+    @MainActor
+    func testChatsTabReturnKeepsRosterOrOpenChat() {
+        let app = XCUIApplication()
+        app.launchArguments = ScriptedScenarios.arguments(name: ScriptedScenario.homeRoster.rawValue)
+            + ["-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
+        app.launch()
+        let list = element(app, "home.list")
+        XCTAssertTrue(list.waitForExistence(timeout: 15), "Home list did not appear")
+        let chatsTab = app.buttons.matching(identifier: "phone.tab.chats").firstMatch
+        let storeTab = app.buttons.matching(identifier: "phone.tab.store").firstMatch
+        let destination = element(app, "home.scripted.destination")
+
+        // Roster → Store → Chats: the roster, not a chat.
+        storeTab.tap()
+        XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 3))
+        chatsTab.tap()
+        XCTAssertTrue(waitFor(2) { chatsTab.isSelected })
+        XCTAssertTrue(list.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertFalse(destination.exists, "a tab return opened a chat over the roster")
+
+        // Chat open → Store (the chat's Store link) → Chats: the same chat.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luna'")).firstMatch.tap()
+        XCTAssertTrue(destination.waitForExistence(timeout: 5), boundedHierarchy(app))
+        let opened = element(app, "home.scripted.destination.title").label
+        XCTAssertTrue(opened.hasPrefix("Luna"), opened)
+        element(app, "home.scripted.destination.store").tap()
+        XCTAssertTrue(waitFor(3) { storeTab.isSelected })
+        XCTAssertTrue(element(app, "store.catalog").waitForExistence(timeout: 3))
+        chatsTab.tap()
+        XCTAssertTrue(destination.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertEqual(element(app, "home.scripted.destination.title").label, opened)
+    }
+
     @MainActor
     func testInvitationShowsJoinProgressThenPushes() {
         let app = XCUIApplication()

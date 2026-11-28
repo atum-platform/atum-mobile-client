@@ -2958,49 +2958,81 @@ extension S2StateTests {
         XCTAssertNil(denied.homeRoomID)
     }
 
+    /// Owner report (28 Nov 2026): roster → another tab → Chats opened the
+    /// last chat. A tab return keeps Chats' own stack and never issues a
+    /// restore intent; only the account scope's launch does.
     @MainActor
-    func testChatRestoreCoversYieldToTabSwitchRetapAndExpiry() {
+    func testChatsTabReturnKeepsItsStackAndOnlyLaunchRestores() {
         let router = Router()
-        // The shell's wiring: Chats selected from another tab, at its root.
+        // The shell's wiring (`AppRoot.configureRouter`).
+        var reopened = [String]()
         router.onUserSelectedTab = { tab in
-            if tab == .home, router.homeRoomID == nil { router.beginChatRestore(.chatsTap) }
+            if let roomID = router.retainedRoomID(for: tab) { reopened.append(roomID) }
         }
         var retaps = 0
         router.onHomeRootRetap = { retaps += 1 }
+        let noRestore: (PersonalChatRestoreEntry, UUID, Bool, @escaping @MainActor () -> Bool) -> String? = {
+            _, _, _, _ in
+            XCTFail("A tab return must not restore")
+            return "!last:atum.test"
+        }
 
-        router.select(tab: .store)
-        router.select(tab: .home)
-        let first = router.chatRestoreIntent
-        XCTAssertEqual(first?.entry, .chatsTap)
+        // Cold launch still issues the launch intent and covers Chats' root.
+        router.applyAccountScope(replacesAccount: false)
+        let launch = router.chatRestoreIntent
+        XCTAssertEqual(launch?.entry, .launch)
         XCTAssertTrue(router.coversChatsRootForRestore)
 
-        // Switching away during the hold ends it; the other tab responds.
+        // Switching away during the launch hold ends it.
         router.select(tab: .drive)
         XCTAssertEqual(router.selectedTab, .drive)
         XCTAssertNil(router.chatRestoreIntent)
-        XCTAssertFalse(router.coversChatsRootForRestore)
 
-        // Back to Chats: a new intent with a new ID.
-        router.select(tab: .home)
-        let second = router.chatRestoreIntent
-        XCTAssertNotNil(second)
-        XCTAssertNotEqual(second?.id, first?.id)
+        // Roster → any other tab → Chats: the roster, with no restore intent.
+        for tab in [Router.Tab.drive, .store, .teamSpace] {
+            if router.selectedTab != tab { router.select(tab: tab) }
+            router.select(tab: .home)
+            XCTAssertNil(router.chatRestoreIntent, "\(tab)")
+            XCTAssertFalse(router.coversChatsRootForRestore, "\(tab)")
+            XCTAssertNil(router.attemptChatRestore(noRestore), "\(tab)")
+            XCTAssertTrue(router.homePath.isEmpty, "\(tab)")
+            XCTAssertEqual(router.pushScreen, .homeRoot, "\(tab)")
+        }
+        XCTAssertTrue(reopened.isEmpty)
 
-        // A re-tap at Chats' root never restores: the roster scrolls to top.
+        // A re-tap at Chats' root scrolls the roster to top and never restores.
         router.select(tab: .home)
-        XCTAssertNil(router.chatRestoreIntent)
-        XCTAssertFalse(router.coversChatsRootForRestore)
         XCTAssertEqual(retaps, 1)
-        XCTAssertNil(router.attemptChatRestore { _, _, _, _ in
-            XCTFail("A re-tap must not restore")
-            return "!last:atum.test"
-        })
+        XCTAssertNil(router.chatRestoreIntent)
 
-        // A claim reply that lands after the hold expired is discarded and
-        // the roster stays reachable.
+        // Chat open → another tab → Chats: the same chat, from Chats' stack.
+        router.open(roomId: "!open:atum.test")
         router.select(tab: .store)
         router.select(tab: .home)
-        guard let intent = router.chatRestoreIntent else { return XCTFail("tap intent") }
+        XCTAssertEqual(reopened, ["!open:atum.test"])
+        XCTAssertEqual(router.homeRoomID, "!open:atum.test")
+        XCTAssertEqual(router.homePath.count, 1)
+        XCTAssertEqual(router.pushScreen, .chat(roomID: "!open:atum.test"))
+        XCTAssertNil(router.chatRestoreIntent)
+
+        // Team Space keeps its own stack the same way.
+        router.openTeamSpace(roomId: "!general:atum.test")
+        router.select(tab: .home)
+        router.select(tab: .teamSpace)
+        XCTAssertEqual(reopened, ["!open:atum.test", "!open:atum.test", "!general:atum.test"])
+        XCTAssertEqual(router.teamSpacePath.count, 1)
+
+        // A Chats re-tap in a chat pops to the roster (iOS), never a restore.
+        router.select(tab: .home)
+        router.select(tab: .home)
+        XCTAssertNil(router.homeRoomID)
+        XCTAssertTrue(router.homePath.isEmpty)
+        XCTAssertNil(router.chatRestoreIntent)
+        XCTAssertEqual(retaps, 1)
+
+        // A claim reply that lands after a launch hold expired is discarded
+        // and the roster stays reachable.
+        let intent = router.beginChatRestore(.launch)
         var stillCurrent: (@MainActor () -> Bool)?
         XCTAssertNil(router.attemptChatRestore { _, _, _, current in stillCurrent = current; return nil })
         router.endChatRestore(intent.id)
@@ -3010,8 +3042,6 @@ extension S2StateTests {
             XCTFail("An expired intent must not restore")
             return "!last:atum.test"
         })
-        XCTAssertEqual(router.selectedTab, .home)
-        XCTAssertTrue(router.homePath.isEmpty)
         XCTAssertEqual(router.pushScreen, .homeRoot)
     }
 

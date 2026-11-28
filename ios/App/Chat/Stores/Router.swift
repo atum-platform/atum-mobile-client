@@ -368,11 +368,24 @@ final class Router: RouterOpening {
         }
     }
 
+    /// What the shell reopens when a person switches to `tab`: the room that
+    /// tab's stack still shows, or nil when it is at its root. A tab return
+    /// keeps each tab's own stack, as iOS tabs do, so it never begins a chat
+    /// restore: a roster left showing is the roster on return (owner report,
+    /// 28 Nov 2026). Only `applyAccountScope` starts one (`.launch`).
+    func retainedRoomID(for tab: Tab) -> String? {
+        switch tab {
+        case .home: homeRoomID
+        case .teamSpace: teamSpaceRoomID
+        case .drive, .store: nil
+        }
+    }
+
     // MARK: Last personal chat (W4-V2)
 
     /// Starts a restore intent with a fresh ID under the current navigation
-    /// generation. The shell starts `.launch` for each account scope and
-    /// `.chatsTap` when a person switches to Chats at its root.
+    /// generation. The shell starts `.launch` for each account scope only; a
+    /// tab return keeps Chats' stack (`retainedRoomID(for:)`).
     @discardableResult
     func beginChatRestore(_ entry: PersonalChatRestoreEntry, id: UUID = UUID()) -> ChatRestoreIntent {
         let intent = ChatRestoreIntent(id: id, entry: entry, generation: navigationGeneration)
