@@ -15,11 +15,14 @@ mobile PR #95.
 2. Otherwise open the platform default assistant's joined roster
    conversation. The active assistant's Matrix user must match the room's
    other member. The platform roster also supplies the cloud-only default.
-3. When the roster confirms there is no active assistant, an explicit Chats
-   tap can open the first eligible conversation. Pinned rooms go first in
-   Matrix tag order, low-priority unpinned rooms follow ordinary rooms, and
-   the remaining ties use newest event and then room ID. Launch leaves the
-   roster visible when it has no remembered room or primary conversation.
+3. Launch leaves the roster visible when it has no remembered room or
+   primary conversation. The policy still has a `.chatsTap` entry that, when
+   the roster confirms there is no active assistant, picks the first
+   eligible conversation (pinned rooms first in Matrix tag order,
+   low-priority unpinned rooms after ordinary rooms, then newest event and
+   room ID). Since 28 Nov 2026 the shell never issues it: returning to the
+   Chats tab keeps that tab's own stack and never restores. See
+   "Corrected rule" below.
 
 Team Space rooms, invitations and former assistants' history stay out of
 the restore candidates. The private CoS room uses the same Matrix create type
@@ -74,8 +77,9 @@ func restorePersonalChat(
 ) -> String?
 ```
 
-- Use `.launch` for signed-in startup and `.chatsTap` for an explicit Chats
-  tab action. Try once live Matrix room data is available. A pending intent
+- Use `.launch` for signed-in startup only. A Chats tab return does not
+  call the hook (28 Nov 2026 correction). Try once live Matrix room data is
+  available. A pending intent
   that gets `nil` can retry on updates to the room list, workspace
   classification, `hasPersonalChatAgentRoster`, or
   `personalChatRestoreRevision` under the same intent ID. Generate a fresh
@@ -91,7 +95,22 @@ func restorePersonalChat(
   Publish it to the personal route synchronously in the same turn. A `nil`
   result leaves route ownership with the shell.
 
+## Corrected rule (28 Nov 2026)
+
+Owner report: on the Chats roster, switching to another tab and back opened
+the last chat instead of the roster. The cause was the shell's tab hook
+(`AppRoot.configureRouter`, `onUserSelectedTab`), which began a `.chatsTap`
+intent every time Chats was selected at its root. The restore now applies
+only to the account scope's `.launch` intent: a cold launch or a new
+sign-in, which is also the first entry into Chats in a session. A tab
+return keeps each tab's stack, as iOS tabs do. Details and tests are in
+`docs/ports/w4-v2-last-chat-ui.md`, "Tab return keeps Chats' stack".
+
 ## Follow-ups
+
+The `.chatsTap` entry, its first-eligible ordering and its 1 s hold
+(`Router.chatRestoreHold`) are dormant. They and their policy tests can be
+removed when the engine is next touched.
 
 A permanent `/agents` failure keeps a genuine remembered untyped DM
 ineligible. The roster is needed to distinguish it from a former assistant.

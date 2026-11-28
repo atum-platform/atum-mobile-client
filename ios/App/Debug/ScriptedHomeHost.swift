@@ -222,9 +222,19 @@ struct ScriptedHomeHost: View {
                 .navigationDestination(for: String.self) { roomID in
                     ZStack {
                         design.color("ground", scheme: scheme).ignoresSafeArea()
-                        Text(verbatim: rows.first(where: { $0.id == roomID })?.title ?? "")
-                            .font(.headline)
+                        VStack {
+                            Text(verbatim: rows.first(where: { $0.id == roomID })?.title ?? "")
+                                .font(.headline)
+                                .accessibilityIdentifier("home.scripted.destination.title")
+                            // The chat's Store link (an assistant card's
+                            // shelf), the live way out of a chat to a tab.
+                            Button { router.openStore(shelf: .pets) } label: {
+                                Text(verbatim: "Store")
+                            }
+                            .accessibilityIdentifier("home.scripted.destination.store")
+                        }
                     }
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("home.scripted.destination")
                     .toolbarVisibility(.hidden, for: .tabBar)
                 }
