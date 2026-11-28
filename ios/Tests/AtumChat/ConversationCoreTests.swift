@@ -228,7 +228,7 @@ final class ConversationCoreTests: XCTestCase {
         core.draft = "oops"
         _ = core.send(now: now)
         let held = core.pendingSends[0].id
-        XCTAssertEqual(core.delete(held), [])
+        XCTAssertEqual(core.abort(held), [])
         XCTAssertEqual(core.pendingSends, [])
         XCTAssertEqual(core.attached(now: now), [], "nothing goes out")
     }
@@ -296,6 +296,22 @@ final class ConversationCoreTests: XCTestCase {
         XCTAssertEqual(core.abort("p"), [.abortSend(.transaction("txn-p"))])
         XCTAssertEqual(core.delete("p"), [.abortSend(.transaction("txn-p"))], "deleting a failed send aborts it")
         XCTAssertEqual(core.delete("m"), [.redact(.event("$m"))])
+    }
+
+    func testDiscardFromAStaleFailedSendMenuCannotRedactTheDeliveredMessage() {
+        let failed = F.echo("p", delivery: .failed(isRecoverable: true))
+        var core = attachedCore([failed])
+        XCTAssertFalse(MessageMenuRules.deleteNeedsConfirmation(failed))
+        XCTAssertEqual(core.abort("p"), [.abortSend(.transaction("txn-p"))])
+
+        _ = core.retry("p")
+        var delivered = failed
+        delivered.delivery = .sent(eventID: "$p")
+        delivered.eventOrTransactionId = .event("$p")
+        _ = core.receive(projection([delivered], change: .inPlace, touched: ["p"]), now: now)
+
+        XCTAssertEqual(core.abort("p"), [])
+        XCTAssertEqual(core.delete("p"), [.redact(.event("$p"))], "the confirmed action can still redact it")
     }
 
     /// U5, D8 (coordinator decision 9): "Thử lại" on a recoverable failure

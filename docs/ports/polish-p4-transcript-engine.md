@@ -129,6 +129,13 @@ Device checks still useful: the send entrance and the drag-from-a-bubble behavio
 
 Merged `origin/main` at `f923168`, including P2's list and header polish. The merge combined P2's chat panel list test helper with P4's existing transcript helpers.
 
+- Press-and-slide hit-tests the lift location. Returning within 10 pt of the press clears the highlight and leaves the menu open. `MessageMenuRulesTests` covers a slide onto Delete followed by a move back into the dead zone or outside the target.
+- The menu dispatches failed and held sends to the abort-only action. The confirmation button is the chat menu's only entry point to redaction. `ConversationCoreTests` covers a retry settling under a stale menu and verifies that the abort action produces no effect after delivery.
+- The chat's message presentation modifier owns the select-text sheet, Safari cover, and shared alert for Delete and held links. The sheet's dismissal callback consumes the pending URL once and routes it through the existing link policy. The UI test asserts receipt of the tap, dismissal, policy decision, and visible alert or Safari cover separately.
+- When a diff removes every intersecting anchor candidate, the transcript captures the nearest surviving successor's offset in the old layout. The adapter's anchor capture depends on UIKit geometry and has no existing unit-test seam. Explicit jumps and search placement respect the chat's Reduce Motion setting.
+
+The locked verification run is queued. Its build and test artifacts are under `/Volumes/AtumTestFlight/p4-r3`.
+
 ## Follow-up: scaling measurement plan
 
 Recorded from review r1; not done in this change.

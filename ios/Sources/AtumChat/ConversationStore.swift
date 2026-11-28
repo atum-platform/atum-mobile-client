@@ -8,7 +8,7 @@ import Foundation
 public struct ChatActions: Sendable {
     /// B8: "Thử lại" on a failed send.
     public var retrySend: @MainActor @Sendable (_ itemID: String) -> Void
-    /// B8: "Xóa" in the failed-send sheet: aborts a failed (or held) send.
+    /// B8: "Xóa" without confirmation only discards a failed or held send.
     public var deleteSend: @MainActor @Sendable (_ itemID: String) -> Void
     /// B20: "Sao chép".
     public var copy: @MainActor @Sendable (_ itemID: String) -> Void
@@ -18,9 +18,7 @@ public struct ChatActions: Sendable {
     public var toggleReaction: @MainActor @Sendable (_ itemID: String, _ key: String) -> Void
     /// B17: every link tap, through `LinkPolicy`.
     public var openLink: @MainActor @Sendable (_ url: String) -> Void
-    /// B20: "Xóa" in the menu on my message: redacts it, or aborts it when
-    /// it is a failed send, or drops it when it is held (contract amendment,
-    /// S1 day 1).
+    /// B20: "Xóa với mọi người?" confirmed. May redact my message.
     public var delete: @MainActor @Sendable (_ itemID: String) -> Void
     /// B20: "Sửa" on my text message in people and group chats: loads it
     /// into the composer (`ConversationStore.beginEdit`; contract amendment,

@@ -45,9 +45,21 @@ final class ChatLinkRouter {
             return
         }
         switch LinkPolicy.decision(for: text) {
-        case let .openInApp(url): presented = Page(url: url)
-        case .hold: showsHeld = true
-        case .refuse: break
+        case let .openInApp(url):
+            #if DEBUG
+            UITestProbe.append("link policy openInApp", to: "menu-press.txt")
+            #endif
+            presented = Page(url: url)
+        case .hold:
+            #if DEBUG
+            UITestProbe.append("link policy hold", to: "menu-press.txt")
+            #endif
+            showsHeld = true
+        case .refuse:
+            #if DEBUG
+            UITestProbe.append("link policy refuse", to: "menu-press.txt")
+            #endif
+            break
         }
     }
 }

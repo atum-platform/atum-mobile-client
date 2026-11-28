@@ -305,7 +305,6 @@ struct ChatScreen: View {
             .environment(\.chatReducesMotion, reduceMotion || ChatMotion.disabledForUITests)
             .environment(\.chatFlatRuns, info?.company != nil || conversationChat != nil || teamSpaceChat
                          || thread != nil)
-            .messageActionSheets(presenter, design: design, actions: actions)
             .sheet(isPresented: $addPeoplePresented) {
                 if let conversation = conversationChat {
                     let kept = conversation.kept
@@ -401,9 +400,6 @@ struct ChatScreen: View {
                 }
             }
             .onDisappear { store.setTurnStopAnnouncement(nil) }
-            .fullScreenCover(item: $links.presented) { page in
-                SafariView(url: page.url).ignoresSafeArea()
-            }
             .fullScreenCover(item: $mediaPresenter.viewer) { request in
                 MediaViewer(request: request, design: design, access: mediaAccess,
                             namespace: mediaNamespace) {
@@ -414,9 +410,7 @@ struct ChatScreen: View {
                 get: { mediaPresenter.quickLookFile?.url },
                 set: { if $0 == nil { mediaPresenter.quickLookFile = nil } }
             ))
-            .alert(theme.copy.text(.linkHeld), isPresented: $links.showsHeld) {
-                Button(theme.copy.text(.dismiss), role: .cancel) {}
-            }
+            .messageActionSheets(presenter, links: links, design: design, actions: actions)
     }
 
     /// The composer, split out of `body` so the type checker stays within its
@@ -525,10 +519,9 @@ struct ChatScreen: View {
         composerModelPresented = false
         links.presented = nil
         links.showsHeld = false
-        presenter.selectText = nil
+        presenter.cancelSelectText()
         presenter.deleteRequest = nil
         presenter.failedSend = nil
-        presenter.linkAfterSelectText = nil
         presenter.actionsOverlay = nil
         appBotPresenter.dismissAll()
         mediaPresenter.dismissAll()

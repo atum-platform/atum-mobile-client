@@ -509,12 +509,16 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         let bottom = list.contentOffset.y + list.bounds.height - list.adjustedContentInset.bottom
         var coveringEvent: Anchor?
         var fallback: Anchor?
+        var lastRemovedItem: Int?
         for path in list.indexPathsForVisibleItems.sorted() {
             guard let frame = layout.layoutAttributesForItem(at: path)?.frame,
                   frame.maxY > top, frame.minY < bottom,
                   let id = dataSource.itemIdentifier(for: path),
-                  let kind = rows[id]?.item.kind, kind != .loadingEarlier,
-                  nextRows?[id] != nil || nextRows == nil else { continue }
+                  let kind = rows[id]?.item.kind, kind != .loadingEarlier else { continue }
+            if let nextRows, nextRows[id] == nil {
+                lastRemovedItem = path.item
+                continue
+            }
             let anchor = Anchor(id: id, viewportY: frame.minY - top)
             if fallback == nil { fallback = anchor }
             if kind.isEventContent {
@@ -522,7 +526,21 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
                 coveringEvent = anchor
             }
         }
-        return coveringEvent ?? fallback
+        if let anchor = coveringEvent ?? fallback { return anchor }
+        guard let nextRows, let lastRemovedItem else { return nil }
+        let itemCount = list.numberOfItems(inSection: 0)
+        guard lastRemovedItem + 1 < itemCount else { return nil }
+
+        // A removed tall row can cover the whole viewport. Read its nearest
+        // surviving successor's offset from the old layout before applying the diff.
+        for item in (lastRemovedItem + 1)..<itemCount {
+            let path = IndexPath(item: item, section: 0)
+            guard let id = dataSource.itemIdentifier(for: path),
+                  let row = nextRows[id], row.item.kind != .loadingEarlier,
+                  let frame = layout.layoutAttributesForItem(at: path)?.frame else { continue }
+            return Anchor(id: id, viewportY: frame.minY - top)
+        }
+        return nil
     }
 
     private func rowFrame(_ id: String) -> CGRect? {
@@ -588,7 +606,7 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         let bottom = max(-inset.top, list.contentSize.height - list.bounds.height + inset.bottom)
         let y = min(max(-inset.top, proposed), bottom)
         guard abs(list.contentOffset.y - y) > 0.5 else { return y }
-        if animated && !ChatMotion.disabledForUITests {
+        if animated && !presentation.environment.chatReducesMotion {
             motion = .animating
             list.setContentOffset(CGPoint(x: list.contentOffset.x, y: y), animated: true)
         } else {
@@ -601,7 +619,8 @@ private final class TranscriptEngine: NSObject, UICollectionViewDelegate {
         guard let list, list.bounds.height > 0, !rows.isEmpty else { return }
         let bottom = { list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom }
         let viewport = list.bounds.height - list.adjustedContentInset.top - list.adjustedContentInset.bottom
-        let jumped = animated && !ChatMotion.disabledForUITests && bottom() - list.contentOffset.y > viewport * 2
+        let jumped = animated && !presentation.environment.chatReducesMotion
+            && bottom() - list.contentOffset.y > viewport * 2
         if jumped {
             // From far up, an animated scroll would cross rows still at their
             // estimated heights and land short as they size. Jump to one

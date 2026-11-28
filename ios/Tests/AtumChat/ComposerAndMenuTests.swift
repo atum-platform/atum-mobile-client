@@ -99,6 +99,16 @@ final class MessageMenuRulesTests: XCTestCase {
         XCTAssertTrue(MessageMenuRules.reactionChoices(for: item, ownUserID: nil).allSatisfy { !$0.isSelected })
     }
 
+    func testSlidingOntoDeleteAndBackToThePressOriginClearsTheTarget() {
+        let origin = CGPoint(x: 51, y: 20)
+        let frames = [MessageMenuItem.delete: CGRect(x: 40, y: 0, width: 80, height: 40)]
+
+        XCTAssertEqual(MessageMenuRules.slideTarget(from: origin, to: CGPoint(x: 80, y: 20), frames: frames),
+                       .delete)
+        XCTAssertNil(MessageMenuRules.slideTarget(from: origin, to: CGPoint(x: 56, y: 20), frames: frames))
+        XCTAssertNil(MessageMenuRules.slideTarget(from: origin, to: CGPoint(x: 130, y: 20), frames: frames))
+    }
+
     // MARK: Delete confirmation (B20)
 
     func testDeleteAsksFirstOnlyWhenTheMessageMayHaveReachedTheOthers() {

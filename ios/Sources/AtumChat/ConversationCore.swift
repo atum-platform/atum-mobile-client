@@ -614,8 +614,8 @@ public struct ConversationCore: Sendable {
         return [.abortSend(ref)]
     }
 
-    /// "Xóa" on my message (B20): a held send is dropped, a failed send
-    /// aborted, anything else redacted.
+    /// After confirming "Xóa với mọi người?" (B20): a held send is dropped,
+    /// a failed send aborted, or my message redacted.
     public mutating func delete(_ itemID: String) -> [ConversationEffect] {
         if removeHeld(itemID) { return [] }
         guard let item = row(itemID)?.item else { return [] }

@@ -1,3 +1,5 @@
+import Foundation
+
 /// What the long-press menu offers on one row (plan B20–B22, §2.7, §3.5).
 ///
 /// The menu view shows exactly these items, in this order; the store still
@@ -36,8 +38,14 @@ public struct ReactionChoice: Equatable, Hashable, Sendable {
         self.isSelected = isSelected
     }
 }
-
 public enum MessageMenuRules {
+    /// A press must move 10 points before it can highlight or select a target.
+    public static func slideTarget<Target>(from start: CGPoint?, to location: CGPoint,
+                                          frames: [Target: CGRect]) -> Target? {
+        guard let start, hypot(location.x - start.x, location.y - start.y) >= 10 else { return nil }
+        return frames.first { $0.value.contains(location) }?.key
+    }
+
     /// Desktop's `MATRIX_QUICK_REACTIONS` (atum-app
     /// `apps/desktop/src/matrix/message-actions.tsx`), in its order. Data,
     /// not copy.

@@ -760,8 +760,12 @@ final class MessageMenuUITests: WS3UITestCase {
                       "no PayOS link in the sheet: \(sheetLabels(app))")
         keepScreenshot("links-1-select-text-sheet", of: app)
         tapLink(payos)
+        guard assertSelectTextLinkHandoff("hold", tap: 1, probe: probe) else { return }
         let alert = app.alerts.firstMatch
-        XCTAssertTrue(alert.waitForExistence(timeout: 5), "no held-link line")
+        guard alert.waitForExistence(timeout: 5) else {
+            XCTFail("PayOS reached the hold policy after sheet dismissal but did not present its alert")
+            return
+        }
         XCTAssertTrue(alert.label.contains("Liên kết này chưa mở được trên iPhone."), alert.label)
         XCTAssertFalse(element(app, "selectText.body").exists, "the sheet stays under the line")
         keepScreenshot("links-2-held-from-sheet", of: app)
@@ -774,13 +778,38 @@ final class MessageMenuUITests: WS3UITestCase {
                       "no ordinary link in the sheet: \(sheetLabels(app))")
         keepScreenshot("links-3-select-text-sheet-again", of: app)
         tapLink(page)
+        guard assertSelectTextLinkHandoff("openInApp", tap: 2, probe: probe) else { return }
         let close = app.buttons.matching(NSPredicate(format: "label IN %@", ["Đóng", "Close", "Xong", "Done"])).firstMatch
-        XCTAssertTrue(close.waitForExistence(timeout: 20), "the in-app Safari page did not show")
+        guard close.waitForExistence(timeout: 20) else {
+            XCTFail("The ordinary URL reached the in-app policy after sheet dismissal but did not present Safari")
+            return
+        }
         XCTAssertFalse(element(app, "selectText.body").exists, "the sheet stays under the page")
         XCTAssertEqual(app.state, .runningForeground, "the link left the app")
         keepScreenshot("links-4-safari-from-sheet", of: app)
         close.tap()
         XCTAssertTrue(element(app, AccessibilityID.transcript).waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func assertSelectTextLinkHandoff(_ policy: String, tap: Int, probe: URL) -> Bool {
+        let file = probe.appendingPathComponent("menu-press.txt")
+        func trace() -> String { (try? String(contentsOf: file, encoding: .utf8)) ?? "" }
+        let stages = [
+            (marker: "select text link tapped", count: tap, error: "The sheet did not receive the link tap"),
+            (marker: "select text sheet dismissed with pending link", count: tap,
+             error: "The tapped link is waiting for the sheet dismissal"),
+            (marker: "link policy \(policy)", count: 1, error: "The dismissed sheet did not route to \(policy)")
+        ]
+        for stage in stages {
+            guard eventually(5, {
+                trace().split(separator: "\n").filter { $0.hasSuffix(stage.marker) }.count >= stage.count
+            }) else {
+                XCTFail("\(stage.error). Probe:\n\(trace())")
+                return false
+            }
+        }
+        return true
     }
 
     /// Opens Moon's linked answer's menu, then "Chọn văn bản".
@@ -790,7 +819,8 @@ final class MessageMenuUITests: WS3UITestCase {
         let select = element(app, "menu.items").buttons["Chọn văn bản"].firstMatch
         XCTAssertTrue(select.wait(for: \.isHittable, toEqual: true, timeout: 8), "no hittable select-text item")
         select.tap()
-        XCTAssertTrue(element(app, "selectText.body").waitForExistence(timeout: 8), "no sheet")
+        XCTAssertTrue(element(app, "selectText.body").waitForExistence(timeout: 8),
+                      "the menu accepted the select-text tap but the sheet did not show")
     }
 
     /// A link inside the select-text sheet (never the transcript's own,

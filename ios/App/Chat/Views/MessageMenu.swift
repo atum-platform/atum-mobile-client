@@ -53,11 +53,6 @@ final class MessageActionsPresenter {
 
     /// Where the opening finger was when the menu opened (global).
     @ObservationIgnored private var pressStart: CGPoint?
-    /// A finger must travel this far before it selects anything, so a press
-    /// released where it began never runs the part that landed under it
-    /// (the system's menus behave the same).
-    static let slideDistance: CGFloat = 10
-
     /// The menu opened under a finger that is still down at `location`.
     func pressBegan(at location: CGPoint) {
         pressStart = location
@@ -65,28 +60,29 @@ final class MessageActionsPresenter {
 
     /// The opening finger moved: highlight the part under it, if any.
     func slide(to location: CGPoint) {
-        guard actionsOverlay != nil, let start = pressStart,
-              hypot(location.x - start.x, location.y - start.y) >= Self.slideDistance else { return }
-        let hit = targetFrames.first { $0.value.contains(location) }?.key
+        let hit = target(at: location)
         if hit != highlighted { highlighted = hit }
+    }
+
+    private func target(at location: CGPoint) -> MessageMenuTarget? {
+        guard actionsOverlay != nil else { return nil }
+        return MessageMenuRules.slideTarget(from: pressStart, to: location, frames: targetFrames)
     }
 
     /// The opening finger lifted at `location`: on a part, run it (tested
     /// again here, since a quick flick can arrive before the parts are laid
     /// out); anywhere else the menu stays open for a tap, as the system's does.
     func release(at location: CGPoint) {
-        slide(to: location)
+        let target = target(at: location)
         #if DEBUG
         // `-AtumUITestProbeDir` only: the lift against the parts' frames, for the P3 captures.
         let frames = targetFrames.map { "\($0.key)=\(Int($0.value.minX)),\(Int($0.value.minY)),"
             + "\(Int($0.value.width))x\(Int($0.value.height))" }.sorted().joined(separator: " ")
         UITestProbe.append("release at=\(Int(location.x)),\(Int(location.y)) start=\(String(describing: pressStart)) "
-                           + "hit=\(String(describing: highlighted)) frames=\(frames)", to: "menu-press.txt")
+                           + "hit=\(String(describing: target)) frames=\(frames)", to: "menu-press.txt")
         #endif
-        pressStart = nil
-        guard let target = highlighted else { return }
-        highlighted = nil
-        commitTarget?(target)
+        pressCancelled()
+        if let target { commitTarget?(target) }
     }
 
     /// The opening finger's press was cancelled or failed (the system took
@@ -120,35 +116,41 @@ final class MessageActionsPresenter {
     /// and the link is routed once it has gone, because the chat screen
     /// presents the in-app page or the held-link line, and SwiftUI presents
     /// nothing from under a presented sheet.
-    @ObservationIgnored var linkAfterSelectText: String?
+    private var linkAfterSelectText: String?
     /// "Reply in thread" (TS-6b): opens the room's thread panel on this root.
     /// Set only in a Team Space channel or conversation; nil offers no item.
     var openThread: ((String) -> Void)?
 
     /// The select-text sheet's link tap: close the sheet, then route.
     func openLinkFromSelectText(_ url: String) {
+        guard selectText != nil else { return }
+        #if DEBUG
+        UITestProbe.append("select text link tapped", to: "menu-press.txt")
+        #endif
         linkAfterSelectText = url
         selectText = nil
     }
 
-    /// The select-text sheet has gone: route the link it queued, once. Called
-    /// from the sheet's `onDismiss` and, because SwiftUI can drop that
-    /// callback after the menu cover's own dismissal (as with
-    /// `overlayDismissed`), from its content's disappearance.
-    func selectTextDismissed(_ open: @MainActor (String) -> Void, via source: String) {
+    /// The sheet's dismissal completed. Advance to the queued link once.
+    func selectTextDismissed(_ open: @MainActor (String) -> Void) {
         guard selectText == nil, let link = linkAfterSelectText else { return }
         linkAfterSelectText = nil
         #if DEBUG
-        UITestProbe.append("select text link routed via=\(source)", to: "menu-press.txt")
+        UITestProbe.append("select text sheet dismissed with pending link", to: "menu-press.txt")
         #endif
         open(link)
+    }
+
+    func cancelSelectText() {
+        linkAfterSelectText = nil
+        selectText = nil
     }
 
     /// A system menu, sheet or delete confirmation covers the chat: its bottom does
     /// not count as visible, so no receipt goes out meanwhile (B13).
     var covers: Bool {
-        actionsOverlay != nil || selectText != nil || deleteRequest != nil || failedSend != nil
-            || reportRequest != nil
+        actionsOverlay != nil || selectText != nil || linkAfterSelectText != nil || deleteRequest != nil
+            || failedSend != nil || reportRequest != nil
     }
 
     /// B8: tapping "Chưa gửi được" under a failed bubble (the row view's
@@ -198,9 +200,9 @@ extension View {
     /// The menu's and the failed-send mark's presentations, once per chat
     /// screen: the select-text sheet, the delete confirmation and the
     /// failed-send sheet.
-    func messageActionSheets(_ presenter: MessageActionsPresenter, design: LiveDesign,
-                             actions: ChatActions) -> some View {
-        modifier(MessageActionSheets(presenter: presenter, design: design, actions: actions))
+    func messageActionSheets(_ presenter: MessageActionsPresenter, links: ChatLinkRouter,
+                             design: LiveDesign, actions: ChatActions) -> some View {
+        modifier(MessageActionSheets(presenter: presenter, links: links, design: design, actions: actions))
     }
 }
 
@@ -557,7 +559,7 @@ enum MessageMenuActions {
                 presenter.deleteRequest = DeleteRequest(itemID: row.id,
                                                         assistantName: kind == .assistant ? roomTitle : nil)
             } else {
-                actions.delete(row.id)
+                actions.deleteSend(row.id)
             }
         }
     }
@@ -1039,8 +1041,19 @@ struct ParsedOrFreshMarkdown: MarkupParser {
 /// The presentations, once per chat screen.
 private struct MessageActionSheets: ViewModifier {
     @Bindable var presenter: MessageActionsPresenter
+    @Bindable var links: ChatLinkRouter
     let design: LiveDesign
     let actions: ChatActions
+
+    private enum Dialog {
+        case delete(DeleteRequest)
+        case heldLink
+    }
+
+    private var dialog: Dialog? {
+        if let request = presenter.deleteRequest { return .delete(request) }
+        return links.showsHeld ? .heldLink : nil
+    }
 
     func body(content: Content) -> some View {
         content
@@ -1055,14 +1068,10 @@ private struct MessageActionSheets: ViewModifier {
                     }
             }
             .sheet(item: $presenter.selectText, onDismiss: {
-                presenter.selectTextDismissed(actions.openLink, via: "onDismiss")
+                presenter.selectTextDismissed(links.open)
             }) { request in
                 SelectTextSheet(request: request, design: design) { url in
                     presenter.openLinkFromSelectText(url)
-                }
-                .onDisappear {
-                    // Let the removal finish before presenting from the chat.
-                    Task { @MainActor in presenter.selectTextDismissed(actions.openLink, via: "disappear") }
                 }
             }
             .sheet(item: $presenter.failedSend) { request in
@@ -1073,17 +1082,39 @@ private struct MessageActionSheets: ViewModifier {
                     await actions.report(request.itemID, reason)
                 }
             }
-            .alert(ChatCopy.text(design, ChatCopy.Key.deleteMessageTitle),
-                   isPresented: Binding(get: { presenter.deleteRequest != nil },
-                                        set: { if !$0 { presenter.deleteRequest = nil } }),
-                   presenting: presenter.deleteRequest) { request in
-                Button(ChatCopy.text(design, ChatCopy.Key.delete), role: .destructive) {
-                    actions.delete(request.itemID)
-                }
-                Button(ChatCopy.text(design, ChatCopy.Key.cancel), role: .cancel) {}
-            } message: { request in
-                Text(message(request))
+            .fullScreenCover(item: $links.presented) { page in
+                SafariView(url: page.url).ignoresSafeArea()
             }
+            // The delete and link dialogs share one alert host after a sheet.
+            .alert(dialogTitle, isPresented: Binding(
+                get: { dialog != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        presenter.deleteRequest = nil
+                        links.showsHeld = false
+                    }
+                }
+            ), presenting: dialog) { dialog in
+                switch dialog {
+                case let .delete(request):
+                    Button(ChatCopy.text(design, .delete), role: .destructive) {
+                        actions.delete(request.itemID)
+                    }
+                    Button(ChatCopy.text(design, .cancel), role: .cancel) {}
+                case .heldLink:
+                    Button(ChatCopy.text(design, .dismiss), role: .cancel) {}
+                }
+            } message: { dialog in
+                if case let .delete(request) = dialog { Text(message(request)) }
+            }
+    }
+
+    private var dialogTitle: String {
+        switch dialog {
+        case .delete: ChatCopy.text(design, .deleteMessageTitle)
+        case .heldLink: ChatCopy.text(design, .linkHeld)
+        case nil: ""
+        }
     }
 
     private func message(_ request: DeleteRequest) -> String {
