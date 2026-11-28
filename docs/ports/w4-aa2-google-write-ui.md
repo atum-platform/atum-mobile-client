@@ -73,7 +73,8 @@ the card ID captured from the projection the owner tapped.
    row. A cleared location shows "Location" and "Clear". A cleared description
    uses the closest pinned field label, "Details", and keeps the proposal
    Decline-only until a precise description key is available. The same store
-   restriction applies in chat and Work.
+   restriction applies in chat and Work. Empty fields on an event creation are
+   left out of the grid because a new event has no existing fields to clear.
 5. **Reconciling shows no words.** Desktop has no such state: its unavailable
    answer returns to pending with "Couldn't reach Atum. Try again." The phone
    store holds an ambiguous decision disabled until a read proves the outcome.
@@ -177,6 +178,7 @@ Proposed desktop export keys for W4-C9, with English source text:
 - Design lint passed with 601 baseline findings, all 10 lint tests passed,
   the desktop export pin verified, all 13 copy and project-source checks
   passed, and `git diff --check` passed.
+- The public guard for the consent fix exited 0 against `origin/main`.
 
 ### Original port
 

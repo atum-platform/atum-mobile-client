@@ -91,7 +91,7 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
         let question = resolve(questionKey)
         self.glyph = glyph
         self.question = question
-        blocks = Self.blocks(lines, resolve: resolve)
+        blocks = Self.blocks(lines, kind: kind, resolve: resolve)
         let restriction = kind.phoneApprovalRestriction(for: lines)
         showsApprove = restriction == nil
         approvalNotice = restriction == .requiresMac ? resolve(Keys.approvalOnMac) : nil
@@ -113,7 +113,8 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
 
     // MARK: Blocks
 
-    private static func blocks(_ lines: [GoogleWritePreviewLine], resolve: (String) -> String) -> [Block] {
+    private static func blocks(_ lines: [GoogleWritePreviewLine], kind: GoogleWriteProposalKind,
+                               resolve: (String) -> String) -> [Block] {
         var blocks = [Block]()
         var quoteTruncated = false
         for line in lines { if case .quoteTruncated = line { quoteTruncated = true } }
@@ -149,7 +150,7 @@ public struct GoogleWriteCardPresentation: Equatable, Sendable {
                 blocks.append(.row(label: resolve(Keys.location), value: .text(location)))
             case let .description(text):
                 blocks.append(.text(text))
-            case let .cleared(field):
+            case let .cleared(field) where kind == .updateEvent:
                 let label = field == .location ? Keys.location : Keys.details
                 blocks.append(.row(label: resolve(label), value: .removal(resolve(Keys.clear))))
             case let .mailboxTarget(conversation):

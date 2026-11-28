@@ -70,6 +70,11 @@ final class GoogleWriteCardPresentationTests: XCTestCase {
         ])
         XCTAssertFalse(clearBoth.showsApprove)
         XCTAssertEqual(clearBoth.phase, .open(canDecide: true, busy: nil, retryLine: nil))
+
+        let createdEmpty = try XCTUnwrap(card(.work, kind: .createEvent,
+                                             lines: omitted + [.cleared(.location), .cleared(.description)]))
+        XCTAssertEqual(createdEmpty.blocks, unchanged.blocks)
+        XCTAssertTrue(createdEmpty.showsApprove)
     }
 
     func testGmailMailboxAndDraftReplacementOfferDeclineAndMacNotice() throws {
