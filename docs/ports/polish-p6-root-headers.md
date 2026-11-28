@@ -296,8 +296,19 @@ Categories:
   `CODE_SIGNING_ALLOWED=NO`), with `-warn-long-expression-type-checking=300`
   to flag what a slower runner times out on. Script
   `polish-p6/fix1/locked-build.sh`, launchd label `io.atum.lock.p6fix1`.
-  It was queued behind P7, W4-Y2, W4-AC2 and a `swift test` lane; the result
-  is recorded below when it lands.
+  It was queued behind P7, W4-Y2, W4-AC2 and a `swift test` lane.
+  - Attempt 1 (`generic/platform=iOS Simulator`) failed at link. That
+    destination also builds x86_64, and MatrixRustSDK has no x86_64 slice.
+    This was the script's setup, not the code.
+  - Attempt 2 (`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES`), head `c766050`, 29 Nov
+    01:17–01:28 (+07): `** TEST BUILD SUCCEEDED **`, exit 0. No warning or
+    error in any file this round touched.
+  - The only app expression over 300 ms is `AtumMobileApp.swift:63`
+    (about 2.1 s), which predates P6. The split `HomeScreen` body no
+    longer shows up.
+  - Logs: `polish-p6/fix1/build.log`, `slow-expressions.txt`.
+- `python3 scripts/public_guard.py --base origin/main --head HEAD`: exit 0,
+  by its own exit code.
 - UI classes for the hosted run: `HomeShellUITests`, `AgentDeskBellUITests`,
   `HomeSearchM1CaptureUITests`, `TeamSpaceRevampUITests`,
   `TeamSpaceDailyUITests` and `ChatPanelUITests`. Also the classes over
