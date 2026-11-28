@@ -139,6 +139,10 @@ struct AppRoot: View {
                     let coversLaunch = router.chatRestoreIntent?.entry == .launch
                         && router.coversChatsRootForRestore
                     product(account)
+                        // ML5: another own device's emoji request, as one quiet banner.
+                        .deviceVerificationRequests(
+                            design: design, actions: securityActions,
+                            ready: model.liveMatrix?.hasCompletedInitialSync == true)
                         .accessibilityHidden(coversLaunch)
                         .overlay {
                             if coversLaunch { S6BootWait(design: design) }
@@ -733,8 +737,17 @@ struct AppRoot: View {
             deviceSignOutURL: { await model.deviceSignOutURL(deviceID: $0) },
             phoneApprovals: model.phoneApprovals,
             accountConnections: AccountConnectionsActions(read: { await model.accountConnections() },
-                                                          makePoll: { model.accountConnectionsPoller() })
+                                                          makePoll: { model.accountConnectionsPoller() }),
+            security: securityActions
         )
+    }
+
+    /// ML5 trust UI: one live runtime's verification, recovery key and
+    /// Private readiness. Nil while no session is live hides every entry.
+    private var securityActions: SecurityActions? {
+        model.securityRuntime.map { runtime in
+            SecurityActions.live(runtime: runtime, restore: { await model.restoreMessages(using: $0) })
+        }
     }
 
     private static func notificationState(_ status: UNAuthorizationStatus) -> AccountNotificationState {
@@ -1114,6 +1127,13 @@ struct AppRoot: View {
         // message search, routed to the exact event.
         actions.messageSearch = model.homeMessageSearchActions { target, company in
             await routeRoom(target.roomID, requiringCompany: company, message: target) == .opened
+        }
+        // S9 Private at creation (ML5): hidden until this phone is ready.
+        if model.liveMatrix != nil {
+            actions.privateChat = PrivateChatActions(
+                readiness: { await model.privateChatReady() },
+                createDirect: { await model.createPrivateDirect($0) },
+                createGroup: { await model.createPrivateGroup($0, selected: $1, requestID: $2) })
         }
         return actions
     }

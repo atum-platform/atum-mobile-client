@@ -53,6 +53,8 @@ struct AtumMobileApp: App {
         #if DEBUG
         if AtumDebugLaunch.showsExpiredSessionPreview {
             ExpiredSessionPreviewHost()
+        } else if let scenario = ScriptedSecurityLaunch.scenario {
+            ScriptedSecurityHost(scenario: scenario)
         } else if let scenario = AtumDebugLaunch.s6Scenario {
             S6ScriptedHost(scenario: scenario)
         } else if let script = AtumScriptedLaunch.selection?.chat {
