@@ -174,7 +174,7 @@ struct DeviceVerificationView: View {
     }
 
     private func primary(_ title: String, id: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
+        Button(action: action) { Text(title).frame(maxWidth: .infinity, minHeight: 50) }
             .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
             .accessibilityIdentifier(id)
     }

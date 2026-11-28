@@ -108,7 +108,7 @@ struct RecoveryKeySaveView: View {
             }
             .padding(kit.space(.s4))
             .frame(maxWidth: .infinity)
-            .background(atum.color(.bubble, scheme: scheme),
+            .background(atum.kitColor(.surface, scheme: scheme),
                         in: RoundedRectangle(cornerRadius: kit.phoneRadius(.lg), style: .continuous))
             .privacySensitive()
             .textSelection(.disabled)
@@ -137,6 +137,7 @@ struct RecoveryKeySaveView: View {
                 Group {
                     if busy { AtomWait().frame(width: 20, height: 20) } else { Text(label) }
                 }
+                .frame(maxWidth: .infinity, minHeight: 50)
             }
             .buttonStyle(AtumPrimaryButtonStyle(atum: atum, scheme: scheme))
             .disabled(busy)

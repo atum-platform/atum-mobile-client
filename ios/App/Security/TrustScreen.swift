@@ -23,7 +23,7 @@ struct TrustScreen<Content: View, Actions: View>: View {
                         .font(.title)
                         .foregroundStyle(atum.color(.ink, scheme: scheme))
                         .frame(width: 64, height: 64)
-                        .background(atum.color(.bubble, scheme: scheme), in: Circle())
+                        .background(atum.kitColor(.surface, scheme: scheme), in: Circle())
                         .padding(.bottom, kit.space(.s2))
                         .accessibilityHidden(true)
                 }

@@ -1,5 +1,6 @@
 #if DEBUG
 import AtumChat
+import AuthenticationServices
 import Observation
 import SwiftUI
 
@@ -107,6 +108,8 @@ struct ScriptedSecurityHost: View {
     private func actions(platformSave: Bool,
                          driver: ScriptedVerificationDriver? = nil) -> SecurityActions {
         let verification = driver ?? ScriptedVerificationDriver(.idle)
+        var save: (@MainActor (UUID, ASPresentationAnchor) async -> Result<Void, PhoneTrustFailure>)?
+        if platformSave { save = { _, _ in .success(()) } }
         return SecurityActions(
             verification: { verification },
             snapshot: {
@@ -115,7 +118,7 @@ struct ScriptedSecurityHost: View {
             },
             setup: { .success(Self.attempt) },
             revealKey: { _ in "EsTb7Hq2Kd9PwZx43mRfLp8VnC6yUg1A0000ScRp" },
-            saveToPasswords: platformSave ? { _, _ in .success(()) } : nil,
+            saveToPasswords: save,
             confirmSaved: { _ in .success(()) },
             restore: { _ in .failed }
         )
