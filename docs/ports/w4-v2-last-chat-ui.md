@@ -12,14 +12,15 @@ This lane calls it from the app shell. It also fixes client issue #101
 | --- | --- | --- |
 | Launch or a new sign-in, with a restorable chat | Chats roster | The boot screen stays up until the restore decides, then the transcript appears with no push animation and no roster frame |
 | Launch, nothing to restore | Chats roster | Chats roster, as soon as the inputs the policy reads have settled (at most 3 s behind the boot screen) |
-| Tap Chats from another tab, Chats at its root | Chats roster | The last chat, else the primary assistant's chat. While the per-intent claim read runs, Chats' root shows the plain ground (at most 1 s). Then the transcript or the roster |
-| Tap Chats while a chat is open in Chats | That chat | Unchanged (the retained chat reopens) |
+| Tap Chats from another tab, Chats at its root | Chats roster | Chats roster. Corrected 28 Nov 2026: r1–r3 restored the last chat here, which was the owner's bug |
+| Tap Chats from another tab while a chat is open in Chats | That chat | Unchanged (the retained chat reopens) |
 | Re-tap Chats at its root | Scroll to top | Unchanged. A re-tap never restores, so the roster stays reachable |
+| Re-tap Chats in a chat | Pops to the roster | Unchanged |
 | Back from a restored chat | n/a | The roster, the same as Back from a tapped chat |
 | Notification or deep link at launch | Opens that room | Unchanged. It wins over any pending restore |
 
 The lane adds no new copy. The launch hold reuses `S6BootWait`. The
-Chats-tap hold is the `ground` token.
+Chats-tap `ground` cover was removed with the tab-return restore.
 
 ## Shell ownership
 
@@ -33,8 +34,9 @@ Chats-tap hold is the `ground` token.
 - `beginChatRestore(_:)` creates a `ChatRestoreIntent` with a new UUID under
   the current generation. `AppRoot` applies each account scope through
   `applyAccountScope(replacesAccount:)`, which begins `.launch` unless a
-  notification already owns the route. It begins `.chatsTap` from
-  `onUserSelectedTab(.home)` when Chats has no retained room.
+  notification already owns the route. Before 28 Nov 2026 it also began
+  `.chatsTap` from `onUserSelectedTab(.home)` when Chats had no retained
+  room. That was removed (see "Tab return keeps Chats' stack").
 - `applyAccountScope(replacesAccount:)` resets routes only when the new scope
   replaces a signed-in account (`AppRoot` tracks the applied scope's account,
   `LiveAppModel.accountScopeID`). The first account after none (a cold
@@ -124,6 +126,64 @@ the warm path's existing behaviour, so no new routing code was needed.
 Releasing the hold does not advance the navigation generation: nothing
 moved.
 
+## Tab return keeps Chats' stack (28 Nov 2026)
+
+Owner report, verbatim: "small bug on mobile: when im on the chat roster
+screen, then navigate to another screen via bottom nav, then back to chat -
+it goes to the last open chat, even though initially i was on the roster
+screen instead of a specific chat".
+
+Cause: `AppRoot.configureRouter` set `router.onUserSelectedTab` so that
+selecting Chats with no retained room called `beginChatRestore(.chatsTap)`
+and `attemptChatRestore()`. Leaving the roster for another tab and coming
+back therefore ran the launch-style restore and pushed the remembered chat.
+The r1 table above recorded this as intended; it was not what the owner
+wanted.
+
+Fix (the smallest change, no navigation rewrite):
+
+- `Router.retainedRoomID(for:)` names the room a tab's stack still shows.
+  The tab hook reopens that room and does nothing else. A Chats root stays
+  the roster; an open chat stays open (its model reopens, as before).
+- The restore is begun only by `applyAccountScope` (`.launch`): a cold
+  launch or a new sign-in. That is the first entry into Chats in a session,
+  because each account scope starts on Chats.
+- The Chats-tap `ground` cover in `AppRoot.product` was removed. Nothing
+  begins `.chatsTap` any more, so it could never show.
+- Unchanged: a Chats re-tap in a chat pops to the roster, and a re-tap at
+  the root scrolls to the top. Team Space keeps its own stack the same way.
+  Notifications, share and other deep links still claim navigation and win
+  over a launch restore.
+
+Desktop #121 (`atum-desktop`, `docs/work-sweep-chat-restore-1124.md`):
+"Launch, a cleared selection, and pressing Chats all open
+`matrixChatRoomToOpen`". This is an intentional difference. On desktop the
+roster is a side panel beside the transcript, so Chat has no roster-only
+state for a return to lose and "never an empty state" means "never an empty
+transcript pane". On the phone the roster is a full screen of its own, and
+iOS tabs keep their stack. The phone keeps desktop's launch rule (the
+remembered chat, else the primary assistant) and keeps the person's place
+on a tab return.
+
+Tests:
+
+- `S2StateTests.testChatsTabReturnKeepsItsStackAndOnlyLaunchRestores`
+  replaces `testChatRestoreCoversYieldToTabSwitchRetapAndExpiry`, which
+  encoded the old wiring. It drives the shell's tab hook through
+  `retainedRoomID(for:)`. A cold launch still issues `.launch`. A switch
+  away ends it. Roster → Drive, Store or Team Space → Chats issues no intent
+  and never calls the model. Chat → Store → Chats reopens the same chat.
+  Team Space keeps its room. A re-tap in a chat pops to the roster without
+  a restore. A late claim reply after the launch hold expires is discarded.
+- `HomeShellUITests.testChatsTabReturnKeepsRosterOrOpenChat`: roster →
+  Store → Chats shows the roster. Luna → Store → Chats shows Luna. A chat
+  hides the tab bar, so the scripted chat gained a Store button
+  (`home.scripted.destination.store`) that calls `Router.openStore(shelf:)`,
+  the live way out of a chat (an assistant card's shelf link). The scripted
+  host has no restore engine and does not run `AppRoot`, so this test pins
+  the shared `RootTabs`/`Router` stack behaviour. It would not fail against
+  the old `AppRoot` hook; the unit test covers that seam.
+
 ## #101: Purchased on `storePath`
 
 Purchased was a `navigationDestination(isPresented:)` on a local Boolean.
@@ -161,7 +221,8 @@ Added in fix round 2:
   notification held (or only received) while booting survives the first
   account scope and validates; no launch restore starts. A real account
   change discards it and starts a restore.
-- `testChatRestoreCoversYieldToTabSwitchRetapAndExpiry`: switching away
+- `testChatRestoreCoversYieldToTabSwitchRetapAndExpiry` (replaced on
+  28 Nov 2026 by `testChatsTabReturnKeepsItsStackAndOnlyLaunchRestores`): switching away
   during a Chats-tap hold ends it and the other tab is selected; returning
   makes a new intent; a re-tap at Chats' root never restores (scroll to top);
   a claim reply after the hold expires is discarded and the roster stays
@@ -209,16 +270,18 @@ Added in fix round 3:
 - The hold bounds are product judgment, not desktop values. Desktop has no
   full-screen roster to flash. A launch whose sync takes longer than 3 s
   shows the roster and does not restore.
-- The Chats-tap hold exists because the engine re-reads the CoS claim for
-  every new intent. A per-session claim cache in the engine would remove it.
+- (Obsolete since 28 Nov 2026: a tab return no longer restores, so there is
+  no Chats-tap hold.) The Chats-tap hold existed because the engine re-reads
+  the CoS claim for every new intent.
 - `AppRoot` wiring (retry signals, hold task, covers) has no XCTest. The
   live path needs a signed-in Matrix session. The scripted UI host does not
   use `AppRoot`, so a UI test of the live covers is not practical in this
   lane (r2 decision). The cover rules are exercised at the Router seam the
   shell reads (`coversChatsRootForRestore`, `chatRestoreIsCurrent`). A live
-  manual pass remains: switch away and back during a Chats-tap hold, re-tap
+  manual pass remains: switch away and back during the launch hold, re-tap
   Chats at its root, a claim reply after the hold expires, Back from a
-  restored chat.
+  restored chat, and (28 Nov 2026) roster → another tab → Chats shows the
+  roster on a signed-in phone.
 - The Matrix readiness retry (r2 finding 3) has no unit test: the signals
   read a live `LiveMatrixSession`. It is a pure addition to the retry key.
 - A cold notification that validation denies leaves the launch without a
