@@ -204,6 +204,9 @@ they are unchanged.
 Owner rule: parity means desktop as rendered. Where a change would alter what
 desktop shows, it is left as it is and proposed here.
 
+> **Update, 28 Nov 2026:** the owner approved proposals 1, 2, 3 and 5. P6
+> carried them out; see `polish-p6-root-headers.md`.
+
 1. **Home title and search (issue 7).** Not changed. Desktop's roster has no
    "Chats" title, and `HomeShellUITests` asserts that the screen has no title.
    The custom `HomeSearchField` stays beside the account face, as desktop

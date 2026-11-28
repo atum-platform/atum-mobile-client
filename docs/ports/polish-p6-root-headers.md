@@ -66,6 +66,145 @@ A sheet uses the system sheet background: no `.background(ground)` fill and no
 system grouped background and a plain one the sheet's own. Bottom action bars
 inside a sheet use the system `.bar` material instead of a ground strip.
 
-## What changed
+## What changed, with what it replaces
 
-Filled in below.
+### Home (`ios/App/Home/HomeScreen.swift`, `HomeAccountFace.swift`)
+
+- **Replaced:**
+  - the hidden bar (`.toolbar(.hidden, for: .navigationBar)`, the audit's
+    `HomeScreen.swift:542`);
+  - the hand-built top row (`header`: avatar, search capsule, bell, glass plus,
+    with its own accessibility-size layout, audit `:712-764`);
+  - `HomeSearchField`, a vertical-axis `TextField` that stripped newlines to
+    imitate the Search key (audit `:1354-1404`).
+- **Now:**
+  - `.navigationTitle` with the exported `desktop.atum.roster.title` ("Chats" /
+    "Trò chuyện") and a large title;
+  - `.searchable(placement: .navigationBarDrawer(displayMode: .always))`,
+    bound to ML3's `HomeSearchController.text` with the same prompts (plain,
+    or the device-only placeholder);
+  - `.searchFocused` for focus, and `.onSubmit(of: .search)` ends typing and
+    keeps the query (the old Return behaviour);
+  - the system Cancel ends search: `HomeSearchActivity` reads `isSearching`,
+    and when it turns false Home calls `HomeSearchController.dismiss()`, which
+    is what the old Cancel did;
+  - the account face is `.topBarLeading`, drawn without the bar's shared glass
+    (`.sharedBackgroundVisibility(.hidden)`), so it reads as a profile picture;
+  - compose is a system bar button (`.topBarTrailing`, `barIcon(.plus)`) in
+    place of the hand-made `LiveGlass` circle. Same action, label and
+    identifier (`home.create`).
+- The S2 scope chips and the S16 filter chips, and the domain sign-in card,
+  sit in a `.safeAreaInset(edge: .top)` over the content's own scroll view.
+  The large title still collapses with the roster.
+- **Bell into the face (owner decision 6).** `AttentionBell` becomes
+  `HomeAccountFace` (file renamed). Desktop removed its bell on 24 Nov 2026:
+  what waits sits at the top of the rail's account face, which wears a red
+  dot (`rail-account.tsx`, `attention-indicator.tsx`). On the phone:
+  - nothing waits: the face opens Settings, as before;
+  - something waits: the face wears a red (`danger`) dot. A tap opens the old
+    bell's list, the same rows and actions, with Settings as its last row.
+    That is desktop's menu order: attention first, then the account;
+  - VoiceOver: the label is "Settings, Needs you: Sign in again" (several
+    items: "Settings, Needs you: 2 things need you", from the exported `count`
+    key). The value is the count. A new item is still announced once.
+  - identifiers: `home.account` (the face), `home.account.badge`,
+    `home.account.attention.<kind>`, `home.account.settings`. `home.bell*`
+    are gone.
+
+### Team Space (`CompanyWorkspaceViews.swift`, `CompanySpaceViews.swift`, `TeamSpaceRevampViews.swift`)
+
+- **Replaced (owner decision 4):** three header rows became one.
+  - The leading company capsule (`header`, `CompanyHeaderLabel`, audit
+    `CompanyWorkspaceViews.swift:815-835`) is gone.
+  - So is the large "Team space" title under it.
+  - `CompanyPagesBar`, Chat | Board as a segmented control with an
+    accessibility-size fallback (audit `CompanySpaceViews.swift:13-33`), is
+    gone.
+  - `CompanyBoardControls` and `TeamSpaceSegments`, Board | List and Mine
+    over the board (audit `TeamSpaceRevampViews.swift:228-256`), are gone.
+- **Now:**
+  - the company name is the inline title. Its `.toolbarTitleMenu` lists every
+    company (the open one checked, each with its mark in words) and then
+    Companies, which opens the existing switcher sheet with its invitations
+    and Create company;
+  - one trailing view `Menu` (`company.pages`). It is labelled with the
+    current page's name and holds inline `Picker`s for Chat · Board (·
+    Marketplace) and, on the Board, Board · List, plus the Mine `Toggle`. Its
+    VoiceOver value says the choice ("Board, List, Mine");
+  - the `.selection` haptic on a page or view change is kept;
+  - Activity and the company "…" follow as their own group.
+- **Dynamic Type:** the system menu's rows follow Dynamic Type and keep
+  44 pt targets. The bar item gets the system large-content viewer at
+  accessibility sizes, as bar items do. The AX-XXXL UI test checks the List
+  and Mine rows.
+
+### Drive and Store
+
+- Both keep their large titles and `.searchable`.
+- Drive is already on the rule: its one trailing item is "…" (view options).
+- Store drew `ConnectionGlyph` as its own toolbar item even when it was
+  hidden, so iOS 26 could keep an empty glass slot. Now the item, and a
+  fixed spacer after it, exist only while the glyph shows. The balance stays
+  the root's own control.
+
+### Chat panel (Back vs X)
+
+- `ChatMembersPage`, `SharedCollectionPage`, `AppPanelPageView`,
+  `RoomPinnedMessagesPage` and `AgentDeskPage` no longer add
+  `ChatPanelCloseButton`.
+- `ChatPanelHost` keeps a hidden `.cancelAction` button while a page is
+  pushed, so Escape still closes the panel.
+- `ChatInfoHome` keeps the X.
+
+### Sheet backgrounds
+
+The ground fill and `scrollContentBackground(.hidden)` are removed from:
+
+- Home's Start chat, Add friend, New group and the founder draft;
+- Team Space's switcher, Company overview, Activity, Saved, Threads, Invite,
+  Join with a link, New channel and message search.
+
+Start chat's and New group's bottom action bars use `.background(.bar)`.
+
+Not changed (outside the four roots' sheets):
+- `AppOnboardingSheet` and `ConversationPickerSheet` keep their fills;
+- `SelectTextSheet` and `FailedSendSheet` are short sheets with
+  `glassOpaque`;
+- `MessageMenu`'s clear overlay.
+
+## Deviations from desktop
+
+- **Search's spoken name.** Desktop's roster search has the aria-label
+  "Search everything". The system search field speaks its prompt ("Search"),
+  and SwiftUI offers no separate label for it, so that one assertion was
+  dropped from `HomeShellUITests`.
+- **The face's dot is red** (desktop's `danger` face badge).
+  `AttentionBellPolicy.tone` still says `.warn` for both phone causes. The
+  old bell drew amber. The policy and its tests were left as they are; the
+  face follows desktop as rendered.
+- **The face opens Settings directly when nothing waits.** Desktop always
+  opens its account menu. The phone's Settings sheet is that menu's content
+  (status, Settings, phone, Protons, feedback, sign out), so the extra step is
+  skipped while there is no attention row to show.
+- **Team Space title.** The company's logo, and the mark saying another
+  company has something waiting, are no longer drawn in the bar. A system
+  title is text only. Each company's mark is in the title menu, and the Team
+  Space tab badge still counts every company.
+- **Board · List and Mine** are behind the view menu, not inline over the
+  board as on desktop. The owner accepted this phone-only placement
+  (decision 4).
+- **Escape on pushed panel pages** works through a hidden shortcut button,
+  not a visible X.
+
+## Missing copy
+
+None. Every word is an existing exported key:
+- `desktop.atum.roster.title` (Chats);
+- `desktop.atum.settings.title`;
+- the `src.matrix.attention-copy.copies.*` keys;
+- `CompanyCopy.companiesTitle`;
+- the `TeamSpaceCopy` page, board-view and Mine keys.
+
+## Verification
+
+Filled in after the locked run.
