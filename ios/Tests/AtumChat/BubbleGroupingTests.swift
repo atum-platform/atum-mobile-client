@@ -54,10 +54,11 @@ final class BubbleFaceGroupingTests: XCTestCase {
             value.map { RowGrouping(position: $0.position, showsSender: $0.showsSender, showsFace: $0.showsFace) }
         }
         XCTAssertEqual(shape(app), shape(assistant), "names, faces and run breaks")
-        // Desktop: every answer of my agent carries its time; an app's or a
-        // person's messages only at the end of a run (TL-4).
-        XCTAssertEqual(assistant.map(\.showsTime), [true, true, true, true, true, true])
+        // Polish P7: everyone's clock, my agent's included, sits only on the
+        // last bubble of a run (TL-4).
+        XCTAssertEqual(assistant.map(\.showsTime), [false, true, true, true, true, true])
         XCTAssertEqual(app.map(\.showsTime), [false, true, true, true, true, true])
+        XCTAssertEqual(assistant, app, "my assistant's chat now lays out exactly like an app's")
         XCTAssertEqual(app.map(\.showsSender), [false, false, false, false, false, false])
         XCTAssertEqual(app.map(\.position), [.first, .last, .single, .single, .single, .single])
     }

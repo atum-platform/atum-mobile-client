@@ -17,8 +17,11 @@ import SwiftUI
 /// the last one, aligned to its bottom; the run's other bubbles keep an empty
 /// face-wide gutter so the run lines up (`RowGrouping.showsFace`).
 ///
-/// Under the bubble: reaction chips (B22) and my delivery mark (B7, B8) or
-/// the no-answer line (B10). A long press on the bubble opens the menu (B20).
+/// In the bubble's trailing corner: the run's time and "đã sửa"
+/// (`BubbleMeta`, Polish P7). Under the bubble: reaction chips (B22) and my
+/// delivery mark while it sends, when it failed or once it is seen (B7, B8,
+/// `DeliveryLine`). A long press on the bubble opens the menu (B20), whose
+/// Copy is the only one.
 ///
 /// VoiceOver reads the bubble as one element: sender, time, content and
 /// delivery (B16), with an action per link. A reply's quote is its own
@@ -28,8 +31,6 @@ struct MessageBubbleRow: View {
     let kind: RoomKind
     let roomTitle: String
     let parsedBody: AttributedString?
-    /// The newest answer in an assistant or app chat: copy sits under it.
-    var isLatestAnswer = false
     /// HC-6: the open search's matches in this message.
     var searchHighlight: ChatSearchHighlight? = nil
     /// The agent may still be writing this message: it never folds.
@@ -96,8 +97,8 @@ struct MessageBubbleRow: View {
                     ReactionChips(row: row, trailing: trailing)
                         .padding(.leading, avatarSlot)
                 }
-                if DeliveryLine.shows(row, isLatestAnswer: isLatestAnswer && !trailing, flat: false) {
-                    DeliveryLine(row: row, kind: kind, isLatestAnswer: isLatestAnswer && !trailing)
+                if DeliveryLine.shows(row, flat: false) {
+                    DeliveryLine(row: row, kind: kind)
                         .padding(.leading, avatarSlot)
                 }
             }
@@ -139,7 +140,7 @@ struct MessageBubbleRow: View {
                 if !row.item.reactions.isEmpty {
                     ReactionChips(row: row, trailing: false)
                 }
-                if DeliveryLine.shows(row, isLatestAnswer: false, flat: true) {
+                if DeliveryLine.shows(row, flat: true) {
                     DeliveryLine(row: row, kind: kind)
                 }
             }
@@ -198,12 +199,19 @@ struct MessageBubbleRow: View {
                     MediaImageContent(row: row, width: size.width, height: size.height,
                                       fill: fill, shape: AnyShape(shape),
                                       roomTitle: roomTitle, kind: kind)
+                        .overlay(alignment: .bottomTrailing) {
+                            if row.item.body.isEmpty, showsMeta {
+                                BubbleMeta(row: row, onMedia: true)
+                            }
+                        }
                     if !row.item.body.isEmpty {
-                        mediaCaption(theme)
-                            .accessibilityHidden(true)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 8)
-                            .padding(.bottom, 10)
+                        withMeta(theme, inline: true, trailingPad: 12, bottomPad: 10) {
+                            mediaCaption(theme)
+                                .accessibilityHidden(true)
+                                .padding(.horizontal, 12)
+                                .padding(.top, 8)
+                                .padding(.bottom, 10)
+                        }
                     }
                     botAPIKeyboard(theme)
                 }
@@ -212,6 +220,9 @@ struct MessageBubbleRow: View {
                 .clipShape(shape)
             } else {
                 ImageBox(width: width, height: height, fill: fill, shape: shape)
+                    .overlay(alignment: .bottomTrailing) {
+                        if showsMeta { BubbleMeta(row: row, onMedia: true) }
+                    }
                     .rowSpeech(speech)
             }
         case let .file(name):
@@ -219,73 +230,122 @@ struct MessageBubbleRow: View {
             // side, a 40 pt `fill-quiet` tile; never the ink bubble.
             let card = kit.color(.surface, scheme: scheme)
             if row.item.media != nil {
-                MediaFileContent(row: row, fill: card,
-                                 tileFill: kit.color(.fillQuiet, scheme: scheme),
-                                 shape: AnyShape(shape), roomTitle: roomTitle, roomKind: kind)
-                    .atumKitElevation(.one, in: shape)
+                // The card's own fill moves out to the meta's layout, so the
+                // time sits inside the card, under its name.
+                withMeta(theme, inline: false, trailingPad: 12, bottomPad: 12) {
+                    MediaFileContent(row: row, fill: .clear,
+                                     tileFill: kit.color(.fillQuiet, scheme: scheme),
+                                     shape: AnyShape(shape), roomTitle: roomTitle, roomKind: kind)
+                }
+                .background(card, in: shape)
+                .atumKitElevation(.one, in: shape)
             } else {
-                FileCard(name: name)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(card, in: shape)
-                    .atumKitElevation(.one, in: shape)
-                    .rowSpeech(speech)
+                withMeta(theme, inline: false, trailingPad: 14, bottomPad: 10) {
+                    FileCard(name: name)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .rowSpeech(speech)
+                }
+                .background(card, in: shape)
+                .atumKitElevation(.one, in: shape)
             }
         case let .placeholder(reason):
             // Never cut short: at the largest text sizes the line wraps and
             // keeps its meaning (B19).
-            Text(ChatRowText.placeholder(reason, copy: theme.copy))
-                .font(.body.italic())
-                .foregroundStyle(theme.quiet(scheme))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .overlay(shape.strokeBorder(theme.color("frame", scheme), lineWidth: 1))
-                .rowSpeech(speech)
+            withMeta(theme, inline: true, trailingPad: 14, bottomPad: 9) {
+                Text(ChatRowText.placeholder(reason, copy: theme.copy))
+                    .font(.body.italic())
+                    .foregroundStyle(theme.quiet(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .rowSpeech(speech)
+            }
+            .overlay(shape.strokeBorder(theme.color("frame", scheme), lineWidth: 1))
         default:
             if row.showsQuote {
                 // The quote and the message are two elements in one bubble;
                 // the message is read first (B16), then the quote (B21).
                 let fold = foldState()
-                BubbleStack(tightens: true) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        QuoteView(row: row, roomTitle: roomTitle)
-                        messageText(theme)
-                            .messageFold(fold.folded, lineHeight: foldLineHeight)
-                            .spokenMessage(speech, links: links, actions: actions)
-                            .accessibilityIdentifier("message.body.\(row.id)")
-                            .accessibilitySortPriority(1)
+                withMeta(theme, inline: textInline(fold), trailingPad: 14, bottomPad: textBottom(fold)) {
+                    BubbleStack(tightens: true) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            QuoteView(row: row, roomTitle: roomTitle)
+                            messageText(theme)
+                                .messageFold(fold.folded, lineHeight: foldLineHeight)
+                                .spokenMessage(speech, links: links, actions: actions)
+                                .accessibilityIdentifier("message.body.\(row.id)")
+                                .accessibilitySortPriority(1)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.top, 9)
+                        .padding(.bottom, fold.showsToggle ? 0 : 9)
+                        if fold.showsToggle {
+                            foldToggle(theme, folded: fold.folded)
+                                .padding(.horizontal, 14)
+                        }
+                        botAPIKeyboard(theme)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 9)
-                    .padding(.bottom, fold.showsToggle ? 0 : 9)
-                    if fold.showsToggle {
-                        foldToggle(theme, folded: fold.folded)
-                            .padding(.horizontal, 14)
-                    }
-                    botAPIKeyboard(theme)
                 }
                 .background(fill, in: shape)
                 .modifier(IncomingElevation(trailing: trailing, shape: shape))
                 .accessibilityElement(children: .contain)
             } else {
                 let fold = foldState()
-                BubbleStack(tightens: true) {
-                    messageText(theme)
-                        .messageFold(fold.folded, lineHeight: foldLineHeight)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 9)
-                        .padding(.bottom, fold.showsToggle ? 0 : 9)
-                        .spokenMessage(speech, links: links, actions: actions)
-                        .accessibilityIdentifier("message.body.\(row.id)")
-                    if fold.showsToggle {
-                        foldToggle(theme, folded: fold.folded)
+                withMeta(theme, inline: textInline(fold), trailingPad: 14, bottomPad: textBottom(fold)) {
+                    BubbleStack(tightens: true) {
+                        messageText(theme)
+                            .messageFold(fold.folded, lineHeight: foldLineHeight)
                             .padding(.horizontal, 14)
+                            .padding(.top, 9)
+                            .padding(.bottom, fold.showsToggle ? 0 : 9)
+                            .spokenMessage(speech, links: links, actions: actions)
+                            .accessibilityIdentifier("message.body.\(row.id)")
+                        if fold.showsToggle {
+                            foldToggle(theme, folded: fold.folded)
+                                .padding(.horizontal, 14)
+                        }
+                        botAPIKeyboard(theme)
                     }
-                    botAPIKeyboard(theme)
                 }
                 .background(fill, in: shape)
                 .modifier(IncomingElevation(trailing: trailing, shape: shape))
+            }
+        }
+    }
+
+    // MARK: The corner time (`BubbleMeta`, Polish P7)
+
+    /// A bubble has its corner time or edit mark; a team space's flat runs
+    /// keep theirs in the run's header and the line under it.
+    private var showsMeta: Bool { !flat && BubbleMeta.shows(row) }
+
+    /// Plain text with nothing under it may share its last line with the
+    /// meta; a fold toggle or Bot API buttons put it on its own row.
+    private func textInline(_ fold: FoldState) -> Bool {
+        !fold.showsToggle && !hasKeyboard
+    }
+
+    /// What sits under the bubble's last part, for the meta's own row:
+    /// the buttons' 8 pt, the toggle's none, or the text's 9 pt.
+    private func textBottom(_ fold: FoldState) -> CGFloat {
+        hasKeyboard ? 8 : fold.showsToggle ? 0 : 9
+    }
+
+    private var hasKeyboard: Bool { !(row.item.botAPI?.keyboard?.isEmpty ?? true) }
+
+    /// The content with the meta in its trailing corner. The layout is always
+    /// there, so the content keeps its identity when the clock moves on.
+    private func withMeta<Content: View>(_ theme: ChatTheme, inline: Bool, trailingPad: CGFloat,
+                                         bottomPad: CGFloat,
+                                         @ViewBuilder content: () -> Content) -> some View {
+        let kit = theme.design.kit
+        return BubbleMetaLayout(showsMeta: showsMeta, allowsInline: inline,
+                                contentTrailing: trailingPad, contentBottom: bottomPad,
+                                gap: kit.space(.s2), edge: kit.space(.s3), bottom: kit.space(.s2)) {
+            content()
+            if showsMeta {
+                BubbleMeta(row: row, onOwnBubble: trailing)
             }
         }
     }
@@ -368,8 +428,7 @@ struct MessageBubbleRow: View {
         }
     }
 
-    /// The text. Its "đã sửa" is in the line under the bubble (TL-5,
-    /// `DeliveryLine`), as on desktop.
+    /// The text. Its "đã sửa" is in the bubble's corner (TL-5, `BubbleMeta`).
     private func messageText(_ theme: ChatTheme) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if row.item.isOwn {

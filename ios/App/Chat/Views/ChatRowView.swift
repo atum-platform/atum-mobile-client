@@ -4,7 +4,7 @@ import UIKit
 
 /// One display row (plan §2.2): picks the row view for the row's kind and
 /// the room's kind (§2.7), and adds the spacing grouping decided (B16; the
-/// run time is in the line under the bubble, TL-4). `Equatable`, so an
+/// run time is in the bubble's corner, TL-4, `BubbleMeta`). `Equatable`, so an
 /// unchanged row is skipped.
 ///
 /// The event rows carry WS3's long-press menu (B20–B22, `chatRowMenu`): on
@@ -14,8 +14,6 @@ struct ChatRowView: View, Equatable {
     let kind: RoomKind
     let roomTitle: String
     let parsedBody: AttributedString?
-    /// The newest answer in an assistant or app chat carries its actions.
-    var isLatestAnswer = false
     /// HC-6: the open search's matches in this row's words, if any.
     var searchHighlight: ChatSearchHighlight? = nil
     /// The agent may still be writing this message: it never folds.
@@ -33,8 +31,7 @@ struct ChatRowView: View, Equatable {
         switch row.item.kind {
         case .message, .image, .file, .placeholder:
             MessageBubbleRow(row: row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody,
-                             isLatestAnswer: isLatestAnswer, searchHighlight: searchHighlight,
-                             isGrowing: isGrowing)
+                             searchHighlight: searchHighlight, isGrowing: isGrowing)
         case .notice:
             NoticeRow(row: row, kind: kind, parsedBody: parsedBody)
                 .chatRowMenu(row, kind: kind, roomTitle: roomTitle, parsedBody: parsedBody)

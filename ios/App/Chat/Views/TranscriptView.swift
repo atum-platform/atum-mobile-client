@@ -76,24 +76,20 @@ struct TranscriptView: View {
 
     @ViewBuilder private func transcript(_ rows: [ChatRow]) -> some View {
         let following = followState == .following
-        // The newest answer in an assistant or app chat carries its actions
-        // (FlowPhone › Chat); people chats and groups have none.
-        let latestAnswerID = store.kind == .assistant || store.kind == .appBot
-            ? rows.last { $0.item.kind == .message && !$0.item.isOwn }?.id : nil
         // Messages the agent may still be writing never fold (`MessageFold`).
         let growing = MessageFold.growingIDs(in: rows)
-        let scroll = scrollBody(rows, following: following, latestAnswerID: latestAnswerID, growing: growing)
+        let scroll = scrollBody(rows, following: following, growing: growing)
         let observed = observingChanges(scroll, rows: rows, growing: growing)
         withRowInteractions(observed)
     }
 
     // The transcript's modifier chain is split into three functions so each
     // type-checks quickly; one expression timed out on the hosted runners.
-    private func transcriptRow(_ row: ChatRow, latestAnswerID: String?, growing: Set<String>) -> some View {
+    private func transcriptRow(_ row: ChatRow, growing: Set<String>) -> some View {
         let highlight: Color = routedHighlightRowID == row.id
             ? (theme?.color("ink", scheme).opacity(0.12) ?? .clear) : .clear
         return ChatRowView(row: row, kind: store.kind, roomTitle: store.title,
-                           parsedBody: store.parsedBody(for: row), isLatestAnswer: row.id == latestAnswerID,
+                           parsedBody: store.parsedBody(for: row),
                            searchHighlight: search?.highlights[row.id], isGrowing: growing.contains(row.id))
             .equatable()
             .background(RoundedRectangle(cornerRadius: 8).fill(highlight))
@@ -106,8 +102,7 @@ struct TranscriptView: View {
             }
     }
 
-    private func scrollBody(_ rows: [ChatRow], following: Bool, latestAnswerID: String?,
-                            growing: Set<String>) -> some View {
+    private func scrollBody(_ rows: [ChatRow], following: Bool, growing: Set<String>) -> some View {
         return ScrollView {
             // An eager stack: every loaded row is laid out. A lazy stack
             // estimates rows it has not laid out, and with rows as different
@@ -116,7 +111,7 @@ struct TranscriptView: View {
             // main thread (G-scroll record).
             VStack(spacing: 0) {
                 ForEach(rows) { row in
-                    transcriptRow(row, latestAnswerID: latestAnswerID, growing: growing)
+                    transcriptRow(row, growing: growing)
                 }
             }
             .scrollTargetLayout()

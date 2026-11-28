@@ -1,34 +1,27 @@
 import AtumChat
 import SwiftUI
 
-/// The quiet line under a bubble, as desktop draws it (`MatrixSendState`,
-/// `data-matrix-run-time` and the answer toolbar in `src/matrix/app.tsx`):
-/// "14:05 · đã sửa" in one row, then the readers' faces once someone read it.
-/// - The clock under the last bubble of each run and under every answer of
-///   my agent (TL-4, `RowGrouping.showsTime`); never in a team space's flat
-///   runs, whose header carries it.
-/// - "đã sửa" for people's edits, mine included (TL-5,
-///   `RowGrouping.showsEdited`).
-/// - My delivery mark (B7, B8): a clock while it sends, "Chưa gửi được" with
-///   a warning glyph when it failed (tapping it offers "Thử lại" and "Xóa"),
-///   and the readers' faces under the message each receipt names. One read
-///   signal (desktop #89, owner 2026-11-19): a settled message nobody has
-///   read yet shows just its time, with no check and no "Đã gửi"; the faces
-///   are the only receipt, and the separator only joins what is drawn.
-/// - Copy, after the time, under the newest answer.
-/// The quiet "Chưa có câu trả lời." line is gone (owner real use, 10-17:
-/// uncertain-outcome lines go; Kit gap spec §3.2): the working line and the
-/// answer speak.
+/// The quiet line under a bubble, now for my delivery mark only (Polish P7,
+/// UX audit issue 4, owner 2026-11-28): the run's time and "đã sửa" moved
+/// into the bubble's trailing corner (`BubbleMeta`), so a settled message
+/// nobody has read draws no line at all.
+/// - A clock while it sends, "Chưa gửi được" with a warning glyph when it
+///   failed (tapping it offers "Thử lại" and "Xóa"), and the readers' faces
+///   under the message each receipt names (B7, B8). One read signal
+///   (desktop #89, owner 2026-11-19): no check and no "Đã gửi"; the faces
+///   are the only receipt.
+/// - In a team space's flat runs (no bubble, the header carries the time),
+///   "đã sửa" stays here, before the mark (TL-5, `RowGrouping.showsEdited`).
+/// Copy lives only in the long-press menu (B20); the inline copy under the
+/// newest answer is gone, so the menu's "Sao chép" is the one.
 ///
-/// The words are in the bubble's accessibility label; only the failed mark,
-/// the readers ("Đã xem"/"Đã xem · N") and Copy are their own (actionable)
+/// The words are in the bubble's accessibility label; only the failed mark
+/// and the readers ("Đã xem"/"Đã xem · N") are their own (actionable)
 /// elements. B26's warning on a failed send is the composer's
 /// (`SendFailureWatch`), so it plays once whichever row fails.
 struct DeliveryLine: View {
     let row: ChatRow
     let kind: RoomKind
-    /// The newest answer in an assistant or app chat: Copy follows the time.
-    var isLatestAnswer = false
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.messageActions) private var presenter
@@ -40,25 +33,16 @@ struct DeliveryLine: View {
 
     /// Whether the line has anything to show; the bubble row draws it only
     /// then.
-    static func shows(_ row: ChatRow, isLatestAnswer: Bool, flat: Bool) -> Bool {
-        row.delivery != .none || row.grouping.showsEdited
-            || (!flat && (row.grouping.showsTime || isLatestAnswer))
+    static func shows(_ row: ChatRow, flat: Bool) -> Bool {
+        row.delivery != .none || (flat && row.grouping.showsEdited)
     }
 
     var body: some View {
         if let theme {
             let quiet = theme.quiet(scheme)
-            let showsTime = row.grouping.showsTime && !flat
-            let showsEdited = row.grouping.showsEdited
+            let showsEdited = flat && row.grouping.showsEdited
             let hasMark = row.delivery != .none
             HStack(spacing: 4) {
-                if showsTime {
-                    Text(verbatim: theme.time(row.item.timestamp))
-                        .font(.caption)
-                        .foregroundStyle(quiet)
-                        .accessibilityHidden(true)
-                }
-                if showsTime && (showsEdited || hasMark) { separator(quiet) }
                 if showsEdited {
                     Text(theme.copy.text(.edited))
                         .font(.caption)
@@ -67,18 +51,14 @@ struct DeliveryLine: View {
                 }
                 if showsEdited && hasMark { separator(quiet) }
                 mark(theme)
-                if isLatestAnswer && !flat {
-                    LatestAnswerCopyRow(itemID: row.id)
-                }
             }
             .padding(.horizontal, theme.design.kit.space(.s1))
-            // Polish P3: the clock gives way to the readers' faces (or to
-            // nothing) with a quick fade instead of a pop. The line's height
-            // never changes with its mark, so the transcript does not move.
+            // Polish P3: the clock gives way to the readers' faces with a
+            // quick fade instead of a pop.
             .chatMotion(.quick, value: row.delivery)
             // `.contain` keeps the line's identifier on the line itself, so the
-            // Copy button and Seen faces inside keep their own (`answer.copy`,
-            // `delivery.seen`); without it SwiftUI stamps this ID on each child.
+            // Seen faces inside keep their own (`delivery.seen`); without it
+            // SwiftUI stamps this ID on each child.
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("delivery.line.\(row.id)")
         }

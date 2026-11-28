@@ -135,10 +135,14 @@ final class GroupingTests: XCTestCase {
                              F.personRoom()), [true, true], "more than 5 minutes apart: two runs")
     }
 
-    func testEveryAnswerOfMyAgentCarriesItsTimeAnAppsOnlyAtRunEnd() {
+    func testMyAgentsAnswersCarryTheirTimeOnlyAtRunEndLikeAnyone() {
+        // Polish P7 (owner 2026-11-28): the clock sits in the corner of each
+        // run's last bubble only; an answer is not an exception on the phone.
         let answers = [text("q", from: F.me, minute: 0), text("a1", from: F.agent, minute: 1),
                        text("a2", from: F.agent, minute: 2)]
-        XCTAssertEqual(times(answers, F.assistantRoom()), [true, true, true], "desktop's answer toolbar time")
+        XCTAssertEqual(times(answers, F.assistantRoom()), [true, false, true], "one clock per run")
+        XCTAssertEqual(times([text("a1", from: F.agent, minute: 1), text("a2", from: F.agent, minute: 7)],
+                             F.assistantRoom()), [true, true], "a gap of more than 5 minutes shows it again")
         let app = [text("m1", from: F.bot, minute: 1), text("m2", from: F.bot, minute: 2)]
         XCTAssertEqual(times(app, F.botRoom()), [false, true], "an app's messages are not answers")
         var interim = text("i", from: F.agent, minute: 1)

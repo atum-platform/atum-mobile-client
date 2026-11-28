@@ -34,16 +34,18 @@ public struct RowGrouping: Equatable, Hashable, Sendable {
     /// The other bubbles of the run keep an empty face-wide gutter, so the
 /** Preserve user-visible identity, state and recovery behavior across connection changes. */
     public var showsFace: Bool
-    /// TL-4, desktop's run time (`src/matrix/app.tsx`, `runEnd`,
-    /// `MatrixSendState`'s `time`): the clock sits in the quiet line under
-    /// this bubble. Under the last bubble of every run (mine share the line
-    /// with readers' faces once seen), and under every answer of my agent (desktop's
-    /// answer toolbar). Never on a message still sending, failed, or
-    /// undecryptable, never on notices.
+    /// TL-4, desktop's run time (`src/matrix/app.tsx`, `runEnd`): the clock
+    /// for this bubble. Polish P7 (UX audit issue 4, owner 2026-11-28) puts
+    /// it inside the bubble's trailing corner on the phone, and only on the
+    /// last bubble of each run, so it shows once per sender after a change of
+    /// sender or a gap of more than 5 minutes (`runGap`). Answers of my agent
+    /// follow the same rule (the phone has no answer toolbar). Never on a
+    /// message still sending, failed, or undecryptable, never on notices.
+    /// Every bubble's accessibility label still carries its time.
     public var showsTime: Bool
-    /// TL-5: "đã sửa" sits in that same line (desktop `personEdited`):
-    /// people's edits, mine included; an agent's or bot's edits (a streamed
-    /// answer) say nothing.
+    /// TL-5: "đã sửa" sits beside that clock in the bubble (desktop
+    /// `personEdited`), on every edited bubble: people's edits, mine
+    /// included; an agent's or bot's edits (a streamed answer) say nothing.
     public var showsEdited: Bool
 
     public init(position: RunPosition? = nil, showsSender: Bool = false, showsFace: Bool = false,
@@ -75,9 +77,9 @@ public struct RowGrouping: Equatable, Hashable, Sendable {
 /// - Notices are quiet centred lines, not bubbles: they are not in a run and,
 ///   as in S0, they do not break one either (a working line between two
 ///   answers does not repeat the agent's name).
-/// - The clock sits under the last bubble of each run and under every answer
-///   of my agent, as on desktop (TL-4, 2026-11-11). It replaced the centred
-///   label the phone drew after a 60-minute gap.
+/// - The clock sits in the corner of the last bubble of each run (TL-4,
+///   2026-11-11; Polish P7, 2026-11-28). It replaced the centred label the
+///   phone drew after a 60-minute gap.
 /// - In a group, the sender's name opens a run and the sender's face closes
 ///   it (beside the last bubble, as in Messages and WhatsApp). A 1:1 chat
 // Preserve user-visible identity, state and recovery behavior across connection changes.
@@ -147,9 +149,7 @@ public enum Grouping {
         for (index, row) in rows.enumerated() {
             guard let position = result[index].position else { continue }
             let item = row.item
-            if showsTime(item) {
-                result[index].showsTime = position.endsRun || isAnswer(item, context: context)
-            }
+            if showsTime(item) { result[index].showsTime = position.endsRun }
             result[index].showsEdited = showsEdited(item, context: context)
         }
         return result
@@ -194,19 +194,6 @@ public enum Grouping {
         switch item.delivery {
         case .sending, .failed: return false
         case .remote, .sent: return true
-        }
-    }
-
-    /// Desktop's `answer`: my agent's message (not an interim remark). Only
-    /// my assistant's chat knows its agent (`RoomContext.agentUserIDs`; an
-    /// app's chat lists its bot there, which desktop does not count, and a
-    /// live group lists nobody). Every answer carries its time.
-    public static func isAnswer(_ item: ChatItem, context: RoomContext) -> Bool {
-        guard !item.isOwn, context.kind == .assistant, !item.interim,
-              context.agentUserIDs.contains(item.sender) else { return false }
-        switch item.kind {
-        case .message, .image, .file: return true
-        default: return false
         }
     }
 

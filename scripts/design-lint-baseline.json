@@ -38,10 +38,6 @@
     "ios/App/Chat/Views/AgentDeskPage.swift": {
       "spacing": 8
     },
-    "ios/App/Chat/Views/AnswerActionsRow.swift": {
-      "padding": 1,
-      "font-size": 1
-    },
     "ios/App/Chat/Views/AppPanelPages.swift": {
       "padding": 2,
       "spacing": 3

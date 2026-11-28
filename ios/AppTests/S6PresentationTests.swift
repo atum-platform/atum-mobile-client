@@ -49,14 +49,27 @@ final class S6PresentationTests: XCTestCase {
                                       options: .s1)
         XCTAssertEqual(settled.first { $0.id == "q" }?.delivery, DeliveryMark.none,
                        "my newest settled message carries no mark")
-        // A flat run's line holds no time, so a settled unread message draws
-        // no line at all, not an empty one or a lone separator.
-        XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item), isLatestAnswer: false, flat: true))
-        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, grouping: RowGrouping(showsTime: true)),
-                                         isLatestAnswer: false, flat: false), "a bubble run keeps its time")
-        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .seen(readerCount: 1)),
-                                         isLatestAnswer: false, flat: true), "the faces still show")
-        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .sending), isLatestAnswer: false, flat: true))
+        // Polish P7: the line holds only the delivery mark (and, in a flat
+        // run, "đã sửa"), so a settled unread message draws no line at all,
+        // not an empty one or a lone separator; its time is in the bubble.
+        XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item), flat: true))
+        XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item, grouping: RowGrouping(showsTime: true)), flat: false),
+                       "the run's time sits in the bubble's corner, not in a line under it")
+        XCTAssertTrue(BubbleMeta.shows(ChatRow(item: item, grouping: RowGrouping(showsTime: true))))
+        XCTAssertFalse(DeliveryLine.shows(ChatRow(item: item, grouping: RowGrouping(showsEdited: true)), flat: false),
+                       "a bubble's đã sửa is in its corner")
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, grouping: RowGrouping(showsEdited: true)), flat: true),
+                      "a flat run has no bubble: đã sửa stays in its line")
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .seen(readerCount: 1)), flat: true),
+                      "the faces still show")
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .sending), flat: false))
+        XCTAssertTrue(DeliveryLine.shows(ChatRow(item: item, delivery: .failed), flat: false))
+        // My newest message keeps its clock's place while it sends, so the
+        // bubble does not grow when it settles.
+        let sending = ChatRow(item: item, delivery: .sending, grouping: RowGrouping(position: .single))
+        XCTAssertTrue(BubbleMeta.keepsTimeSlot(sending))
+        XCTAssertFalse(BubbleMeta.keepsTimeSlot(ChatRow(item: item, delivery: .sending,
+                                                        grouping: RowGrouping(position: .first))), "not inside a run")
     }
 
     func testRecoveryKeyGroupsOnlyWhileActiveAndRedactsEveryCharacterOtherwise() {
