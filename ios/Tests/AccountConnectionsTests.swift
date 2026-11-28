@@ -347,22 +347,26 @@ final class AccountConnectionsTests: XCTestCase {
     func testTheReadPostsTheDesktopsOperationAndDecodesTheRegistry() async throws {
         let client = NativeDomainClient(testAuthorization: { _ in "native-token" },
                                         protocolClasses: [AccountConnectionsProtocol.self])
-        AccountConnectionsProtocol.answer = (200, AccountConnectionsTests.fixture)
+        AccountConnectionsProtocol.reset(answers: [
+            (200, AccountConnectionsTests.fixture),
+            (200, Data(#"{"profile":"atum.account-connections/1","connections":[{"id":"x"}]}"#.utf8)),
+            (503, Data(#"{"error":"matrix_503"}"#.utf8)),
+        ])
         let value = try await client.accountConnections()
         XCTAssertEqual(value.connections.count, 7)
+        XCTAssertEqual(AccountConnectionsProtocol.requests, 1)
         let seen = try XCTUnwrap(AccountConnectionsProtocol.seen)
         XCTAssertEqual(seen.method, "POST")
         XCTAssertEqual(seen.path, "/api/matrix/v1/device-services")
         XCTAssertEqual(seen.authorization, "Bearer native-token")
-        XCTAssertEqual(seen.body, AccountConnectionsContract.requestBody)
+        XCTAssertEqual(seen.body, Data(#"{"operation":"account_connections_read"}"#.utf8))
         XCTAssertNil(seen.version, "a POST carries no device-service version header")
 
-        AccountConnectionsProtocol.answer = (200, Data(#"{"profile":"atum.account-connections/1","connections":[{"id":"x"}]}"#.utf8))
         do { _ = try await client.accountConnections(); XCTFail("an unreadable registry was shown") }
-        catch {}
-        AccountConnectionsProtocol.answer = (503, Data(#"{"error":"matrix_503"}"#.utf8))
+        catch { XCTAssertEqual(error as? NativeDomainClientFailure, .invalidResponse) }
         do { _ = try await client.accountConnections(); XCTFail("a 503 was read as an answer") }
-        catch {}
+        catch { XCTAssertEqual((error as? PhoneRegistryError)?.error, .unavailable) }
+        XCTAssertEqual(AccountConnectionsProtocol.requests, 3)
     }
 
     /// The connect sheet's poll can run as the app suspends, so it must never
@@ -423,9 +427,7 @@ final class AccountConnectionsTests: XCTestCase {
 private final class AccountConnectionsProtocol: URLProtocol, @unchecked Sendable {
     struct Seen { let method: String; let path: String; let authorization: String?; let body: Data?; let version: String? }
     nonisolated(unsafe) static var seen: Seen?
-    nonisolated(unsafe) static var answer: (Int, Data) = (200, Data())
-    /// Answered in order before `answer`; `requests` counts every request.
-    nonisolated(unsafe) static var answers: [(Int, Data)] = []
+    nonisolated(unsafe) private static var answers: [(Int, Data)] = []
     nonisolated(unsafe) static var requests = 0
 
     static func reset(answers: [(Int, Data)]) {
@@ -442,7 +444,12 @@ private final class AccountConnectionsProtocol: URLProtocol, @unchecked Sendable
                          body: Self.body(of: request),
                          version: request.value(forHTTPHeaderField: "Atum-Device-Service-Version"))
         Self.requests += 1
-        let (status, data) = Self.answers.isEmpty ? Self.answer : Self.answers.removeFirst()
+        guard !Self.answers.isEmpty else {
+            XCTFail("Unexpected device-services request")
+            client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
+            return
+        }
+        let (status, data) = Self.answers.removeFirst()
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
                                                               headerFields: ["Content-Type": "application/json"])!,
                             cacheStoragePolicy: .notAllowed)

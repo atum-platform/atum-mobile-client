@@ -44,6 +44,22 @@ to the UI lane.
 
 ## Local verification
 
+Platform main `13f46194` handles `account_connections_read` and
+`work_plan_readiness_read` as separate device-services operations with
+different response profiles. The readiness transport test queued a response
+before checking that a missing bearer made zero requests. That response stayed
+in the shared URLProtocol stub and was served to the next test's registry
+request, which correctly rejected the readiness profile as `invalidResponse`.
+Each transport scenario now replaces the stub's response queue. The registry
+test checks the exact operation, request count, and errors for a malformed
+registry and a 503. The stub fails the test if a request arrives after the
+queue runs out.
+
+The registry transport test passed on phone `origin/main` at `236b918`
+before the readiness change. The Debug simulator build and all eight
+`AccountConnectionsStateTests` passed on `dc363d23`.
+The focused Swift package run passed all 31 tests after the stub fix.
+
 Focused coverage lives in `WorkPlanReadinessTests`,
 `AccountConnectionsTransportTests`, and `AccountConnectionsStateTests`.
 The locked run uses Swift Package Manager and the `AtumMobileStateTests`
