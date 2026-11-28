@@ -62,39 +62,45 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertTrue(element(app, "desk.files.sent").exists, "no sent files")
         keepScreenshot("w4-e3-desk-\(tag)", of: app)
 
-        // Large: its folder opens in place, Back returns; More shows the routines.
-        expandDesk(app)
-        XCTAssertTrue(element(app, "desk.page").waitForExistence(timeout: 3), "the panel closed: \(boundedHierarchy(app))")
-        XCTAssertTrue(element(app, "desk.files.own").waitForExistence(timeout: 3), "no own files")
+        // Scroll to each row at the current detent. A folder opens in place,
+        // Back returns, and More shows the routines.
+        let page = element(app, "desk.page")
         let folder = element(app, "desk.own.folder.reports")
-        XCTAssertTrue(revealByScrolling(folder, in: element(app, "desk.page")), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(folder, in: page), boundedHierarchy(app))
         folder.tap()
-        XCTAssertTrue(element(app, "desk.own.file.q3-summary.md").waitForExistence(timeout: 3), boundedHierarchy(app))
-        element(app, "desk.own.back").tap()
-        XCTAssertTrue(element(app, "desk.own.file.notes.md").waitForExistence(timeout: 3))
+        XCTAssertTrue(revealByScrolling(element(app, "desk.own.file.q3-summary.md"), in: page), boundedHierarchy(app))
+        let back = element(app, "desk.own.back")
+        XCTAssertTrue(revealByScrolling(back, in: page, up: false), boundedHierarchy(app))
+        back.tap()
+        XCTAssertTrue(revealByScrolling(element(app, "desk.own.file.notes.md"), in: page), boundedHierarchy(app))
 
         let pause = app.switches["desk.pause"]
-        XCTAssertTrue(pause.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(pause, in: page), boundedHierarchy(app))
         XCTAssertEqual(pause.value as? String, "0", "one routine is live: not paused")
-        element(app, "desk.more").tap()
+        let more = element(app, "desk.more")
+        XCTAssertTrue(revealByScrolling(more, in: page), boundedHierarchy(app))
+        more.tap()
         let brief = app.switches["desk.routine.job-brief"]
         // More opens the routines under the controls, past the fold.
-        XCTAssertTrue(revealByScrolling(brief, in: element(app, "desk.page")), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(brief, in: page), boundedHierarchy(app))
         XCTAssertEqual(brief.value as? String, "1")
-        XCTAssertEqual(app.switches["desk.routine.job-review"].value as? String, "0")
+        let review = app.switches["desk.routine.job-review"]
+        XCTAssertTrue(revealByScrolling(review, in: page), boundedHierarchy(app))
+        XCTAssertEqual(review.value as? String, "0")
         keepScreenshot("w4-e3-desk-controls-\(tag)", of: app)
 
         // The labelled switch can cover the whole list row. Tap the native
         // switch inside it and keep it clear of the sheet's edges.
         let knob = pause.switches.firstMatch
-        guard revealByScrolling(knob, in: element(app, "desk.page"), up: nil, verticalInset: 44) else {
+        guard revealByScrolling(knob, in: page, up: false, verticalInset: 20) else {
             XCTFail("Pause switch did not come into the sheet's tap area: \(boundedHierarchy(app))")
             return
         }
         let probeCount = probeLines("agent-desk.txt").count
         knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitFor(3) { (pause.value as? String) == "1" }, "Pause did not move: \(boundedHierarchy(app))")
-        XCTAssertTrue(waitFor(3) { (brief.value as? String) == "0" }, "the routine did not pause with it")
+        XCTAssertTrue(revealByScrolling(brief, in: page), boundedHierarchy(app))
+        XCTAssertEqual(brief.value as? String, "0", "the routine did not pause with it")
         XCTAssertTrue(waitFor(3) {
             self.probeLines("agent-desk.txt").dropFirst(probeCount).contains { $0.text == "control pause" }
         }, "Pause did not reach the host")
@@ -104,7 +110,7 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         // page is at rest. XCTest's own scroll-to-visible taps mid-scroll, and a
         // tap on a moving scroll view only stops it.
         let allSettings = element(app, "desk.allSettings")
-        element(app, "desk.page").swipeUp()
+        XCTAssertTrue(revealByScrolling(allSettings, in: page), boundedHierarchy(app))
         var lastFrame = CGRect.null
         XCTAssertTrue(waitFor(5) {
             let frame = allSettings.frame
@@ -128,10 +134,10 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         let app = launch(.chatAgentDesk, language: tag.hasPrefix("vi") ? "vi" : "en")
         XCTAssertTrue(element(app, "chat.more").waitForExistence(timeout: 15), boundedHierarchy(app))
         element(app, "chat.more").tap()
-        XCTAssertTrue(element(app, "desk.page").waitForExistence(timeout: 5), boundedHierarchy(app))
-        expandDesk(app)
+        let page = element(app, "desk.page")
+        XCTAssertTrue(page.waitForExistence(timeout: 5), boundedHierarchy(app))
         let broken = app.buttons["desk.file.save.chat.agent-desk.file.8"]
-        XCTAssertTrue(broken.waitForExistence(timeout: 3), boundedHierarchy(app))
+        XCTAssertTrue(revealByScrolling(broken, in: page), boundedHierarchy(app))
         broken.tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5), "a failed Save said nothing: \(boundedHierarchy(app))")
@@ -141,23 +147,13 @@ final class AgentDeskBellUITests: TranscriptUITestCase {
         XCTAssertTrue(waitFor(3) { broken.isEnabled }, "Save stayed disabled after the failure")
         XCTAssertEqual(pickers(), opened, "a failed download opened the export sheet")
 
-        app.buttons["desk.file.save.chat.agent-desk.file"].tap()
+        let save = app.buttons["desk.file.save.chat.agent-desk.file"]
+        XCTAssertTrue(revealByScrolling(save, in: page, up: false), boundedHierarchy(app))
+        save.tap()
         XCTAssertTrue(waitFor(8) { pickers() == opened + 1 }, "the export sheet never opened")
         keepScreenshot("w4-e3-desk-save-picker-\(tag)", of: app)
         app.terminate()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
-    }
-
-    @MainActor
-    private func expandDesk(_ app: XCUIApplication) {
-        let sheet = element(app, "info.sheet")
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
-        // Start on the grabber. A swipe inside the collection can scroll it
-        // while leaving the sheet at its medium detent.
-        let grabber = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
-        grabber.press(forDuration: 0.05, thenDragTo: end)
-        XCTAssertTrue(waitFor(5) { sheet.frame.minY < app.frame.height * 0.3 },
-                      "the desk sheet did not expand: \(boundedHierarchy(app))")
     }
 
     @MainActor
