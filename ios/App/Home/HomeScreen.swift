@@ -388,6 +388,8 @@ struct HomeActions {
     var handles: PersonHandleLookup?
     var newGroup: HomeGroupActions?
     var newAssistant: HomeAssistantActions?
+    /// S9 Private at creation (ML5). Nil, or not ready, draws no Private row.
+    var privateChat: PrivateChatActions?
     var founderDraft: FounderDraftActions?
     /// "Delete chat" / "Leave group" (`ChatExitPolicy`), confirmed first.
     var exitRoom: ((String, ChatExitAction) -> Void)?
@@ -1610,14 +1612,14 @@ private struct HomeStartChatSheet: View {
         case let .addFriend(handle):
             if let addFriend = actions.addFriend {
                 HomeAddFriendView(design: design, submit: addFriend, discovery: actions.peopleDiscovery,
-                                  initialHandle: handle) { roomID in
+                                  initialHandle: handle, privateChat: actions.privateChat) { roomID in
                     close()
                     actions.openRoom(roomID)
                 }
             }
         case .newGroup:
             if let newGroup = actions.newGroup {
-                HomeNewGroupView(design: design, actions: newGroup) { roomID in
+                HomeNewGroupView(design: design, actions: newGroup, privateChat: actions.privateChat) { roomID in
                     close()
                     actions.openRoom(roomID)
                 }
@@ -1758,6 +1760,7 @@ private struct HomeAddFriendView: View {
     /// HC-5: Start chat's "Find @x on Atum" arrives with the @name typed and
     /// the search already started, as desktop's `onFindPerson(query)`.
     var initialHandle: String? = nil
+    var privateChat: PrivateChatActions? = nil
     let openRoom: (String) -> Void
 
     private enum Presentation: Equatable {
@@ -1768,7 +1771,11 @@ private struct HomeAddFriendView: View {
         case rateLimited(Int?)
         case searchFailed
         case startFailed
+        /// S9: a private start was refused with one line.
+        case privateRefused(PrivateChatCreateResult)
     }
+
+    @State private var makePrivate = false
 
     @State private var matches = [HomeGroupCandidate]()
     @State private var directoryFailed = false
@@ -1813,7 +1820,12 @@ private struct HomeAddFriendView: View {
                 .accessibilityIdentifier("home.addFriend.find")
             }
 
-            if !matches.isEmpty {
+            PrivateChatOptionSection(design: design, actions: privateChat, isOn: $makePrivate,
+                                     disabled: presentation == .searching)
+
+            // A private chat starts only from an exact handle lookup, so the
+            // directory suggestions step aside while Private is on.
+            if !matches.isEmpty, !makePrivate {
                 Section(copy(.people)) {
                     ForEach(matches) { person in
                         Button {
@@ -1900,6 +1912,7 @@ private struct HomeAddFriendView: View {
         case .rateLimited(nil): copy(.rateLimitedSoon)
         case .searchFailed: copy(.searchFailed)
         case .startFailed: copy(.startFailed)
+        case let .privateRefused(result): result.notice(SecurityCopy(design: design)) ?? copy(.startFailed)
         }
     }
 
@@ -1914,6 +1927,21 @@ private struct HomeAddFriendView: View {
         guard let handle, presentation != .searching else { return }
         request?.cancel()
         presentation = .searching
+        if makePrivate, let privateChat {
+            request = Task { @MainActor in
+                let result = await privateChat.createDirect(handle)
+                guard !Task.isCancelled else { return }
+                request = nil
+                switch result {
+                case let .openRoom(roomID): openRoom(roomID)
+                case let .notFound(handle): presentation = .notFound(handle)
+                case let .rateLimited(seconds): presentation = .rateLimited(seconds)
+                case .failed: presentation = .startFailed
+                case .peopleOnly, .notReady: presentation = .privateRefused(result)
+                }
+            }
+            return
+        }
         request = Task { @MainActor in
             let result = await submit(handle)
             guard !Task.isCancelled else { return }
@@ -2039,7 +2067,13 @@ struct FounderDraftSheet: View {
 private struct HomeNewGroupView: View {
     let design: LiveDesign
     let actions: HomeGroupActions
+    var privateChat: PrivateChatActions? = nil
     let openRoom: (String) -> Void
+
+    /// S9: off by default; the request UUID survives retries of one intent.
+    @State private var makePrivate = false
+    @State private var privateIntent: PhoneTrustPrivateGroupIntent?
+    @State private var privateNotice: String?
 
     private enum LookupPresentation: Equatable {
         case idle, searching, notMessageable, failed
@@ -2114,9 +2148,21 @@ private struct HomeNewGroupView: View {
                 }
             }
 
+            PrivateChatOptionSection(design: design, actions: privateChat, isOn: $makePrivate,
+                                     disabled: creating)
+
             Section {
-                Text(copy(.historyShared))
-                    .foregroundStyle(atum.color(.muted, scheme: scheme))
+                // A private group's history starts at join; the shared-history
+                // line describes only the plain default.
+                if !makePrivate {
+                    Text(copy(.historyShared))
+                        .foregroundStyle(atum.color(.muted, scheme: scheme))
+                }
+                if let privateNotice {
+                    Text(privateNotice)
+                        .foregroundStyle(atum.color(.danger, scheme: scheme))
+                        .accessibilityIdentifier("home.newGroup.privateNotice")
+                }
                 if selected.count >= HomeGroupPolicy.maximumInvites {
                     Text(copy(.groupFull))
                         .foregroundStyle(atum.color(.danger, scheme: scheme))
@@ -2160,7 +2206,8 @@ private struct HomeNewGroupView: View {
             if found == nil { lookupPresentation = .failed }
         }
         .onAppear { nameFocused = true }
-        .onChange(of: name) { _, _ in createFailed = false }
+        .onChange(of: name) { _, _ in createFailed = false; privateNotice = nil }
+        .onChange(of: makePrivate) { _, _ in createFailed = false; privateNotice = nil }
         .onChange(of: query) { _, _ in
             lookupTask?.cancel()
             lookupTask = nil
@@ -2262,7 +2309,27 @@ private struct HomeNewGroupView: View {
         creationTask?.cancel()
         creating = true
         createFailed = false
+        privateNotice = nil
         let members = selectedCandidates
+        if makePrivate, let privateChat,
+           let groupName = HomeGroupPolicy.name(typed: name, selected: members) {
+            let memberIDs = Set(members.map(\.id))
+            var intent = privateIntent ?? PhoneTrustPrivateGroupIntent(name: groupName, memberIDs: memberIDs)
+            let requestID = intent.requestID(name: groupName, memberIDs: memberIDs)
+            privateIntent = intent
+            creationTask = Task { @MainActor in
+                let result = await privateChat.createGroup(groupName, members, requestID)
+                guard !Task.isCancelled else { return }
+                creationTask = nil
+                creating = false
+                switch result {
+                case let .openRoom(roomID): openRoom(roomID)
+                case .peopleOnly, .notReady: privateNotice = result.notice(SecurityCopy(design: design))
+                case .notFound, .rateLimited, .failed: createFailed = true
+                }
+            }
+            return
+        }
         creationTask = Task { @MainActor in
             let result = await actions.create(name, members)
             guard !Task.isCancelled else { return }

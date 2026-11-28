@@ -43,6 +43,8 @@ struct AccountScreen: View {
     @State private var showsLegal = false
     @State private var showsStore = false
     @State private var recoverySheet: RecoverySheet?
+    @State private var securityPresented = false
+    @State private var unsavedKeyBeforeSignOut: PendingRecoverySave?
     @State private var founderDraftPresented = false
     @State private var confirmsSignOut = false
     @State private var signOutError = false
@@ -169,7 +171,8 @@ struct AccountScreen: View {
                     openFounderDraft: { founderDraftPresented = true },
                     contactFounder: contactFounder,
                     openFounderRoom: openFounderRoom,
-                    assistantCard: assistantCard
+                    assistantCard: assistantCard,
+                    openSecurity: actions.security == nil ? nil : { securityPresented = true }
                 )
             )
             .alert(copy("src.matrix.mobile-copy.mobilePhoneCopy.signOutTitle"),
@@ -228,6 +231,28 @@ struct AccountScreen: View {
                 RestoreMessagesSheet(design: design,
                                      restore: actions.restoreMessages,
                                      onDone: { recoverySheet = nil })
+            }
+        }
+        .sheet(isPresented: $securityPresented) {
+            if let security = actions.security {
+                SecuritySheet(design: design, actions: security)
+            }
+        }
+        .sheet(item: $unsavedKeyBeforeSignOut) { pending in
+            if let security = actions.security {
+                NavigationStack {
+                    RecoveryKeySaveView(
+                        design: design, id: pending.id, actions: security,
+                        mode: .beforeSignOut(signOut: {
+                            let result = await actions.signOut(true)
+                            if !result { signOutError = true }
+                            return result
+                        }),
+                        onSaved: {},
+                        close: { unsavedKeyBeforeSignOut = nil }
+                    )
+                }
+                .atumDesign(design)
             }
         }
         .alert(copy("src.matrix.chat-copy.copies.errorGeneric"), isPresented: $signOutError) {
@@ -299,6 +324,20 @@ struct AccountScreen: View {
     }
 
     private func beginSignOut() {
+        guard let security = actions.security else { return beginExistingSignOut() }
+        // A key generated on this phone whose save is unconfirmed would be
+        // stranded by signing out: offer it first (ML5 contract). Any read
+        // failure keeps today's sign-out path.
+        Task {
+            if let id = await security.snapshot()?.pendingSaveID {
+                unsavedKeyBeforeSignOut = PendingRecoverySave(id: id)
+            } else {
+                beginExistingSignOut()
+            }
+        }
+    }
+
+    private func beginExistingSignOut() {
         switch AccountSettingsState.signOutPrompt(
             holdsRecoveryKey: presentation.holdsRecoveryKey,
             recoveryKeySavedOnThisPhone: presentation.recoveryKeySavedOnThisPhone
@@ -323,6 +362,10 @@ struct AccountScreen: View {
     private func copy(_ key: String,
                       _ arguments: [AtumCopy.Argument] = []) -> String {
         design.text(key, arguments: arguments)
+    }
+
+    private struct PendingRecoverySave: Identifiable {
+        let id: UUID
     }
 
     private enum RecoverySheet: String, Identifiable {

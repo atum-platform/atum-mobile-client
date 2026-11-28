@@ -321,3 +321,286 @@ struct RestoreMessagesSheet: View {
     private func copy(_ key: String) -> String { design.text(key) }
 }
 
+
+/// Settings › Encrypted messages › Private chats (chat parity S7–S9). The one
+/// deliberate entry to trust: this iPhone's verification, its recovery key and
+/// whether Private can be offered. Every outcome is a row value or one quiet
+/// line here; nothing on sign-in, Home or a chat waits for it. The existing
+/// restore sheet above is reused unchanged for "use my recovery key".
+struct SecuritySheet: View {
+    enum Route: Hashable {
+        case verify
+        case key(UUID)
+    }
+
+    let design: LiveDesign
+    let actions: SecurityActions
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var path = [Route]()
+    @State private var snapshot: MatrixSecuritySnapshot?
+    @State private var loaded = false
+    @State private var outcome: PhoneTrustSetupOutcome?
+    @State private var settingUp = false
+    @State private var restorePresented = false
+    @State private var toast: String?
+    @State private var toastCount = 0
+
+    private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
+    private var kit: AtumKit { design.kit }
+    private var copy: SecurityCopy { SecurityCopy(design: design) }
+
+    private var keyStatus: PhoneTrustKeyStatus? {
+        snapshot.map {
+            PhoneTrustKeyStatus(recoveryEnabled: $0.recoveryEnabled, backupEnabled: $0.backupEnabled,
+                                recoveryKeyConfirmed: $0.recoveryKeyConfirmed, pendingSaveID: $0.pendingSaveID)
+        }
+    }
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            List {
+                Section {
+                    Text(copy.text(.securityLead))
+                        .font(.body)
+                        .foregroundStyle(atum.color(.ink, scheme: scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
+                Section {
+                    if let snapshot {
+                        verificationRow(verified: snapshot.sessionVerified)
+                        if let keyStatus { keyRow(keyStatus) }
+                    } else if loaded {
+                        Text(copy.exported("src.matrix.chat-copy.copies.errorGeneric"))
+                            .foregroundStyle(atum.color(.danger, scheme: scheme))
+                    } else {
+                        AtomWait()
+                            .frame(width: 24, height: 24)
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .foregroundStyle(atum.color(.muted, scheme: scheme))
+                            .accessibilityHidden(true)
+                    }
+                } footer: {
+                    if let line = footerLine {
+                        Text(line)
+                            .font(.footnote)
+                            .foregroundStyle(atum.color(.soft, scheme: scheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("security.sheet.line")
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(atum.color(.ground, scheme: scheme))
+            .navigationTitle(copy.text(.securityTitle))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel(copy.exported("src.matrix.chat-copy.copies.dismiss"))
+                }
+            }
+            .navigationDestination(for: Route.self) { route in
+                destination(route)
+            }
+        }
+        .atumDesign(design)
+        .overlay(alignment: .bottom) {
+            if let toast {
+                TrustToast(design: design, text: toast)
+                    .padding(.bottom, kit.space(.s8))
+                    .motionTransition(.opacity)
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .sheet(isPresented: $restorePresented, onDismiss: { Task { await refresh() } }) {
+            RestoreMessagesSheet(design: design, restore: actions.restore,
+                                 onDone: { restorePresented = false })
+        }
+        .task { await refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refresh() } }
+        }
+        .onChange(of: path) { _, path in
+            if path.isEmpty { Task { await refresh() } }
+        }
+        .accessibilityIdentifier("security.sheet")
+    }
+
+    // MARK: Rows
+
+    @ViewBuilder private func verificationRow(verified: Bool) -> some View {
+        let value = copy.exported(verified ? "src.matrix.security-copy.copies.verified"
+                                  : "src.matrix.security-copy.copies.notVerified")
+        if verified {
+            statusRow(glyph: .deviceMobile, title: copy.text(.thisIPhone), value: value,
+                      identifier: "security.sheet.device")
+        } else {
+            AtumSettingsRow(glyph: .deviceMobile, title: copy.text(.thisIPhone), value: value,
+                            indicator: .push, identifier: "security.sheet.device") {
+                outcome = nil
+                path.append(.verify)
+            }
+        }
+    }
+
+    @ViewBuilder private func keyRow(_ status: PhoneTrustKeyStatus) -> some View {
+        let title = copy.exported("src.matrix.security-copy.copies.recoveryTitle")
+        switch status {
+        case .on:
+            statusRow(glyph: .keyRound, title: title,
+                      value: copy.exported("src.matrix.security-copy.copies.recoveryOn"),
+                      identifier: "security.sheet.key")
+        case let .notSaved(id):
+            AtumSettingsRow(glyph: .keyRound, title: title, value: copy.text(.keyNotSaved),
+                            indicator: .push, identifier: "security.sheet.key") {
+                path.append(.key(id))
+            }
+        case .onElsewhere:
+            AtumSettingsRow(glyph: .keyRound, title: title,
+                            value: copy.exported("src.matrix.security-copy.copies.recoveryOn"),
+                            indicator: .push, identifier: "security.sheet.key") {
+                restorePresented = true
+            }
+        case .notSetUp:
+            if settingUp {
+                statusRow(glyph: .keyRound, title: title,
+                          value: copy.exported("src.matrix.security-copy.copies.working"),
+                          identifier: "security.sheet.key")
+            } else {
+                AtumSettingsRow(glyph: .keyRound, title: title,
+                                value: copy.exported("src.matrix.security-copy.copies.recoveryOff"),
+                                indicator: .push, identifier: "security.sheet.key") {
+                    keyRowTapped()
+                }
+            }
+        }
+    }
+
+    /// A row that only states something: no button, no caret.
+    private func statusRow(glyph: AtumGlyph, title: String, value: String,
+                           identifier: String) -> some View {
+        HStack(spacing: kit.space(.s3)) {
+            Image(atum.symbol(glyph))
+                .font(.title3.weight(.light))
+                .foregroundStyle(atum.color(.soft, scheme: scheme))
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.body)
+                .foregroundStyle(atum.color(.ink, scheme: scheme))
+            Spacer(minLength: kit.space(.s2))
+            Text(value)
+                .font(.body)
+                .foregroundStyle(atum.kitColor(.ink3, scheme: scheme))
+        }
+        .frame(minHeight: 52)
+        .listRowBackground(atum.kitColor(.surface, scheme: scheme))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var footerLine: String? {
+        if let outcome {
+            switch outcome {
+            case .verifyFirst: return copy.text(.verifyFirstBody)
+            case .useExistingKey: return copy.text(.existingBody)
+            case .setUpOnAnotherDevice: return PhoneFirstTrustUnavailable.line(copy)
+            case .retry(.busy): return copy.text(.retryBusy)
+            case .retry(.notReady): return copy.text(.retryNotReady)
+            case .retry(.storage): return copy.text(.retryStorage)
+            case .key, .closed: return nil
+            }
+        }
+        return snapshot?.canCreatePrivateChat == true ? copy.text(.readyBody) : nil
+    }
+
+    // MARK: Actions
+
+    @ViewBuilder private func destination(_ route: Route) -> some View {
+        switch route {
+        case .verify:
+            if let driver = actions.verification() {
+                DeviceVerificationView(
+                    design: design, driver: driver, entry: .request,
+                    useRecoveryKey: {
+                        path.removeAll()
+                        restorePresented = true
+                    },
+                    onConfirmed: { show(copy.text(.confirmedToast)) },
+                    close: { path.removeAll() }
+                )
+            }
+        case let .key(id):
+            RecoveryKeySaveView(design: design, id: id, actions: actions, mode: .offer,
+                                onSaved: { show(copy.text(.keySavedToast)) },
+                                close: { path.removeAll() })
+        }
+    }
+
+    private func keyRowTapped() {
+        if outcome == .useExistingKey {
+            restorePresented = true
+        } else {
+            runSetup()
+        }
+    }
+
+    private func runSetup() {
+        guard !settingUp else { return }
+        settingUp = true
+        outcome = nil
+        Task {
+            let result = await actions.setup()
+            settingUp = false
+            switch result {
+            case let .success(id):
+                await refresh()
+                path.append(.key(id))
+            case let .failure(failure):
+                let next = PhoneTrustSetupOutcome(setupFailure: failure)
+                if next == .closed { dismiss(); return }
+                outcome = next
+                await refresh()
+            }
+        }
+    }
+
+    private func refresh() async {
+        let next = await actions.snapshot()
+        snapshot = next
+        loaded = true
+        // A settled state retires a stale line (for example, verified after
+        // the emoji flow, or recovery restored with the key).
+        if let next, outcome == .verifyFirst, next.sessionVerified { outcome = nil }
+        if let next, outcome == .useExistingKey, next.recoveryKeyConfirmed { outcome = nil }
+    }
+
+    private func show(_ text: String) {
+        withMotion(.quick) { toast = text }
+        toastCount += 1
+        let event = toastCount
+        AccessibilityNotification.Announcement(text).post()
+        Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            if toastCount == event { withMotion(.quick) { toast = nil } }
+        }
+    }
+}
+
+/// Phone-first trust (`.crossSigningBootstrapUnavailable`): the account has no
+/// identity yet and this build has no safe phone-first setup. Automatic setup
+/// was tested and kept off (28 Nov 2026). Security shows one honest line — set
+/// up from another signed-in device, or later — with no button. Kept in one
+/// place so a future decided route replaces it without other edits.
+enum PhoneFirstTrustUnavailable {
+    @MainActor static func line(_ copy: SecurityCopy) -> String {
+        copy.text(.setUpElsewhereBody)
+    }
+}

@@ -219,6 +219,9 @@ struct AccountActions {
     /// Settings › Connections: the account's plans, OpenCode Go and data and
     /// tools (`account_connections_read`). Nil keeps the "Not available yet" row.
     var accountConnections: AccountConnectionsActions? = nil
+    /// Settings › Encrypted messages › Private chats (ML5). Nil hides the row
+    /// and keeps sign-out exactly as before.
+    var security: SecurityActions? = nil
 }
 
 /// The desktop's display-name rule (`matrixProfileDisplayName`,

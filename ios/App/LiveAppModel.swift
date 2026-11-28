@@ -1643,6 +1643,92 @@ final class LiveAppModel {
         return .failed
     }
 
+    // MARK: ML5 trust UI hooks (coordinator integrates and gates the release)
+
+    /// The live runtime behind `SecurityActions.live`; nil while signed out.
+    var securityRuntime: MatrixLiveRuntime? { context?.runtime }
+
+    /// Advisory only: the create calls recheck readiness at dispatch.
+    func privateChatReady() async -> Bool {
+        guard let runtime = context?.runtime else { return false }
+        return (try? await runtime.securitySnapshot())?.canCreatePrivateChat == true
+    }
+
+    /// S9 private DM: exact handle lookup, positive human evidence, then the
+    /// runtime's private path. Never reuses or converts a plain DM.
+    func createPrivateDirect(_ rawHandle: String) async -> PrivateChatCreateResult {
+        guard let handle = HomeAddFriendPolicy.handle(rawHandle), let client = domainClient,
+              let session = liveMatrix, session.isReady else { return .failed }
+        let lookup: AliasLookupResponse
+        switch await privateLookup(handle, client: client) {
+        case let .found(found): lookup = found
+        case let .refused(result): return result
+        }
+        guard liveMatrix === session, domainClient === client, !Task.isCancelled else { return .failed }
+        guard case .assigned = lookup else { return .notFound(handle.rawValue) }
+        guard lookup.humanMessageTarget != nil else { return .peopleOnly }
+        do {
+            let roomID = try await session.createPrivateDirectRoom(inviting: lookup)
+            return await waitForRoom(roomID, session: session) ? .openRoom(roomID) : .failed
+        } catch {
+            return Self.privateCreateResult(error)
+        }
+    }
+
+    /// S9 private group. Each selected person, including one first inferred
+    /// from room membership, needs a fresh lookup naming that exact MXID.
+    func createPrivateGroup(_ typedName: String, selected: [HomeGroupCandidate],
+                            requestID: UUID) async -> PrivateChatCreateResult {
+        guard let client = domainClient, let session = liveMatrix, session.isReady,
+              selected.count <= HomeGroupPolicy.maximumInvites,
+              Set(selected.map(\.id)).count == selected.count,
+              let name = HomeGroupPolicy.name(typed: typedName, selected: selected)
+        else { return .failed }
+        guard selected.allSatisfy({ $0.kind == .person }) else { return .peopleOnly }
+        var lookups = [AliasLookupResponse]()
+        for candidate in selected {
+            guard let known = candidate.handle ?? handle(for: candidate.id),
+                  let exact = HomeAddFriendPolicy.handle(known) else { return .peopleOnly }
+            switch await privateLookup(exact, client: client) {
+            case let .found(lookup):
+                guard lookup.humanMessageTarget?.rawValue == candidate.id else { return .peopleOnly }
+                lookups.append(lookup)
+            case let .refused(result):
+                return result == .notFound(exact.rawValue) ? .peopleOnly : result
+            }
+            guard liveMatrix === session, domainClient === client, !Task.isCancelled else { return .failed }
+        }
+        do {
+            let roomID = try await session.createPrivateGroup(name: name, inviting: lookups,
+                                                              requestID: requestID)
+            return await waitForRoom(roomID, session: session) ? .openRoom(roomID) : .failed
+        } catch {
+            return Self.privateCreateResult(error)
+        }
+    }
+
+    private func privateLookup(_ handle: NativeHandle,
+                               client: NativeDomainClient) async -> PrivateLookup {
+        do {
+            return .found(try await client.aliasLookup(handle: handle))
+        } catch let failure as NativeDomainClientFailure {
+            if case let .http(http) = failure, http.response.error == .rateLimited {
+                return .refused(.rateLimited(http.retryAfterSeconds.flatMap(Int.init(exactly:))))
+            }
+            return .refused(.failed)
+        } catch {
+            return .refused(.failed)
+        }
+    }
+
+    private static func privateCreateResult(_ error: Error) -> PrivateChatCreateResult {
+        switch error as? MatrixSecurityFailure {
+        case .notHuman?, .invalidParticipants?: .peopleOnly
+        case .recoveryNotReady?, .sessionUnavailable?, .verificationRequired?: .notReady
+        default: .failed
+        }
+    }
+
     private func waitForGroup(named name: String,
                               preferredRoomID: String? = nil,
                               excluding baseline: Set<String>,

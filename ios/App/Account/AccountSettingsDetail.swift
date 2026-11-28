@@ -26,6 +26,8 @@ struct AccountSettingsDetailCallbacks {
     /// routines), built by the app root from the chat's own assistant actions.
     /// Settings never implements a second editor. Nil: no card to open.
     var assistantCard: ((AccountAssistantSummary) -> AnyView)? = nil
+    /// Encrypted messages › Private chats (ML5 trust UI). Nil hides the row.
+    var openSecurity: (() -> Void)? = nil
 }
 
 struct AccountSettingsDetail: View {
@@ -162,6 +164,7 @@ struct AccountSettingsDetail: View {
         case .recovery:
             Section {
                 recoveryRows
+                securityRow
             } header: {
                 Text(copy("src.matrix.settings-copy.copy.encryptedMessages"))
             }
@@ -716,6 +719,17 @@ struct AccountSettingsDetail: View {
                         title: copy("src.matrix.security-copy.copies.recoveryTitle"),
                         value: recoveryStatusText,
                         identifier: "account.settings.privacy.recovery-unavailable")
+        }
+    }
+
+    /// The deliberate entry to verification, the recovery key and Private.
+    @ViewBuilder private var securityRow: some View {
+        if let openSecurity = callbacks.openSecurity {
+            settingsRow(glyph: .shield,
+                        title: SecurityCopy(design: design).text(.securityTitle),
+                        indicator: .push,
+                        identifier: "account.settings.privacy.security",
+                        action: openSecurity)
         }
     }
 
