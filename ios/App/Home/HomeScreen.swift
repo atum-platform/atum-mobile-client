@@ -728,6 +728,10 @@ struct HomeScreen: View {
     private var atum: AtumVisualSystem { AtumVisualSystem(design: design) }
 
     /// HC-7: the long-press's personal-chat items for one row.
+    private func exitText(_ action: ChatExitAction, delete: String, leave: String) -> String {
+        design.text(action == .deleteChat ? delete : leave)
+    }
+
     private func personalMenu(for row: HomeRow) -> HomeRowPersonalMenu {
         guard row.isPersonalChat, !row.isInvitation, !row.isFounderDraft else { return HomeRowPersonalMenu() }
         let peer = row.kind == .person ? actions.blockablePeer?(row.roomID) : nil

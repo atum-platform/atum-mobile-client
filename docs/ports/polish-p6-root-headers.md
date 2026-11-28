@@ -237,3 +237,7 @@ None. Every word is an existing exported key:
   updated UI tests have not run. The test helpers that find the system
   search's Cancel and the company title menu are written against the
   system's accessibility names, and the run must confirm them.
+
+## Locked run 1 (28 Nov 13:0x UTC)
+
+Debug build failed (exit 65): `7e2212c` removed `exitText(_:delete:leave:)` along with the old header, while the exit confirmation dialog still calls it (plus a cascading type-check timeout in `body`). Coordinator restored the helper unchanged; locked run re-queued.
